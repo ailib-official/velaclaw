@@ -9,8 +9,8 @@ the **protocol-first** model: logical ids like `openai/gpt-4o-mini` resolved thr
 
 | Term | Meaning |
 |------|--------|
-| **Legacy path** | Code compiled with the **`legacy-providers`** Cargo feature: large match arms in `src/providers/mod.rs` for `openrouter`, `anthropic`, `custom:…`, and related aliases. |
-| **Default path (today)** | `default = ["ai-protocol"]` in `Cargo.toml` — you get the protocol stack and `ProtocolBackedProvider`; you do **not** get the legacy match arms unless you add `--features legacy-providers`. |
+| **Legacy path** | Removed in ZS-ML-015: old string keys (`openrouter`, `anthropic`, `custom:…`) no longer compile into ZeroSpider. |
+| **Default path (today)** | `default = ["ai-protocol"]` in `Cargo.toml` — all model providers resolve through `ProtocolBackedProvider` and ai-protocol manifests. |
 | **Protocol root** | Directory where YAML/JSON under `v2/providers` (or `dist/…`) describe providers and models. Set via **`AI_PROTOCOL_DIR`**. |
 | **BYOK availability** | Whether ai-lib-rust can resolve a credential for the provider through the unified credential chain. ZeroSpider reports the result but does not inspect or log secret values. |
 
@@ -24,7 +24,7 @@ the **protocol-first** model: logical ids like `openai/gpt-4o-mini` resolved thr
 
 If `AI_PROTOCOL_DIR` is wrong or points at a non-directory, `AiClient::new("provider/model")` fails. Quick setup prints a **yellow tip** when you choose a `provider/model` id but no usable local root is configured.
 
-`zerospider models protocol-providers` uses the same ai-lib credential resolver for its `available` column, so it catches both V2 `endpoint.auth.token_env` and conventional fallbacks such as `OPENAI_API_KEY` without enabling `legacy-providers`.
+`zerospider models protocol-providers` uses the same ai-lib credential resolver for its `available` column, so it catches both V2 `endpoint.auth.token_env` and conventional fallbacks such as `OPENAI_API_KEY`.
 
 ## 2. Shorthand: old provider name → new logical id
 
@@ -34,11 +34,11 @@ ZeroSpider still accepts the **same string shape** in `default_provider` / `defa
 |----------------------------------|-------------------------|--------|
 | `openai` | `openai/gpt-4o-mini` | Pick the model name from the manifest registry. |
 | `openrouter` | e.g. `openrouter/…` | Depends on how manifests name the provider. |
-| `ollama` / `qwen` / … | `provider_id/model_id` from manifests | If a vendor only existed in the legacy match arm, either enable **`legacy-providers`** temporarily or add/adapt manifests upstream. |
-| `custom:https://api.example.com/v1` | A manifest-backed endpoint + logical model, or (short term) `legacy-providers` | Prefer defining the endpoint in **ai-protocol** so `AiClient` uses one code path. |
+| `ollama` / `qwen` / … | `provider_id/model_id` from manifests | If a vendor only existed in the old match arm, add/adapt manifests upstream. |
+| `custom:https://api.example.com/v1` | A manifest-backed endpoint + logical model | Define the endpoint in **ai-protocol** so `AiClient` uses one code path. |
 
-`custom:` and some Anthropic/compat endpoints that were only in the **legacy** factory still require
-`--features legacy-providers` when building until you have an equivalent protocol definition.
+`custom:` and `anthropic-custom:` URL syntaxes now return a migration error. Create a provider
+manifest for that endpoint instead.
 
 ## 3. `Cargo` features (what to build)
 
@@ -46,7 +46,7 @@ ZeroSpider still accepts the **same string shape** in `default_provider` / `defa
 |---------|----------|
 | `cargo test` / default features | **Protocol path** only — matches production default. |
 | `cargo test --no-default-features --features ai-protocol` | **Manifest-only** build (no legacy factory). |
-| `cargo test --features "ai-protocol legacy-providers"` | Full **legacy** HTTP matrix + `tests/provider_resolution.rs` (CI runs this in addition). |
+| `cargo check -p zerospider --features "ai-protocol routing_mvp" --lib` | Routing compile gate. |
 
 Current ai-lib-rust feature decision: ZeroSpider does **not** enable ai-lib-rust
 `embeddings`, `batch`, or `telemetry` features yet. Chat/streaming stays on the
@@ -55,10 +55,10 @@ before enabling those dependency features. Telemetry continues through
 `observability-otel`; ai-lib metrics should be wired in a future task only with a
 documented no-duplicate-counter boundary.
 
-## 4. CI / test matrix (Phase 5)
+## 4. CI / test matrix (Phase 7)
 
 - **Default PR gate:** `ai-protocol` tests and `cargo check` (including `routing_mvp` compile gate as documented in `docs/ai-lib-migration.md`).
-- **Legacy regression:** add `legacy-providers` when changing anything that affects the `create_provider` match arms or `tests/provider_resolution.rs`.
+- **Removed:** legacy HTTP factory and `tests/provider_resolution.rs`.
 
 ## 5. Security
 

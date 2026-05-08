@@ -65,14 +65,14 @@ cargo test --features ai-protocol
 # Manifest-only (same as default features today: `ai-protocol` only)
 cargo test -p zerospider --no-default-features --features ai-protocol
 
-# Full legacy HTTP factory + integration tests (optional; also used in CI)
-cargo test -p zerospider --features "ai-protocol legacy-providers"
+# Routing compile gate
+cargo check -p zerospider --features "ai-protocol routing_mvp" --lib
 ```
 
 Feature flags:
 
 - **`ai-protocol`** — enables optional `ai-lib-rust`, `protocol_registry`, and protocol CLI. **On by default.**
-- **`legacy-providers`** — built-in vendor adapters (`openrouter`, `anthropic`, `custom:`, …). **Off by default**; pass `--features legacy-providers` when you need the old string-key factory or to run `tests/provider_resolution.rs`.
+- **Legacy HTTP providers removed (ZS-ML-015)** — built-in string-key adapters (`openrouter`, `anthropic`, `custom:`, …) are no longer compiled by ZeroSpider. Add or update ai-protocol manifests instead.
 - **`routing_mvp`** — forwards `ai-lib-rust`’s experimental routing feature (optional). **Off by default.** Enable with `--features "ai-protocol routing_mvp"` when you need that code path; CI runs `cargo check -p zerospider --features "ai-protocol routing_mvp" --lib` to prevent bitrot. **Metrics:** if `AiClient` exposes a metrics API in a future `ai-lib-rust` release, wire it to your observability layer without duplicating transport retry counters already covered here vs `[reliability]`.
 
 ### Deferred ai-lib-rust feature decisions (ZS-ML-009)

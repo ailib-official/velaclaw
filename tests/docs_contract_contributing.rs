@@ -8,7 +8,7 @@ fn contributing_mentions_protocol_env_and_checkout() {
     for needle in [
         "ailib-official/ai-protocol",
         "Canonical Git remote (ZS-ML-011",
-        "ZS-ML-013",
+        "ZS-ML-015",
         "AI_PROTOCOL_DIR",
         "docs/ai-lib-migration.md",
         "cargo test --features ai-protocol",
@@ -42,7 +42,7 @@ fn migration_legacy_doc_contract() {
     ));
     for needle in [
         "AI_PROTOCOL_DIR",
-        "legacy-providers",
+        "provider/model",
         "ai-protocol",
         "ZS-ML-005",
     ] {

@@ -9,8 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking / ZS-ML-015:** removed the `legacy-providers` Cargo feature and built-in HTTP provider factory. Use `provider/model` ids backed by ai-protocol manifests; `custom:` / `anthropic-custom:` URL syntaxes now return migration errors.
 - **PT-074 BYOK availability:** protocol provider discovery now delegates credential availability to ai-lib-rust's unified credential chain (endpoint.auth, V1 auth, conventional env fallback, and keyring when enabled) instead of maintaining a ZeroSpider-only env scan.
-- **Default Cargo features** now include only `ai-protocol` (not `legacy-providers`), aligning with the ai-lib migration plan’s “protocol-first” default. Enable `--features legacy-providers` (or a non-default dist profile that turns it on) for built-in HTTP vendor adapters and the full legacy provider factory test matrix.
+- **Default Cargo features** now include only `ai-protocol`, aligning with the ai-lib migration plan’s protocol-first default.
 
 ### Dependencies
 
@@ -19,14 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`legacy-providers`** feature: gates built-in HTTP vendor adapters (`openrouter`, `anthropic`, `custom:`, …). Use `--no-default-features` with `--features ai-protocol` for manifest-only builds.
 - **`ai-protocol`**: protocol-backed providers, `protocol_registry` scan, and `zerospider models protocol-providers` / `protocol-models` CLI.
 - Quick setup warns when `provider/model` is used without a usable local `AI_PROTOCOL_DIR`.
 - **`routing_mvp`** optional feature: forwards `ai-lib-rust/routing_mvp` for experimental routing; CI runs a `cargo check` compile gate with `ai-protocol` (ZS-ML-004).
 
 ### Documentation
 
-- **`docs/migration-legacy-to-protocol.md`**: maps legacy string keys / `custom:` / feature flags to `provider/model` + `AI_PROTOCOL_DIR`; describes default vs `legacy-providers` CI matrix (ZS-ML-005).
+- **`docs/migration-legacy-to-protocol.md`**: maps legacy string keys / `custom:` URLs to `provider/model` + `AI_PROTOCOL_DIR` and documents the ZS-ML-015 removal.
 - **`docs/ai-lib-migration.md`**: compatibility window (pre-1.0 cadence, ai-protocol pin policy) (ZS-ML-006).
 - **`docs/ai-lib-migration.md`**: resilience boundaries — transport retry in `ProtocolBackedProvider` vs `[reliability]` fallback chains.
 - **`docs/ai-lib-migration.md`**: Phase 2 — minimal TOML for `provider/model` logical ids and `[reliability]` fallbacks (ZS-ML-003).
@@ -34,7 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Testing
 
-- **PT-074 BYOK smoke:** protocol registry unit tests cover V2 endpoint.auth.token_env and conventional env fallback availability without legacy-providers.
+- **PT-074 BYOK smoke:** protocol registry unit tests cover V2 endpoint.auth.token_env and conventional env fallback availability.
 - **Config**: regression test that TOML accepts protocol-style `default_provider` and `[reliability]` entries (ZS-ML-003).
 - **Protocol env**: unit tests for `protocol_root_from_path_value` (reject HTTP URLs; accept existing directories) (ZS-ML-006).
 - **Docs**: contract test for `docs/migration-legacy-to-protocol.md` (ZS-ML-005).

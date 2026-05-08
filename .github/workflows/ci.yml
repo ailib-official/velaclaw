@@ -11,7 +11,7 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # ZS-ML-013: Merge gate must not implicitly require `legacy-providers`.
+  # ZS-ML-015: protocol-only CI after removing the legacy HTTP provider factory.
   rust-protocol-required:
     runs-on: ubuntu-latest
     steps:
@@ -50,30 +50,3 @@ jobs:
 
       - name: cargo test (protocol-only, no default features)
         run: cargo test -p zerospider --no-default-features --features ai-protocol --locked
-
-  rust-legacy-regression:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-
-      - name: Verify Cargo.lock is honored
-        run: |
-          cargo fetch --locked
-          git diff --exit-code Cargo.lock
-
-      - name: cargo fmt --check
-        run: cargo fmt --all -- --check
-
-      - name: cargo clippy (ai-protocol + legacy-providers)
-        run: cargo clippy -p zerospider --all-targets --features "ai-protocol legacy-providers" --locked -- -D warnings
-
-      - name: cargo test (ai-protocol + legacy — factory + provider_resolution)
-        run: cargo test -p zerospider --features "ai-protocol legacy-providers" --locked

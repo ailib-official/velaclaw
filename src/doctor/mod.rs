@@ -815,18 +815,17 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    #[cfg(feature = "legacy-providers")]
     #[test]
-    fn provider_validation_checks_custom_url_shape() {
-        assert!(provider_validation_error("openrouter").is_none());
-        assert!(provider_validation_error("custom:https://example.com").is_none());
-        assert!(provider_validation_error("anthropic-custom:https://example.com").is_none());
+    fn provider_validation_reports_removed_legacy_keys() {
+        let invalid_legacy = provider_validation_error("openrouter").unwrap_or_default();
+        assert!(invalid_legacy.contains("removed in ZS-ML-015"));
 
-        let invalid_custom = provider_validation_error("custom:").unwrap_or_default();
-        assert!(invalid_custom.contains("requires a URL"));
+        let invalid_custom =
+            provider_validation_error("custom:https://example.com").unwrap_or_default();
+        assert!(invalid_custom.contains("provider/model"));
 
         let invalid_unknown = provider_validation_error("totally-fake").unwrap_or_default();
-        assert!(invalid_unknown.contains("Unknown provider"));
+        assert!(invalid_unknown.contains("removed in ZS-ML-015"));
     }
 
     #[test]
@@ -915,16 +914,17 @@ mod tests {
         assert_eq!(prov_item.unwrap().severity, Severity::Error);
     }
 
-    #[cfg(feature = "legacy-providers")]
     #[test]
-    fn config_validation_accepts_custom_provider() {
+    fn config_validation_rejects_custom_provider() {
         let mut config = Config::default();
         config.default_provider = Some("custom:https://my-api.com".into());
         let mut items = Vec::new();
         check_config_semantics(&config, &mut items);
-        let prov_item = items.iter().find(|i| i.message.contains("is valid"));
+        let prov_item = items
+            .iter()
+            .find(|item| item.message.contains("default provider"));
         assert!(prov_item.is_some());
-        assert_eq!(prov_item.unwrap().severity, Severity::Ok);
+        assert_eq!(prov_item.unwrap().severity, Severity::Error);
     }
 
     #[test]

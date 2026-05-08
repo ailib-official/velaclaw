@@ -40,6 +40,10 @@ ZeroSpider still accepts the **same string shape** in `default_provider` / `defa
 `custom:` and `anthropic-custom:` URL syntaxes now return a migration error. Create a provider
 manifest for that endpoint instead.
 
+Removal point: PR #32 (`bd15a62133445d6ef5a1c94ca6d59161c9c4ce08`) removed the
+legacy HTTP factory. The last `main` commit before removal was PR #31
+(`83ff308cd71c5aeb3c84fc6cd577243c094b6659`).
+
 ## 3. `Cargo` features (what to build)
 
 | Command | Use when |

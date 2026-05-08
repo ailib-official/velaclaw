@@ -155,7 +155,7 @@ enum Commands {
         #[arg(long)]
         api_key: Option<String>,
 
-        /// Provider name (used in quick mode, default: openrouter)
+        /// Provider/model id (used in quick mode, default: openai/gpt-5.2)
         #[arg(long)]
         provider: Option<String>,
         /// Model ID override (used in quick mode)
@@ -183,7 +183,7 @@ Examples:
         #[arg(short, long)]
         message: Option<String>,
 
-        /// Provider to use (openrouter, anthropic, openai, openai-codex)
+        /// Provider/model id to use (for example openai/gpt-5.2, or openai-codex)
         #[arg(short, long)]
         provider: Option<String>,
 
@@ -881,7 +881,10 @@ async fn main() -> Result<()> {
             println!();
             println!(
                 "🤖 Provider:      {}",
-                config.default_provider.as_deref().unwrap_or("openrouter")
+                config
+                    .default_provider
+                    .as_deref()
+                    .unwrap_or("openai/gpt-5.2")
             );
             println!(
                 "   Model:         {}",
@@ -1032,7 +1035,7 @@ async fn main() -> Result<()> {
             let current = config
                 .default_provider
                 .as_deref()
-                .unwrap_or("openrouter")
+                .unwrap_or("openai/gpt-5.2")
                 .trim()
                 .to_ascii_lowercase();
             println!("Supported providers ({} total):\n", providers.len());
@@ -1630,7 +1633,7 @@ mod tests {
             "zerospider",
             "onboard",
             "--provider",
-            "openrouter",
+            "openai/gpt-5.2",
             "--model",
             "custom-model-946",
             "--api-key",
@@ -1651,7 +1654,7 @@ mod tests {
                 assert!(!interactive);
                 assert!(!force);
                 assert!(!channels_only);
-                assert_eq!(provider.as_deref(), Some("openrouter"));
+                assert_eq!(provider.as_deref(), Some("openai/gpt-5.2"));
                 assert_eq!(model.as_deref(), Some("custom-model-946"));
                 assert_eq!(api_key.as_deref(), Some("sk-issue946"));
             }

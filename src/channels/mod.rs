@@ -383,7 +383,7 @@ fn resolved_default_provider(config: &Config) -> String {
     config
         .default_provider
         .clone()
-        .unwrap_or_else(|| "openrouter".to_string())
+        .unwrap_or_else(|| "openai/gpt-5.2".to_string())
 }
 
 fn resolved_default_model(config: &Config) -> String {
@@ -3827,14 +3827,14 @@ BTC is currently around $65,000 based on latest tool output."#
 
         let mut provider_cache_seed: HashMap<String, Arc<dyn Provider>> = HashMap::new();
         provider_cache_seed.insert("test-provider".to_string(), Arc::clone(&default_provider));
-        provider_cache_seed.insert("openrouter".to_string(), routed_provider);
+        provider_cache_seed.insert("openai/gpt-5.2".to_string(), routed_provider);
 
         let route_key = "telegram_alice".to_string();
         let mut route_overrides = HashMap::new();
         route_overrides.insert(
             route_key,
             ChannelRouteSelection {
-                provider: "openrouter".to_string(),
+                provider: "openai/gpt-5.2".to_string(),
                 model: "route-model".to_string(),
             },
         );

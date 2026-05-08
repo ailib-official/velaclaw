@@ -39,7 +39,7 @@ zerospider onboard
 zerospider onboard --interactive
 
 # 指定参数
-zerospider onboard --api-key sk-xxx --provider openrouter --model auto
+zerospider onboard --api-key sk-xxx --provider openai/gpt-5.2
 ```
 
 ---

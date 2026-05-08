@@ -51,7 +51,7 @@ Examples:
   ./zeroclaw_install.sh --install-system-deps --install-rust
   ./zeroclaw_install.sh --prefer-prebuilt
   ./zeroclaw_install.sh --prebuilt-only
-  ./zeroclaw_install.sh --onboard --api-key "sk-..." --provider openrouter [--model "openrouter/auto"]
+  ./zeroclaw_install.sh --onboard --api-key "sk-..." --provider openai/gpt-5.2
   ./zeroclaw_install.sh --interactive-onboard
 
   # Compatibility entrypoint:
@@ -901,7 +901,7 @@ DONE
 
 Next steps:
   ./zeroclaw_install.sh --docker --interactive-onboard
-  ./zeroclaw_install.sh --docker --api-key "sk-..." --provider openrouter
+  ./zeroclaw_install.sh --docker --api-key "sk-..." --provider openai/gpt-5.2
 DONE
   exit 0
 fi

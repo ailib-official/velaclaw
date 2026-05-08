@@ -274,12 +274,15 @@ impl Agent {
             config,
         );
 
-        let provider_name = config.default_provider.as_deref().unwrap_or("openrouter");
+        let provider_name = config
+            .default_provider
+            .as_deref()
+            .unwrap_or("openai/gpt-5.2");
 
         let model_name = config
             .default_model
             .as_deref()
-            .unwrap_or("anthropic/claude-sonnet-4-20250514")
+            .unwrap_or("openai/gpt-5.2")
             .to_string();
 
         let provider: Box<dyn Provider> = providers::create_routed_provider(
@@ -586,12 +589,12 @@ pub async fn run(
     let provider_name = effective_config
         .default_provider
         .as_deref()
-        .unwrap_or("openrouter")
+        .unwrap_or("openai/gpt-5.2")
         .to_string();
     let model_name = effective_config
         .default_model
         .as_deref()
-        .unwrap_or("anthropic/claude-sonnet-4-20250514")
+        .unwrap_or("openai/gpt-5.2")
         .to_string();
 
     agent.observer.record_event(&ObserverEvent::AgentStart {

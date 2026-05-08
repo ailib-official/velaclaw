@@ -1554,12 +1554,12 @@ pub async fn run(
     let provider_name = provider_override
         .as_deref()
         .or(config.default_provider.as_deref())
-        .unwrap_or("openrouter");
+        .unwrap_or("openai/gpt-5.2");
 
     let model_name = model_override
         .as_deref()
         .or(config.default_model.as_deref())
-        .unwrap_or("anthropic/claude-sonnet-4");
+        .unwrap_or("openai/gpt-5.2");
 
     let provider_runtime_options = providers::ProviderRuntimeOptions {
         auth_profile_override: None,
@@ -1997,7 +1997,10 @@ pub async fn process_message(config: Config, message: &str) -> Result<String> {
         crate::peripherals::create_peripheral_tools(&config.peripherals).await?;
     tools_registry.extend(peripheral_tools);
 
-    let provider_name = config.default_provider.as_deref().unwrap_or("openrouter");
+    let provider_name = config
+        .default_provider
+        .as_deref()
+        .unwrap_or("openai/gpt-5.2");
     let model_name = config
         .default_model
         .clone()

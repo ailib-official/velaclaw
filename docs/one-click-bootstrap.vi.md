@@ -97,13 +97,13 @@ Lệnh này build image ZeroClaw cục bộ và chạy thiết lập trong conta
 ### Thiết lập nhanh (không tương tác)
 
 ```bash
-./bootstrap.sh --onboard --api-key "sk-..." --provider openrouter
+./bootstrap.sh --onboard --api-key "sk-..." --provider openai/gpt-5.2
 ```
 
 Hoặc dùng biến môi trường:
 
 ```bash
-ZEROCLAW_API_KEY="sk-..." ZEROCLAW_PROVIDER="openrouter" ./bootstrap.sh --onboard
+ZEROCLAW_API_KEY="sk-..." ZEROCLAW_PROVIDER="openai/gpt-5.2" ./bootstrap.sh --onboard
 ```
 
 ### Thiết lập tương tác

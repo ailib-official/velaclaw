@@ -53,12 +53,12 @@ otel_service_name = "zeroclaw"
 Chọn provider cũng có thể điều khiển qua biến môi trường. Thứ tự ưu tiên:
 
 1. `ZEROCLAW_PROVIDER` (ghi đè tường minh, luôn thắng khi có giá trị)
-2. `PROVIDER` (dự phòng kiểu cũ, chỉ áp dụng khi provider trong config chưa đặt hoặc vẫn là `openrouter`)
+2. `PROVIDER` (dự phòng kiểu cũ, chỉ áp dụng khi provider trong config chưa đặt hoặc vẫn là mặc định giao thức `openai/gpt-5.2`)
 3. `default_provider` trong `config.toml`
 
 Lưu ý cho người dùng container:
 
-- Nếu `config.toml` đặt provider tùy chỉnh như `custom:https://.../v1`, biến `PROVIDER=openrouter` mặc định từ Docker/container sẽ không thay thế nó.
+- Nếu `config.toml` đặt ID `provider/model` rõ ràng như `local-gateway/my-model`, biến `PROVIDER=openai/gpt-5.2` mặc định từ Docker/container sẽ không thay thế nó.
 - Dùng `ZEROCLAW_PROVIDER` khi cố ý muốn biến môi trường ghi đè provider đã cấu hình.
 
 ## `[agent]`

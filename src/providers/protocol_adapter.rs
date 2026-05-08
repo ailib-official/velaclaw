@@ -63,13 +63,21 @@ impl ProtocolBackedProvider {
     ) -> anyhow::Result<Self> {
         let model = format!("{}/{}", provider_id, model_id);
 
-        let client = tokio::runtime::Handle::try_current()
-            .map(|h| h.block_on(async { ai_lib_rust::AiClient::new(&model).await }))
-            .unwrap_or_else(|_| {
+        let client = if tokio::runtime::Handle::try_current().is_ok() {
+            let model_for_thread = model.clone();
+            std::thread::spawn(move || {
                 let rt = tokio::runtime::Runtime::new()?;
-                rt.block_on(async { ai_lib_rust::AiClient::new(&model).await })
+                rt.block_on(async { ai_lib_rust::AiClient::new(&model_for_thread).await })
+                    .map_err(anyhow::Error::from)
             })
-            .map_err(|e| {
+            .join()
+            .map_err(|_| anyhow::anyhow!("protocol provider initialization thread panicked"))??
+        } else {
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(async { ai_lib_rust::AiClient::new(&model).await })?
+        };
+
+        let client = Ok(client).map_err(|e: anyhow::Error| {
                 let base = format!("Failed to build client for {model}: {e}");
                 anyhow::anyhow!(
                     "{base}\n\

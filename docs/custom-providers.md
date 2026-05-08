@@ -1,57 +1,52 @@
 # Custom Provider Configuration
 
-ZeroClaw supports custom API endpoints for both OpenAI-compatible and Anthropic-compatible providers.
+ZeroSpider chat providers are protocol-only after ZS-ML-015. Custom chat
+endpoints must be described as ai-protocol manifests and referenced by a
+logical `provider/model` id.
 
 ## Provider Types
 
-### OpenAI-Compatible Endpoints (`custom:`)
+### Manifest-Backed Chat Endpoints
 
-For services that implement the OpenAI API format:
-
-```toml
-default_provider = "custom:https://your-api.com"
-api_key = "your-api-key"
-default_model = "your-model-name"
-```
-
-### Anthropic-Compatible Endpoints (`anthropic-custom:`)
-
-For services that implement the Anthropic API format:
+For services that implement an OpenAI-compatible, Anthropic-compatible, or
+gateway-specific API, add a provider manifest to your local ai-protocol checkout
+and use the logical model id from that manifest:
 
 ```toml
-default_provider = "anthropic-custom:https://your-api.com"
-api_key = "your-api-key"
-default_model = "your-model-name"
+default_provider = "local-gateway/my-model"
+default_model = "local-gateway/my-model"
 ```
+
+The old `custom:https://...` and `anthropic-custom:https://...` chat provider
+syntaxes now return a migration error.
 
 ## Configuration Methods
 
 ### Config File
 
-Edit `~/.zeroclaw/config.toml`:
+Edit `~/.zerospider/config.toml`:
 
 ```toml
-api_key = "your-api-key"
-default_provider = "anthropic-custom:https://api.example.com"
-default_model = "claude-sonnet-4-6"
+default_provider = "local-gateway/my-model"
+default_model = "local-gateway/my-model"
 ```
 
 ### Environment Variables
 
-For `custom:` and `anthropic-custom:` providers, use the generic key env vars:
+Use the credential environment variable declared by the manifest. For local
+manifests that use a generic token, this is commonly:
 
 ```bash
 export API_KEY="your-api-key"
-# or: export ZEROCLAW_API_KEY="your-api-key"
-zeroclaw agent
+zerospider agent
 ```
 
 ## llama.cpp Server (Recommended Local Setup)
 
-ZeroClaw includes a first-class local provider for `llama-server`:
+Use an ai-protocol manifest for `llama-server`:
 
-- Provider ID: `llamacpp` (alias: `llama.cpp`)
-- Default endpoint: `http://localhost:8080/v1`
+- Provider/model ID example: `llamacpp/ggml-org/gpt-oss-20b-GGUF`
+- Endpoint in manifest: `http://localhost:8080/v1`
 - API key is optional unless `llama-server` is started with `--api-key`
 
 Start a local server (example):
@@ -60,34 +55,33 @@ Start a local server (example):
 llama-server -hf ggml-org/gpt-oss-20b-GGUF --jinja -c 133000 --host 127.0.0.1 --port 8033
 ```
 
-Then configure ZeroClaw:
+Then configure ZeroSpider:
 
 ```toml
-default_provider = "llamacpp"
-api_url = "http://127.0.0.1:8033/v1"
-default_model = "ggml-org/gpt-oss-20b-GGUF"
+default_provider = "llamacpp/ggml-org/gpt-oss-20b-GGUF"
+default_model = "llamacpp/ggml-org/gpt-oss-20b-GGUF"
 default_temperature = 0.7
 ```
 
 Quick validation:
 
 ```bash
-zeroclaw models refresh --provider llamacpp
-zeroclaw agent -m "hello"
+zerospider models refresh --provider llamacpp/ggml-org/gpt-oss-20b-GGUF
+zerospider agent -m "hello"
 ```
 
 You do not need to export `ZEROCLAW_API_KEY=dummy` for this flow.
 
 ## Testing Configuration
 
-Verify your custom endpoint:
+Verify your custom manifest-backed endpoint:
 
 ```bash
 # Interactive mode
-zeroclaw agent
+zerospider agent
 
 # Single message test
-zeroclaw agent -m "test message"
+zerospider agent -m "test message"
 ```
 
 ## Troubleshooting
@@ -95,7 +89,8 @@ zeroclaw agent -m "test message"
 ### Authentication Errors
 
 - Verify API key is correct
-- Check endpoint URL format (must include `http://` or `https://`)
+- Check that `AI_PROTOCOL_DIR` points at the checkout containing your manifest
+- Check the manifest endpoint URL format (`http://` or `https://`)
 - Ensure endpoint is accessible from your network
 
 ### Model Not Found
@@ -120,25 +115,23 @@ curl -sS https://your-api.com/models \
 
 ## Examples
 
-### Local LLM Server (Generic Custom Endpoint)
+### Local LLM Server (Manifest-Backed Endpoint)
 
 ```toml
-default_provider = "custom:http://localhost:8080/v1"
-api_key = "your-api-key-if-required"
-default_model = "local-model"
+default_provider = "local-gateway/local-model"
+default_model = "local-gateway/local-model"
 ```
 
 ### Corporate Proxy
 
 ```toml
-default_provider = "anthropic-custom:https://llm-proxy.corp.example.com"
-api_key = "internal-token"
+default_provider = "corp-proxy/claude-sonnet"
+default_model = "corp-proxy/claude-sonnet"
 ```
 
 ### Cloud Provider Gateway
 
 ```toml
-default_provider = "custom:https://gateway.cloud-provider.com/v1"
-api_key = "gateway-api-key"
-default_model = "gpt-4"
+default_provider = "cloud-gateway/gpt-4"
+default_model = "cloud-gateway/gpt-4"
 ```

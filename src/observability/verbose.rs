@@ -77,12 +77,12 @@ mod tests {
     fn verbose_events_do_not_panic() {
         let obs = VerboseObserver::new();
         obs.record_event(&ObserverEvent::LlmRequest {
-            provider: "openrouter".into(),
+            provider: "openai/gpt-5.2".into(),
             model: "claude".into(),
             messages_count: 3,
         });
         obs.record_event(&ObserverEvent::LlmResponse {
-            provider: "openrouter".into(),
+            provider: "openai/gpt-5.2".into(),
             model: "claude".into(),
             duration: Duration::from_millis(12),
             success: true,

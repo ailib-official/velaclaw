@@ -397,30 +397,30 @@ mod tests {
     fn records_all_events_without_panic() {
         let obs = test_observer();
         obs.record_event(&ObserverEvent::AgentStart {
-            provider: "openrouter".into(),
+            provider: "openai/gpt-5.2".into(),
             model: "claude-sonnet".into(),
         });
         obs.record_event(&ObserverEvent::LlmRequest {
-            provider: "openrouter".into(),
+            provider: "openai/gpt-5.2".into(),
             model: "claude-sonnet".into(),
             messages_count: 2,
         });
         obs.record_event(&ObserverEvent::LlmResponse {
-            provider: "openrouter".into(),
+            provider: "openai/gpt-5.2".into(),
             model: "claude-sonnet".into(),
             duration: Duration::from_millis(250),
             success: true,
             error_message: None,
         });
         obs.record_event(&ObserverEvent::AgentEnd {
-            provider: "openrouter".into(),
+            provider: "openai/gpt-5.2".into(),
             model: "claude-sonnet".into(),
             duration: Duration::from_millis(500),
             tokens_used: Some(100),
             cost_usd: Some(0.0015),
         });
         obs.record_event(&ObserverEvent::AgentEnd {
-            provider: "openrouter".into(),
+            provider: "openai/gpt-5.2".into(),
             model: "claude-sonnet".into(),
             duration: Duration::ZERO,
             tokens_used: None,
@@ -484,7 +484,7 @@ mod tests {
     fn otel_records_llm_failure_without_panic() {
         let obs = test_observer();
         obs.record_event(&ObserverEvent::LlmResponse {
-            provider: "openrouter".into(),
+            provider: "openai/gpt-5.2".into(),
             model: "missing-model".into(),
             duration: Duration::from_millis(0),
             success: false,

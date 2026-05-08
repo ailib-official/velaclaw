@@ -131,7 +131,7 @@ cd zeroclaw
 cargo build --release --locked
 cargo install --path . --force --locked
 
-zeroclaw onboard --api-key sk-... --provider openrouter
+zerospider onboard --api-key sk-... --provider openai/gpt-5.2
 zeroclaw onboard --interactive
 
 zeroclaw agent -m "Hello, ZeroClaw!"
@@ -197,7 +197,7 @@ zeroclaw agent --provider anthropic -m "hello"
 
 | Подсистема | Trait | Встроенные реализации | Расширение |
 |-----------|-------|---------------------|------------|
-| **AI-модели** | `Provider` | Каталог через `zeroclaw providers` (сейчас 28 встроенных + алиасы, плюс пользовательские endpoint) | `custom:https://your-api.com` (OpenAI-совместимый) или `anthropic-custom:https://your-api.com` |
+| **AI-модели** | `Provider` | Каталог через `zerospider providers` (ai-protocol `provider/model` ID) | `openai/gpt-5.2` |
 | **Каналы** | `Channel` | CLI, Telegram, Discord, Slack, Mattermost, iMessage, Matrix, Signal, WhatsApp, Email, IRC, Lark, DingTalk, QQ, Webhook | Любой messaging API |
 | **Память** | `Memory` | SQLite гибридный поиск, PostgreSQL-бэкенд, Lucid-мост, Markdown-файлы, явный `none`-бэкенд, snapshot/hydrate, опциональный кэш ответов | Любой persistence-бэкенд |
 | **Инструменты** | `Tool` | shell/file/memory, cron/schedule, git, pushover, browser, http_request, screenshot/image_info, composio (opt-in), delegate, аппаратные инструменты | Любая функциональность |
@@ -255,7 +255,7 @@ keyword_weight = 0.3
 
 ```toml
 api_key = "sk-..."
-default_provider = "openrouter"
+default_provider = "openai/gpt-5.2"
 default_model = "anthropic/claude-sonnet-4-6"
 default_temperature = 0.7
 

@@ -33,7 +33,7 @@ ZeroSpider 是一个 Rust 优先的自主 AI Agent 运行时，集成了 [ai-pro
 ### 前置条件
 
 - Rust 1.70+（2021 版本）
-- AI Protocol 目录（可选，用于协议驱动的 Provider）
+- 本地 [ai-protocol](https://github.com/ailib-official/ai-protocol) checkout，用于 Provider manifests
 
 ### 构建
 
@@ -42,10 +42,7 @@ ZeroSpider 是一个 Rust 优先的自主 AI Agent 运行时，集成了 [ai-pro
 git clone https://github.com/ailib-official/zerospider.git
 cd zerospider
 
-# 启用所有功能构建
-cargo build --features ai-protocol,smart-routing,multi-model,remote-deploy
-
-# 或仅使用默认功能构建
+# 使用默认协议支持构建
 cargo build
 ```
 
@@ -71,8 +68,8 @@ cargo run --features smart-routing -- --smart
 # 启用多模型协商
 cargo run --features multi-model -- --negotiate
 
-# 启用所有功能
-cargo run --features ai-protocol,smart-routing,multi-model,remote-deploy
+# 使用默认协议模型 ID（openai/gpt-5.2）发送一条消息
+cargo run -- agent -m "Hello"
 ```
 
 ---
@@ -86,28 +83,17 @@ cargo run --features ai-protocol,smart-routing,multi-model,remote-deploy
 # 克隆自：git clone https://github.com/ailib-official/ai-protocol
 export AI_PROTOCOL_DIR=/path/to/ai-protocol
 
-# Provider API 密钥
+# ai-protocol manifest 声明的 Provider API 密钥
 export OPENAI_API_KEY=sk-...
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 ### 配置文件
 
-```yaml
-# ~/.zerospider/config.yaml
-routing:
-  smart_selection: true
-  
-negotiation:
-  enabled: true
-  min_providers: 2
-  consensus_threshold: 0.7
-
-deployment:
-  remote_enabled: true
-  allowed_hosts:
-    - server1.example.com
-    - server2.example.com
+```toml
+# ~/.zerospider/config.toml
+default_provider = "openai/gpt-5.2"
+default_model = "openai/gpt-5.2"
 ```
 
 ---

@@ -161,11 +161,11 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
         },
         // ── AI Models ───────────────────────────────────────────
         IntegrationEntry {
-            name: "OpenRouter",
-            description: "200+ models, 1 API key",
+            name: "ai-protocol default",
+            description: "Manifest-backed provider/model id",
             category: IntegrationCategory::AiModel,
             status_fn: |c| {
-                if c.default_provider.as_deref() == Some("openrouter") && c.api_key.is_some() {
+                if c.default_provider.as_deref() == Some("openai/gpt-5.2") && c.api_key.is_some() {
                     IntegrationStatus::Active
                 } else {
                     IntegrationStatus::Available

@@ -53,12 +53,12 @@ otel_service_name = "zeroclaw"
 Provider selection can also be controlled by environment variables. Precedence is:
 
 1. `ZEROCLAW_PROVIDER` (explicit override, always wins when non-empty)
-2. `PROVIDER` (legacy fallback, only applied when config provider is unset or still `openrouter`)
+2. `PROVIDER` (legacy fallback, only applied when config provider is unset or still the protocol default `openai/gpt-5.2`)
 3. `default_provider` in `config.toml`
 
 Operational note for container users:
 
-- If your `config.toml` sets an explicit custom provider like `custom:https://.../v1`, a default `PROVIDER=openrouter` from Docker/container env will no longer replace it.
+- If your `config.toml` sets an explicit provider/model id like `local-gateway/my-model`, a default `PROVIDER=openai/gpt-5.2` from Docker/container env will no longer replace it.
 - Use `ZEROCLAW_PROVIDER` when you intentionally want runtime env to override a non-default configured provider.
 
 ## `[agent]`

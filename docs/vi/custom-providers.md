@@ -1,28 +1,19 @@
 # Cấu hình Provider Tùy chỉnh
 
-ZeroClaw hỗ trợ endpoint API tùy chỉnh cho cả provider tương thích OpenAI lẫn Anthropic.
+Sau ZS-ML-015, provider chat tùy chỉnh phải đi qua manifest ai-protocol và được gọi bằng ID `provider/model`.
 
 ## Các loại Provider
 
-### Endpoint tương thích OpenAI (`custom:`)
+### Endpoint chat có manifest
 
-Dành cho các dịch vụ triển khai định dạng API của OpenAI:
-
-```toml
-default_provider = "custom:https://your-api.com"
-api_key = "your-api-key"
-default_model = "your-model-name"
-```
-
-### Endpoint tương thích Anthropic (`anthropic-custom:`)
-
-Dành cho các dịch vụ triển khai định dạng API của Anthropic:
+Thêm endpoint vào checkout ai-protocol, rồi cấu hình ID logic:
 
 ```toml
-default_provider = "anthropic-custom:https://your-api.com"
-api_key = "your-api-key"
-default_model = "your-model-name"
+default_provider = "local-gateway/my-model"
+default_model = "local-gateway/my-model"
 ```
+
+Các cú pháp chat cũ `custom:https://...` và `anthropic-custom:https://...` hiện trả về lỗi hướng dẫn migration.
 
 ## Phương thức cấu hình
 
@@ -31,14 +22,13 @@ default_model = "your-model-name"
 Chỉnh sửa `~/.zeroclaw/config.toml`:
 
 ```toml
-api_key = "your-api-key"
-default_provider = "anthropic-custom:https://api.example.com"
-default_model = "claude-sonnet-4-6"
+default_provider = "local-gateway/my-model"
+default_model = "local-gateway/my-model"
 ```
 
 ### Biến môi trường
 
-Với provider `custom:` và `anthropic-custom:`, dùng biến môi trường chứa key chung:
+Dùng biến môi trường credential được khai báo trong manifest:
 
 ```bash
 export API_KEY="your-api-key"
@@ -91,21 +81,20 @@ curl -sS https://your-api.com/models \
 ### LLM Server cục bộ
 
 ```toml
-default_provider = "custom:http://localhost:8080"
-default_model = "local-model"
+default_provider = "local-gateway/local-model"
+default_model = "local-gateway/local-model"
 ```
 
 ### Proxy của doanh nghiệp
 
 ```toml
-default_provider = "anthropic-custom:https://llm-proxy.corp.example.com"
-api_key = "internal-token"
+default_provider = "corp-proxy/claude-sonnet"
+default_model = "corp-proxy/claude-sonnet"
 ```
 
 ### Cloud Provider Gateway
 
 ```toml
-default_provider = "custom:https://gateway.cloud-provider.com/v1"
-api_key = "gateway-api-key"
-default_model = "gpt-4"
+default_provider = "cloud-gateway/gpt-4"
+default_model = "cloud-gateway/gpt-4"
 ```

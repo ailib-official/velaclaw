@@ -177,10 +177,7 @@ landlock = { version = "0.4", optional = true }
 libc = "0.2"
 
 [features]
-# `legacy-providers`: built-in vendor adapters (openrouter, anthropic, custom:, …).
-# Default: protocol path only (ZS-ML-001 / migration plan Phase 3). Add `--features legacy-providers` for the HTTP factory and TG1 `provider_resolution` tests.
 default = ["ai-protocol"]
-legacy-providers = []
 hardware = ["nusb", "tokio-serial"]
 channel-matrix = ["dep:matrix-sdk"]
 channel-lark = ["dep:prost"]
@@ -234,10 +231,6 @@ panic = "abort"
 tempfile = "3.27"
 criterion = { version = "0.8", features = ["async_tokio"] }
 tokio-stream = { version = "0.1.18", default-features = false, features = ["fs"] }
-
-[[test]]
-name = "provider_resolution"
-required-features = ["legacy-providers"]
 
 [[bench]]
 name = "agent_benchmarks"

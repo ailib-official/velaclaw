@@ -1,4 +1,4 @@
-//! ZS-ML-014 — protocol-first resolution without enabling `legacy-providers`.
+//! ZS-ML-014 — protocol-first resolution after removing legacy HTTP providers.
 #![cfg(feature = "ai-protocol")]
 
 use std::path::PathBuf;

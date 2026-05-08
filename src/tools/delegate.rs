@@ -669,7 +669,7 @@ mod tests {
 
     fn agentic_config(allowed_tools: Vec<String>, max_iterations: usize) -> DelegateAgentConfig {
         DelegateAgentConfig {
-            // Resolves without `legacy-providers` (codex is handled before the legacy match arm).
+            // Codex remains an explicit OAuth-backed provider after legacy HTTP adapters were removed.
             provider: "openai-codex".to_string(),
             model: "model-test".to_string(),
             system_prompt: Some("You are agentic.".to_string()),

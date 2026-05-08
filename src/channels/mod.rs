@@ -3750,7 +3750,7 @@ BTC is currently around $65,000 based on latest tool output."#
 
         let mut provider_cache_seed: HashMap<String, Arc<dyn Provider>> = HashMap::new();
         provider_cache_seed.insert("test-provider".to_string(), Arc::clone(&default_provider));
-        provider_cache_seed.insert("openrouter".to_string(), fallback_provider);
+        provider_cache_seed.insert("openai/gpt-5.2".to_string(), fallback_provider);
 
         let runtime_ctx = Arc::new(ChannelRuntimeContext {
             channels_by_name: Arc::new(channels_by_name),
@@ -3784,7 +3784,7 @@ BTC is currently around $65,000 based on latest tool output."#
                 id: "msg-cmd-1".to_string(),
                 sender: "alice".to_string(),
                 reply_target: "chat-1".to_string(),
-                content: "/models openrouter".to_string(),
+                content: "/models openai/gpt-5.2".to_string(),
                 channel: "telegram".to_string(),
                 timestamp: 1,
                 thread_ts: None,
@@ -3795,7 +3795,7 @@ BTC is currently around $65,000 based on latest tool output."#
 
         let sent = channel_impl.sent_messages.lock().await;
         assert_eq!(sent.len(), 1);
-        assert!(sent[0].contains("Provider switched to `openrouter`"));
+        assert!(sent[0].contains("Provider switched to `openai/gpt-5.2`"));
 
         let route_key = "telegram_alice";
         let route = runtime_ctx
@@ -3805,7 +3805,7 @@ BTC is currently around $65,000 based on latest tool output."#
             .get(route_key)
             .cloned()
             .expect("route should be stored for sender");
-        assert_eq!(route.provider, "openrouter");
+        assert_eq!(route.provider, "openai/gpt-5.2");
         assert_eq!(route.model, "default-model");
 
         assert_eq!(default_provider_impl.call_count.load(Ordering::SeqCst), 0);

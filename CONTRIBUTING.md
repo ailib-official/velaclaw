@@ -27,11 +27,8 @@ cargo test --features ai-protocol
 
 If you do not set `AI_PROTOCOL_DIR`, follow the same migration doc for the supported fallback behavior and CI expectations. Prefer **`AI_PROTOCOL_DIR`** for ZeroSpider documentation consistency (some tools also accept `AI_PROTOCOL_PATH` as an alias).
 
-CI splits **protocol-default** versus **`legacy-providers`** (ZS-ML-013): if you touch `#[cfg(feature = "legacy-providers")]` wiring in `src/providers/mod.rs` or legacy-only tests, also run locally:
-
-```bash
-cargo test -p zerospider --features "ai-protocol legacy-providers" --locked
-```
+ZS-ML-015 removed the old built-in HTTP provider factory. New provider support belongs in
+`ai-protocol` manifests and should be exercised through `provider/model` tests.
 
 ## Development Setup
 

@@ -4,13 +4,15 @@ English summary + 中文：本页固定 **版本矩阵** 与本地开发方式�
 
 **User-facing migration** from built-in HTTP shorthands to `provider/model` + `AI_PROTOCOL_DIR`: see **`docs/migration-legacy-to-protocol.md`**.
 
+**Clone / Git remote hygiene:** canonical development remote is **`ailib-official/zerospider`**; do not leave `main` tracking an archived hiddenpath default (see **`CONTRIBUTING.md`** § “Canonical Git remote”).
+
 ## Compatibility window (Phase 6)
 
 ZeroSpider is **pre-1.0**; treat minors as potentially breaking until 1.0.
 
 | Area | Policy |
 |------|--------|
-| `ai-lib-rust` (crates.io or pinned git during PT-074 rollout) | Pin **0.9.4+** within the same minor; run `cargo test --features ai-protocol` after any bump. During the PT-074 credential-chain rollout, use the reviewed ai-lib-rust commit that exposes `ai_lib_rust::credentials` until the next crates.io patch is published. |
+| `ai-lib-rust` (crates.io; ZS-ML-012) | Pin **0.9.6+** within the same minor; run `cargo test --features ai-protocol --locked` after any bump; BYOK credential chain uses `ai_lib_rust::credentials`. Local debugging may use `[patch.crates-io]` toward a git checkout — do not ship that patch in canonical releases unless policy explicitly allows it. |
 | `ai-protocol` (Git) | Pin a **tag or commit** for reproducible QA; document the pin in your team runbook. Between tags, expect manifest schema drift — re-run protocol smoke tests when moving pins. |
 | ZeroSpider releases | Until 1.0, follow `CHANGELOG.md` [Unreleased] and semver notes for `legacy-providers` / `ai-protocol` changes. |
 
@@ -18,7 +20,7 @@ ZeroSpider is **pre-1.0**; treat minors as potentially breaking until 1.0.
 
 | Component | Recommended | Notes |
 |-----------|-------------|--------|
-| `ai-lib-rust` (crates.io or pinned git during PT-074 rollout) | **0.9.4+** | Workspace facade over `ai-lib-core` + policy layers; use same minor as protocol QA. PT-074 availability checks consume `ai_lib_rust::credentials` instead of duplicating manifest env logic in ZeroSpider. |
+| `ai-lib-rust` (crates.io) | **0.9.6+** | Workspace facade over `ai-lib-core` + policy layers; CI uses `--locked` against the published crate (ZS-ML-012). |
 | `ai-protocol` (Git) | tag or commit documented in team runbook | Manifest YAML + JSON Schema; set `AI_PROTOCOL_DIR` to a checkout root. |
 
 Patch bumps (0.9.x) should stay semver-compatible; re-run `cargo test --features ai-protocol` after any bump.

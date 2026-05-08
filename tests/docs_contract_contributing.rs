@@ -7,6 +7,8 @@ fn contributing_mentions_protocol_env_and_checkout() {
     let s = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/CONTRIBUTING.md"));
     for needle in [
         "ailib-official/ai-protocol",
+        "Canonical Git remote (ZS-ML-011",
+        "ZS-ML-013",
         "AI_PROTOCOL_DIR",
         "docs/ai-lib-migration.md",
         "cargo test --features ai-protocol",

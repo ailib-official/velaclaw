@@ -2,6 +2,15 @@
 
 Thanks for your interest in contributing. This guide will help you get started. Some later sections still reference the upstream “ZeroClaw” naming in paths and examples; the **ai-protocol** / **ai-lib** workflow is documented here and in `docs/ai-lib-migration.md`.
 
+## Canonical Git remote (ZS-ML-011 / Phase 7)
+
+Development and PRs use **`https://github.com/ailib-official/zerospider`**. Older clones sometimes still use `origin -> github.com/hiddenpath/zerospider` with `main` tracking that archived remote — fix by either:
+
+- renaming remotes (`ailib-official` → `origin`, archive remote renamed), **or**
+- keeping both remotes and running `git branch --set-upstream-to=ailib-official/main main` so `git pull`/`git status` reflect the canonical default branch only.
+
+Verification: `git remote -v`, `git branch -vv`, and `git rev-parse main` equals `git rev-parse ailib-official/main` when synced.
+
 ## ZeroSpider: ai-protocol checkout and `AI_PROTOCOL_DIR`
 
 Provider manifests and JSON Schema come from the [ai-protocol](https://github.com/ailib-official/ai-protocol) repository. For any build or test that resolves models through the protocol provider graph, you need a local clone and `AI_PROTOCOL_DIR` pointing at its root (the directory that contains the manifest tree / schema the project expects).
@@ -18,10 +27,16 @@ cargo test --features ai-protocol
 
 If you do not set `AI_PROTOCOL_DIR`, follow the same migration doc for the supported fallback behavior and CI expectations. Prefer **`AI_PROTOCOL_DIR`** for ZeroSpider documentation consistency (some tools also accept `AI_PROTOCOL_PATH` as an alias).
 
+CI splits **protocol-default** versus **`legacy-providers`** (ZS-ML-013): if you touch `#[cfg(feature = "legacy-providers")]` wiring in `src/providers/mod.rs` or legacy-only tests, also run locally:
+
+```bash
+cargo test -p zerospider --features "ai-protocol legacy-providers" --locked
+```
+
 ## Development Setup
 
 ```bash
-# Clone the repo
+# Clone the canonical repo (avoid hiddenpath as default upstream)
 git clone https://github.com/ailib-official/zerospider.git
 cd zerospider
 

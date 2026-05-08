@@ -58,6 +58,8 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
@@ -66,6 +68,12 @@ jobs:
         run: |
           cargo fetch --locked
           git diff --exit-code Cargo.lock
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy (ai-protocol + legacy-providers)
+        run: cargo clippy -p zerospider --all-targets --features "ai-protocol legacy-providers" --locked -- -D warnings
 
       - name: cargo test (ai-protocol + legacy — factory + provider_resolution)
         run: cargo test -p zerospider --features "ai-protocol legacy-providers" --locked

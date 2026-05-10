@@ -106,7 +106,7 @@ Nếu cross-compile thất bại, dùng Phương án A và build trực tiếp t
 ssh arduino@<UNO_Q_IP>
 
 # Cấu hình nhanh
-zeroclaw onboard --api-key YOUR_OPENROUTER_KEY --provider openrouter
+zerospider onboard --api-key YOUR_OPENAI_KEY --provider openai/gpt-5.2
 
 # Hoặc tạo config thủ công
 mkdir -p ~/.zeroclaw/workspace
@@ -116,9 +116,9 @@ nano ~/.zeroclaw/config.toml
 ### 3.2 config.toml tối giản
 
 ```toml
-api_key = "YOUR_OPENROUTER_API_KEY"
-default_provider = "openrouter"
-default_model = "anthropic/claude-sonnet-4-6"
+api_key = "YOUR_OPENAI_API_KEY"
+default_provider = "openai/gpt-5.2"
+default_model = "openai/gpt-5.2"
 
 [peripherals]
 enabled = false
@@ -201,7 +201,7 @@ Giờ khi bạn nhắn tin cho Telegram bot *"Turn on the LED"* hoặc *"Set pin
 | 4 | `sudo apt-get install -y pkg-config libssl-dev` |
 | 5 | `git clone https://github.com/theonlyhennygod/zeroclaw.git && cd zeroclaw` |
 | 6 | `cargo build --release --no-default-features` |
-| 7 | `zeroclaw onboard --api-key KEY --provider openrouter` |
+| 7 | `zerospider onboard --api-key KEY --provider openai/gpt-5.2` |
 | 8 | Chỉnh sửa `~/.zeroclaw/config.toml` (thêm Telegram bot_token) |
 | 9 | `zeroclaw daemon --host 127.0.0.1 --port 3000` |
 | 10 | Nhắn tin cho Telegram bot — nó phản hồi |

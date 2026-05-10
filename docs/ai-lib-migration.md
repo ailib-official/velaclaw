@@ -14,7 +14,7 @@ ZeroSpider is **pre-1.0**; treat minors as potentially breaking until 1.0.
 |------|--------|
 | `ai-lib-rust` (crates.io; ZS-ML-012) | Pin **0.9.6+** within the same minor; run `cargo test --features ai-protocol --locked` after any bump; BYOK credential chain uses `ai_lib_rust::credentials`. Local debugging may use `[patch.crates-io]` toward a git checkout — do not ship that patch in canonical releases unless policy explicitly allows it. |
 | `ai-protocol` (Git) | Pin a **tag or commit** for reproducible QA; document the pin in your team runbook. Between tags, expect manifest schema drift — re-run protocol smoke tests when moving pins. |
-| ZeroSpider releases | Until 1.0, follow `CHANGELOG.md` [Unreleased] and semver notes for `legacy-providers` / `ai-protocol` changes. |
+| ZeroSpider releases | Until 1.0, follow `CHANGELOG.md` [Unreleased]. ZS-ML-015 removed `legacy-providers`; chat providers now use `ai-protocol` manifests only. |
 
 ## Version matrix (pin for reproducible builds)
 

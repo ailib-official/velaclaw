@@ -115,18 +115,14 @@ Các model ID khởi đầu được khuyến nghị (đã xác minh với danh 
 - `nvidia/llama-3.3-nemotron-super-49b-v1.5`
 - `nvidia/llama-3.1-nemotron-ultra-253b-v1`
 
-## Endpoint Tùy chỉnh
+## Endpoint Chat Tùy chỉnh
 
-- Endpoint tương thích OpenAI:
-
-```toml
-default_provider = "custom:https://your-api.example.com"
-```
-
-- Endpoint tương thích Anthropic:
+Endpoint chat tùy chỉnh cần manifest ai-protocol. Đặt `AI_PROTOCOL_DIR` và dùng
+ID model logic:
 
 ```toml
-default_provider = "anthropic-custom:https://your-api.example.com"
+default_provider = "local-gateway/my-model"
+default_model = "local-gateway/my-model"
 ```
 
 ## Cấu hình MiniMax OAuth (`config.toml`)
@@ -183,13 +179,13 @@ Bạn có thể định tuyến các lời gọi model theo hint bằng cách s�
 ```toml
 [[model_routes]]
 hint = "reasoning"
-provider = "openrouter"
-model = "anthropic/claude-opus-4-20250514"
+provider = "openai/gpt-5.2"
+model = "openai/gpt-5.2"
 
 [[model_routes]]
 hint = "fast"
-provider = "groq"
-model = "llama-3.3-70b-versatile"
+provider = "groq/llama-3.3-70b-versatile"
+model = "groq/llama-3.3-70b-versatile"
 ```
 
 Sau đó gọi với tên model hint (ví dụ từ tool hoặc các đường dẫn tích hợp):

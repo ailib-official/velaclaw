@@ -5,6 +5,7 @@ use crate::config::{
     AutonomyConfig, BrowserConfig, ChannelsConfig, ComposioConfig, Config, DiscordConfig,
     HeartbeatConfig, IMessageConfig, LarkConfig, MatrixConfig, MemoryConfig, ObservabilityConfig,
     RuntimeConfig, SecretsConfig, SlackConfig, StorageConfig, TelegramConfig, WebhookConfig,
+    DEFAULT_PROTOCOL_MODEL_ID,
 };
 use crate::hardware::{self, HardwareConfig};
 use crate::memory::{
@@ -307,7 +308,7 @@ pub async fn run_channels_repair_wizard() -> Result<Config> {
 // ── Quick setup (zero prompts) ───────────────────────────────────
 
 /// Non-interactive setup: generates a sensible default config instantly.
-/// Use `zerospider onboard` or `zerospider onboard --api-key sk-... --provider openrouter --memory sqlite|lucid`.
+/// Use `zerospider onboard` or `zerospider onboard --api-key sk-... --provider openai/gpt-5.2 --memory sqlite|lucid`.
 /// Use `zerospider onboard --interactive` for the full wizard.
 fn backend_key_from_choice(choice: usize) -> &'static str {
     selectable_memory_backends()
@@ -395,7 +396,7 @@ async fn run_quick_setup_with_home(
     ensure_onboard_overwrite_allowed(&config_path, force)?;
     fs::create_dir_all(&workspace_dir).context("Failed to create workspace directory")?;
 
-    let provider_name = provider.unwrap_or("openrouter").to_string();
+    let provider_name = provider.unwrap_or(DEFAULT_PROTOCOL_MODEL_ID).to_string();
     #[cfg(feature = "ai-protocol")]
     warn_if_ai_protocol_dir_missing_for_protocol_style_provider(&provider_name);
     let model = model_override
@@ -534,7 +535,7 @@ async fn run_quick_setup_with_home(
     println!();
     println!("  {}", style("Next steps:").white().bold());
     if credential_override.is_none() {
-        println!("    1. Set your API key:  export OPENROUTER_API_KEY=\"sk-...\"");
+        println!("    1. Set your API key:  export OPENAI_API_KEY=\"sk-...\"");
         println!("    2. Or edit:           ~/.zerospider/config.toml");
         println!("    3. Chat:              zerospider agent -m \"Hello!\"");
         println!("    4. Gateway:           zerospider gateway");
@@ -549,6 +550,10 @@ async fn run_quick_setup_with_home(
 }
 
 fn canonical_provider_name(provider_name: &str) -> &str {
+    if let Some((provider_id, _)) = crate::providers::parse_protocol_provider_model(provider_name) {
+        return provider_id;
+    }
+
     if is_qwen_oauth_alias(provider_name) {
         return "qwen-code";
     }
@@ -586,6 +591,10 @@ const MINIMAX_ONBOARD_MODELS: [(&str, &str); 5] = [
 ];
 
 fn default_model_for_provider(provider: &str) -> String {
+    if crate::providers::parse_protocol_provider_model(provider).is_some() {
+        return provider.to_string();
+    }
+
     match canonical_provider_name(provider) {
         "anthropic" => "claude-sonnet-4-5-20250929".into(),
         "openai" => "gpt-5.2".into(),
@@ -610,7 +619,7 @@ fn default_model_for_provider(provider: &str) -> String {
         "kimi-code" => "kimi-for-coding".into(),
         "bedrock" => "anthropic.claude-sonnet-4-5-20250929-v1:0".into(),
         "nvidia" => "meta/llama-3.3-70b-instruct".into(),
-        _ => "anthropic/claude-sonnet-4.6".into(),
+        _ => DEFAULT_PROTOCOL_MODEL_ID.into(),
     }
 }
 
@@ -622,7 +631,7 @@ fn curated_models_for_provider(provider_name: &str) -> Vec<(String, String)> {
                 "Claude Sonnet 4.6 (balanced, recommended)".to_string(),
             ),
             (
-                "openai/gpt-5.2".to_string(),
+                DEFAULT_PROTOCOL_MODEL_ID.to_string(),
                 "GPT-5.2 (latest flagship)".to_string(),
             ),
             (
@@ -918,7 +927,7 @@ fn curated_models_for_provider(provider_name: &str) -> Vec<(String, String)> {
                 "Claude Sonnet 4.6 (balanced default)".to_string(),
             ),
             (
-                "openai/gpt-5.2".to_string(),
+                DEFAULT_PROTOCOL_MODEL_ID.to_string(),
                 "GPT-5.2 (latest flagship)".to_string(),
             ),
             (
@@ -1547,7 +1556,7 @@ pub fn run_models_refresh(
 ) -> Result<()> {
     let provider_name = provider_override
         .or(config.default_provider.as_deref())
-        .unwrap_or("openrouter")
+        .unwrap_or(DEFAULT_PROTOCOL_MODEL_ID)
         .trim()
         .to_string();
 
@@ -1736,16 +1745,27 @@ fn setup_workspace() -> Result<(PathBuf, PathBuf)> {
 
 // ── Step 2: Provider & API Key ───────────────────────────────────
 
+fn print_gateway_tier_manifest_hints() {
+    println!();
+    print_bullet(
+        "Gateway vendors (Vercel AI, Cloudflare AI, Astrai, …) only resolve when matching YAML manifests exist under your AI_PROTOCOL_DIR checkout.",
+    );
+    print_bullet(
+        "If upstream ai-protocol does not ship your gateway yet, add manifests locally (or use Custom) and enter that manifest's provider/model id.",
+    );
+    println!();
+}
+
 #[allow(clippy::too_many_lines)]
 fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String, Option<String>)> {
     // ── Tier selection ──
     let tiers = vec![
-        "⭐ Recommended (OpenRouter, Venice, Anthropic, OpenAI, Gemini)",
+        "⭐ Recommended protocol models (OpenAI, Anthropic, Gemini, DeepSeek)",
         "⚡ Fast inference (Groq, Fireworks, Together AI, NVIDIA NIM)",
-        "🌐 Gateway / proxy (Vercel AI, Cloudflare AI, Amazon Bedrock)",
+        "🌐 Gateway / proxy (Bedrock via ai-protocol — other gateways need manifests in AI_PROTOCOL_DIR)",
         "🔬 Specialized (Moonshot/Kimi, GLM/Zhipu, MiniMax, Qwen/DashScope, Qianfan, Z.AI, Synthetic, OpenCode Zen, Cohere)",
         "🏠 Local / private (Ollama, llama.cpp server — no API key needed)",
-        "🔧 Custom — bring your own OpenAI-compatible API",
+        "🔧 Custom — use your own ai-protocol manifest",
     ];
 
     let tier_idx = Select::new()
@@ -1757,76 +1777,56 @@ fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String, Optio
     let providers: Vec<(&str, &str)> = match tier_idx {
         0 => vec![
             (
-                "openrouter",
-                "OpenRouter — 200+ models, 1 API key (recommended)",
+                DEFAULT_PROTOCOL_MODEL_ID,
+                "OpenAI GPT-5.2 via ai-protocol (default)",
             ),
-            ("venice", "Venice AI — privacy-first (Llama, Opus)"),
-            ("anthropic", "Anthropic — Claude Sonnet & Opus (direct)"),
-            ("openai", "OpenAI — GPT-4o, o1, GPT-5 (direct)"),
+            (
+                "anthropic/claude-sonnet-4-5-20250929",
+                "Anthropic Claude Sonnet via ai-protocol",
+            ),
+            ("google/gemini-2.5-pro", "Google Gemini via ai-protocol"),
+            ("deepseek/deepseek-chat", "DeepSeek via ai-protocol"),
+            ("qwen/qwen-plus", "Qwen via ai-protocol"),
             (
                 "openai-codex",
                 "OpenAI Codex (ChatGPT subscription OAuth, no API key)",
             ),
-            ("deepseek", "DeepSeek — V3 & R1 (affordable)"),
-            ("mistral", "Mistral — Large & Codestral"),
-            ("xai", "xAI — Grok 3 & 4"),
-            ("perplexity", "Perplexity — search-augmented AI"),
-            (
-                "gemini",
-                "Google Gemini — Gemini 2.0 Flash & Pro (supports CLI auth)",
-            ),
         ],
         1 => vec![
-            ("groq", "Groq — ultra-fast LPU inference"),
-            ("fireworks", "Fireworks AI — fast open-source inference"),
-            ("together-ai", "Together AI — open-source model hosting"),
-            ("nvidia", "NVIDIA NIM — DeepSeek, Llama, & more"),
-        ],
-        2 => vec![
-            ("vercel", "Vercel AI Gateway"),
-            ("cloudflare", "Cloudflare AI Gateway"),
+            ("groq/llama-3.3-70b-versatile", "Groq via ai-protocol"),
             (
-                "astrai",
-                "Astrai — compliant AI routing (PII stripping, cost optimization)",
+                "fireworks/accounts/fireworks/models/llama-v3p3-70b-instruct",
+                "Fireworks AI via ai-protocol",
             ),
-            ("bedrock", "Amazon Bedrock — AWS managed models"),
+            (
+                "together/meta-llama/Llama-3.3-70B-Instruct-Turbo",
+                "Together AI via ai-protocol",
+            ),
+            (
+                "nvidia/meta/llama-3.3-70b-instruct",
+                "NVIDIA NIM via ai-protocol",
+            ),
         ],
+        2 => {
+            print_gateway_tier_manifest_hints();
+            vec![(
+                "bedrock/anthropic.claude-sonnet-4-5-20250929-v1:0",
+                "Amazon Bedrock via ai-protocol",
+            )]
+        }
         3 => vec![
-            (
-                "kimi-code",
-                "Kimi Code — coding-optimized Kimi API (KimiCLI)",
-            ),
-            (
-                "qwen-code",
-                "Qwen Code — OAuth tokens reused from ~/.qwen/oauth_creds.json",
-            ),
-            ("moonshot", "Moonshot — Kimi API (China endpoint)"),
-            (
-                "moonshot-intl",
-                "Moonshot — Kimi API (international endpoint)",
-            ),
-            ("glm", "GLM — ChatGLM / Zhipu (international endpoint)"),
-            ("glm-cn", "GLM — ChatGLM / Zhipu (China endpoint)"),
-            (
-                "minimax",
-                "MiniMax — international endpoint (api.minimax.io)",
-            ),
-            ("minimax-cn", "MiniMax — China endpoint (api.minimaxi.com)"),
-            ("qwen", "Qwen — DashScope China endpoint"),
-            ("qwen-intl", "Qwen — DashScope international endpoint"),
-            ("qwen-us", "Qwen — DashScope US endpoint"),
-            ("qianfan", "Qianfan — Baidu AI models (China endpoint)"),
-            ("zai", "Z.AI — global coding endpoint"),
-            ("zai-cn", "Z.AI — China coding endpoint (open.bigmodel.cn)"),
-            ("synthetic", "Synthetic — Synthetic AI models"),
-            ("opencode", "OpenCode Zen — code-focused AI"),
-            ("cohere", "Cohere — Command R+ & embeddings"),
+            ("moonshot/kimi-k2.5", "Moonshot/Kimi via ai-protocol"),
+            ("glm/glm-5", "GLM/Zhipu via ai-protocol"),
+            ("minimax/MiniMax-M2.5", "MiniMax via ai-protocol"),
+            ("qianfan/ernie-4.0-turbo-8k", "Qianfan via ai-protocol"),
+            ("zai/glm-5", "Z.AI via ai-protocol"),
+            ("cohere/command-a-03-2025", "Cohere via ai-protocol"),
         ],
         4 => vec![
-            ("ollama", "Ollama — local models (Llama, Mistral, Phi)"),
+            ("ollama/llama3.2", "Ollama via ai-protocol"),
             (
-                "llamacpp",
-                "llama.cpp server — local OpenAI-compatible endpoint",
+                "llamacpp/ggml-org/gpt-oss-20b-GGUF",
+                "llama.cpp server via ai-protocol",
             ),
         ],
         _ => vec![], // Custom — handled below
@@ -1838,19 +1838,20 @@ fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String, Optio
         println!(
             "  {} {}",
             style("Custom Provider Setup").white().bold(),
-            style("— any OpenAI-compatible API").dim()
+            style("— ai-protocol manifest").dim()
         );
-        print_bullet("ZeroClaw works with ANY API that speaks the OpenAI chat completions format.");
-        print_bullet("Examples: LiteLLM, LocalAI, vLLM, text-generation-webui, LM Studio, etc.");
+        print_bullet("Define your endpoint as an ai-protocol provider manifest first.");
+        print_bullet("Then enter the logical model id exposed by that manifest.");
         println!();
 
-        let base_url: String = Input::new()
-            .with_prompt("  API base URL (e.g. http://localhost:1234 or https://my-api.com)")
+        let provider_name: String = Input::new()
+            .with_prompt("  Logical model id (provider/model, e.g. local-gateway/my-model)")
             .interact_text()?;
-
-        let base_url = base_url.trim().trim_end_matches('/').to_string();
-        if base_url.is_empty() {
-            anyhow::bail!("Custom provider requires a base URL.");
+        let provider_name = provider_name.trim().to_string();
+        if crate::providers::parse_protocol_provider_model(&provider_name).is_none() {
+            anyhow::bail!(
+                "Custom providers must use provider/model syntax backed by an ai-protocol manifest"
+            );
         }
 
         let api_key: String = Input::new()
@@ -1858,12 +1859,7 @@ fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String, Optio
             .allow_empty(true)
             .interact_text()?;
 
-        let model: String = Input::new()
-            .with_prompt("  Model name (e.g. llama3, gpt-4o, mistral)")
-            .default("default".into())
-            .interact_text()?;
-
-        let provider_name = format!("custom:{base_url}");
+        let model = provider_name.clone();
 
         println!(
             "  {} Provider: {} | Model: {}",
@@ -4725,7 +4721,10 @@ fn print_summary(config: &Config) {
     println!(
         "    {} Provider:      {}",
         style("🤖").cyan(),
-        config.default_provider.as_deref().unwrap_or("openrouter")
+        config
+            .default_provider
+            .as_deref()
+            .unwrap_or(DEFAULT_PROTOCOL_MODEL_ID)
     );
     println!(
         "    {} Model:         {}",
@@ -4864,7 +4863,10 @@ fn print_summary(config: &Config) {
 
     let mut step = 1u8;
 
-    let provider = config.default_provider.as_deref().unwrap_or("openrouter");
+    let provider = config
+        .default_provider
+        .as_deref()
+        .unwrap_or(DEFAULT_PROTOCOL_MODEL_ID);
     if config.api_key.is_none() && !provider_supports_keyless_local_usage(provider) {
         if provider == "openai-codex" {
             println!(
@@ -4955,6 +4957,7 @@ fn print_summary(config: &Config) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::DEFAULT_PROTOCOL_MODEL_ID;
     use serde_json::json;
     use tempfile::TempDir;
 
@@ -4975,7 +4978,7 @@ mod tests {
 
         let config = run_quick_setup_with_home(
             Some("sk-issue946"),
-            Some("openrouter"),
+            Some(DEFAULT_PROTOCOL_MODEL_ID),
             Some("custom-model-946"),
             Some("sqlite"),
             false,
@@ -4984,12 +4987,16 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(config.default_provider.as_deref(), Some("openrouter"));
+        assert_eq!(
+            config.default_provider.as_deref(),
+            Some(DEFAULT_PROTOCOL_MODEL_ID)
+        );
         assert_eq!(config.default_model.as_deref(), Some("custom-model-946"));
         assert_eq!(config.api_key.as_deref(), Some("sk-issue946"));
 
         let config_raw = tokio::fs::read_to_string(config.config_path).await.unwrap();
-        assert!(config_raw.contains("default_provider = \"openrouter\""));
+        let expected_line = format!("default_provider = \"{DEFAULT_PROTOCOL_MODEL_ID}\"");
+        assert!(config_raw.contains(&expected_line));
         assert!(config_raw.contains("default_model = \"custom-model-946\""));
     }
 
@@ -4999,7 +5006,7 @@ mod tests {
 
         let config = run_quick_setup_with_home(
             Some("sk-issue946"),
-            Some("anthropic"),
+            Some("anthropic/claude-sonnet-4-5-20250929"),
             None,
             Some("sqlite"),
             false,
@@ -5008,8 +5015,11 @@ mod tests {
         .await
         .unwrap();
 
-        let expected = default_model_for_provider("anthropic");
-        assert_eq!(config.default_provider.as_deref(), Some("anthropic"));
+        let expected = default_model_for_provider("anthropic/claude-sonnet-4-5-20250929");
+        assert_eq!(
+            config.default_provider.as_deref(),
+            Some("anthropic/claude-sonnet-4-5-20250929")
+        );
         assert_eq!(config.default_model.as_deref(), Some(expected.as_str()));
     }
 
@@ -5020,13 +5030,16 @@ mod tests {
         let config_path = zerospider_dir.join("config.toml");
 
         tokio::fs::create_dir_all(&zerospider_dir).await.unwrap();
-        tokio::fs::write(&config_path, "default_provider = \"openrouter\"\n")
-            .await
-            .unwrap();
+        tokio::fs::write(
+            &config_path,
+            format!("default_provider = \"{DEFAULT_PROTOCOL_MODEL_ID}\"\n"),
+        )
+        .await
+        .unwrap();
 
         let err = run_quick_setup_with_home(
             Some("sk-existing"),
-            Some("openrouter"),
+            Some(DEFAULT_PROTOCOL_MODEL_ID),
             Some("custom-model"),
             Some("sqlite"),
             false,
@@ -5056,7 +5069,7 @@ mod tests {
 
         let config = run_quick_setup_with_home(
             Some("sk-force"),
-            Some("openrouter"),
+            Some(DEFAULT_PROTOCOL_MODEL_ID),
             Some("custom-model-fresh"),
             Some("sqlite"),
             true,
@@ -5065,12 +5078,16 @@ mod tests {
         .await
         .expect("quick setup should overwrite existing config with --force");
 
-        assert_eq!(config.default_provider.as_deref(), Some("openrouter"));
+        assert_eq!(
+            config.default_provider.as_deref(),
+            Some(DEFAULT_PROTOCOL_MODEL_ID)
+        );
         assert_eq!(config.default_model.as_deref(), Some("custom-model-fresh"));
         assert_eq!(config.api_key.as_deref(), Some("sk-force"));
 
         let config_raw = tokio::fs::read_to_string(config.config_path).await.unwrap();
-        assert!(config_raw.contains("default_provider = \"openrouter\""));
+        let expected_line = format!("default_provider = \"{DEFAULT_PROTOCOL_MODEL_ID}\"");
+        assert!(config_raw.contains(&expected_line));
         assert!(config_raw.contains("default_model = \"custom-model-fresh\""));
     }
 
@@ -5541,8 +5558,8 @@ mod tests {
     #[test]
     fn default_model_for_provider_uses_latest_defaults() {
         assert_eq!(
-            default_model_for_provider("openrouter"),
-            "anthropic/claude-sonnet-4.6"
+            default_model_for_provider(DEFAULT_PROTOCOL_MODEL_ID),
+            DEFAULT_PROTOCOL_MODEL_ID
         );
         assert_eq!(default_model_for_provider("openai"), "gpt-5.2");
         assert_eq!(default_model_for_provider("openai-codex"), "gpt-5-codex");
@@ -5583,7 +5600,7 @@ mod tests {
         );
         assert_eq!(
             default_model_for_provider("astrai"),
-            "anthropic/claude-sonnet-4.6"
+            DEFAULT_PROTOCOL_MODEL_ID
         );
     }
 

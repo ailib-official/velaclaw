@@ -33,7 +33,7 @@ ZeroSpider is a Rust-first autonomous AI agent runtime that integrates with the 
 ### Prerequisites
 
 - Rust 1.70+ (2021 edition)
-- AI Protocol directory (optional, for protocol-driven providers)
+- A local [ai-protocol](https://github.com/ailib-official/ai-protocol) checkout for provider manifests
 
 ### Build
 
@@ -42,10 +42,7 @@ ZeroSpider is a Rust-first autonomous AI agent runtime that integrates with the 
 git clone https://github.com/ailib-official/zerospider.git
 cd zerospider
 
-# Build with all features
-cargo build --features ai-protocol,smart-routing,multi-model,remote-deploy
-
-# Or build with default features only
+# Build with default protocol support
 cargo build
 ```
 
@@ -71,8 +68,8 @@ cargo run --features smart-routing -- --smart
 # Enable multi-model negotiation
 cargo run --features multi-model -- --negotiate
 
-# Enable all features
-cargo run --features ai-protocol,smart-routing,multi-model,remote-deploy
+# Run with the default protocol model id (openai/gpt-5.2)
+cargo run -- agent -m "Hello"
 ```
 
 ---
@@ -86,28 +83,17 @@ cargo run --features ai-protocol,smart-routing,multi-model,remote-deploy
 # Clone from: git clone https://github.com/ailib-official/ai-protocol
 export AI_PROTOCOL_DIR=/path/to/ai-protocol
 
-# Provider API keys
+# Provider API keys declared by ai-protocol manifests
 export OPENAI_API_KEY=sk-...
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 ### Config File
 
-```yaml
-# ~/.zerospider/config.yaml
-routing:
-  smart_selection: true
-  
-negotiation:
-  enabled: true
-  min_providers: 2
-  consensus_threshold: 0.7
-
-deployment:
-  remote_enabled: true
-  allowed_hosts:
-    - server1.example.com
-    - server2.example.com
+```toml
+# ~/.zerospider/config.toml
+default_provider = "openai/gpt-5.2"
+default_model = "openai/gpt-5.2"
 ```
 
 ---

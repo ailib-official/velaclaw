@@ -296,9 +296,11 @@ pub(crate) fn parse_protocol_provider_model(name: &str) -> Option<(&str, &str)> 
 fn legacy_provider_removed_error(name: &str) -> anyhow::Error {
     anyhow::anyhow!(
         "Legacy provider key `{name}` was removed in ZS-ML-015. Use `provider/model` syntax \
-         (for example `openai/gpt-5.2`) with `AI_PROTOCOL_DIR` pointing at an ai-protocol checkout. \
+         (for example `{example}`) with `AI_PROTOCOL_DIR` pointing at an ai-protocol checkout. \
          For custom endpoints, create an ai-protocol provider manifest instead of `custom:` or \
-         `anthropic-custom:` URL syntax. See `docs/migration-legacy-to-protocol.md`."
+         `anthropic-custom:` URL syntax. See `docs/migration-legacy-to-protocol.md`.",
+        example = crate::config::DEFAULT_PROTOCOL_MODEL_ID,
+        name = name,
     )
 }
 
@@ -341,7 +343,10 @@ fn create_provider_with_url_and_options(
 ) -> anyhow::Result<Box<dyn Provider>> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
-        anyhow::bail!("Provider name cannot be empty. Use provider/model syntax, for example `openai/gpt-5.2`.");
+        anyhow::bail!(
+            "Provider name cannot be empty. Use provider/model syntax, for example `{example}`.",
+            example = crate::config::DEFAULT_PROTOCOL_MODEL_ID,
+        );
     }
 
     #[cfg(feature = "ai-protocol")]
@@ -363,7 +368,8 @@ fn create_provider_with_url_and_options(
     let _ = (api_url, options);
     if protocol_only_mode_enabled() {
         anyhow::bail!(
-            "Provider mode is protocol-only via {PROVIDER_MODE_ENV}. Use provider/model syntax (e.g. openai/gpt-5.2)."
+            "Provider mode is protocol-only via {PROVIDER_MODE_ENV}. Use provider/model syntax (e.g. {example}).",
+            example = crate::config::DEFAULT_PROTOCOL_MODEL_ID,
         );
     }
 
@@ -541,7 +547,7 @@ pub struct ProviderInfo {
 pub fn list_providers() -> Vec<ProviderInfo> {
     vec![
         ProviderInfo {
-            name: "openai/gpt-5.2",
+            name: crate::config::DEFAULT_PROTOCOL_MODEL_ID,
             display_name: "OpenAI via ai-protocol",
             aliases: &[],
             local: false,

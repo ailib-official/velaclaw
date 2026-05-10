@@ -3,7 +3,7 @@ use crate::agent::dispatcher::{
 };
 use crate::agent::memory_loader::{DefaultMemoryLoader, MemoryLoader};
 use crate::agent::prompt::{PromptContext, SystemPromptBuilder};
-use crate::config::Config;
+use crate::config::{Config, DEFAULT_PROTOCOL_MODEL_ID};
 use crate::memory::{self, Memory, MemoryCategory};
 use crate::observability::{self, Observer, ObserverEvent};
 use crate::providers::{self, ChatMessage, ChatRequest, ConversationMessage, Provider};
@@ -274,12 +274,15 @@ impl Agent {
             config,
         );
 
-        let provider_name = config.default_provider.as_deref().unwrap_or("openrouter");
+        let provider_name = config
+            .default_provider
+            .as_deref()
+            .unwrap_or(DEFAULT_PROTOCOL_MODEL_ID);
 
         let model_name = config
             .default_model
             .as_deref()
-            .unwrap_or("anthropic/claude-sonnet-4-20250514")
+            .unwrap_or(DEFAULT_PROTOCOL_MODEL_ID)
             .to_string();
 
         let provider: Box<dyn Provider> = providers::create_routed_provider(
@@ -586,12 +589,12 @@ pub async fn run(
     let provider_name = effective_config
         .default_provider
         .as_deref()
-        .unwrap_or("openrouter")
+        .unwrap_or(DEFAULT_PROTOCOL_MODEL_ID)
         .to_string();
     let model_name = effective_config
         .default_model
         .as_deref()
-        .unwrap_or("anthropic/claude-sonnet-4-20250514")
+        .unwrap_or(DEFAULT_PROTOCOL_MODEL_ID)
         .to_string();
 
     agent.observer.record_event(&ObserverEvent::AgentStart {

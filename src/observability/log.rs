@@ -112,6 +112,7 @@ impl Observer for LogObserver {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::DEFAULT_PROTOCOL_MODEL_ID;
     use std::time::Duration;
 
     #[test]
@@ -123,18 +124,18 @@ mod tests {
     fn log_observer_all_events_no_panic() {
         let obs = LogObserver::new();
         obs.record_event(&ObserverEvent::AgentStart {
-            provider: "openrouter".into(),
+            provider: DEFAULT_PROTOCOL_MODEL_ID.into(),
             model: "claude-sonnet".into(),
         });
         obs.record_event(&ObserverEvent::AgentEnd {
-            provider: "openrouter".into(),
+            provider: DEFAULT_PROTOCOL_MODEL_ID.into(),
             model: "claude-sonnet".into(),
             duration: Duration::from_millis(500),
             tokens_used: Some(100),
             cost_usd: Some(0.0015),
         });
         obs.record_event(&ObserverEvent::AgentEnd {
-            provider: "openrouter".into(),
+            provider: DEFAULT_PROTOCOL_MODEL_ID.into(),
             model: "claude-sonnet".into(),
             duration: Duration::ZERO,
             tokens_used: None,

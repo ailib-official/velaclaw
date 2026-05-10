@@ -12,14 +12,14 @@ Dành cho cài đặt lần đầu và làm quen nhanh.
 
 | Tình huống | Lệnh |
 |----------|---------|
-| Có API key, muốn cài nhanh nhất | `zeroclaw onboard --api-key sk-... --provider openrouter` |
+| Có API key, muốn cài nhanh nhất | `zerospider onboard --api-key sk-... --provider openai/gpt-5.2` |
 | Muốn được hướng dẫn từng bước | `zeroclaw onboard --interactive` |
 | Đã có config, chỉ cần sửa kênh | `zeroclaw onboard --channels-only` |
 | Dùng xác thực subscription | Xem [Subscription Auth](../../../README.md#subscription-auth-openai-codex--claude-code) |
 
 ## Thiết lập và kiểm tra
 
-- Thiết lập nhanh: `zeroclaw onboard --api-key "sk-..." --provider openrouter`
+- Thiết lập nhanh: `zerospider onboard --api-key "sk-..." --provider openai/gpt-5.2`
 - Thiết lập tương tác: `zeroclaw onboard --interactive`
 - Kiểm tra môi trường: `zeroclaw status` + `zeroclaw doctor`
 

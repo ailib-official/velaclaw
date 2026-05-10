@@ -123,11 +123,12 @@ fn show_integration_info(config: &Config, name: &str) -> Result<()> {
             println!("    2. Create app → Bot Token Scopes → Install");
             println!("    3. Run: zerospider onboard --channels-only");
         }
-        "OpenRouter" => {
+        "ai-protocol default" => {
             println!("  Setup:");
-            println!("    1. Get API key at https://openrouter.ai/keys");
-            println!("    2. Run: zerospider onboard");
-            println!("    Access 200+ models with one key.");
+            println!("    1. Clone https://github.com/ailib-official/ai-protocol");
+            println!("    2. Set AI_PROTOCOL_DIR to that checkout");
+            println!("    3. Set the provider credential env var declared by the manifest");
+            println!("    4. Run: zerospider onboard");
         }
         "Ollama" => {
             println!("  Setup:");

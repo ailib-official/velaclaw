@@ -45,8 +45,8 @@ RUN mkdir -p /zeroclaw-data/.zeroclaw /zeroclaw-data/workspace && \
 workspace_dir = "/zeroclaw-data/workspace"
 config_path = "/zeroclaw-data/.zeroclaw/config.toml"
 api_key = ""
-default_provider = "openrouter"
-default_model = "anthropic/claude-sonnet-4-20250514"
+default_provider = "openai/gpt-5.2"
+default_model = "openai/gpt-5.2"
 default_temperature = 0.7
 
 [gateway]

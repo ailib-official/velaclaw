@@ -86,7 +86,7 @@ mod tools;
 mod tunnel;
 mod util;
 
-use config::Config;
+use config::{Config, DEFAULT_PROTOCOL_MODEL_ID};
 
 // Re-export so binary's hardware/peripherals modules can use zerospider::HardwareCommands etc.
 pub use zerospider::{HardwareCommands, PeripheralCommands};
@@ -155,7 +155,7 @@ enum Commands {
         #[arg(long)]
         api_key: Option<String>,
 
-        /// Provider name (used in quick mode, default: openrouter)
+        /// Provider/model id (used in quick mode, default: openai/gpt-5.2)
         #[arg(long)]
         provider: Option<String>,
         /// Model ID override (used in quick mode)
@@ -183,7 +183,7 @@ Examples:
         #[arg(short, long)]
         message: Option<String>,
 
-        /// Provider to use (openrouter, anthropic, openai, openai-codex)
+        /// Provider/model id to use (for example openai/gpt-5.2, or openai-codex)
         #[arg(short, long)]
         provider: Option<String>,
 
@@ -881,7 +881,10 @@ async fn main() -> Result<()> {
             println!();
             println!(
                 "🤖 Provider:      {}",
-                config.default_provider.as_deref().unwrap_or("openrouter")
+                config
+                    .default_provider
+                    .as_deref()
+                    .unwrap_or(DEFAULT_PROTOCOL_MODEL_ID)
             );
             println!(
                 "   Model:         {}",
@@ -1032,7 +1035,7 @@ async fn main() -> Result<()> {
             let current = config
                 .default_provider
                 .as_deref()
-                .unwrap_or("openrouter")
+                .unwrap_or(DEFAULT_PROTOCOL_MODEL_ID)
                 .trim()
                 .to_ascii_lowercase();
             println!("Supported providers ({} total):\n", providers.len());
@@ -1630,7 +1633,7 @@ mod tests {
             "zerospider",
             "onboard",
             "--provider",
-            "openrouter",
+            DEFAULT_PROTOCOL_MODEL_ID,
             "--model",
             "custom-model-946",
             "--api-key",
@@ -1651,7 +1654,7 @@ mod tests {
                 assert!(!interactive);
                 assert!(!force);
                 assert!(!channels_only);
-                assert_eq!(provider.as_deref(), Some("openrouter"));
+                assert_eq!(provider.as_deref(), Some(DEFAULT_PROTOCOL_MODEL_ID));
                 assert_eq!(model.as_deref(), Some("custom-model-946"));
                 assert_eq!(api_key.as_deref(), Some("sk-issue946"));
             }

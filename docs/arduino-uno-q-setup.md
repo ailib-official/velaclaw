@@ -106,7 +106,7 @@ If cross-compile fails, use Option A and build on the device.
 ssh arduino@<UNO_Q_IP>
 
 # Quick config
-zeroclaw onboard --api-key YOUR_OPENROUTER_KEY --provider openrouter
+zerospider onboard --api-key YOUR_OPENAI_KEY --provider openai/gpt-5.2
 
 # Or create config manually
 mkdir -p ~/.zeroclaw/workspace
@@ -116,9 +116,9 @@ nano ~/.zeroclaw/config.toml
 ### 3.2 Minimal config.toml
 
 ```toml
-api_key = "YOUR_OPENROUTER_API_KEY"
-default_provider = "openrouter"
-default_model = "anthropic/claude-sonnet-4-6"
+api_key = "YOUR_OPENAI_API_KEY"
+default_provider = "openai/gpt-5.2"
+default_model = "openai/gpt-5.2"
 
 [peripherals]
 enabled = false
@@ -201,7 +201,7 @@ Now when you message your Telegram bot *"Turn on the LED"* or *"Set pin 13 high"
 | 4 | `sudo apt-get install -y pkg-config libssl-dev` |
 | 5 | `git clone https://github.com/theonlyhennygod/zeroclaw.git && cd zeroclaw` |
 | 6 | `cargo build --release --features hardware` |
-| 7 | `zeroclaw onboard --api-key KEY --provider openrouter` |
+| 7 | `zerospider onboard --api-key KEY --provider openai/gpt-5.2` |
 | 8 | Edit `~/.zeroclaw/config.toml` (add Telegram bot_token) |
 | 9 | `zeroclaw daemon --host 127.0.0.1 --port 3000` |
 | 10 | Message your Telegram bot — it responds |

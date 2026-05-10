@@ -134,18 +134,15 @@ Recommended starter model IDs (verified against NVIDIA API catalog on February 1
 - `nvidia/llama-3.3-nemotron-super-49b-v1.5`
 - `nvidia/llama-3.1-nemotron-ultra-253b-v1`
 
-## Custom Endpoints
+## Custom Chat Endpoints
 
-- OpenAI-compatible endpoint:
-
-```toml
-default_provider = "custom:https://your-api.example.com"
-```
-
-- Anthropic-compatible endpoint:
+Custom chat endpoints are manifest-backed after ZS-ML-015. Add the endpoint to
+an ai-protocol provider manifest, set `AI_PROTOCOL_DIR`, and reference the
+logical model id:
 
 ```toml
-default_provider = "anthropic-custom:https://your-api.example.com"
+default_provider = "local-gateway/my-model"
+default_model = "local-gateway/my-model"
 ```
 
 ## MiniMax OAuth Setup (config.toml)
@@ -202,13 +199,13 @@ You can route model calls by hint using `[[model_routes]]`:
 ```toml
 [[model_routes]]
 hint = "reasoning"
-provider = "openrouter"
-model = "anthropic/claude-opus-4-20250514"
+provider = "openai/gpt-5.2"
+model = "openai/gpt-5.2"
 
 [[model_routes]]
 hint = "fast"
-provider = "groq"
-model = "llama-3.3-70b-versatile"
+provider = "groq/llama-3.3-70b-versatile"
+model = "groq/llama-3.3-70b-versatile"
 ```
 
 Then call with a hint model name (for example from tool or integration paths):

@@ -229,7 +229,7 @@ cd zeroclaw
 ./bootstrap.sh --prebuilt-only
 
 # Tùy chọn: chạy onboarding trong cùng luồng
-./bootstrap.sh --onboard --api-key "sk-..." --provider openrouter [--model "openrouter/auto"]
+./bootstrap.sh --onboard --api-key "sk-..." --provider openai/gpt-5.2
 
 # Tùy chọn: chạy bootstrap + onboarding hoàn toàn ở chế độ tương thích với Docker
 ./bootstrap.sh --docker
@@ -278,7 +278,7 @@ cargo install --path . --force --locked
 export PATH="$HOME/.cargo/bin:$PATH"
 
 # Cài nhanh (không cần tương tác, có thể chỉ định model)
-zeroclaw onboard --api-key sk-... --provider openrouter [--model "openrouter/auto"]
+zerospider onboard --api-key sk-... --provider openai/gpt-5.2
 
 # Hoặc dùng trình hướng dẫn tương tác
 zeroclaw onboard --interactive
@@ -385,7 +385,7 @@ Mọi hệ thống con đều là **trait** — chỉ cần đổi cấu hình, 
 
 | Hệ thống con | Trait | Đi kèm sẵn | Mở rộng |
 |-----------|-------|------------|--------|
-| **Mô hình AI** | `Provider` | Danh mục provider qua `zeroclaw providers` (hiện có 28 built-in + alias, cộng endpoint tùy chỉnh) | `custom:https://your-api.com` (tương thích OpenAI) hoặc `anthropic-custom:https://your-api.com` |
+| **Mô hình AI** | `Provider` | Danh mục provider qua `zerospider providers` (ai-protocol `provider/model`) | `openai/gpt-5.2` |
 | **Channel** | `Channel` | CLI, Telegram, Discord, Slack, Mattermost, iMessage, Matrix, Signal, WhatsApp, Email, IRC, Lark, DingTalk, QQ, Webhook | Bất kỳ messaging API nào |
 | **Memory** | `Memory` | SQLite hybrid search, PostgreSQL backend (storage provider có thể cấu hình), Lucid bridge, Markdown files, backend `none` tường minh, snapshot/hydrate, response cache tùy chọn | Bất kỳ persistence backend nào |
 | **Tool** | `Tool` | shell/file/memory, cron/schedule, git, pushover, browser, http_request, screenshot/image_info, composio (opt-in), delegate, hardware tools | Bất kỳ khả năng nào |
@@ -607,15 +607,13 @@ sẽ được áp dụng nóng vào lần có tin nhắn channel đến tiếp t
 
 ```toml
 api_key = "sk-..."
-default_provider = "openrouter"
-default_model = "anthropic/claude-sonnet-4-6"
+default_provider = "openai/gpt-5.2"
+default_model = "openai/gpt-5.2"
 default_temperature = 0.7
 
-# Endpoint tùy chỉnh tương thích OpenAI
-# default_provider = "custom:https://your-api.com"
-
-# Endpoint tùy chỉnh tương thích Anthropic
-# default_provider = "anthropic-custom:https://your-api.com"
+# Endpoint chat tùy chỉnh cần manifest ai-protocol rồi dùng provider/model
+# default_provider = "local-gateway/my-model"
+# default_model = "local-gateway/my-model"
 
 [memory]
 backend = "sqlite"             # "sqlite", "lucid", "postgres", "markdown", "none"

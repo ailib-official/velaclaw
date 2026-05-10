@@ -1,5 +1,4 @@
 use super::traits::{Observer, ObserverEvent, ObserverMetric};
-use crate::config::DEFAULT_PROTOCOL_MODEL_ID;
 use opentelemetry::metrics::{Counter, Gauge, Histogram};
 use opentelemetry::trace::{Span, SpanKind, Status, Tracer};
 use opentelemetry::{global, KeyValue};
@@ -373,6 +372,7 @@ impl Observer for OtelObserver {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::DEFAULT_PROTOCOL_MODEL_ID;
     use std::time::Duration;
 
     // Note: OtelObserver::new() requires an OTLP endpoint.

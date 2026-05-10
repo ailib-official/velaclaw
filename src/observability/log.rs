@@ -1,5 +1,4 @@
 use super::traits::{Observer, ObserverEvent, ObserverMetric};
-use crate::config::DEFAULT_PROTOCOL_MODEL_ID;
 use std::any::Any;
 use tracing::info;
 
@@ -113,6 +112,7 @@ impl Observer for LogObserver {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::DEFAULT_PROTOCOL_MODEL_ID;
     use std::time::Duration;
 
     #[test]

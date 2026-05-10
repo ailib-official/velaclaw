@@ -1,5 +1,4 @@
 use super::traits::{Observer, ObserverEvent, ObserverMetric};
-use crate::config::DEFAULT_PROTOCOL_MODEL_ID;
 use prometheus::{
     Encoder, GaugeVec, Histogram, HistogramOpts, HistogramVec, IntCounterVec, Registry, TextEncoder,
 };
@@ -239,6 +238,7 @@ impl Observer for PrometheusObserver {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::DEFAULT_PROTOCOL_MODEL_ID;
     use std::time::Duration;
 
     #[test]

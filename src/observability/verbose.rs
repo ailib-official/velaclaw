@@ -1,5 +1,4 @@
 use super::traits::{Observer, ObserverEvent, ObserverMetric};
-use crate::config::DEFAULT_PROTOCOL_MODEL_ID;
 use std::any::Any;
 
 /// Human-readable progress observer for interactive CLI sessions.
@@ -67,6 +66,7 @@ impl Observer for VerboseObserver {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::DEFAULT_PROTOCOL_MODEL_ID;
     use std::time::Duration;
 
     #[test]

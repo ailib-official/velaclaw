@@ -4,6 +4,8 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+use zerospider::config::DEFAULT_PROTOCOL_MODEL_ID;
+
 static AI_PROTOCOL_ENV_LOCK: Mutex<()> = Mutex::new(());
 
 /// Restores prior `AI_PROTOCOL_DIR` after the test finishes.
@@ -79,7 +81,10 @@ fn protocol_fixture_resolves_openai_without_legacy() {
 
     let _env = AiProtocolDirGuard::set(root.to_str().expect("UTF-8 path"));
 
-    let out = zerospider::providers::create_provider("openai/gpt-5.2", Some("sk-zsml014-teststub"));
+    let out = zerospider::providers::create_provider(
+        DEFAULT_PROTOCOL_MODEL_ID,
+        Some("sk-zsml014-teststub"),
+    );
     assert!(
         out.is_ok(),
         "expected protocol-backed provider, got {:?}",

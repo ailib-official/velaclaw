@@ -5,6 +5,7 @@ use crate::config::{
     AutonomyConfig, BrowserConfig, ChannelsConfig, ComposioConfig, Config, DiscordConfig,
     HeartbeatConfig, IMessageConfig, LarkConfig, MatrixConfig, MemoryConfig, ObservabilityConfig,
     RuntimeConfig, SecretsConfig, SlackConfig, StorageConfig, TelegramConfig, WebhookConfig,
+    DEFAULT_PROTOCOL_MODEL_ID,
 };
 use crate::hardware::{self, HardwareConfig};
 use crate::memory::{
@@ -25,8 +26,6 @@ use std::fs;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-
-const DEFAULT_PROTOCOL_MODEL_ID: &str = "openai/gpt-5.2";
 
 #[cfg(feature = "ai-protocol")]
 fn warn_if_ai_protocol_dir_missing_for_protocol_style_provider(provider_key: &str) {
@@ -632,7 +631,7 @@ fn curated_models_for_provider(provider_name: &str) -> Vec<(String, String)> {
                 "Claude Sonnet 4.6 (balanced, recommended)".to_string(),
             ),
             (
-                "openai/gpt-5.2".to_string(),
+                DEFAULT_PROTOCOL_MODEL_ID.to_string(),
                 "GPT-5.2 (latest flagship)".to_string(),
             ),
             (
@@ -928,7 +927,7 @@ fn curated_models_for_provider(provider_name: &str) -> Vec<(String, String)> {
                 "Claude Sonnet 4.6 (balanced default)".to_string(),
             ),
             (
-                "openai/gpt-5.2".to_string(),
+                DEFAULT_PROTOCOL_MODEL_ID.to_string(),
                 "GPT-5.2 (latest flagship)".to_string(),
             ),
             (
@@ -1746,13 +1745,24 @@ fn setup_workspace() -> Result<(PathBuf, PathBuf)> {
 
 // ── Step 2: Provider & API Key ───────────────────────────────────
 
+fn print_gateway_tier_manifest_hints() {
+    println!();
+    print_bullet(
+        "Gateway vendors (Vercel AI, Cloudflare AI, Astrai, …) only resolve when matching YAML manifests exist under your AI_PROTOCOL_DIR checkout.",
+    );
+    print_bullet(
+        "If upstream ai-protocol does not ship your gateway yet, add manifests locally (or use Custom) and enter that manifest's provider/model id.",
+    );
+    println!();
+}
+
 #[allow(clippy::too_many_lines)]
 fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String, Option<String>)> {
     // ── Tier selection ──
     let tiers = vec![
         "⭐ Recommended protocol models (OpenAI, Anthropic, Gemini, DeepSeek)",
         "⚡ Fast inference (Groq, Fireworks, Together AI, NVIDIA NIM)",
-        "🌐 Gateway / proxy (Vercel AI, Cloudflare AI, Amazon Bedrock)",
+        "🌐 Gateway / proxy (Bedrock via ai-protocol — other gateways need manifests in AI_PROTOCOL_DIR)",
         "🔬 Specialized (Moonshot/Kimi, GLM/Zhipu, MiniMax, Qwen/DashScope, Qianfan, Z.AI, Synthetic, OpenCode Zen, Cohere)",
         "🏠 Local / private (Ollama, llama.cpp server — no API key needed)",
         "🔧 Custom — use your own ai-protocol manifest",
@@ -1797,21 +1807,13 @@ fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String, Optio
                 "NVIDIA NIM via ai-protocol",
             ),
         ],
-        2 => vec![
-            ("vercel/gpt-5.2", "Vercel AI Gateway via ai-protocol"),
-            (
-                "cloudflare/gpt-5.2",
-                "Cloudflare AI Gateway via ai-protocol",
-            ),
-            (
-                "astrai/gpt-5.2",
-                "Astrai compliant AI routing via ai-protocol",
-            ),
-            (
+        2 => {
+            print_gateway_tier_manifest_hints();
+            vec![(
                 "bedrock/anthropic.claude-sonnet-4-5-20250929-v1:0",
                 "Amazon Bedrock via ai-protocol",
-            ),
-        ],
+            )]
+        }
         3 => vec![
             ("moonshot/kimi-k2.5", "Moonshot/Kimi via ai-protocol"),
             ("glm/glm-5", "GLM/Zhipu via ai-protocol"),
@@ -4955,6 +4957,7 @@ fn print_summary(config: &Config) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::DEFAULT_PROTOCOL_MODEL_ID;
     use serde_json::json;
     use tempfile::TempDir;
 
@@ -4992,7 +4995,8 @@ mod tests {
         assert_eq!(config.api_key.as_deref(), Some("sk-issue946"));
 
         let config_raw = tokio::fs::read_to_string(config.config_path).await.unwrap();
-        assert!(config_raw.contains("default_provider = \"openai/gpt-5.2\""));
+        let expected_line = format!("default_provider = \"{DEFAULT_PROTOCOL_MODEL_ID}\"");
+        assert!(config_raw.contains(&expected_line));
         assert!(config_raw.contains("default_model = \"custom-model-946\""));
     }
 
@@ -5026,9 +5030,12 @@ mod tests {
         let config_path = zerospider_dir.join("config.toml");
 
         tokio::fs::create_dir_all(&zerospider_dir).await.unwrap();
-        tokio::fs::write(&config_path, "default_provider = \"openai/gpt-5.2\"\n")
-            .await
-            .unwrap();
+        tokio::fs::write(
+            &config_path,
+            format!("default_provider = \"{DEFAULT_PROTOCOL_MODEL_ID}\"\n"),
+        )
+        .await
+        .unwrap();
 
         let err = run_quick_setup_with_home(
             Some("sk-existing"),
@@ -5079,7 +5086,8 @@ mod tests {
         assert_eq!(config.api_key.as_deref(), Some("sk-force"));
 
         let config_raw = tokio::fs::read_to_string(config.config_path).await.unwrap();
-        assert!(config_raw.contains("default_provider = \"openai/gpt-5.2\""));
+        let expected_line = format!("default_provider = \"{DEFAULT_PROTOCOL_MODEL_ID}\"");
+        assert!(config_raw.contains(&expected_line));
         assert!(config_raw.contains("default_model = \"custom-model-fresh\""));
     }
 
@@ -5550,8 +5558,8 @@ mod tests {
     #[test]
     fn default_model_for_provider_uses_latest_defaults() {
         assert_eq!(
-            default_model_for_provider("openai/gpt-5.2"),
-            "openai/gpt-5.2"
+            default_model_for_provider(DEFAULT_PROTOCOL_MODEL_ID),
+            DEFAULT_PROTOCOL_MODEL_ID
         );
         assert_eq!(default_model_for_provider("openai"), "gpt-5.2");
         assert_eq!(default_model_for_provider("openai-codex"), "gpt-5-codex");

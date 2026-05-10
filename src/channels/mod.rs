@@ -62,7 +62,7 @@ pub use whatsapp::WhatsAppChannel;
 pub use whatsapp_web::WhatsAppWebChannel;
 
 use crate::agent::loop_::{build_tool_instructions, run_tool_call_loop};
-use crate::config::Config;
+use crate::config::{Config, DEFAULT_PROTOCOL_MODEL_ID};
 use crate::identity;
 use crate::memory::{self, Memory};
 use crate::observability::{self, Observer};
@@ -383,7 +383,7 @@ fn resolved_default_provider(config: &Config) -> String {
     config
         .default_provider
         .clone()
-        .unwrap_or_else(|| "openai/gpt-5.2".to_string())
+        .unwrap_or_else(|| DEFAULT_PROTOCOL_MODEL_ID.to_string())
 }
 
 fn resolved_default_model(config: &Config) -> String {
@@ -3750,7 +3750,7 @@ BTC is currently around $65,000 based on latest tool output."#
 
         let mut provider_cache_seed: HashMap<String, Arc<dyn Provider>> = HashMap::new();
         provider_cache_seed.insert("test-provider".to_string(), Arc::clone(&default_provider));
-        provider_cache_seed.insert("openai/gpt-5.2".to_string(), fallback_provider);
+        provider_cache_seed.insert(DEFAULT_PROTOCOL_MODEL_ID.to_string(), fallback_provider);
 
         let runtime_ctx = Arc::new(ChannelRuntimeContext {
             channels_by_name: Arc::new(channels_by_name),
@@ -3784,7 +3784,7 @@ BTC is currently around $65,000 based on latest tool output."#
                 id: "msg-cmd-1".to_string(),
                 sender: "alice".to_string(),
                 reply_target: "chat-1".to_string(),
-                content: "/models openai/gpt-5.2".to_string(),
+                content: format!("/models {DEFAULT_PROTOCOL_MODEL_ID}"),
                 channel: "telegram".to_string(),
                 timestamp: 1,
                 thread_ts: None,
@@ -3795,7 +3795,9 @@ BTC is currently around $65,000 based on latest tool output."#
 
         let sent = channel_impl.sent_messages.lock().await;
         assert_eq!(sent.len(), 1);
-        assert!(sent[0].contains("Provider switched to `openai/gpt-5.2`"));
+        assert!(sent[0].contains(&format!(
+            "Provider switched to `{DEFAULT_PROTOCOL_MODEL_ID}`"
+        )));
 
         let route_key = "telegram_alice";
         let route = runtime_ctx
@@ -3805,7 +3807,7 @@ BTC is currently around $65,000 based on latest tool output."#
             .get(route_key)
             .cloned()
             .expect("route should be stored for sender");
-        assert_eq!(route.provider, "openai/gpt-5.2");
+        assert_eq!(route.provider, DEFAULT_PROTOCOL_MODEL_ID);
         assert_eq!(route.model, "default-model");
 
         assert_eq!(default_provider_impl.call_count.load(Ordering::SeqCst), 0);
@@ -3827,14 +3829,14 @@ BTC is currently around $65,000 based on latest tool output."#
 
         let mut provider_cache_seed: HashMap<String, Arc<dyn Provider>> = HashMap::new();
         provider_cache_seed.insert("test-provider".to_string(), Arc::clone(&default_provider));
-        provider_cache_seed.insert("openai/gpt-5.2".to_string(), routed_provider);
+        provider_cache_seed.insert(DEFAULT_PROTOCOL_MODEL_ID.to_string(), routed_provider);
 
         let route_key = "telegram_alice".to_string();
         let mut route_overrides = HashMap::new();
         route_overrides.insert(
             route_key,
             ChannelRouteSelection {
-                provider: "openai/gpt-5.2".to_string(),
+                provider: DEFAULT_PROTOCOL_MODEL_ID.to_string(),
                 model: "route-model".to_string(),
             },
         );

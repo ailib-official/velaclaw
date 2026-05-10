@@ -495,6 +495,7 @@ impl Observer for NoopObserver {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::DEFAULT_PROTOCOL_MODEL_ID;
     use crate::providers::{ChatRequest, ChatResponse, ToolCall};
     use crate::security::{AutonomyLevel, SecurityPolicy};
     use anyhow::anyhow;
@@ -522,8 +523,8 @@ mod tests {
         agents.insert(
             "coder".to_string(),
             DelegateAgentConfig {
-                provider: "openai/gpt-5.2".to_string(),
-                model: "openai/gpt-5.2".to_string(),
+                provider: DEFAULT_PROTOCOL_MODEL_ID.to_string(),
+                model: DEFAULT_PROTOCOL_MODEL_ID.to_string(),
                 system_prompt: None,
                 api_key: Some("delegate-test-credential".to_string()),
                 temperature: None,

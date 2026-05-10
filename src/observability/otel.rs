@@ -1,4 +1,5 @@
 use super::traits::{Observer, ObserverEvent, ObserverMetric};
+use crate::config::DEFAULT_PROTOCOL_MODEL_ID;
 use opentelemetry::metrics::{Counter, Gauge, Histogram};
 use opentelemetry::trace::{Span, SpanKind, Status, Tracer};
 use opentelemetry::{global, KeyValue};
@@ -397,30 +398,30 @@ mod tests {
     fn records_all_events_without_panic() {
         let obs = test_observer();
         obs.record_event(&ObserverEvent::AgentStart {
-            provider: "openai/gpt-5.2".into(),
+            provider: DEFAULT_PROTOCOL_MODEL_ID.into(),
             model: "claude-sonnet".into(),
         });
         obs.record_event(&ObserverEvent::LlmRequest {
-            provider: "openai/gpt-5.2".into(),
+            provider: DEFAULT_PROTOCOL_MODEL_ID.into(),
             model: "claude-sonnet".into(),
             messages_count: 2,
         });
         obs.record_event(&ObserverEvent::LlmResponse {
-            provider: "openai/gpt-5.2".into(),
+            provider: DEFAULT_PROTOCOL_MODEL_ID.into(),
             model: "claude-sonnet".into(),
             duration: Duration::from_millis(250),
             success: true,
             error_message: None,
         });
         obs.record_event(&ObserverEvent::AgentEnd {
-            provider: "openai/gpt-5.2".into(),
+            provider: DEFAULT_PROTOCOL_MODEL_ID.into(),
             model: "claude-sonnet".into(),
             duration: Duration::from_millis(500),
             tokens_used: Some(100),
             cost_usd: Some(0.0015),
         });
         obs.record_event(&ObserverEvent::AgentEnd {
-            provider: "openai/gpt-5.2".into(),
+            provider: DEFAULT_PROTOCOL_MODEL_ID.into(),
             model: "claude-sonnet".into(),
             duration: Duration::ZERO,
             tokens_used: None,
@@ -484,7 +485,7 @@ mod tests {
     fn otel_records_llm_failure_without_panic() {
         let obs = test_observer();
         obs.record_event(&ObserverEvent::LlmResponse {
-            provider: "openai/gpt-5.2".into(),
+            provider: DEFAULT_PROTOCOL_MODEL_ID.into(),
             model: "missing-model".into(),
             duration: Duration::from_millis(0),
             success: false,

@@ -1,5 +1,5 @@
 use crate::approval::{ApprovalManager, ApprovalRequest, ApprovalResponse};
-use crate::config::Config;
+use crate::config::{Config, DEFAULT_PROTOCOL_MODEL_ID};
 use crate::memory::{self, Memory, MemoryCategory};
 use crate::multimodal;
 use crate::observability::{self, Observer, ObserverEvent};
@@ -1554,12 +1554,12 @@ pub async fn run(
     let provider_name = provider_override
         .as_deref()
         .or(config.default_provider.as_deref())
-        .unwrap_or("openai/gpt-5.2");
+        .unwrap_or(DEFAULT_PROTOCOL_MODEL_ID);
 
     let model_name = model_override
         .as_deref()
         .or(config.default_model.as_deref())
-        .unwrap_or("openai/gpt-5.2");
+        .unwrap_or(DEFAULT_PROTOCOL_MODEL_ID);
 
     let provider_runtime_options = providers::ProviderRuntimeOptions {
         auth_profile_override: None,
@@ -2000,7 +2000,7 @@ pub async fn process_message(config: Config, message: &str) -> Result<String> {
     let provider_name = config
         .default_provider
         .as_deref()
-        .unwrap_or("openai/gpt-5.2");
+        .unwrap_or(DEFAULT_PROTOCOL_MODEL_ID);
     let model_name = config
         .default_model
         .clone()

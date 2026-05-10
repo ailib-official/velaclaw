@@ -1,4 +1,5 @@
 use super::traits::{Observer, ObserverEvent, ObserverMetric};
+use crate::config::DEFAULT_PROTOCOL_MODEL_ID;
 use std::any::Any;
 use tracing::info;
 
@@ -123,18 +124,18 @@ mod tests {
     fn log_observer_all_events_no_panic() {
         let obs = LogObserver::new();
         obs.record_event(&ObserverEvent::AgentStart {
-            provider: "openai/gpt-5.2".into(),
+            provider: DEFAULT_PROTOCOL_MODEL_ID.into(),
             model: "claude-sonnet".into(),
         });
         obs.record_event(&ObserverEvent::AgentEnd {
-            provider: "openai/gpt-5.2".into(),
+            provider: DEFAULT_PROTOCOL_MODEL_ID.into(),
             model: "claude-sonnet".into(),
             duration: Duration::from_millis(500),
             tokens_used: Some(100),
             cost_usd: Some(0.0015),
         });
         obs.record_event(&ObserverEvent::AgentEnd {
-            provider: "openai/gpt-5.2".into(),
+            provider: DEFAULT_PROTOCOL_MODEL_ID.into(),
             model: "claude-sonnet".into(),
             duration: Duration::ZERO,
             tokens_used: None,

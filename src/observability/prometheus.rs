@@ -1,4 +1,5 @@
 use super::traits::{Observer, ObserverEvent, ObserverMetric};
+use crate::config::DEFAULT_PROTOCOL_MODEL_ID;
 use prometheus::{
     Encoder, GaugeVec, Histogram, HistogramOpts, HistogramVec, IntCounterVec, Registry, TextEncoder,
 };
@@ -249,18 +250,18 @@ mod tests {
     fn records_all_events_without_panic() {
         let obs = PrometheusObserver::new();
         obs.record_event(&ObserverEvent::AgentStart {
-            provider: "openai/gpt-5.2".into(),
+            provider: DEFAULT_PROTOCOL_MODEL_ID.into(),
             model: "claude-sonnet".into(),
         });
         obs.record_event(&ObserverEvent::AgentEnd {
-            provider: "openai/gpt-5.2".into(),
+            provider: DEFAULT_PROTOCOL_MODEL_ID.into(),
             model: "claude-sonnet".into(),
             duration: Duration::from_millis(500),
             tokens_used: Some(100),
             cost_usd: None,
         });
         obs.record_event(&ObserverEvent::AgentEnd {
-            provider: "openai/gpt-5.2".into(),
+            provider: DEFAULT_PROTOCOL_MODEL_ID.into(),
             model: "claude-sonnet".into(),
             duration: Duration::ZERO,
             tokens_used: None,
@@ -301,7 +302,7 @@ mod tests {
     fn encode_produces_prometheus_text_format() {
         let obs = PrometheusObserver::new();
         obs.record_event(&ObserverEvent::AgentStart {
-            provider: "openai/gpt-5.2".into(),
+            provider: DEFAULT_PROTOCOL_MODEL_ID.into(),
             model: "claude-sonnet".into(),
         });
         obs.record_event(&ObserverEvent::ToolCall {

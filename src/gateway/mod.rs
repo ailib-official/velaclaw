@@ -10,7 +10,7 @@
 //! This module coordinates HTTP entry points and model dispatch for the gateway.
 
 use crate::channels::{Channel, LinqChannel, NextcloudTalkChannel, SendMessage, WhatsAppChannel};
-use crate::config::Config;
+use crate::config::{Config, DEFAULT_PROTOCOL_MODEL_ID};
 use crate::memory::{self, Memory, MemoryCategory};
 use crate::providers::{self, ChatMessage, Provider, ProviderCapabilityError};
 use crate::runtime;
@@ -324,7 +324,7 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
                 .as_deref()
                 .filter(|model| providers::parse_protocol_provider_model(model).is_some())
         })
-        .unwrap_or("openai/gpt-5.2");
+        .unwrap_or(DEFAULT_PROTOCOL_MODEL_ID);
     let provider: Arc<dyn Provider> = Arc::from(providers::create_resilient_provider_with_options(
         provider_name,
         config.api_key.as_deref(),

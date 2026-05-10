@@ -1,4 +1,5 @@
 use super::{IntegrationCategory, IntegrationEntry, IntegrationStatus};
+use crate::config::DEFAULT_PROTOCOL_MODEL_ID;
 use crate::providers::{
     is_glm_alias, is_minimax_alias, is_moonshot_alias, is_qianfan_alias, is_qwen_alias,
     is_zai_alias,
@@ -165,7 +166,9 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             description: "Manifest-backed provider/model id",
             category: IntegrationCategory::AiModel,
             status_fn: |c| {
-                if c.default_provider.as_deref() == Some("openai/gpt-5.2") && c.api_key.is_some() {
+                if c.default_provider.as_deref() == Some(DEFAULT_PROTOCOL_MODEL_ID)
+                    && c.api_key.is_some()
+                {
                     IntegrationStatus::Active
                 } else {
                     IntegrationStatus::Available

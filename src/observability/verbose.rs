@@ -1,4 +1,5 @@
 use super::traits::{Observer, ObserverEvent, ObserverMetric};
+use crate::config::DEFAULT_PROTOCOL_MODEL_ID;
 use std::any::Any;
 
 /// Human-readable progress observer for interactive CLI sessions.
@@ -77,12 +78,12 @@ mod tests {
     fn verbose_events_do_not_panic() {
         let obs = VerboseObserver::new();
         obs.record_event(&ObserverEvent::LlmRequest {
-            provider: "openai/gpt-5.2".into(),
+            provider: DEFAULT_PROTOCOL_MODEL_ID.into(),
             model: "claude".into(),
             messages_count: 3,
         });
         obs.record_event(&ObserverEvent::LlmResponse {
-            provider: "openai/gpt-5.2".into(),
+            provider: DEFAULT_PROTOCOL_MODEL_ID.into(),
             model: "claude".into(),
             duration: Duration::from_millis(12),
             success: true,

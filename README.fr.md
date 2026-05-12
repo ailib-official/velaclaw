@@ -91,7 +91,7 @@ Benchmark rapide sur machine locale (macOS arm64, fév. 2026) normalisé pour ma
 > Notes : Les résultats VelaClaw sont mesurés sur des builds de production utilisant `/usr/bin/time -l`. OpenClaw nécessite le runtime Node.js (typiquement ~390 Mo de surcharge mémoire supplémentaire), tandis que NanoBot nécessite le runtime Python. PicoClaw et VelaClaw sont des binaires statiques. Les chiffres RAM ci-dessus sont la mémoire runtime ; les exigences de compilation build-time sont plus élevées.
 
 <p align="center">
-  <img src="zero-claw.jpeg" alt="Comparaison VelaClaw vs OpenClaw" width="800" />
+  <img src="velaclaw.jpeg" alt="Comparaison VelaClaw vs OpenClaw" width="800" />
 </p>
 
 ### Mesure locale reproductible

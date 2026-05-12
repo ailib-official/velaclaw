@@ -91,7 +91,7 @@ Bảng này dành cho các thông báo quan trọng (thay đổi không tương 
 > Ghi chú: Kết quả VelaClaw được đo trên release build sử dụng `/usr/bin/time -l`. OpenClaw yêu cầu runtime Node.js (thường thêm ~390MB bộ nhớ overhead), còn NanoBot yêu cầu runtime Python. PicoClaw và VelaClaw là các static binary. Số RAM ở trên là bộ nhớ runtime; yêu cầu biên dịch lúc build-time sẽ cao hơn.
 
 <p align="center">
-  <img src="zero-claw.jpeg" alt="VelaClaw vs OpenClaw Comparison" width="800" />
+  <img src="velaclaw.jpeg" alt="VelaClaw vs OpenClaw Comparison" width="800" />
 </p>
 
 ### Tự đo trên máy bạn

@@ -84,7 +84,7 @@ VelaClaw は、高速・省リソース・高拡張性を重視した自律エ�
 > 注記: VelaClaw の結果は release ビルドを `/usr/bin/time -l` で計測したものです。OpenClaw は Node.js ランタイムが必要で、ランタイム由来だけで通常は約390MBの追加メモリを要します。NanoBot は Python ランタイムが必要です。PicoClaw と VelaClaw は静的バイナリです。
 
 <p align="center">
-  <img src="zero-claw.jpeg" alt="VelaClaw vs OpenClaw Comparison" width="800" />
+  <img src="velaclaw.jpeg" alt="VelaClaw vs OpenClaw Comparison" width="800" />
 </p>
 
 ### ローカルで再現可能な測定

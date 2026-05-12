@@ -84,7 +84,7 @@ VelaClaw — это производительная и расширяемая �
 > Примечание: результаты VelaClaw получены на release-сборке с помощью `/usr/bin/time -l`. OpenClaw требует Node.js runtime; только этот runtime обычно добавляет около 390MB дополнительного потребления памяти. NanoBot требует Python runtime. PicoClaw и VelaClaw — статические бинарники.
 
 <p align="center">
-  <img src="zero-claw.jpeg" alt="Сравнение VelaClaw и OpenClaw" width="800" />
+  <img src="velaclaw.jpeg" alt="Сравнение VelaClaw и OpenClaw" width="800" />
 </p>
 
 ### Локально воспроизводимое измерение

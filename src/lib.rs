@@ -1,4 +1,4 @@
-//! ZeroSpider 核心库，定义主要的命令枚举与共享组件。
+//! VelaClaw 核心库，定义主要的命令枚举与共享组件。
 #![warn(clippy::all, clippy::pedantic)]
 #![allow(
     clippy::assigning_clones,
@@ -110,8 +110,8 @@ configuration keys for that channel type.
 Supported types: telegram, discord, slack, whatsapp, matrix, imessage, email.
 
 Examples:
-  zerospider channel add telegram '{\"bot_token\":\"...\",\"name\":\"my-bot\"}'
-  zerospider channel add discord '{\"bot_token\":\"...\",\"name\":\"my-discord\"}'")]
+  velaclaw channel add telegram '{\"bot_token\":\"...\",\"name\":\"my-bot\"}'
+  velaclaw channel add discord '{\"bot_token\":\"...\",\"name\":\"my-discord\"}'")]
     Add {
         /// Channel type (telegram, discord, slack, whatsapp, matrix, imessage, email)
         channel_type: String,
@@ -132,8 +132,8 @@ ID to the channel allowlist so the agent will respond to messages \
 from that identity.
 
 Examples:
-  zerospider channel bind-telegram zerospider_user
-  zerospider channel bind-telegram 123456789")]
+  velaclaw channel bind-telegram velaclaw_user
+  velaclaw channel bind-telegram 123456789")]
     BindTelegram {
         /// Telegram identity to allow (username without '@' or numeric user ID)
         identity: String,
@@ -160,7 +160,7 @@ pub(crate) enum SkillCommands {
 /// Migration subcommands
 #[derive(Subcommand, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) enum MigrateCommands {
-    /// Import memory from an `OpenClaw` workspace into this `ZeroClaw` workspace
+    /// Import memory from an `OpenClaw` workspace into this `VelaClaw` workspace
     Openclaw {
         /// Optional path to `OpenClaw` workspace (defaults to ~/.openclaw/workspace)
         #[arg(long)]
@@ -186,8 +186,8 @@ Times are evaluated in UTC by default; use --tz with an IANA \
 timezone name to override.
 
 Examples:
-  zerospider cron add '0 9 * * 1-5' 'Good morning' --tz America/New_York
-  zerospider cron add '*/30 * * * *' 'Check system health'")]
+  velaclaw cron add '0 9 * * 1-5' 'Good morning' --tz America/New_York
+  velaclaw cron add '*/30 * * * *' 'Check system health'")]
     Add {
         /// Cron expression
         expression: String,
@@ -204,8 +204,8 @@ Add a one-shot task that fires at a specific UTC timestamp.
 The timestamp must be in RFC 3339 format (e.g. 2025-01-15T14:00:00Z).
 
 Examples:
-  zerospider cron add-at 2025-01-15T14:00:00Z 'Send reminder'
-  zerospider cron add-at 2025-12-31T23:59:00Z 'Happy New Year!'")]
+  velaclaw cron add-at 2025-01-15T14:00:00Z 'Send reminder'
+  velaclaw cron add-at 2025-12-31T23:59:00Z 'Happy New Year!'")]
     AddAt {
         /// One-shot timestamp in RFC3339 format
         at: String,
@@ -219,8 +219,8 @@ Add a task that repeats at a fixed interval.
 Interval is specified in milliseconds. For example, 60000 = 1 minute.
 
 Examples:
-  zerospider cron add-every 60000 'Ping heartbeat'     # every minute
-  zerospider cron add-every 3600000 'Hourly report'    # every hour")]
+  velaclaw cron add-every 60000 'Ping heartbeat'     # every minute
+  velaclaw cron add-every 3600000 'Hourly report'    # every hour")]
     AddEvery {
         /// Interval in milliseconds
         every_ms: u64,
@@ -235,9 +235,9 @@ Accepts human-readable durations: s (seconds), m (minutes), \
 h (hours), d (days).
 
 Examples:
-  zerospider cron once 30m 'Run backup in 30 minutes'
-  zerospider cron once 2h 'Follow up on deployment'
-  zerospider cron once 1d 'Daily check'")]
+  velaclaw cron once 30m 'Run backup in 30 minutes'
+  velaclaw cron once 2h 'Follow up on deployment'
+  velaclaw cron once 1d 'Daily check'")]
     Once {
         /// Delay duration
         delay: String,
@@ -256,9 +256,9 @@ Update one or more fields of an existing scheduled task.
 Only the fields you specify are changed; others remain unchanged.
 
 Examples:
-  zerospider cron update <task-id> --expression '0 8 * * *'
-  zerospider cron update <task-id> --tz Europe/London --name 'Morning check'
-  zerospider cron update <task-id> --command 'Updated message'")]
+  velaclaw cron update <task-id> --expression '0 8 * * *'
+  velaclaw cron update <task-id> --tz Europe/London --name 'Morning check'
+  velaclaw cron update <task-id> --command 'Updated message'")]
     Update {
         /// Task ID
         id: String,
@@ -347,7 +347,7 @@ Scans connected USB devices by VID/PID and matches them against \
 known development boards (STM32 Nucleo, Arduino, ESP32).
 
 Examples:
-  zerospider hardware discover")]
+  velaclaw hardware discover")]
     Discover,
     /// Introspect a device by path (e.g. /dev/ttyACM0)
     #[command(long_about = "\
@@ -357,8 +357,8 @@ Opens the specified device path and queries for board information, \
 firmware version, and supported capabilities.
 
 Examples:
-  zerospider hardware introspect /dev/ttyACM0
-  zerospider hardware introspect COM3")]
+  velaclaw hardware introspect /dev/ttyACM0
+  velaclaw hardware introspect COM3")]
     Introspect {
         /// Serial or device path
         path: String,
@@ -371,8 +371,8 @@ Queries the target MCU directly through the debug probe without \
 requiring any firmware on the target board.
 
 Examples:
-  zerospider hardware info
-  zerospider hardware info --chip STM32F401RETx")]
+  velaclaw hardware info
+  velaclaw hardware info --chip STM32F401RETx")]
     Info {
         /// Chip name (e.g. STM32F401RETx). Default: STM32F401RETx for Nucleo-F401RE
         #[arg(long, default_value = "STM32F401RETx")]
@@ -396,26 +396,26 @@ single-board computers like Raspberry Pi.
 Supported boards: nucleo-f401re, rpi-gpio, esp32, arduino-uno.
 
 Examples:
-  zerospider peripheral add nucleo-f401re /dev/ttyACM0
-  zerospider peripheral add rpi-gpio native
-  zerospider peripheral add esp32 /dev/ttyUSB0")]
+  velaclaw peripheral add nucleo-f401re /dev/ttyACM0
+  velaclaw peripheral add rpi-gpio native
+  velaclaw peripheral add esp32 /dev/ttyUSB0")]
     Add {
         /// Board type (nucleo-f401re, rpi-gpio, esp32)
         board: String,
         /// Path for serial transport (/dev/ttyACM0) or "native" for local GPIO
         path: String,
     },
-    /// Flash ZeroClaw firmware to Arduino (creates .ino, installs arduino-cli if needed, uploads)
+    /// Flash VelaClaw firmware to Arduino (creates .ino, installs arduino-cli if needed, uploads)
     #[command(long_about = "\
-Flash ZeroClaw firmware to an Arduino board.
+Flash VelaClaw firmware to an Arduino board.
 
 Generates the .ino sketch, installs arduino-cli if it is not \
 already available, compiles, and uploads the firmware.
 
 Examples:
-  zerospider peripheral flash
-  zerospider peripheral flash --port /dev/cu.usbmodem12345
-  zerospider peripheral flash -p COM3")]
+  velaclaw peripheral flash
+  velaclaw peripheral flash --port /dev/cu.usbmodem12345
+  velaclaw peripheral flash -p COM3")]
     Flash {
         /// Serial port (e.g. /dev/cu.usbmodem12345). If omitted, uses first arduino-uno from config.
         #[arg(short, long)]
@@ -427,6 +427,6 @@ Examples:
         #[arg(long)]
         host: Option<String>,
     },
-    /// Flash ZeroClaw firmware to Nucleo-F401RE (builds + probe-rs run)
+    /// Flash VelaClaw firmware to Nucleo-F401RE (builds + probe-rs run)
     FlashNucleo,
 }

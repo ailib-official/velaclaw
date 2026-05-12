@@ -1,13 +1,13 @@
 # 第七章：Telegram 配置
 
-本章详细介绍如何配置 ZeroClaw 的 Telegram 机器人。
+本章详细介绍如何配置 VelaClaw 的 Telegram 机器人。
 
 ---
 
 ## 目录
 
 1. [创建 Telegram 机器人](#创建-telegram-机器人)
-2. [配置 ZeroClaw](#配置-zeroclaw)
+2. [配置 VelaClaw](#配置-velaclaw)
 3. [用户授权](#用户授权)
 4. [使用机器人](#使用机器人)
 5. [高级配置](#高级配置)
@@ -30,12 +30,12 @@
 BotFather: Alright, a new bot. How are we going to call it? 
 Please choose a name for your bot.
 
-你: My ZeroClaw Bot
+你: My VelaClaw Bot
 
 BotFather: Good. Now let's choose a username for your bot. 
 It must end in `bot`. Like this, for example: TetrisBot or tetris_bot.
 
-你: my_zeroclaw_bot
+你: my_velaclaw_bot
 
 BotFather: Done! Congratulations on your new bot...
 Use this token to access the HTTP API:
@@ -53,17 +53,17 @@ Keep your token secure...
 
 ---
 
-## 配置 ZeroClaw
+## 配置 VelaClaw
 
 ### 方式一：交互式配置
 
 ```bash
-zeroclaw channel add telegram '{"token": "YOUR_BOT_TOKEN"}'
+velaclaw channel add telegram '{"token": "YOUR_BOT_TOKEN"}'
 ```
 
 ### 方式二：编辑配置文件
 
-编辑 `~/.zeroclaw/config.yaml`：
+编辑 `~/.velaclaw/config.yaml`：
 
 ```yaml
 channels:
@@ -75,7 +75,7 @@ channels:
 ### 验证配置
 
 ```bash
-zeroclaw channel doctor
+velaclaw channel doctor
 ```
 
 输出：
@@ -84,7 +84,7 @@ zeroclaw channel doctor
 Telegram:
   ✓ Bot 连接正常
   ✓ Token 有效
-  Bot 用户名: @my_zeroclaw_bot
+  Bot 用户名: @my_velaclaw_bot
 ```
 
 ---
@@ -107,12 +107,12 @@ Your user ID: 123456789
 **方式二：查看日志**
 
 ```bash
-# 启动 ZeroClaw
-zeroclaw daemon
+# 启动 VelaClaw
+velaclaw daemon
 
 # 在 Telegram 发送消息
 # 查看日志
-tail -f ~/.zeroclaw/logs/zeroclaw.log
+tail -f ~/.velaclaw/logs/velaclaw.log
 ```
 
 日志会显示：
@@ -126,10 +126,10 @@ tail -f ~/.zeroclaw/logs/zeroclaw.log
 
 ```bash
 # 通过用户名添加
-zeroclaw channel bind-telegram your_username
+velaclaw channel bind-telegram your_username
 
 # 通过用户 ID 添加
-zeroclaw channel bind-telegram 123456789
+velaclaw channel bind-telegram 123456789
 ```
 
 **方式二：编辑配置文件**
@@ -147,16 +147,16 @@ channels:
 
 ### 配对流程
 
-首次使用时，ZeroClaw 需要配对：
+首次使用时，VelaClaw 需要配对：
 
 ```
 用户在 Telegram: 你好
 
-ZeroClaw: 
-🔐 这是您第一次使用此 ZeroClaw 实例。
-请在您的 ZeroClaw 服务器上运行以下命令完成配对：
+VelaClaw: 
+🔐 这是您第一次使用此 VelaClaw 实例。
+请在您的 VelaClaw 服务器上运行以下命令完成配对：
 
-zeroclaw channel bind-telegram 123456789
+velaclaw channel bind-telegram 123456789
 
 或者输入配对码: 1234
 ```
@@ -165,7 +165,7 @@ zeroclaw channel bind-telegram 123456789
 
 ```bash
 # 方式一：直接绑定
-zeroclaw channel bind-telegram 123456789
+velaclaw channel bind-telegram 123456789
 
 # 方式二：输入配对码
 # 在交互模式中输入收到的配对码
@@ -179,10 +179,10 @@ zeroclaw channel bind-telegram 123456789
 
 ```bash
 # 方式一：只启动渠道
-zeroclaw channel start
+velaclaw channel start
 
 # 方式二：启动完整守护进程
-zeroclaw daemon
+velaclaw daemon
 ```
 
 ### 基本对话
@@ -190,11 +190,11 @@ zeroclaw daemon
 ```
 你: 你好
 
-ZeroClaw: 你好！有什么我可以帮你的吗？
+VelaClaw: 你好！有什么我可以帮你的吗？
 
 你: 帮我查一下天气
 
-ZeroClaw: 抱歉，我目前无法获取实时天气数据...
+VelaClaw: 抱歉，我目前无法获取实时天气数据...
 ```
 
 ### 使用命令
@@ -212,7 +212,7 @@ ZeroClaw: 抱歉，我目前无法获取实时天气数据...
 ```
 你: /stats
 
-ZeroClaw:
+VelaClaw:
 📊 使用统计
 今天请求数: 15
 本月请求数: 234
@@ -224,12 +224,12 @@ ZeroClaw:
 ```
 用户: [发送文件]
 
-ZeroClaw: 收到文件 document.pdf (1.2 MB)
+VelaClaw: 收到文件 document.pdf (1.2 MB)
 需要我帮你处理这个文件吗？
 
 用户: 是的，帮我总结内容
 
-ZeroClaw: [处理文件并返回摘要]
+VelaClaw: [处理文件并返回摘要]
 ```
 
 ---
@@ -244,7 +244,7 @@ ZeroClaw: [处理文件并返回摘要]
 
 BotFather: Choose a bot to change the list of commands.
 
-你: @my_zeroclaw_bot
+你: @my_velaclaw_bot
 
 BotFather: OK. Send me a list of commands for your bot...
 
@@ -316,22 +316,22 @@ channels:
 
 1. 检查服务是否运行
    ```bash
-   zeroclaw status
+   velaclaw status
    ```
 
 2. 检查 Token 是否正确
    ```bash
-   zeroclaw channel doctor
+   velaclaw channel doctor
    ```
 
 3. 检查用户是否在白名单
    ```bash
-   zeroclaw channel list
+   velaclaw channel list
    ```
 
 4. 查看日志
    ```bash
-   tail -f ~/.zeroclaw/logs/zeroclaw.log
+   tail -f ~/.velaclaw/logs/velaclaw.log
    ```
 
 ### Token 无效

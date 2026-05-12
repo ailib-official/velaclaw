@@ -332,7 +332,7 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
         &config.reliability,
         &providers::ProviderRuntimeOptions {
             auth_profile_override: None,
-            zerospider_dir: config.config_path.parent().map(std::path::PathBuf::from),
+            velaclaw_dir: config.config_path.parent().map(std::path::PathBuf::from),
             secrets_encrypt: config.secrets.encrypt,
             reasoning_enabled: config.runtime.reasoning_enabled,
         },
@@ -406,7 +406,7 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
 
     // WhatsApp app secret for webhook signature verification
     // Priority: environment variable > config file
-    let whatsapp_app_secret: Option<Arc<str>> = std::env::var("ZEROCLAW_WHATSAPP_APP_SECRET")
+    let whatsapp_app_secret: Option<Arc<str>> = std::env::var("VELACLAW_WHATSAPP_APP_SECRET")
         .ok()
         .and_then(|secret| {
             let secret = secret.trim();
@@ -434,7 +434,7 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
 
     // Linq signing secret for webhook signature verification
     // Priority: environment variable > config file
-    let linq_signing_secret: Option<Arc<str>> = std::env::var("ZEROCLAW_LINQ_SIGNING_SECRET")
+    let linq_signing_secret: Option<Arc<str>> = std::env::var("VELACLAW_LINQ_SIGNING_SECRET")
         .ok()
         .and_then(|secret| {
             let secret = secret.trim();
@@ -464,7 +464,7 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
     // Nextcloud Talk webhook secret for signature verification
     // Priority: environment variable > config file
     let nextcloud_talk_webhook_secret: Option<Arc<str>> =
-        std::env::var("ZEROCLAW_NEXTCLOUD_TALK_WEBHOOK_SECRET")
+        std::env::var("VELACLAW_NEXTCLOUD_TALK_WEBHOOK_SECRET")
             .ok()
             .and_then(|secret| {
                 let secret = secret.trim();
@@ -526,7 +526,7 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
         }
     }
 
-    println!("🦀 ZeroClaw Gateway listening on http://{display_addr}");
+    println!("🦀 VelaClaw Gateway listening on http://{display_addr}");
     if let Some(ref url) = tunnel_url {
         println!("  🌐 Public URL: {url}");
     }
@@ -695,7 +695,7 @@ async fn handle_dashboard() -> impl IntoResponse {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ZeroSpider Dashboard</title>
+  <title>VelaClaw Dashboard</title>
   <style>
     * { box-sizing: border-box; }
     body { font-family: system-ui, sans-serif; margin: 0; padding: 1.5rem; background: #0f172a; color: #e2e8f0; }
@@ -710,7 +710,7 @@ async fn handle_dashboard() -> impl IntoResponse {
   </style>
 </head>
 <body>
-  <h1>ZeroSpider Dashboard</h1>
+  <h1>VelaClaw Dashboard</h1>
   <div id="content">Loading...</div>
   <script>
     async function load() {
@@ -1579,7 +1579,7 @@ mod tests {
 
         let body = response.into_body().collect().await.unwrap().to_bytes();
         let text = String::from_utf8(body.to_vec()).unwrap();
-        assert!(text.contains("zerospider_heartbeat_ticks_total 1"));
+        assert!(text.contains("velaclaw_heartbeat_ticks_total 1"));
     }
 
     #[test]

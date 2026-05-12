@@ -1,6 +1,6 @@
 # 第六章：通信渠道概览
 
-本章介绍 ZeroClaw 支持的各种通信渠道。
+本章介绍 VelaClaw 支持的各种通信渠道。
 
 ---
 
@@ -15,7 +15,7 @@
 
 ## 支持的平台
 
-ZeroClaw 支持以下通信渠道：
+VelaClaw 支持以下通信渠道：
 
 ### 即时通讯平台
 
@@ -54,7 +54,7 @@ ZeroClaw 支持以下通信渠道：
 ### 查看已配置渠道
 
 ```bash
-zeroclaw channel list
+velaclaw channel list
 ```
 
 输出：
@@ -76,31 +76,31 @@ zeroclaw channel list
 
 ```bash
 # 启动所有配置的渠道
-zeroclaw channel start
+velaclaw channel start
 
-# 启动后，ZeroClaw 会在各平台监听消息
+# 启动后，VelaClaw 会在各平台监听消息
 ```
 
 ### 添加渠道
 
 ```bash
 # 添加 Telegram 渠道
-zeroclaw channel add telegram '{"token": "YOUR_BOT_TOKEN"}'
+velaclaw channel add telegram '{"token": "YOUR_BOT_TOKEN"}'
 
 # 添加 Discord 渠道
-zeroclaw channel add discord '{"token": "YOUR_BOT_TOKEN"}'
+velaclaw channel add discord '{"token": "YOUR_BOT_TOKEN"}'
 ```
 
 ### 删除渠道
 
 ```bash
-zeroclaw channel remove telegram
+velaclaw channel remove telegram
 ```
 
 ### 健康检查
 
 ```bash
-zeroclaw channel doctor
+velaclaw channel doctor
 ```
 
 输出：
@@ -126,7 +126,7 @@ Discord:
 
 ### 配置文件结构
 
-编辑 `~/.zeroclaw/config.yaml`：
+编辑 `~/.velaclaw/config.yaml`：
 
 ```yaml
 channels:
@@ -156,7 +156,7 @@ channels:
 
 ### 用户白名单
 
-限制谁可以使用你的 ZeroClaw：
+限制谁可以使用你的 VelaClaw：
 
 ```yaml
 # Telegram 用户白名单

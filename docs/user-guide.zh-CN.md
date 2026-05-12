@@ -1,6 +1,6 @@
-# ZeroSpider 智能助手 - 新功能使用指南
+# VelaClaw 智能助手 - 新功能使用指南
 
-欢迎！本指南将帮助你了解 ZeroSpider 最新版本的强大新功能。无需编程知识，跟着指南操作即可。
+欢迎！本指南将帮助你了解 VelaClaw 最新版本的强大新功能。无需编程知识，跟着指南操作即可。
 
 ---
 
@@ -18,14 +18,14 @@
 
 ### 这次更新带来了什么？
 
-ZeroSpider 现在变得更聪明了：
+VelaClaw 现在变得更聪明了：
 
 | 功能 | 简单解释 |
 |------|----------|
 | **智能模型选择** | 自动为你选择最合适的 AI 模型 |
 | **多专家协商** | 多个 AI 同时回答，取最佳结果 |
 | **并行处理** | 同时处理多个任务，速度更快 |
-| **远程部署** | 可将 ZeroSpider 部署到远程服务器 |
+| **远程部署** | 可将 VelaClaw 部署到远程服务器 |
 
 ---
 
@@ -39,11 +39,11 @@ ZeroSpider 现在变得更聪明了：
 - 你问的是**创意写作**→ 选择最擅长写作的模型
 - 你问的是**翻译**→ 选择最擅长翻译的模型
 
-**你不需要手动选择，ZeroSpider 会自动帮你做决定。**
+**你不需要手动选择，VelaClaw 会自动帮你做决定。**
 
 ### 它是怎么工作的？
 
-ZeroSpider 会从以下维度评估每个 AI 模型：
+VelaClaw 会从以下维度评估每个 AI 模型：
 
 | 评估维度 | 说明 |
 |----------|------|
@@ -56,16 +56,16 @@ ZeroSpider 会从以下维度评估每个 AI 模型：
 
 ### 如何启用？
 
-在启动 ZeroSpider 时添加 `--smart` 参数：
+在启动 VelaClaw 时添加 `--smart` 参数：
 
 ```bash
-zerospider --smart
+velaclaw --smart
 ```
 
 或者在配置文件中设置：
 
 ```yaml
-# ~/.zerospider/config.yaml
+# ~/.velaclaw/config.yaml
 routing:
   smart_selection: true
 ```
@@ -77,7 +77,7 @@ routing:
 ```
 你：帮我写一个 Python 函数，计算斐波那契数列
 
-ZeroSpider 自动选择：Claude Sonnet（擅长编程）
+VelaClaw 自动选择：Claude Sonnet（擅长编程）
 回答速度：中等
 成本：中等
 质量：优秀
@@ -88,7 +88,7 @@ ZeroSpider 自动选择：Claude Sonnet（擅长编程）
 ```
 你：今天天气怎么样？
 
-ZeroSpider 自动选择：GPT-4o-mini（快速响应）
+VelaClaw 自动选择：GPT-4o-mini（快速响应）
 回答速度：很快
 成本：低
 质量：良好
@@ -99,7 +99,7 @@ ZeroSpider 自动选择：GPT-4o-mini（快速响应）
 ```
 你：分析一下人工智能对未来就业市场的影响
 
-ZeroSpider 自动选择：GPT-4o（擅长推理分析）
+VelaClaw 自动选择：GPT-4o（擅长推理分析）
 回答速度：较慢
 成本：较高
 质量：优秀
@@ -107,7 +107,7 @@ ZeroSpider 自动选择：GPT-4o（擅长推理分析）
 
 ### 如何设置偏好？
 
-你可以告诉 ZeroSpider 你的优先级：
+你可以告诉 VelaClaw 你的优先级：
 
 **优先速度（适合日常聊天）**：
 ```yaml
@@ -137,7 +137,7 @@ routing:
 - 问一个专家，听他的答案
 - 问多个专家，综合他们的意见
 
-ZeroSpider 的"多专家协商"就是后者——它会同时让多个 AI 模型回答你的问题，然后智能地综合出最佳答案。
+VelaClaw 的"多专家协商"就是后者——它会同时让多个 AI 模型回答你的问题，然后智能地综合出最佳答案。
 
 ### 为什么需要这个？
 
@@ -149,7 +149,7 @@ ZeroSpider 的"多专家协商"就是后者——它会同时让多个 AI 模型
 
 ### 协商方式
 
-ZeroSpider 提供多种协商策略：
+VelaClaw 提供多种协商策略：
 
 #### 1. 投票模式（默认）
 
@@ -178,7 +178,7 @@ ZeroSpider 提供多种协商策略：
 ```
 问题：写一首关于春天的诗
 
-ZeroSpider 让三个模型各写一首诗，
+VelaClaw 让三个模型各写一首诗，
 然后选择写得最好的一首给你。
 ```
 
@@ -205,19 +205,19 @@ ZeroSpider 让三个模型各写一首诗，
 
 ```bash
 # 使用投票模式
-zerospider --negotiate voting
+velaclaw --negotiate voting
 
 # 使用最佳答案模式
-zerospider --negotiate best
+velaclaw --negotiate best
 
 # 使用级联优化模式
-zerospider --negotiate cascade
+velaclaw --negotiate cascade
 ```
 
 **方法 2：配置文件**
 
 ```yaml
-# ~/.zerospider/config.yaml
+# ~/.velaclaw/config.yaml
 negotiation:
   enabled: true
   strategy: voting  # voting/best/cascade
@@ -291,7 +291,7 @@ negotiation:
 在配置中设置并行数量：
 
 ```yaml
-# ~/.zerospider/config.yaml
+# ~/.velaclaw/config.yaml
 parallel:
   max_concurrent: 5  # 最多同时处理 5 个任务
   timeout_seconds: 60  # 每个任务最长 60 秒
@@ -303,7 +303,7 @@ parallel:
 
 ### 什么是远程部署？
 
-把 ZeroSpider 安装到远程服务器上运行，而不是在你自己的电脑上。
+把 VelaClaw 安装到远程服务器上运行，而不是在你自己的电脑上。
 
 ### 为什么需要远程部署？
 
@@ -328,7 +328,7 @@ parallel:
 编辑配置文件：
 
 ```yaml
-# ~/.zerospider/deploy.yaml
+# ~/.velaclaw/deploy.yaml
 servers:
   - id: my-server
     host: 192.168.1.100  # 服务器 IP 地址
@@ -340,13 +340,13 @@ servers:
 
 ```bash
 # 部署到服务器
-zerospider deploy my-server
+velaclaw deploy my-server
 
 # 检查部署状态
-zerospider status my-server
+velaclaw status my-server
 
 # 如果出问题，可以回滚
-zerospider rollback my-server
+velaclaw rollback my-server
 ```
 
 ### 部署模式选择
@@ -376,7 +376,7 @@ deploy:
 
 **会稍微慢一点**，因为需要多个模型同时处理。但对于重要问题，多等待几秒换来更可靠的答案是值得的。
 
-### Q3：如何知道 ZeroSpider 选了哪个模型？
+### Q3：如何知道 VelaClaw 选了哪个模型？
 
 在设置中开启调试模式：
 
@@ -407,7 +407,7 @@ parallel:
 
 ### Q5：远程部署安全吗？
 
-ZeroSpider 使用 SSH 密钥认证，数据传输加密。建议：
+VelaClaw 使用 SSH 密钥认证，数据传输加密。建议：
 - 使用强密码保护 SSH 密钥
 - 定期更换密钥
 - 限制服务器访问 IP
@@ -415,7 +415,7 @@ ZeroSpider 使用 SSH 密钥认证，数据传输加密。建议：
 ### Q6：如何查看使用统计？
 
 ```bash
-zerospider stats
+velaclaw stats
 ```
 
 会显示：
@@ -515,12 +515,12 @@ budget:
 
 ## 需要帮助？
 
-- **文档网站**：https://zerospider.ai/docs
-- **社区论坛**：https://community.zerospider.ai
-- **问题反馈**：https://github.com/zerospider-labs/zerospider/issues
+- **文档网站**：https://velaclaw.ai/docs
+- **社区论坛**：https://community.velaclaw.ai
+- **问题反馈**：https://github.com/velaclaw-labs/velaclaw/issues
 
 ---
 
-*ZeroSpider - 更智能的 AI 助手*
+*VelaClaw - 更智能的 AI 助手*
 *版本：feat/ai-protocol-integration*
 *更新日期：2026-02-20*

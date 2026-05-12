@@ -1,6 +1,6 @@
 # 第一章：快速入门
 
-本章帮你从零开始，10 分钟内完成 ZeroClaw 的安装和首次使用。
+本章帮你从零开始，10 分钟内完成 VelaClaw 的安装和首次使用。
 
 ---
 
@@ -42,13 +42,13 @@
 **Linux / macOS：**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/zeroclaw-labs/zeroclaw/main/bootstrap.sh | bash
+curl -fsSL https://raw.githubusercontent.com/velaclaw-labs/velaclaw/main/bootstrap.sh | bash
 ```
 
 **Windows（PowerShell 管理员模式）：**
 
 ```powershell
-irm https://raw.githubusercontent.com/zeroclaw-labs/zeroclaw/main/bootstrap.ps1 | iex
+irm https://raw.githubusercontent.com/velaclaw-labs/velaclaw/main/bootstrap.ps1 | iex
 ```
 
 ### 方式二：手动安装
@@ -71,12 +71,12 @@ rustc --version
 cargo --version
 ```
 
-#### 步骤 3：安装 ZeroClaw
+#### 步骤 3：安装 VelaClaw
 
 ```bash
 # 克隆仓库
-git clone https://github.com/zeroclaw-labs/zeroclaw.git
-cd zeroclaw
+git clone https://github.com/velaclaw-labs/velaclaw.git
+cd velaclaw
 
 # 编译
 cargo build --release
@@ -85,10 +85,10 @@ cargo build --release
 cargo install --path .
 ```
 
-#### 步骤 4：验证 ZeroClaw
+#### 步骤 4：验证 VelaClaw
 
 ```bash
-zeroclaw --version
+velaclaw --version
 ```
 
 ---
@@ -98,7 +98,7 @@ zeroclaw --version
 ### 运行配置向导
 
 ```bash
-zeroclaw onboard
+velaclaw onboard
 ```
 
 向导会问你以下问题：
@@ -161,12 +161,12 @@ zeroclaw onboard
 
 ### 查看配置
 
-配置文件位于 `~/.zeroclaw/config.yaml`
+配置文件位于 `~/.velaclaw/config.yaml`
 
 查看当前配置：
 
 ```bash
-cat ~/.zeroclaw/config.yaml
+cat ~/.velaclaw/config.yaml
 ```
 
 ---
@@ -177,10 +177,10 @@ cat ~/.zeroclaw/config.yaml
 
 ```bash
 # 单次对话
-zeroclaw agent --message "你好，介绍一下你自己"
+velaclaw agent --message "你好，介绍一下你自己"
 
 # 进入交互模式
-zeroclaw agent
+velaclaw agent
 ```
 
 交互模式下：
@@ -188,7 +188,7 @@ zeroclaw agent
 ```
 你: 帮我写一个 Python 函数，计算斐波那契数列
 
-ZeroClaw: 好的！这是一个计算斐波那契数列的 Python 函数：
+VelaClaw: 好的！这是一个计算斐波那契数列的 Python 函数：
 
 ```python
 def fibonacci(n):
@@ -204,26 +204,26 @@ for i in range(10):
 
 你: 解释一下这段代码
 
-ZeroClaw: 这个函数使用递归方式计算斐波那契数列...
+VelaClaw: 这个函数使用递归方式计算斐波那契数列...
 ```
 
 ### 方式二：指定模型
 
 ```bash
 # 使用特定模型
-zeroclaw agent --model gpt-4o --message "写一首关于春天的诗"
+velaclaw agent --model gpt-4o --message "写一首关于春天的诗"
 ```
 
 ### 方式三：查看系统状态
 
 ```bash
-zeroclaw status
+velaclaw status
 ```
 
 输出示例：
 
 ```
-ZeroClaw 状态
+VelaClaw 状态
 =============
 
 版本: 0.1.0
@@ -291,7 +291,7 @@ export http_proxy=http://127.0.0.1:7890
 
 ## 下一步
 
-恭喜！你已经成功安装并运行了 ZeroClaw。
+恭喜！你已经成功安装并运行了 VelaClaw。
 
 接下来可以：
 

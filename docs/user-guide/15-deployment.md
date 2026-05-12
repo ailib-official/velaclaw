@@ -1,6 +1,6 @@
 # 第十五章：远程部署
 
-本章介绍如何将 ZeroClaw 部署到远程服务器。
+本章介绍如何将 VelaClaw 部署到远程服务器。
 
 ---
 
@@ -80,7 +80,7 @@
 
 ### 步骤 1：配置服务器信息
 
-编辑 `~/.zeroclaw/deploy.yaml`：
+编辑 `~/.velaclaw/deploy.yaml`：
 
 ```yaml
 servers:
@@ -99,9 +99,9 @@ servers:
 deploy:
   mode: direct  # direct/docker/systemd
   
-  binary_path: /usr/local/bin/zeroclaw
-  config_path: /etc/zeroclaw/config.yaml
-  working_dir: /var/lib/zeroclaw
+  binary_path: /usr/local/bin/velaclaw
+  config_path: /etc/velaclaw/config.yaml
+  working_dir: /var/lib/velaclaw
   
   auto_start: true
   restart_on_failure: true
@@ -112,7 +112,7 @@ deploy:
 
 ```bash
 # 部署到服务器
-zeroclaw deploy my-server
+velaclaw deploy my-server
 ```
 
 输出：
@@ -140,13 +140,13 @@ zeroclaw deploy my-server
 
 ```bash
 # 上传配置文件
-zeroclaw deploy sync-config my-server
+velaclaw deploy sync-config my-server
 ```
 
 ### 查看服务器状态
 
 ```bash
-zeroclaw deploy status my-server
+velaclaw deploy status my-server
 ```
 
 输出：
@@ -175,10 +175,10 @@ CPU 使用: 0.5%
 
 ```bash
 # 更新到最新版本
-zeroclaw deploy update my-server
+velaclaw deploy update my-server
 
 # 或指定版本
-zeroclaw deploy update my-server --version 0.2.0
+velaclaw deploy update my-server --version 0.2.0
 ```
 
 ---
@@ -188,7 +188,7 @@ zeroclaw deploy update my-server --version 0.2.0
 ### 健康检查
 
 ```bash
-zeroclaw deploy health-check my-server
+velaclaw deploy health-check my-server
 ```
 
 输出：
@@ -211,23 +211,23 @@ zeroclaw deploy health-check my-server
 
 ```bash
 # 实时查看日志
-zeroclaw deploy logs my-server --follow
+velaclaw deploy logs my-server --follow
 
 # 查看最近日志
-zeroclaw deploy logs my-server --lines 100
+velaclaw deploy logs my-server --lines 100
 ```
 
 ### 重启服务
 
 ```bash
 # 重启
-zeroclaw deploy restart my-server
+velaclaw deploy restart my-server
 
 # 停止
-zeroclaw deploy stop my-server
+velaclaw deploy stop my-server
 
 # 启动
-zeroclaw deploy start my-server
+velaclaw deploy start my-server
 ```
 
 ### 回滚
@@ -235,7 +235,7 @@ zeroclaw deploy start my-server
 如果更新后出现问题：
 
 ```bash
-zeroclaw deploy rollback my-server
+velaclaw deploy rollback my-server
 ```
 
 ---
@@ -249,11 +249,11 @@ deploy:
   mode: docker
   
   docker:
-    image: zeroclaw/zeroclaw:latest
+    image: velaclaw/velaclaw:latest
     ports:
       - "8080:8080"
     volumes:
-      - ~/.zeroclaw:/root/.zeroclaw
+      - ~/.velaclaw:/root/.velaclaw
     environment:
       - RUST_LOG=info
 ```
@@ -261,20 +261,20 @@ deploy:
 ### 部署命令
 
 ```bash
-zeroclaw deploy my-server
+velaclaw deploy my-server
 ```
 
 ### Docker 常用命令
 
 ```bash
 # 查看容器状态
-zeroclaw deploy status my-server
+velaclaw deploy status my-server
 
 # 查看容器日志
-docker logs zeroclaw
+docker logs velaclaw
 
 # 进入容器
-docker exec -it zeroclaw bash
+docker exec -it velaclaw bash
 ```
 
 ---
@@ -288,23 +288,23 @@ deploy:
   mode: systemd
   
   systemd:
-    service_name: zeroclaw
-    description: ZeroClaw AI Assistant
-    user: zeroclaw
-    group: zeroclaw
+    service_name: velaclaw
+    description: VelaClaw AI Assistant
+    user: velaclaw
+    group: velaclaw
 ```
 
 ### 部署后管理
 
 ```bash
 # 查看服务状态
-ssh user@server "systemctl status zeroclaw"
+ssh user@server "systemctl status velaclaw"
 
 # 查看日志
-ssh user@server "journalctl -u zeroclaw -f"
+ssh user@server "journalctl -u velaclaw -f"
 
 # 手动重启
-ssh user@server "systemctl restart zeroclaw"
+ssh user@server "systemctl restart velaclaw"
 ```
 
 ---
@@ -340,10 +340,10 @@ servers:
 
 ```bash
 # 部署到所有生产服务器
-zeroclaw deploy --label env=production
+velaclaw deploy --label env=production
 
 # 部署到特定区域
-zeroclaw deploy --label region=cn-east
+velaclaw deploy --label region=cn-east
 ```
 
 ---
@@ -354,10 +354,10 @@ zeroclaw deploy --label region=cn-east
 
 ```bash
 # 生成密钥
-ssh-keygen -t ed25519 -C "zeroclaw-deploy"
+ssh-keygen -t ed25519 -C "velaclaw-deploy"
 
 # 复制公钥到服务器
-ssh-copy-id -i ~/.ssh/zeroclaw-deploy.pub user@server
+ssh-copy-id -i ~/.ssh/velaclaw-deploy.pub user@server
 ```
 
 ### 2. 限制网络访问
@@ -374,14 +374,14 @@ gateway:
 
 ```bash
 # 设置自动更新检查
-zeroclaw cron add "0 3 * * *" "EXEC: zeroclaw deploy check-update --all"
+velaclaw cron add "0 3 * * *" "EXEC: velaclaw deploy check-update --all"
 ```
 
 ### 4. 备份配置
 
 ```bash
 # 定期备份
-zeroclaw cron add "0 2 * * *" "EXEC: zeroclaw deploy backup --all"
+velaclaw cron add "0 2 * * *" "EXEC: velaclaw deploy backup --all"
 ```
 
 ---
@@ -402,7 +402,7 @@ chmod 600 ~/.ssh/id_rsa
 
 ```bash
 # 查看详细日志
-zeroclaw deploy logs my-server --debug
+velaclaw deploy logs my-server --debug
 
 # 检查端口占用
 ssh user@server "netstat -tlnp | grep 8080"
@@ -415,7 +415,7 @@ ssh user@server "netstat -tlnp | grep 8080"
 ssh user@server "free -h"
 
 # 重启服务释放内存
-zeroclaw deploy restart my-server
+velaclaw deploy restart my-server
 ```
 
 ---

@@ -1,6 +1,6 @@
 # 第二十章：常见问题
 
-本章汇总 ZeroSpider 使用过程中的常见问题及解决方案。
+本章汇总 VelaClaw 使用过程中的常见问题及解决方案。
 
 ---
 
@@ -54,11 +54,11 @@ rustup update stable
 rustup default stable
 ```
 
-### Q: 找不到 zerospider 命令
+### Q: 找不到 velaclaw 命令
 
 **错误信息**：
 ```
-zerospider: command not found
+velaclaw: command not found
 ```
 
 **解决方案**：
@@ -87,7 +87,7 @@ Error: Unauthorized - Invalid API key
 
 1. 确认密钥正确
    ```bash
-   zerospider auth status
+   velaclaw auth status
    ```
 
 2. 检查环境变量
@@ -97,7 +97,7 @@ Error: Unauthorized - Invalid API key
 
 3. 重新配置
    ```bash
-   zerospider auth paste-token --provider openai
+   velaclaw auth paste-token --provider openai
    ```
 
 ### Q: 配置文件找不到
@@ -111,10 +111,10 @@ Error: Config file not found
 
 ```bash
 # 重新初始化
-zerospider onboard
+velaclaw onboard
 
 # 或手动创建目录
-mkdir -p ~/.zerospider
+mkdir -p ~/.velaclaw
 ```
 
 ### Q: 配置格式错误
@@ -128,10 +128,10 @@ Error: Failed to parse config
 
 ```bash
 # 检查 YAML 语法
-zerospider config validate
+velaclaw config validate
 
 # 查看配置示例
-zerospider config schema
+velaclaw config schema
 ```
 
 ---
@@ -149,16 +149,16 @@ zerospider config schema
 
 ```bash
 # 1. 检查服务状态
-zerospider status
+velaclaw status
 
 # 2. 检查渠道
-zerospider channel list
+velaclaw channel list
 
 # 3. 检查认证
-zerospider auth status
+velaclaw auth status
 
 # 4. 查看日志
-tail -f ~/.zerospider/logs/zerospider.log
+tail -f ~/.velaclaw/logs/velaclaw.log
 ```
 
 ### Q: AI 回答不正确
@@ -192,13 +192,13 @@ tail -f ~/.zerospider/logs/zerospider.log
 
 ```bash
 # 检查记忆配置
-zerospider status | grep -A5 "记忆系统"
+velaclaw status | grep -A5 "记忆系统"
 
 # 查看记忆存储
-ls ~/.zerospider/memory/
+ls ~/.velaclaw/memory/
 
 # 检查数据库
-sqlite3 ~/.zerospider/memory/memory.db "SELECT COUNT(*) FROM memories;"
+sqlite3 ~/.velaclaw/memory/memory.db "SELECT COUNT(*) FROM memories;"
 ```
 
 ---
@@ -211,7 +211,7 @@ sqlite3 ~/.zerospider/memory/memory.db "SELECT COUNT(*) FROM memories;"
 
 1. Bot Token 是否正确
    ```bash
-   zerospider channel doctor
+   velaclaw channel doctor
    ```
 
 2. 用户是否在白名单
@@ -224,7 +224,7 @@ sqlite3 ~/.zerospider/memory/memory.db "SELECT COUNT(*) FROM memories;"
 
 3. 服务是否运行
    ```bash
-   zerospider status
+   velaclaw status
    ```
 
 ### Q: Discord Bot 上线但不回复
@@ -286,7 +286,7 @@ model: llama-3.1-70b-versatile
 **检查内存使用**：
 
 ```bash
-zerospider status --memory
+velaclaw status --memory
 ```
 
 **优化方案**：
@@ -306,7 +306,7 @@ agent:
 **查看使用统计**：
 
 ```bash
-zerospider stats
+velaclaw stats
 ```
 
 **优化方案**：
@@ -328,7 +328,7 @@ routing:
 
 | 错误代码 | 说明 | 解决方案 |
 |----------|------|----------|
-| `E001` | 配置文件不存在 | 运行 `zerospider onboard` |
+| `E001` | 配置文件不存在 | 运行 `velaclaw onboard` |
 | `E002` | API 密钥无效 | 检查并重新配置密钥 |
 | `E003` | 网络连接失败 | 检查网络或代理设置 |
 | `E004` | 模型不可用 | 检查模型名称是否正确 |
@@ -347,30 +347,30 @@ routing:
 
 ```bash
 # 实时日志
-tail -f ~/.zerospider/logs/zerospider.log
+tail -f ~/.velaclaw/logs/velaclaw.log
 
 # 错误日志
-cat ~/.zerospider/logs/error.log
+cat ~/.velaclaw/logs/error.log
 ```
 
 ### 运行诊断
 
 ```bash
 # 全面诊断
-zerospider doctor
+velaclaw doctor
 
 # 检查模型
-zerospider doctor models
+velaclaw doctor models
 
 # 检查渠道
-zerospider channel doctor
+velaclaw channel doctor
 ```
 
 ### 社区支持
 
-- **GitHub Issues**: https://github.com/ailib-official/zerospider/issues
-- **文档**: https://github.com/ailib-official/zerospider#readme
-- **社区论坛**: https://github.com/ailib-official/zerospider/discussions
+- **GitHub Issues**: https://github.com/ailib-official/velaclaw/issues
+- **文档**: https://github.com/ailib-official/velaclaw#readme
+- **社区论坛**: https://github.com/ailib-official/velaclaw/discussions
 
 ---
 

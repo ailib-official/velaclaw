@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to ZeroSpider will be documented in this file.
+All notable changes to VelaClaw will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Breaking / ZS-ML-015:** removed the `legacy-providers` Cargo feature and built-in HTTP provider factory. Use `provider/model` ids backed by ai-protocol manifests; `custom:` / `anthropic-custom:` URL syntaxes now return migration errors.
-- **PT-074 BYOK availability:** protocol provider discovery now delegates credential availability to ai-lib-rust's unified credential chain (endpoint.auth, V1 auth, conventional env fallback, and keyring when enabled) instead of maintaining a ZeroSpider-only env scan.
+- **PT-074 BYOK availability:** protocol provider discovery now delegates credential availability to ai-lib-rust's unified credential chain (endpoint.auth, V1 auth, conventional env fallback, and keyring when enabled) instead of maintaining a VelaClaw-only env scan.
 - **Default Cargo features** now include only `ai-protocol`, aligning with the ai-lib migration plan’s protocol-first default.
 
 ### Dependencies
@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`ai-protocol`**: protocol-backed providers, `protocol_registry` scan, and `zerospider models protocol-providers` / `protocol-models` CLI.
+- **`ai-protocol`**: protocol-backed providers, `protocol_registry` scan, and `velaclaw models protocol-providers` / `protocol-models` CLI.
 - Quick setup warns when `provider/model` is used without a usable local `AI_PROTOCOL_DIR`.
 - **`routing_mvp`** optional feature: forwards `ai-lib-rust/routing_mvp` for experimental routing; CI runs a `cargo check` compile gate with `ai-protocol` (ZS-ML-004).
 
@@ -77,17 +77,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed (ai-lib / ai-protocol rectification, 2026-04)
 
 - **Streaming / tool calls** (ZS-ML-007, PR #19): `ProtocolBackedProvider` maps ai-lib-rust `StreamingEvent` tool-call lifecycle (`ToolCallStarted`, `PartialToolCall`, `ToolCallEnded`) into `StreamChunk`, adding structured `StreamToolCallDelta` for streaming tool use.
-- **Dependencies** (ZS-ML-009, PR #21): stop enabling unused `ai-lib-rust` Cargo features `embeddings`, `batch`, and `telemetry` until ZeroSpider has real call sites; document deferral and the `observability-otel` vs ai-lib metrics boundary in migration docs.
+- **Dependencies** (ZS-ML-009, PR #21): stop enabling unused `ai-lib-rust` Cargo features `embeddings`, `batch`, and `telemetry` until VelaClaw has real call sites; document deferral and the `observability-otel` vs ai-lib metrics boundary in migration docs.
 
 ### Testing (ai-lib / ai-protocol rectification, 2026-04)
 
-- **CI** (ZS-ML-008, PR #20): run `cargo test -p zerospider --no-default-features --features ai-protocol` (in addition to the manifest-only `cargo check` gate).
+- **CI** (ZS-ML-008, PR #20): run `cargo test -p velaclaw --no-default-features --features ai-protocol` (in addition to the manifest-only `cargo check` gate).
 - **Resilience** (ZS-ML-008, PR #20): `ReliableProvider` unit tests for protocol-style logical model fallbacks and for app-layer retry budgeting vs inner transport retries.
 
 ## [0.3.0] - 2026-02-23
 
 ### Added
-- **Remote Deployment Feature**: Complete SSH-based remote deployment system for ZeroSpider
+- **Remote Deployment Feature**: Complete SSH-based remote deployment system for VelaClaw
   - New feature flag: `--features remote-deploy`
   - CLI commands: `deploy deploy`, `deploy status`, `deploy health-check`, `deploy list`, `deploy rollback`, `deploy update`, `deploy sync-config`
   - Multiple deployment modes: Direct (binary), Docker, and systemd
@@ -135,14 +135,14 @@ Technical Notes:
 
 ### Changed
 - **Dependencies**: ai-lib-rust now from crates.io (was path); ai-protocol remains env-based (clone from GitHub)
-- **User Guide**: Aligned docs to ZeroSpider branding (ZeroClaw → ZeroSpider, zeroclaw → zerospider, ~/.zeroclaw → ~/.zerospider)
+- **User Guide**: Aligned docs to VelaClaw branding (VelaClaw → VelaClaw, velaclaw → velaclaw, ~/.velaclaw → ~/.velaclaw)
 
 ## [0.1.1] - 2026-02-21
 
 ### Added
-- **Project Fork**: ZeroSpider forked from [ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw) with enhanced features
+- **Project Fork**: VelaClaw forked from [VelaClaw](https://github.com/velaclaw-labs/velaclaw) with enhanced features
 - **Raspberry Pi Support**: Cross-compilation for aarch64-unknown-linux-gnu target (64-bit ARM)
-- **Upstream Sync Script**: `sync-upstream.sh` for tracking zeroclaw-labs/zeroclaw main branch
+- **Upstream Sync Script**: `sync-upstream.sh` for tracking velaclaw-labs/velaclaw main branch
   - `--dry-run` mode for preview
   - `--list` mode to show upstream changes
   - `--cherry-pick <commit>` for selective merging
@@ -159,17 +159,17 @@ Technical Notes:
 - **Build**: Release-fast profile compilation errors resolved
 
 ### Changed
-- **Project Name**: Renamed from ZeroClaw to ZeroSpider
+- **Project Name**: Renamed from VelaClaw to VelaClaw
 - **License**: Dual MIT OR Apache-2.0 license
 - **Author**: Luqiang Wang
-- **Repository**: https://github.com/ailib-official/zerospider
+- **Repository**: https://github.com/ailib-official/velaclaw
 
 ### Security
 - **Cron Tools**: Security policy now passed to cron tools in registry
 
 ### Documentation
 - Restored AGENTS.md and CLAUDE.md as functional documentation
-- Updated README with ZeroSpider branding
+- Updated README with VelaClaw branding
 
 ## [0.1.0] - 2026-02-13
 
@@ -196,7 +196,7 @@ Technical Notes:
 - Workspace escape prevention
 - Forbidden system path protection (`/etc`, `/root`, `~/.ssh`)
 
-[0.3.0]: https://github.com/ailib-official/zerospider/releases/tag/v0.3.0
-[0.2.0]: https://github.com/ailib-official/zerospider/releases/tag/v0.2.0
-[0.1.1]: https://github.com/ailib-official/zerospider/releases/tag/v0.1.1
-[0.1.0]: https://github.com/theonlyhennygod/zeroclaw/releases/tag/v0.1.0
+[0.3.0]: https://github.com/ailib-official/velaclaw/releases/tag/v0.3.0
+[0.2.0]: https://github.com/ailib-official/velaclaw/releases/tag/v0.2.0
+[0.1.1]: https://github.com/ailib-official/velaclaw/releases/tag/v0.1.1
+[0.1.0]: https://github.com/theonlyhennygod/velaclaw/releases/tag/v0.1.0

@@ -19,7 +19,7 @@ Các cú pháp chat cũ `custom:https://...` và `anthropic-custom:https://...` 
 
 ### File Config
 
-Chỉnh sửa `~/.zeroclaw/config.toml`:
+Chỉnh sửa `~/.velaclaw/config.toml`:
 
 ```toml
 default_provider = "local-gateway/my-model"
@@ -32,8 +32,8 @@ Dùng biến môi trường credential được khai báo trong manifest:
 
 ```bash
 export API_KEY="your-api-key"
-# hoặc: export ZEROCLAW_API_KEY="your-api-key"
-zeroclaw agent
+# hoặc: export VELACLAW_API_KEY="your-api-key"
+velaclaw agent
 ```
 
 ## Kiểm tra cấu hình
@@ -42,10 +42,10 @@ Xác minh endpoint tùy chỉnh của bạn:
 
 ```bash
 # Chế độ tương tác
-zeroclaw agent
+velaclaw agent
 
 # Kiểm tra tin nhắn đơn
-zeroclaw agent -m "test message"
+velaclaw agent -m "test message"
 ```
 
 ## Xử lý sự cố

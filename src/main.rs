@@ -1,4 +1,4 @@
-//! ZeroSpider 主入口程序，负责命令行解析与各子系统初始化。
+//! VelaClaw 主入口程序，负责命令行解析与各子系统初始化。
 #![warn(clippy::all, clippy::pedantic)]
 #![allow(
     clippy::assigning_clones,
@@ -54,7 +54,7 @@ mod approval;
 mod auth;
 mod channels;
 mod rag {
-    pub use zerospider::rag::*;
+    pub use velaclaw::rag::*;
 }
 mod config;
 mod cost;
@@ -88,12 +88,12 @@ mod util;
 
 use config::{Config, DEFAULT_PROTOCOL_MODEL_ID};
 
-// Re-export so binary's hardware/peripherals modules can use zerospider::HardwareCommands etc.
-pub use zerospider::{HardwareCommands, PeripheralCommands};
+// Re-export so binary's hardware/peripherals modules can use velaclaw::HardwareCommands etc.
+pub use velaclaw::{HardwareCommands, PeripheralCommands};
 
-/// `ZeroSpider` - Protocol-driven autonomous AI agent runtime.
+/// `VelaClaw` - Protocol-driven autonomous AI agent runtime.
 #[derive(Parser, Debug)]
-#[command(name = "zerospider")]
+#[command(name = "velaclaw")]
 #[command(author = "Luqiang Wang")]
 #[command(version = "0.2.0")]
 #[command(about = "Protocol-driven autonomous AI agent runtime with intelligent model selection.", long_about = None)]
@@ -174,10 +174,10 @@ Launches an interactive chat session with the configured AI provider. \
 Use --message for single-shot queries without entering interactive mode.
 
 Examples:
-  zerospider agent                              # interactive session
-  zerospider agent -m \"Summarize today's logs\"  # single message
-  zerospider agent -p anthropic --model claude-sonnet-4-20250514
-  zerospider agent --peripheral nucleo-f401re:/dev/ttyACM0")]
+  velaclaw agent                              # interactive session
+  velaclaw agent -m \"Summarize today's logs\"  # single message
+  velaclaw agent -p anthropic --model claude-sonnet-4-20250514
+  velaclaw agent --peripheral nucleo-f401re:/dev/ttyACM0")]
     Agent {
         /// Single message mode (don't enter interactive mode)
         #[arg(short, long)]
@@ -209,10 +209,10 @@ and WebSocket connections. Bind address defaults to the values in \
 your config file (gateway.host / gateway.port).
 
 Examples:
-  zerospider gateway                  # use config defaults
-  zerospider gateway -p 8080          # listen on port 8080
-  zerospider gateway --host 0.0.0.0   # bind to all interfaces
-  zerospider gateway -p 0             # random available port")]
+  velaclaw gateway                  # use config defaults
+  velaclaw gateway -p 8080          # listen on port 8080
+  velaclaw gateway --host 0.0.0.0   # bind to all interfaces
+  velaclaw gateway -p 0             # random available port")]
     Gateway {
         /// Port to listen on (use 0 for random available port); defaults to config gateway.port
         #[arg(short, long)]
@@ -227,18 +227,18 @@ Examples:
     #[command(long_about = "\
 Start the long-running autonomous daemon.
 
-Launches the full ZeroClaw runtime: gateway server, all configured \
+Launches the full VelaClaw runtime: gateway server, all configured \
 channels (Telegram, Discord, Slack, etc.), heartbeat monitor, and \
-the cron scheduler. This is the recommended way to run ZeroClaw in \
+the cron scheduler. This is the recommended way to run VelaClaw in \
 production or as an always-on assistant.
 
-Use 'zerospider service install' to register the daemon as an OS \
+Use 'velaclaw service install' to register the daemon as an OS \
 service (systemd/launchd) for auto-start on boot.
 
 Examples:
-  zerospider daemon                   # use config defaults
-  zerospider daemon -p 9090           # gateway on port 9090
-  zerospider daemon --host 127.0.0.1  # localhost only")]
+  velaclaw daemon                   # use config defaults
+  velaclaw daemon -p 9090           # gateway on port 9090
+  velaclaw daemon --host 127.0.0.1  # localhost only")]
     Daemon {
         /// Port to listen on (use 0 for random available port); defaults to config gateway.port
         #[arg(short, long)]
@@ -280,14 +280,14 @@ Cron expressions use the standard 5-field format: \
 override with --tz and an IANA timezone name.
 
 Examples:
-  zerospider cron list
-  zerospider cron add '0 9 * * 1-5' 'Good morning' --tz America/New_York
-  zerospider cron add '*/30 * * * *' 'Check system health'
-  zerospider cron add-at 2025-01-15T14:00:00Z 'Send reminder'
-  zerospider cron add-every 60000 'Ping heartbeat'
-  zerospider cron once 30m 'Run backup in 30 minutes'
-  zerospider cron pause <task-id>
-  zerospider cron update <task-id> --expression '0 8 * * *' --tz Europe/London")]
+  velaclaw cron list
+  velaclaw cron add '0 9 * * 1-5' 'Good morning' --tz America/New_York
+  velaclaw cron add '*/30 * * * *' 'Check system health'
+  velaclaw cron add-at 2025-01-15T14:00:00Z 'Send reminder'
+  velaclaw cron add-every 60000 'Ping heartbeat'
+  velaclaw cron once 30m 'Run backup in 30 minutes'
+  velaclaw cron pause <task-id>
+  velaclaw cron update <task-id> --expression '0 8 * * *' --tz Europe/London")]
     Cron {
         #[command(subcommand)]
         cron_command: CronCommands,
@@ -306,16 +306,16 @@ Examples:
     #[command(long_about = "\
 Manage communication channels.
 
-Add, remove, list, and health-check channels that connect ZeroClaw \
+Add, remove, list, and health-check channels that connect VelaClaw \
 to messaging platforms. Supported channel types: telegram, discord, \
 slack, whatsapp, matrix, imessage, email.
 
 Examples:
-  zerospider channel list
-  zerospider channel doctor
-  zerospider channel add telegram '{\"bot_token\":\"...\",\"name\":\"my-bot\"}'
-  zerospider channel remove my-bot
-  zerospider channel bind-telegram zerospider_user")]
+  velaclaw channel list
+  velaclaw channel doctor
+  velaclaw channel add telegram '{\"bot_token\":\"...\",\"name\":\"my-bot\"}'
+  velaclaw channel remove my-bot
+  velaclaw channel bind-telegram velaclaw_user")]
     Channel {
         #[command(subcommand)]
         channel_command: ChannelCommands,
@@ -354,12 +354,12 @@ Enumerate connected USB devices, identify known development boards \
 probe-rs / ST-Link.
 
 Examples:
-  zerospider hardware discover
-  zerospider hardware introspect /dev/ttyACM0
-  zerospider hardware info --chip STM32F401RETx")]
+  velaclaw hardware discover
+  velaclaw hardware introspect /dev/ttyACM0
+  velaclaw hardware info --chip STM32F401RETx")]
     Hardware {
         #[command(subcommand)]
-        hardware_command: zerospider::HardwareCommands,
+        hardware_command: velaclaw::HardwareCommands,
     },
 
     /// Manage hardware peripherals (STM32, RPi GPIO, etc.)
@@ -371,14 +371,14 @@ to the agent (GPIO, sensors, actuators). Supported boards: \
 nucleo-f401re, rpi-gpio, esp32, arduino-uno.
 
 Examples:
-  zerospider peripheral list
-  zerospider peripheral add nucleo-f401re /dev/ttyACM0
-  zerospider peripheral add rpi-gpio native
-  zerospider peripheral flash --port /dev/cu.usbmodem12345
-  zerospider peripheral flash-nucleo")]
+  velaclaw peripheral list
+  velaclaw peripheral add nucleo-f401re /dev/ttyACM0
+  velaclaw peripheral add rpi-gpio native
+  velaclaw peripheral flash --port /dev/cu.usbmodem12345
+  velaclaw peripheral flash-nucleo")]
     Peripheral {
         #[command(subcommand)]
-        peripheral_command: zerospider::PeripheralCommands,
+        peripheral_command: velaclaw::PeripheralCommands,
     },
 
     /// Manage agent memory (list, get, stats, clear)
@@ -390,11 +390,11 @@ Supports filtering by category and session, pagination, and \
 batch clearing with confirmation.
 
 Examples:
-  zerospider memory stats
-  zerospider memory list
-  zerospider memory list --category core --limit 10
-  zerospider memory get <key>
-  zerospider memory clear --category conversation --yes")]
+  velaclaw memory stats
+  velaclaw memory list
+  velaclaw memory list --category core --limit 10
+  velaclaw memory get <key>
+  velaclaw memory clear --category conversation --yes")]
     Memory {
         #[command(subcommand)]
         memory_command: MemoryCommands,
@@ -402,31 +402,31 @@ Examples:
 
     /// Manage configuration
     #[command(long_about = "\
-Manage ZeroClaw configuration.
+Manage VelaClaw configuration.
 
 Inspect and export configuration settings. Use 'schema' to dump \
 the full JSON Schema for the config file, which documents every \
 available key, type, and default value.
 
 Examples:
-  zerospider config schema              # print JSON Schema to stdout
-  zerospider config schema > schema.json")]
+  velaclaw config schema              # print JSON Schema to stdout
+  velaclaw config schema > schema.json")]
     Config {
         #[command(subcommand)]
         config_command: ConfigCommands,
     },
-    /// Deploy ZeroClaw to remote servers
+    /// Deploy VelaClaw to remote servers
     #[command(long_about = "\
-Deploy ZeroClaw to remote servers via SSH.
+Deploy VelaClaw to remote servers via SSH.
 
 Manage remote deployments with support for direct binary deployment, Docker containers, and systemd services. Includes health checks, status monitoring, rollback, and configuration sync capabilities.
 
 Examples:
-  zerospider deploy deploy --server prod-001
-  zerospider deploy status --server prod-001
-  zerospider deploy health-check --server prod-001
-  zerospider deploy list
-  zerospider deploy rollback --server prod-001")]
+  velaclaw deploy deploy --server prod-001
+  velaclaw deploy status --server prod-001
+  velaclaw deploy health-check --server prod-001
+  velaclaw deploy list
+  velaclaw deploy rollback --server prod-001")]
     Deploy {
         #[command(subcommand)]
         deploy_command: deploy::DeployCommands,
@@ -434,14 +434,14 @@ Examples:
 
     /// Generate shell completion script to stdout
     #[command(long_about = "\
-Generate shell completion scripts for `zerospider`.
+Generate shell completion scripts for `velaclaw`.
 
 The script is printed to stdout so it can be sourced directly:
 
 Examples:
-  source <(zerospider completions bash)
-  zerospider completions zsh > ~/.zfunc/_zerospider
-  zerospider completions fish > ~/.config/fish/completions/zerospider.fish")]
+  source <(velaclaw completions bash)
+  velaclaw completions zsh > ~/.zfunc/_velaclaw
+  velaclaw completions fish > ~/.config/fish/completions/velaclaw.fish")]
     Completions {
         /// Target shell
         #[arg(value_enum)]
@@ -540,7 +540,7 @@ enum AuthCommands {
 
 #[derive(Subcommand, Debug)]
 enum MigrateCommands {
-    /// Import memory from an `OpenClaw` workspace into this `ZeroClaw` workspace
+    /// Import memory from an `OpenClaw` workspace into this `VelaClaw` workspace
     Openclaw {
         /// Optional path to `OpenClaw` workspace (defaults to ~/.openclaw/workspace)
         #[arg(long)]
@@ -759,7 +759,7 @@ async fn main() -> Result<()> {
         if config_dir.trim().is_empty() {
             bail!("--config-dir cannot be empty");
         }
-        std::env::set_var("ZEROCLAW_CONFIG_DIR", config_dir);
+        std::env::set_var("VELACLAW_CONFIG_DIR", config_dir);
     }
 
     // Completions must remain stdout-only and should not load config or initialize logging.
@@ -827,7 +827,7 @@ async fn main() -> Result<()> {
             .await
         }?;
         // Auto-start channels if user said yes during wizard
-        if std::env::var("ZEROCLAW_AUTOSTART_CHANNELS").as_deref() == Ok("1") {
+        if std::env::var("VELACLAW_AUTOSTART_CHANNELS").as_deref() == Ok("1") {
             channels::start_channels(config).await?;
         }
         return Ok(());
@@ -854,9 +854,9 @@ async fn main() -> Result<()> {
             let port = port.unwrap_or(config.gateway.port);
             let host = host.unwrap_or_else(|| config.gateway.host.clone());
             if port == 0 {
-                info!("🚀 Starting ZeroClaw Gateway on {host} (random port)");
+                info!("🚀 Starting VelaClaw Gateway on {host} (random port)");
             } else {
-                info!("🚀 Starting ZeroClaw Gateway on {host}:{port}");
+                info!("🚀 Starting VelaClaw Gateway on {host}:{port}");
             }
             gateway::run_gateway(&host, port, config).await
         }
@@ -865,15 +865,15 @@ async fn main() -> Result<()> {
             let port = port.unwrap_or(config.gateway.port);
             let host = host.unwrap_or_else(|| config.gateway.host.clone());
             if port == 0 {
-                info!("🧠 Starting ZeroClaw Daemon on {host} (random port)");
+                info!("🧠 Starting VelaClaw Daemon on {host} (random port)");
             } else {
-                info!("🧠 Starting ZeroClaw Daemon on {host}:{port}");
+                info!("🧠 Starting VelaClaw Daemon on {host}:{port}");
             }
             daemon::run(config, host, port).await
         }
 
         Commands::Status => {
-            println!("🦀 ZeroClaw Status");
+            println!("🦀 VelaClaw Status");
             println!();
             println!("Version:     {}", env!("CARGO_PKG_VERSION"));
             println!("Workspace:   {}", config.workspace_dir.display());
@@ -973,7 +973,7 @@ async fn main() -> Result<()> {
             }
             #[cfg(feature = "ai-protocol")]
             ModelCommands::ProtocolProviders { json } => {
-                use zerospider::protocol_registry::{
+                use velaclaw::protocol_registry::{
                     resolve_local_protocol_root, scan_protocol_root,
                 };
                 let Some(root) = resolve_local_protocol_root() else {
@@ -1004,7 +1004,7 @@ async fn main() -> Result<()> {
             }
             #[cfg(feature = "ai-protocol")]
             ModelCommands::ProtocolModels { json } => {
-                use zerospider::protocol_registry::{
+                use velaclaw::protocol_registry::{
                     resolve_local_protocol_root, scan_protocol_root,
                 };
                 let Some(root) = resolve_local_protocol_root() else {
@@ -1379,7 +1379,7 @@ async fn handle_auth_command(auth_command: AuthCommands, config: &Config) -> Res
                 Err(e) => {
                     println!("Callback capture failed: {e}");
                     println!(
-                            "Run `zerospider auth paste-redirect --provider openai-codex --profile {profile}`"
+                            "Run `velaclaw auth paste-redirect --provider openai-codex --profile {profile}`"
                         );
                     return Ok(());
                 }
@@ -1411,7 +1411,7 @@ async fn handle_auth_command(auth_command: AuthCommands, config: &Config) -> Res
 
             let pending = load_pending_openai_login(config)?.ok_or_else(|| {
                 anyhow::anyhow!(
-                    "No pending OpenAI login found. Run `zerospider auth login --provider openai-codex` first."
+                    "No pending OpenAI login found. Run `velaclaw auth login --provider openai-codex` first."
                 )
             })?;
 
@@ -1522,7 +1522,7 @@ async fn handle_auth_command(auth_command: AuthCommands, config: &Config) -> Res
                 }
                 None => {
                     bail!(
-                        "No OpenAI Codex auth profile found. Run `zerospider auth login --provider openai-codex`."
+                        "No OpenAI Codex auth profile found. Run `velaclaw auth login --provider openai-codex`."
                     )
                 }
             }
@@ -1630,7 +1630,7 @@ mod tests {
     #[test]
     fn onboard_cli_accepts_model_provider_and_api_key_in_quick_mode() {
         let cli = Cli::try_parse_from([
-            "zerospider",
+            "velaclaw",
             "onboard",
             "--provider",
             DEFAULT_PROTOCOL_MODEL_ID,
@@ -1665,7 +1665,7 @@ mod tests {
     #[test]
     fn completions_cli_parses_supported_shells() {
         for shell in ["bash", "fish", "zsh", "powershell", "elvish"] {
-            let cli = Cli::try_parse_from(["zerospider", "completions", shell])
+            let cli = Cli::try_parse_from(["velaclaw", "completions", shell])
                 .expect("completions invocation should parse");
             match cli.command {
                 Commands::Completions { .. } => {}
@@ -1681,14 +1681,14 @@ mod tests {
             .expect("completion generation should succeed");
         let script = String::from_utf8(output).expect("completion output should be valid utf-8");
         assert!(
-            script.contains("zerospider"),
+            script.contains("velaclaw"),
             "completion script should reference binary name"
         );
     }
 
     #[test]
     fn onboard_cli_accepts_force_flag() {
-        let cli = Cli::try_parse_from(["zerospider", "onboard", "--force"])
+        let cli = Cli::try_parse_from(["velaclaw", "onboard", "--force"])
             .expect("onboard --force should parse");
 
         match cli.command {

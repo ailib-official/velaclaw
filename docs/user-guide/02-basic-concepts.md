@@ -1,6 +1,6 @@
 # 第二章：基础概念
 
-了解 ZeroClaw 的核心概念，帮助你更好地使用它。
+了解 VelaClaw 的核心概念，帮助你更好地使用它。
 
 ---
 
@@ -15,7 +15,7 @@
 
 ## 核心架构
 
-ZeroClaw 采用模块化设计，主要包含以下部分：
+VelaClaw 采用模块化设计，主要包含以下部分：
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -25,7 +25,7 @@ ZeroClaw 采用模块化设计，主要包含以下部分：
                           │
                           ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                      ZeroClaw 核心                           │
+│                      VelaClaw 核心                           │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐    │
 │  │  Agent   │  │ Channels │  │  Tools   │  │  Memory  │    │
 │  │ (对话)   │  │ (渠道)   │  │ (工具)   │  │ (记忆)   │    │
@@ -54,7 +54,7 @@ ZeroClaw 采用模块化设计，主要包含以下部分：
 
 ### 1. Provider（AI 提供商）
 
-Provider 是 AI 模型的来源。ZeroClaw 支持多种 Provider：
+Provider 是 AI 模型的来源。VelaClaw 支持多种 Provider：
 
 | Provider | 代表模型 | 特点 |
 |----------|----------|------|
@@ -88,7 +88,7 @@ Provider: OpenAI
 
 ### 3. Channel（通信渠道）
 
-Channel 让你通过不同平台使用 ZeroClaw：
+Channel 让你通过不同平台使用 VelaClaw：
 
 ```
 支持的渠道：
@@ -165,7 +165,7 @@ Skill 是预定义的任务模板，让 AI 更擅长处理特定场景：
 1. 用户发送消息
        │
        ▼
-2. ZeroClaw 接收消息
+2. VelaClaw 接收消息
        │
        ├──► 检索相关记忆
        │
@@ -197,7 +197,7 @@ Skill 是预定义的任务模板，让 AI 更擅长处理特定场景：
 ```
 用户: "帮我查看 weather.txt 文件的内容"
 
-ZeroClaw:
+VelaClaw:
 1. AI 分析请求 → 需要读取文件
 2. 调用 file_read 工具
 3. 工具执行：读取 weather.txt
@@ -212,7 +212,7 @@ ZeroClaw:
 ### 目录结构
 
 ```
-~/.zeroclaw/
+~/.velaclaw/
 ├── config.yaml          # 主配置文件
 ├── auth/                # 认证信息
 │   └── profiles/        # 各 Provider 的认证
@@ -226,7 +226,7 @@ ZeroClaw:
 
 ### 配置文件
 
-主配置文件 `~/.zeroclaw/config.yaml`：
+主配置文件 `~/.velaclaw/config.yaml`：
 
 ```yaml
 # 默认 Provider 和模型
@@ -276,11 +276,11 @@ gateway:
 
 ### 配对机制
 
-首次在新渠道使用 ZeroClaw 时，需要配对：
+首次在新渠道使用 VelaClaw 时，需要配对：
 
 ```
 1. 用户发送消息
-2. ZeroClaw 返回配对码
+2. VelaClaw 返回配对码
 3. 用户在命令行确认
 4. 配对成功，可以正常使用
 ```

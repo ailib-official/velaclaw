@@ -1,7 +1,7 @@
 //! 安全子系统，负责策略管理、密钥存储与配对逻辑。
 //! Security subsystem for policy enforcement, sandboxing, and secret management.
 //!
-//! This module provides the security infrastructure for ZeroClaw. The core type
+//! This module provides the security infrastructure for VelaClaw. The core type
 //! [`SecurityPolicy`] defines autonomy levels, workspace boundaries, and
 //! access-control rules that are enforced across the tool and runtime subsystems.
 //! [`PairingGuard`] implements device pairing for channel authentication, and

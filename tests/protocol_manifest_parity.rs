@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use zerospider::config::DEFAULT_PROTOCOL_MODEL_ID;
+use velaclaw::config::DEFAULT_PROTOCOL_MODEL_ID;
 
 static AI_PROTOCOL_ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -81,7 +81,7 @@ fn protocol_fixture_resolves_openai_without_legacy() {
 
     let _env = AiProtocolDirGuard::set(root.to_str().expect("UTF-8 path"));
 
-    let out = zerospider::providers::create_provider(
+    let out = velaclaw::providers::create_provider(
         DEFAULT_PROTOCOL_MODEL_ID,
         Some("sk-zsml014-teststub"),
     );
@@ -100,7 +100,7 @@ fn protocol_unknown_provider_surfaces_hint_without_protocol_env() {
 
     let _cleared = ProtocolRootsClearedGuard::unset();
 
-    let result = zerospider::providers::create_provider(
+    let result = velaclaw::providers::create_provider(
         "zsml014_unknown_provider_gs99/no-such-model",
         Some("sk-zsml014-negative"),
     );

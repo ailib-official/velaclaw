@@ -1,6 +1,6 @@
 # 第十章：工具系统
 
-本章介绍 ZeroClaw 的工具系统，了解 AI 能执行哪些操作。
+本章介绍 VelaClaw 的工具系统，了解 AI 能执行哪些操作。
 
 ---
 
@@ -69,15 +69,15 @@ AI 分析请求
 ```
 用户: 帮我读取 /home/user/notes.txt 的内容
 
-ZeroClaw: [调用 file_read 工具]
+VelaClaw: [调用 file_read 工具]
 文件内容如下：
 - 今天学习了 Rust
 - 完成了项目配置
 - 明天计划...
 
-用户: 在文件末尾添加一行：完成了 ZeroClaw 配置
+用户: 在文件末尾添加一行：完成了 VelaClaw 配置
 
-ZeroClaw: [调用 file_write 工具]
+VelaClaw: [调用 file_write 工具]
 已添加内容到 notes.txt
 ```
 
@@ -95,7 +95,7 @@ ZeroClaw: [调用 file_write 工具]
 ```
 用户: 搜索最新的 Rust 版本
 
-ZeroClaw: [调用 web_search 工具]
+VelaClaw: [调用 web_search 工具]
 搜索结果：
 1. Rust 1.76.0 发布 (2024-02-08)
    主要更新：async fn 增强、性能优化...
@@ -118,7 +118,7 @@ ZeroClaw: [调用 web_search 工具]
 ```
 用户: 帮我查看当前目录的文件
 
-ZeroClaw: [调用 shell 工具]
+VelaClaw: [调用 shell 工具]
 当前目录文件：
 drwxr-xr-x  src/
 -rw-r--r--  config.yaml
@@ -138,12 +138,12 @@ drwxr-xr-x  src/
 ```
 用户: 记住我的邮箱是 user@example.com
 
-ZeroClaw: [调用 memory_store 工具]
+VelaClaw: [调用 memory_store 工具]
 已记住：你的邮箱是 user@example.com
 
 用户: 我的邮箱是什么？
 
-ZeroClaw: [调用 memory_recall 工具]
+VelaClaw: [调用 memory_recall 工具]
 你的邮箱是 user@example.com
 ```
 
@@ -161,7 +161,7 @@ ZeroClaw: [调用 memory_recall 工具]
 ```
 用户: 每天 9 点提醒我开会
 
-ZeroClaw: [调用 cron_add 工具]
+VelaClaw: [调用 cron_add 工具]
 已创建定时任务：
 - 时间：每天 9:00
 - 内容：提醒开会
@@ -179,7 +179,7 @@ ZeroClaw: [调用 cron_add 工具]
 ```
 用户: 帮我查看 git 状态
 
-ZeroClaw: [调用 git_operations 工具]
+VelaClaw: [调用 git_operations 工具]
 Git 状态：
 On branch main
 Changes not staged:
@@ -195,7 +195,7 @@ Untracked files:
 
 ### 启用/禁用工具
 
-编辑 `~/.zeroclaw/config.yaml`：
+编辑 `~/.velaclaw/config.yaml`：
 
 ```yaml
 tools:
@@ -275,11 +275,11 @@ tools:
 
 ### 添加自定义工具
 
-ZeroClaw 支持通过技能系统添加自定义工具。
+VelaClaw 支持通过技能系统添加自定义工具。
 
 **示例：天气查询工具**
 
-1. 创建技能文件 `~/.zeroclaw/skills/weather.yaml`：
+1. 创建技能文件 `~/.velaclaw/skills/weather.yaml`：
 
 ```yaml
 name: weather
@@ -304,7 +304,7 @@ tools:
 2. 安装技能：
 
 ```bash
-zeroclaw skills install ~/.zeroclaw/skills/weather.yaml
+velaclaw skills install ~/.velaclaw/skills/weather.yaml
 ```
 
 3. 使用：
@@ -312,7 +312,7 @@ zeroclaw skills install ~/.zeroclaw/skills/weather.yaml
 ```
 用户: 北京今天天气怎么样？
 
-ZeroClaw: [调用 get_weather 工具]
+VelaClaw: [调用 get_weather 工具]
 北京今天天气：
 - 温度：15°C
 - 天气：晴
@@ -321,7 +321,7 @@ ZeroClaw: [调用 get_weather 工具]
 
 ### 使用外部工具
 
-ZeroClaw 集成了 Composio 等外部工具平台：
+VelaClaw 集成了 Composio 等外部工具平台：
 
 ```yaml
 integrations:
@@ -344,7 +344,7 @@ integrations:
 ### 查看工具调用历史
 
 ```bash
-zeroclaw logs tools
+velaclaw logs tools
 ```
 
 输出：
@@ -360,7 +360,7 @@ zeroclaw logs tools
 
 ```bash
 # 启用工具调用调试
-zeroclaw agent --debug-tools
+velaclaw agent --debug-tools
 ```
 
 输出：
@@ -391,7 +391,7 @@ tools:
 
 ```bash
 # 查看工具使用统计
-zeroclaw stats --tools
+velaclaw stats --tools
 ```
 
 ### 敏感操作确认

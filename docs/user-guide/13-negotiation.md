@@ -1,6 +1,6 @@
 # 第十三章：多模型协商
 
-本章介绍 ZeroClaw 的多模型协商功能，让多个 AI 共同完成任务。
+本章介绍 VelaClaw 的多模型协商功能，让多个 AI 共同完成任务。
 
 ---
 
@@ -22,7 +22,7 @@
 - 方式一：问一个专家，听他的答案
 - 方式二：问多个专家，综合他们的意见
 
-**多模型协商**就是后者 —— ZeroClaw 会同时让多个 AI 模型回答你的问题，然后智能地综合出最佳答案。
+**多模型协商**就是后者 —— VelaClaw 会同时让多个 AI 模型回答你的问题，然后智能地综合出最佳答案。
 
 ### 为什么需要协商？
 
@@ -48,7 +48,7 @@
 
 ## 协商策略
 
-ZeroClaw 提供多种协商策略：
+VelaClaw 提供多种协商策略：
 
 ### 1. 投票模式 (Voting)
 
@@ -152,18 +152,18 @@ ZeroClaw 提供多种协商策略：
 
 ```bash
 # 使用投票模式
-zeroclaw agent --negotiate voting
+velaclaw agent --negotiate voting
 
 # 使用最佳答案模式
-zeroclaw agent --negotiate best
+velaclaw agent --negotiate best
 
 # 使用级联优化模式
-zeroclaw agent --negotiate cascade
+velaclaw agent --negotiate cascade
 ```
 
 ### 方式二：配置文件
 
-编辑 `~/.zeroclaw/config.yaml`：
+编辑 `~/.velaclaw/config.yaml`：
 
 ```yaml
 negotiation:
@@ -189,7 +189,7 @@ negotiation:
 ### 方式三：守护进程模式
 
 ```bash
-zeroclaw daemon --negotiate voting
+velaclaw daemon --negotiate voting
 ```
 
 ---
@@ -201,7 +201,7 @@ zeroclaw daemon --negotiate voting
 ```
 用户: 我应该选择哪个云服务商？AWS、GCP 还是 Azure？
 
-ZeroClaw [投票模式]:
+VelaClaw [投票模式]:
 正在咨询多个模型...
 
 模型分析：
@@ -236,7 +236,7 @@ DeepSeek 建议：AWS
 
 [代码...]
 
-ZeroClaw [级联优化模式]:
+VelaClaw [级联优化模式]:
 正在进行多轮审查...
 
 第一轮 (GPT-4o)：
@@ -265,7 +265,7 @@ ZeroClaw [级联优化模式]:
 ```
 用户: 帮我写一段关于人工智能未来的展望
 
-ZeroClaw [最佳答案模式]:
+VelaClaw [最佳答案模式]:
 正在让多个模型创作...
 
 模型 A 的作品：[展示]
@@ -384,7 +384,7 @@ negotiation:
 
 ### Q: 如何知道协商是否成功？
 
-ZeroClaw 会在回答中显示：
+VelaClaw 会在回答中显示：
 
 ```
 [协商结果 | 策略: voting | 置信度: 85%]

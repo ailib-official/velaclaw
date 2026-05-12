@@ -1,6 +1,6 @@
-# ZeroClaw Commands Reference
+# VelaClaw Commands Reference
 
-This reference is derived from the current CLI surface (`zeroclaw --help`).
+This reference is derived from the current CLI surface (`velaclaw --help`).
 
 Last verified: **February 20, 2026**.
 
@@ -31,51 +31,51 @@ Last verified: **February 20, 2026**.
 
 ### `onboard`
 
-- `zeroclaw onboard`
-- `zeroclaw onboard --interactive`
-- `zeroclaw onboard --channels-only`
-- `zeroclaw onboard --force`
-- `zeroclaw onboard --api-key <KEY> --provider <ID> --memory <sqlite|lucid|markdown|none>`
-- `zeroclaw onboard --api-key <KEY> --provider <ID> --model <MODEL_ID> --memory <sqlite|lucid|markdown|none>`
-- `zeroclaw onboard --api-key <KEY> --provider <ID> --model <MODEL_ID> --memory <sqlite|lucid|markdown|none> --force`
+- `velaclaw onboard`
+- `velaclaw onboard --interactive`
+- `velaclaw onboard --channels-only`
+- `velaclaw onboard --force`
+- `velaclaw onboard --api-key <KEY> --provider <ID> --memory <sqlite|lucid|markdown|none>`
+- `velaclaw onboard --api-key <KEY> --provider <ID> --model <MODEL_ID> --memory <sqlite|lucid|markdown|none>`
+- `velaclaw onboard --api-key <KEY> --provider <ID> --model <MODEL_ID> --memory <sqlite|lucid|markdown|none> --force`
 
 `onboard` safety behavior:
 
 - If `config.toml` already exists, `onboard` asks for explicit confirmation before overwrite.
 - In non-interactive environments, existing `config.toml` causes a safe refusal unless `--force` is passed.
-- Use `zeroclaw onboard --channels-only` when you only need to rotate channel tokens/allowlists.
+- Use `velaclaw onboard --channels-only` when you only need to rotate channel tokens/allowlists.
 
 ### `agent`
 
-- `zeroclaw agent`
-- `zeroclaw agent -m "Hello"`
-- `zeroclaw agent --provider <ID> --model <MODEL> --temperature <0.0-2.0>`
-- `zeroclaw agent --peripheral <board:path>`
+- `velaclaw agent`
+- `velaclaw agent -m "Hello"`
+- `velaclaw agent --provider <ID> --model <MODEL> --temperature <0.0-2.0>`
+- `velaclaw agent --peripheral <board:path>`
 
 ### `gateway` / `daemon`
 
-- `zeroclaw gateway [--host <HOST>] [--port <PORT>]`
-- `zeroclaw daemon [--host <HOST>] [--port <PORT>]`
+- `velaclaw gateway [--host <HOST>] [--port <PORT>]`
+- `velaclaw daemon [--host <HOST>] [--port <PORT>]`
 
 ### `service`
 
-- `zeroclaw service install`
-- `zeroclaw service start`
-- `zeroclaw service stop`
-- `zeroclaw service restart`
-- `zeroclaw service status`
-- `zeroclaw service uninstall`
+- `velaclaw service install`
+- `velaclaw service start`
+- `velaclaw service stop`
+- `velaclaw service restart`
+- `velaclaw service status`
+- `velaclaw service uninstall`
 
 ### `cron`
 
-- `zeroclaw cron list`
-- `zeroclaw cron add <expr> [--tz <IANA_TZ>] <command>`
-- `zeroclaw cron add-at <rfc3339_timestamp> <command>`
-- `zeroclaw cron add-every <every_ms> <command>`
-- `zeroclaw cron once <delay> <command>`
-- `zeroclaw cron remove <id>`
-- `zeroclaw cron pause <id>`
-- `zeroclaw cron resume <id>`
+- `velaclaw cron list`
+- `velaclaw cron add <expr> [--tz <IANA_TZ>] <command>`
+- `velaclaw cron add-at <rfc3339_timestamp> <command>`
+- `velaclaw cron add-every <every_ms> <command>`
+- `velaclaw cron once <delay> <command>`
+- `velaclaw cron remove <id>`
+- `velaclaw cron pause <id>`
+- `velaclaw cron resume <id>`
 
 Notes:
 
@@ -84,20 +84,20 @@ Notes:
 
 ### `models`
 
-- `zeroclaw models refresh`
-- `zeroclaw models refresh --provider <ID>`
-- `zeroclaw models refresh --force`
+- `velaclaw models refresh`
+- `velaclaw models refresh --provider <ID>`
+- `velaclaw models refresh --force`
 
 `models refresh` currently supports live catalog refresh for provider IDs: `openrouter`, `openai`, `anthropic`, `groq`, `mistral`, `deepseek`, `xai`, `together-ai`, `gemini`, `ollama`, `llamacpp`, `astrai`, `venice`, `fireworks`, `cohere`, `moonshot`, `glm`, `zai`, `qwen`, and `nvidia`.
 
 ### `channel`
 
-- `zeroclaw channel list`
-- `zeroclaw channel start`
-- `zeroclaw channel doctor`
-- `zeroclaw channel bind-telegram <IDENTITY>`
-- `zeroclaw channel add <type> <json>`
-- `zeroclaw channel remove <name>`
+- `velaclaw channel list`
+- `velaclaw channel start`
+- `velaclaw channel doctor`
+- `velaclaw channel bind-telegram <IDENTITY>`
+- `velaclaw channel add <type> <json>`
+- `velaclaw channel remove <name>`
 
 Runtime in-chat commands (Telegram/Discord while channel server is running):
 
@@ -117,13 +117,13 @@ Channel runtime also watches `config.toml` and hot-applies updates to:
 
 ### `integrations`
 
-- `zeroclaw integrations info <name>`
+- `velaclaw integrations info <name>`
 
 ### `skills`
 
-- `zeroclaw skills list`
-- `zeroclaw skills install <source>`
-- `zeroclaw skills remove <name>`
+- `velaclaw skills list`
+- `velaclaw skills install <source>`
+- `velaclaw skills remove <name>`
 
 `<source>` accepts git remotes (`https://...`, `http://...`, `ssh://...`, and `git@host:owner/repo.git`) or a local filesystem path.
 
@@ -131,43 +131,43 @@ Skill manifests (`SKILL.toml`) support `prompts` and `[[tools]]`; both are injec
 
 ### `migrate`
 
-- `zeroclaw migrate openclaw [--source <path>] [--dry-run]`
+- `velaclaw migrate openclaw [--source <path>] [--dry-run]`
 
 ### `config`
 
-- `zeroclaw config schema`
+- `velaclaw config schema`
 
 `config schema` prints a JSON Schema (draft 2020-12) for the full `config.toml` contract to stdout.
 
 ### `completions`
 
-- `zeroclaw completions bash`
-- `zeroclaw completions fish`
-- `zeroclaw completions zsh`
-- `zeroclaw completions powershell`
-- `zeroclaw completions elvish`
+- `velaclaw completions bash`
+- `velaclaw completions fish`
+- `velaclaw completions zsh`
+- `velaclaw completions powershell`
+- `velaclaw completions elvish`
 
 `completions` is stdout-only by design so scripts can be sourced directly without log/warning contamination.
 
 ### `hardware`
 
-- `zeroclaw hardware discover`
-- `zeroclaw hardware introspect <path>`
-- `zeroclaw hardware info [--chip <chip_name>]`
+- `velaclaw hardware discover`
+- `velaclaw hardware introspect <path>`
+- `velaclaw hardware info [--chip <chip_name>]`
 
 ### `peripheral`
 
-- `zeroclaw peripheral list`
-- `zeroclaw peripheral add <board> <path>`
-- `zeroclaw peripheral flash [--port <serial_port>]`
-- `zeroclaw peripheral setup-uno-q [--host <ip_or_host>]`
-- `zeroclaw peripheral flash-nucleo`
+- `velaclaw peripheral list`
+- `velaclaw peripheral add <board> <path>`
+- `velaclaw peripheral flash [--port <serial_port>]`
+- `velaclaw peripheral setup-uno-q [--host <ip_or_host>]`
+- `velaclaw peripheral flash-nucleo`
 
 ## Validation Tip
 
 To verify docs against your current binary quickly:
 
 ```bash
-zeroclaw --help
-zeroclaw <command> --help
+velaclaw --help
+velaclaw <command> --help
 ```

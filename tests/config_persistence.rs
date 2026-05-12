@@ -7,7 +7,7 @@
 //! and config file round-trips to verify workspace discovery and persistence.
 
 use std::fs;
-use zerospider::config::{AgentConfig, Config, MemoryConfig};
+use velaclaw::config::{AgentConfig, Config, MemoryConfig};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Config default construction

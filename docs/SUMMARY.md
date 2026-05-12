@@ -1,4 +1,4 @@
-# ZeroSpider Docs Summary (Unified TOC)
+# VelaClaw Docs Summary (Unified TOC)
 
 This file is the canonical table of contents for the documentation system.
 

@@ -1,6 +1,6 @@
 # Custom Provider Configuration
 
-ZeroSpider chat providers are protocol-only after ZS-ML-015. Custom chat
+VelaClaw chat providers are protocol-only after ZS-ML-015. Custom chat
 endpoints must be described as ai-protocol manifests and referenced by a
 logical `provider/model` id.
 
@@ -24,7 +24,7 @@ syntaxes now return a migration error.
 
 ### Config File
 
-Edit `~/.zerospider/config.toml`:
+Edit `~/.velaclaw/config.toml`:
 
 ```toml
 default_provider = "local-gateway/my-model"
@@ -38,7 +38,7 @@ manifests that use a generic token, this is commonly:
 
 ```bash
 export API_KEY="your-api-key"
-zerospider agent
+velaclaw agent
 ```
 
 ## llama.cpp Server (Recommended Local Setup)
@@ -55,7 +55,7 @@ Start a local server (example):
 llama-server -hf ggml-org/gpt-oss-20b-GGUF --jinja -c 133000 --host 127.0.0.1 --port 8033
 ```
 
-Then configure ZeroSpider:
+Then configure VelaClaw:
 
 ```toml
 default_provider = "llamacpp/ggml-org/gpt-oss-20b-GGUF"
@@ -66,11 +66,11 @@ default_temperature = 0.7
 Quick validation:
 
 ```bash
-zerospider models refresh --provider llamacpp/ggml-org/gpt-oss-20b-GGUF
-zerospider agent -m "hello"
+velaclaw models refresh --provider llamacpp/ggml-org/gpt-oss-20b-GGUF
+velaclaw agent -m "hello"
 ```
 
-You do not need to export `ZEROCLAW_API_KEY=dummy` for this flow.
+You do not need to export `VELACLAW_API_KEY=dummy` for this flow.
 
 ## Testing Configuration
 
@@ -78,10 +78,10 @@ Verify your custom manifest-backed endpoint:
 
 ```bash
 # Interactive mode
-zerospider agent
+velaclaw agent
 
 # Single message test
-zerospider agent -m "test message"
+velaclaw agent -m "test message"
 ```
 
 ## Troubleshooting

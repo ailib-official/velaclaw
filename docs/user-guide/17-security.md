@@ -1,6 +1,6 @@
 # 第十七章：安全设置
 
-本章介绍 ZeroClaw 的安全设置，保护你的 AI 助手。
+本章介绍 VelaClaw 的安全设置，保护你的 AI 助手。
 
 ---
 
@@ -21,7 +21,7 @@
 ```
 ┌─────────────────────────────────────┐
 │         用户认证层                   │
-│  (谁能使用 ZeroClaw)                 │
+│  (谁能使用 VelaClaw)                 │
 ├─────────────────────────────────────┤
 │         权限控制层                   │
 │  (能做什么操作)                      │
@@ -36,7 +36,7 @@
 
 ### 默认安全策略
 
-ZeroClaw 采用 **安全优先** 的默认配置：
+VelaClaw 采用 **安全优先** 的默认配置：
 
 - ✓ 默认拒绝所有未知用户
 - ✓ 配对机制验证身份
@@ -55,10 +55,10 @@ ZeroClaw 采用 **安全优先** 的默认配置：
 ```
 用户在渠道: 你好
 
-ZeroClaw: 
+VelaClaw: 
 🔐 首次使用需要配对
 请在服务器上运行：
-zeroclaw channel bind-telegram 123456789
+velaclaw channel bind-telegram 123456789
 
 或输入配对码: 2847
 ```
@@ -67,10 +67,10 @@ zeroclaw channel bind-telegram 123456789
 
 ```bash
 # 方式一：直接绑定
-zeroclaw channel bind-telegram 123456789
+velaclaw channel bind-telegram 123456789
 
 # 方式二：在交互模式输入配对码
-# ZeroClaw 会提示输入收到的配对码
+# VelaClaw 会提示输入收到的配对码
 ```
 
 ### 用户白名单
@@ -211,11 +211,11 @@ tools:
 
 ### API 密钥存储
 
-ZeroClaw 自动加密存储 API 密钥：
+VelaClaw 自动加密存储 API 密钥：
 
 ```bash
 # 密钥存储位置
-~/.zeroclaw/auth/
+~/.velaclaw/auth/
 ├── profiles/
 │   ├── openai.default.enc
 │   └── anthropic.default.enc
@@ -227,13 +227,13 @@ ZeroClaw 自动加密存储 API 密钥：
 
 ```bash
 # 设置适当的文件权限
-chmod 700 ~/.zeroclaw/auth
-chmod 600 ~/.zeroclaw/auth/profiles/*
+chmod 700 ~/.velaclaw/auth
+chmod 600 ~/.velaclaw/auth/profiles/*
 ```
 
 ### 日志脱敏
 
-ZeroClaw 自动脱敏敏感信息：
+VelaClaw 自动脱敏敏感信息：
 
 ```
 # 原始日志会被处理：
@@ -285,26 +285,26 @@ tools:
 
 ```bash
 # 查看工具调用日志
-zeroclaw logs tools
+velaclaw logs tools
 
 # 查看认证日志
-zeroclaw logs auth
+velaclaw logs auth
 ```
 
 ### 4. 备份与恢复
 
 ```bash
 # 定期备份配置
-cp -r ~/.zeroclaw ~/.zeroclaw.backup
+cp -r ~/.velaclaw ~/.velaclaw.backup
 
 # 或设置自动备份
-zeroclaw cron add "0 2 * * *" "EXEC: cp -r ~/.zeroclaw ~/.zeroclaw.backup.$(date +%Y%m%d)"
+velaclaw cron add "0 2 * * *" "EXEC: cp -r ~/.velaclaw ~/.velaclaw.backup.$(date +%Y%m%d)"
 ```
 
 ### 5. 更新安全补丁
 
 ```bash
-# 定期更新 ZeroClaw
+# 定期更新 VelaClaw
 git pull origin main
 cargo build --release
 ```
@@ -330,7 +330,7 @@ audit:
 ### 查看审计日志
 
 ```bash
-zeroclaw logs audit
+velaclaw logs audit
 ```
 
 输出：
@@ -359,7 +359,7 @@ zeroclaw logs audit
 | 文件访问是否限制 | ☐ |
 | 审计日志是否启用 | ☐ |
 | 配置是否定期备份 | ☐ |
-| ZeroClaw 是否最新版本 | ☐ |
+| VelaClaw 是否最新版本 | ☐ |
 
 ---
 

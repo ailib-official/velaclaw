@@ -1,4 +1,4 @@
-//! Utility functions for `ZeroClaw`.
+//! Utility functions for `VelaClaw`.
 //!
 //! This module contains reusable helper functions used across the codebase.
 
@@ -29,7 +29,7 @@ pub fn floor_char_boundary(s: &str, byte_idx: usize) -> usize {
 ///
 /// # Examples
 /// ```ignore
-/// use zerospider::util::truncate_with_ellipsis;
+/// use velaclaw::util::truncate_with_ellipsis;
 ///
 /// // ASCII string - no truncation needed
 /// assert_eq!(truncate_with_ellipsis("hello", 10), "hello");

@@ -1,6 +1,6 @@
 # 第三章：与 AI 对话
 
-本章介绍如何与 ZeroClaw 中的 AI 进行有效对话。
+本章介绍如何与 VelaClaw 中的 AI 进行有效对话。
 
 ---
 
@@ -20,18 +20,18 @@
 **交互模式**（持续对话）：
 
 ```bash
-zeroclaw agent
+velaclaw agent
 ```
 
 ```
-ZeroClaw 交互模式
+VelaClaw 交互模式
 输入消息开始对话，输入 /help 查看帮助，输入 /quit 退出
 
 你: 你好！
-ZeroClaw: 你好！有什么我可以帮你的吗？
+VelaClaw: 你好！有什么我可以帮你的吗？
 
 你: 帮我解释一下什么是递归
-ZeroClaw: 递归是一种编程技术...
+VelaClaw: 递归是一种编程技术...
 
 你: /quit
 再见！
@@ -40,20 +40,20 @@ ZeroClaw: 递归是一种编程技术...
 **单次对话**（一问一答）：
 
 ```bash
-zeroclaw agent --message "什么是机器学习？"
+velaclaw agent --message "什么是机器学习？"
 ```
 
 ### 指定模型
 
 ```bash
 # 使用特定模型
-zeroclaw agent --model gpt-4o
+velaclaw agent --model gpt-4o
 
 # 使用特定 Provider
-zeroclaw agent --provider anthropic --model claude-sonnet
+velaclaw agent --provider anthropic --model claude-sonnet
 
 # 设置温度（创造性程度）
-zeroclaw agent --temperature 0.5
+velaclaw agent --temperature 0.5
 ```
 
 **温度参数说明**：
@@ -74,7 +74,7 @@ zeroclaw agent --temperature 0.5
 
 ```
 你: 什么是光合作用？
-ZeroClaw: 光合作用是植物利用阳光...
+VelaClaw: 光合作用是植物利用阳光...
 ```
 
 ### 带任务的对话
@@ -84,7 +84,7 @@ ZeroClaw: 光合作用是植物利用阳光...
 ```
 你: 帮我写一个 Python 函数，计算列表的平均值
 
-ZeroClaw: 好的，这是一个计算列表平均值的函数：
+VelaClaw: 好的，这是一个计算列表平均值的函数：
 
 ```python
 def calculate_average(numbers):
@@ -100,17 +100,17 @@ print(calculate_average(numbers))  # 输出: 3.0
 
 ### 多轮对话
 
-ZeroClaw 会记住上下文，可以连续讨论：
+VelaClaw 会记住上下文，可以连续讨论：
 
 ```
 你: 帮我写一个排序函数
 
-ZeroClaw: 好的，这是一个冒泡排序函数：
+VelaClaw: 好的，这是一个冒泡排序函数：
 [代码...]
 
 你: 能改成快速排序吗？
 
-ZeroClaw: 当然，这是快速排序版本：
+VelaClaw: 当然，这是快速排序版本：
 [代码...] (AI 知道你在说之前那个排序函数)
 ```
 
@@ -121,7 +121,7 @@ AI 会自动判断何时使用工具：
 ```
 你: 帮我查看当前目录有什么文件
 
-ZeroClaw: [调用 file_read 工具]
+VelaClaw: [调用 file_read 工具]
 当前目录有以下文件：
 - config.yaml
 - README.md
@@ -130,7 +130,7 @@ ZeroClaw: [调用 file_read 工具]
 
 你: 读取 README.md 的内容
 
-ZeroClaw: [调用 file_read 工具]
+VelaClaw: [调用 file_read 工具]
 README.md 的内容是：
 # 项目说明
 ...
@@ -176,29 +176,29 @@ README.md 的内容是：
 ```
 你: 我想开发一个待办事项应用，我们先讨论一下架构设计
 
-ZeroClaw: 好的，我们来讨论架构...
+VelaClaw: 好的，我们来讨论架构...
 
 你: 数据存储用 SQLite 还是 JSON 文件更好？
 
-ZeroClaw: 我建议使用 SQLite，因为...
+VelaClaw: 我建议使用 SQLite，因为...
 
 你: 那我们先设计数据库表结构
 
-ZeroClaw: 建议的表结构如下...
+VelaClaw: 建议的表结构如下...
 ```
 
 ### 利用记忆
 
-ZeroClaw 会记住之前的对话：
+VelaClaw 会记住之前的对话：
 
 ```
 第一天：
 你: 我叫小明，是一名 Python 开发者
-ZeroClaw: 很高兴认识你，小明！
+VelaClaw: 很高兴认识你，小明！
 
 第二天：
 你: 你还记得我的名字吗？
-ZeroClaw: 记得，你叫小明，是一名 Python 开发者。
+VelaClaw: 记得，你叫小明，是一名 Python 开发者。
 ```
 
 ---
@@ -209,7 +209,7 @@ ZeroClaw: 记得，你叫小明，是一名 Python 开发者。
 
 ```bash
 # 查看最近对话
-zeroclaw memory recall "对话历史"
+velaclaw memory recall "对话历史"
 ```
 
 ### 清除记忆
@@ -217,7 +217,7 @@ zeroclaw memory recall "对话历史"
 ```
 你: /forget
 
-ZeroClaw: 已清除本次对话的短期记忆。
+VelaClaw: 已清除本次对话的短期记忆。
 ```
 
 ### 使用系统提示
@@ -225,7 +225,7 @@ ZeroClaw: 已清除本次对话的短期记忆。
 在配置文件中设置系统提示：
 
 ```yaml
-# ~/.zeroclaw/config.yaml
+# ~/.velaclaw/config.yaml
 agent:
   system_prompt: |
     你是一个专业的编程助手。
@@ -236,12 +236,12 @@ agent:
 
 ### 流式输出
 
-默认情况下，ZeroClaw 会流式输出 AI 的回复：
+默认情况下，VelaClaw 会流式输出 AI 的回复：
 
 ```
 你: 写一个长故事
 
-ZeroClaw: 从前有一个小村庄，村里住着...
+VelaClaw: 从前有一个小村庄，村里住着...
 (文字逐步显示，不需要等待完整回复)
 ```
 
@@ -281,7 +281,7 @@ agent:
 ```
 你: 这个回答不太对，我想要的是...
 
-ZeroClaw: 抱歉理解有误，让我重新理解一下...
+VelaClaw: 抱歉理解有误，让我重新理解一下...
 
 你: 我给你举个例子：
 输入: [1, 2, 3]
@@ -293,7 +293,7 @@ ZeroClaw: 抱歉理解有误，让我重新理解一下...
 ```
 你: /clear
 
-ZeroClaw: 已清除当前对话上下文，但保留了长期记忆。
+VelaClaw: 已清除当前对话上下文，但保留了长期记忆。
 ```
 
 ### Q: 如何让 AI 更专业？

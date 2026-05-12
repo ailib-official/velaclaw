@@ -12,16 +12,16 @@ Dành cho cài đặt lần đầu và làm quen nhanh.
 
 | Tình huống | Lệnh |
 |----------|---------|
-| Có API key, muốn cài nhanh nhất | `zerospider onboard --api-key sk-... --provider openai/gpt-5.2` |
-| Muốn được hướng dẫn từng bước | `zeroclaw onboard --interactive` |
-| Đã có config, chỉ cần sửa kênh | `zeroclaw onboard --channels-only` |
+| Có API key, muốn cài nhanh nhất | `velaclaw onboard --api-key sk-... --provider openai/gpt-5.2` |
+| Muốn được hướng dẫn từng bước | `velaclaw onboard --interactive` |
+| Đã có config, chỉ cần sửa kênh | `velaclaw onboard --channels-only` |
 | Dùng xác thực subscription | Xem [Subscription Auth](../../README.vi.md#subscription-auth-openai-codex--claude-code) |
 
 ## Thiết lập và kiểm tra
 
-- Thiết lập nhanh: `zerospider onboard --api-key "sk-..." --provider openai/gpt-5.2`
-- Thiết lập tương tác: `zeroclaw onboard --interactive`
-- Kiểm tra môi trường: `zeroclaw status` + `zeroclaw doctor`
+- Thiết lập nhanh: `velaclaw onboard --api-key "sk-..." --provider openai/gpt-5.2`
+- Thiết lập tương tác: `velaclaw onboard --interactive`
+- Kiểm tra môi trường: `velaclaw status` + `velaclaw doctor`
 
 ## Tiếp theo
 

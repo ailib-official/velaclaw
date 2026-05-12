@@ -1,10 +1,10 @@
-# ZeroClaw Code Style Guide
+# VelaClaw Code Style Guide
 
-This style guide provides instructions for Gemini Code Assist when reviewing pull requests for the ZeroClaw project.
+This style guide provides instructions for Gemini Code Assist when reviewing pull requests for the VelaClaw project.
 
 ## Project Overview
 
-ZeroClaw is a Rust-based security-focused project that handles encryption, secrets management, and secure configuration. Code reviews should prioritize security, memory safety, and Rust best practices.
+VelaClaw is a Rust-based security-focused project that handles encryption, secrets management, and secure configuration. Code reviews should prioritize security, memory safety, and Rust best practices.
 
 ## General Principles
 

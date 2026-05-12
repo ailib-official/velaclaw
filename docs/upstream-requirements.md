@@ -2,7 +2,7 @@
 
 ## Overview
 
-During the integration of ai-lib-rust into ZeroClaw, several gaps and enhancement opportunities were identified. This document summarizes the new requirements for ai-lib-rust and ai-protocol projects.
+During the integration of ai-lib-rust into VelaClaw, several gaps and enhancement opportunities were identified. This document summarizes the new requirements for ai-lib-rust and ai-protocol projects.
 
 ---
 
@@ -93,7 +93,7 @@ impl AiClient {
 }
 ```
 
-**Use Case**: ZeroClaw's ProviderScorer needs real-time metrics for adaptive model selection.
+**Use Case**: VelaClaw's ProviderScorer needs real-time metrics for adaptive model selection.
 
 ---
 
@@ -117,7 +117,7 @@ impl MultiModelClient {
 }
 ```
 
-**Use Case**: Simplifies multi-provider scenarios in ZeroClaw.
+**Use Case**: Simplifies multi-provider scenarios in VelaClaw.
 
 ---
 
@@ -142,7 +142,7 @@ pub enum NegotiationStrategy {
 }
 ```
 
-**Use Case**: ZeroClaw's agent loop can leverage built-in negotiation.
+**Use Case**: VelaClaw's agent loop can leverage built-in negotiation.
 
 ---
 
@@ -174,7 +174,7 @@ impl Error {
 }
 ```
 
-**Use Case**: ZeroClaw's ReliableProvider can make smarter retry decisions.
+**Use Case**: VelaClaw's ReliableProvider can make smarter retry decisions.
 
 ---
 
@@ -354,13 +354,13 @@ health:
 Suggest adding a feature matrix document to ai-protocol:
 
 ```
-| Feature          | ai-lib-rust | ZeroClaw | Notes                    |
+| Feature          | ai-lib-rust | VelaClaw | Notes                    |
 |------------------|-------------|----------|--------------------------|
 | embeddings       | ✅          | ❌       | Requires feature flag    |
 | batch            | ✅          | ✅       | Integrated               |
-| negotiation      | ❌          | ✅       | ZeroClaw implementation  |
-| scoring          | ❌          | ✅       | ZeroClaw implementation  |
-| multi-model      | ❌          | ✅       | ZeroClaw implementation  |
+| negotiation      | ❌          | ✅       | VelaClaw implementation  |
+| scoring          | ❌          | ✅       | VelaClaw implementation  |
+| multi-model      | ❌          | ✅       | VelaClaw implementation  |
 ```
 
 ### 3.2 Shared Test Fixtures
@@ -410,7 +410,7 @@ ai-lib-rust >= v0.9.0 (for model() override)
 
 ## 5. Proposed Contributions
 
-The ZeroClaw team can contribute back:
+The VelaClaw team can contribute back:
 
 1. **Scoring System**: The `ProviderScorer` implementation could be generalized and moved to ai-lib-rust
 2. **Selector Logic**: `AdaptiveSelector` patterns could inform ai-lib-rust's model selection
@@ -419,5 +419,5 @@ The ZeroClaw team can contribute back:
 
 ---
 
-*Document generated from ZeroClaw feat/ai-protocol-integration branch*
+*Document generated from VelaClaw feat/ai-protocol-integration branch*
 *Date: 2026-02-20*

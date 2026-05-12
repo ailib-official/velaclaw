@@ -1,8 +1,8 @@
 # Legacy factory ↔ ai-protocol parity (ZS-ML-014)
 
-**Purpose.** Before **`legacy-providers` is removed** (ZS-ML-015), every legacy-only string key/resolution arm in `zerospider` must have an equivalent **`provider/model` + ai-protocol manifest** path (canonical vendor manifests live in [`ailib-official/ai-protocol`](https://github.com/ailib-official/ai-protocol)).
+**Purpose.** Before **`legacy-providers` is removed** (ZS-ML-015), every legacy-only string key/resolution arm in `velaclaw` must have an equivalent **`provider/model` + ai-protocol manifest** path (canonical vendor manifests live in [`ailib-official/ai-protocol`](https://github.com/ailib-official/ai-protocol)).
 
-**Rule.** ZeroSpider must not introduce new vendor-special cases off-manifest; gaps are fixed in ai-protocol manifests or explicitly marked unsupported.
+**Rule.** VelaClaw must not introduce new vendor-special cases off-manifest; gaps are fixed in ai-protocol manifests or explicitly marked unsupported.
 
 ## Coverage table
 

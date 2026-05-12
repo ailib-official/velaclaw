@@ -5,12 +5,12 @@
 ## Test plan
 
 - [ ] `cargo fmt --all -- --check`
-- [ ] `cargo clippy -p zerospider --all-targets --features ai-protocol --locked -- -D warnings`
-- [ ] `cargo test -p zerospider --features ai-protocol --locked`
+- [ ] `cargo clippy -p velaclaw --all-targets --features ai-protocol --locked -- -D warnings`
+- [ ] `cargo test -p velaclaw --features ai-protocol --locked`
 
 ## Fresh-Clone Protocol Smoke
 
-- [ ] Fresh clone uses `origin -> https://github.com/ailib-official/zerospider.git`
+- [ ] Fresh clone uses `origin -> https://github.com/ailib-official/velaclaw.git`
 - [ ] `AI_PROTOCOL_DIR` points to a local `ailib-official/ai-protocol` checkout
 - [ ] A protocol model id such as `openai/gpt-5.2` can be configured through onboarding or `config.toml`
 - [ ] A deprecated chat key such as `openrouter`, `custom:https://...`, or `anthropic-custom:https://...` returns a migration error with `provider/model`, `AI_PROTOCOL_DIR`, and `docs/migration-legacy-to-protocol.md`
@@ -82,7 +82,7 @@ cargo test
 
 - Data-hygiene status (`pass|needs-follow-up`):
 - Redaction/anonymization notes:
-- Neutral wording confirmation (use ZeroClaw/project-native labels if identity-like wording is needed):
+- Neutral wording confirmation (use VelaClaw/project-native labels if identity-like wording is needed):
 
 ## Compatibility / Migration
 

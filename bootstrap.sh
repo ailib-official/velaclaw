@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# ZeroSpider Remote Server Bootstrap Script
+# VelaClaw Remote Server Bootstrap Script
 # 
-# This script prepares a remote server for ZeroSpider deployment by setting up
+# This script prepares a remote server for VelaClaw deployment by setting up
 # the necessary permissions, directories, and sudoers configuration.
 #
 # Usage: bash <(curl -s https://your-server/bootstrap.sh)
@@ -17,7 +17,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-echo -e "${GREEN}=== ZeroSpider Remote Server Bootstrap ===${NC}"
+echo -e "${GREEN}=== VelaClaw Remote Server Bootstrap ===${NC}"
 echo ""
 
 # Function to print info
@@ -54,52 +54,52 @@ fi
 
 # 2. Create working directory
 info "Setting up working directory..."
-sudo mkdir -p /opt/zerospider
-sudo chown -R deploy:deploy /opt/zerospider
-info "✓ Working directory /opt/zerospider ready"
+sudo mkdir -p /opt/velaclaw
+sudo chown -R deploy:deploy /opt/velaclaw
+info "✓ Working directory /opt/velaclaw ready"
 
 # 3. Create logs directory
-sudo mkdir -p /opt/zerospider/logs
-sudo chown -R deploy:deploy /opt/zerospider/logs
+sudo mkdir -p /opt/velaclaw/logs
+sudo chown -R deploy:deploy /opt/velaclaw/logs
 info "✓ Logs directory ready"
 
 # 4. Create remote binary file (placeholder)
 info "Creating placeholder for remote binary..."
-if [[ ! -f /usr/local/bin/zerospider ]]; then
-    sudo touch /usr/local/bin/zerospider
-    sudo chown deploy:deploy /usr/local/bin/zerospider
-    sudo chmod 755 /usr/local/bin/zerospider
-    info "✓ Remote binary placeholder created at /usr/local/bin/zerospider"
+if [[ ! -f /usr/local/bin/velaclaw ]]; then
+    sudo touch /usr/local/bin/velaclaw
+    sudo chown deploy:deploy /usr/local/bin/velaclaw
+    sudo chmod 755 /usr/local/bin/velaclaw
+    info "✓ Remote binary placeholder created at /usr/local/bin/velaclaw"
 else
-    info "✓ Remote binary file already exists at /usr/local/bin/zerospider"
+    info "✓ Remote binary file already exists at /usr/local/bin/velaclaw"
     info "  (will be overwritten during deployment)"
 fi
 
 # 5. Configure sudoers for deploy user (systemd mode)
 info "Configuring sudoers for systemctl commands..."
-SUDOERS_FILE="/etc/sudoers.d/deployer-zerospider"
+SUDOERS_FILE="/etc/sudoers.d/deployer-velaclaw"
 
 sudo tee "$SUDOERS_FILE" > /dev/null <<EOF
-# ZeroSpider deployment sudoers for 'deploy' user
-# Allows deploy user to manage zerospider systemd service without password
+# VelaClaw deployment sudoers for 'deploy' user
+# Allows deploy user to manage velaclaw systemd service without password
 
 # Systemd commands
 deploy ALL=(ALL) NOPASSWD: /usr/bin/systemctl daemon-reload, \
-    /usr/bin/systemctl enable zerospider, \
-    /usr/bin/systemctl start zerospider, \
-    /usr/bin/systemctl stop zerospider, \
-    /usr/bin/systemctl restart zerospider
+    /usr/bin/systemctl enable velaclaw, \
+    /usr/bin/systemctl start velaclaw, \
+    /usr/bin/systemctl stop velaclaw, \
+    /usr/bin/systemctl restart velaclaw
 
 # Directory creation/ownership (for working directory)
-deploy ALL=(ALL) NOPASSWD: /bin/mkdir -p /opt/zerospider, \
-    /bin/mkdir -p /opt/zerospider/logs, \
-    /bin/chown -R deploy:deploy /opt/zerospider, \
-    /bin/chown -R deploy:deploy /usr/local/bin/zerospider
+deploy ALL=(ALL) NOPASSWD: /bin/mkdir -p /opt/velaclaw, \
+    /bin/mkdir -p /opt/velaclaw/logs, \
+    /bin/chown -R deploy:deploy /opt/velaclaw, \
+    /bin/chown -R deploy:deploy /usr/local/bin/velaclaw
 
 # Binary installation
-deploy ALL=(ALL) NOPASSWD: /usr/bin/touch /usr/local/bin/zerospider, \
-    /bin/chown deploy:deploy /usr/local/bin/zerospider, \
-    /usr/bin/chmod 755 /usr/local/bin/zerospider
+deploy ALL=(ALL) NOPASSWD: /usr/bin/touch /usr/local/bin/velaclaw, \
+    /bin/chown deploy:deploy /usr/local/bin/velaclaw, \
+    /usr/bin/chmod 755 /usr/local/bin/velaclaw
 EOF
 
 sudo chmod 0440 "$SUDOERS_FILE"
@@ -116,23 +116,23 @@ else
 fi
 
 # 7. Systemd service file (for systemd mode)
-info "Creating systemd service file for zerospider..."
-SYSTEMD_FILE="/etc/systemd/system/zerospider.service"
+info "Creating systemd service file for velaclaw..."
+SYSTEMD_FILE="/etc/systemd/system/velaclaw.service"
 
 sudo tee "$SYSTEMD_FILE" > /dev/null <<EOF
 [Unit]
-Description=ZeroSpider AI Agent
+Description=VelaClaw AI Agent
 After=network.target
 
 [Service]
 Type=simple
 User=deploy
-WorkingDirectory=/opt/zerospider
-ExecStart=/usr/local/bin/zerospider
+WorkingDirectory=/opt/velaclaw
+ExecStart=/usr/local/bin/velaclaw
 Restart=on-failure
 RestartSec=10
-StandardOutput=attach:/opt/zerospider/logs/zerospider.log
-StandardError=attach:/opt/zerospider/logs/zerospider-error.log
+StandardOutput=attach:/opt/velaclaw/logs/velaclaw.log
+StandardError=attach:/opt/velaclaw/logs/velaclaw-error.log
 
 [Install]
 WantedBy=multi-user.target
@@ -153,11 +153,11 @@ fi
 echo ""
 echo -e "${GREEN}=== Bootstrap Complete ===${NC}"
 echo ""
-info "The remote server is now ready for ZeroSpider deployment!"
+info "The remote server is now ready for VelaClaw deployment!"
 echo ""
 echo -e "${YELLOW}Next steps:${NC}"
-echo "1. Run 'zerospider deploy validate --server <your-server-id>' to verify permissions"
-echo "2. Run 'zerospider deploy deploy --server <your-server-id>' to deploy"
+echo "1. Run 'velaclaw deploy validate --server <your-server-id>' to verify permissions"
+echo "2. Run 'velaclaw deploy deploy --server <your-server-id>' to deploy"
 echo ""
 echo -e "${GREEN}Deployment modes supported:${NC}"
 echo "  - Direct:  Binary deployment (use sudo=true if needed)"
@@ -171,8 +171,8 @@ echo "  - First deployment may be slower as files are copied"
 echo ""
 
 # 10. Create a marker file that bootstrap was run
-echo "bootstrap=$(date -Iseconds)" | sudo tee /opt/zerospider/.bootstrap-complete > /dev/null
-sudo chown deploy:deploy /opt/zerospider/.bootstrap-complete
-info "✓ Marker file created at /opt/zerospider/.bootstrap-complete"
+echo "bootstrap=$(date -Iseconds)" | sudo tee /opt/velaclaw/.bootstrap-complete > /dev/null
+sudo chown deploy:deploy /opt/velaclaw/.bootstrap-complete
+info "✓ Marker file created at /opt/velaclaw/.bootstrap-complete"
 echo ""
 echo -e "${GREEN}Bootstrap script completed successfully!${NC}"

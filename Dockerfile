@@ -20,9 +20,9 @@ RUN mkdir -p src benches crates/robot-kit/src \
     && echo "fn main() {}" > src/main.rs \
     && echo "fn main() {}" > benches/agent_benchmarks.rs \
     && echo "pub fn placeholder() {}" > crates/robot-kit/src/lib.rs
-RUN --mount=type=cache,id=zeroclaw-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
-    --mount=type=cache,id=zeroclaw-cargo-git,target=/usr/local/cargo/git,sharing=locked \
-    --mount=type=cache,id=zeroclaw-target,target=/app/target,sharing=locked \
+RUN --mount=type=cache,id=velaclaw-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=velaclaw-cargo-git,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,id=velaclaw-target,target=/app/target,sharing=locked \
     cargo build --release --locked
 RUN rm -rf src benches crates/robot-kit/src
 
@@ -31,19 +31,19 @@ COPY src/ src/
 COPY benches/ benches/
 COPY crates/ crates/
 COPY firmware/ firmware/
-RUN --mount=type=cache,id=zeroclaw-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
-    --mount=type=cache,id=zeroclaw-cargo-git,target=/usr/local/cargo/git,sharing=locked \
-    --mount=type=cache,id=zeroclaw-target,target=/app/target,sharing=locked \
+RUN --mount=type=cache,id=velaclaw-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=velaclaw-cargo-git,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,id=velaclaw-target,target=/app/target,sharing=locked \
     cargo build --release --locked && \
-    cp target/release/zeroclaw /app/zeroclaw && \
-    strip /app/zeroclaw
+    cp target/release/velaclaw /app/velaclaw && \
+    strip /app/velaclaw
 
 # Prepare runtime directory structure and default config inline (no extra stage)
-RUN mkdir -p /zeroclaw-data/.zeroclaw /zeroclaw-data/workspace && \
-    cat > /zeroclaw-data/.zeroclaw/config.toml <<EOF && \
-    chown -R 65534:65534 /zeroclaw-data
-workspace_dir = "/zeroclaw-data/workspace"
-config_path = "/zeroclaw-data/.zeroclaw/config.toml"
+RUN mkdir -p /velaclaw-data/.velaclaw /velaclaw-data/workspace && \
+    cat > /velaclaw-data/.velaclaw/config.toml <<EOF && \
+    chown -R 65534:65534 /velaclaw-data
+workspace_dir = "/velaclaw-data/workspace"
+config_path = "/velaclaw-data/.velaclaw/config.toml"
 api_key = ""
 default_provider = "openai/gpt-5.2"
 default_model = "openai/gpt-5.2"
@@ -64,49 +64,49 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /zeroclaw-data /zeroclaw-data
-COPY --from=builder /app/zeroclaw /usr/local/bin/zeroclaw
+COPY --from=builder /velaclaw-data /velaclaw-data
+COPY --from=builder /app/velaclaw /usr/local/bin/velaclaw
 
 # Overwrite minimal config with DEV template (Ollama defaults)
-COPY dev/config.template.toml /zeroclaw-data/.zeroclaw/config.toml
-RUN chown 65534:65534 /zeroclaw-data/.zeroclaw/config.toml
+COPY dev/config.template.toml /velaclaw-data/.velaclaw/config.toml
+RUN chown 65534:65534 /velaclaw-data/.velaclaw/config.toml
 
 # Environment setup
 # Use consistent workspace path
-ENV ZEROCLAW_WORKSPACE=/zeroclaw-data/workspace
-ENV HOME=/zeroclaw-data
+ENV VELACLAW_WORKSPACE=/velaclaw-data/workspace
+ENV HOME=/velaclaw-data
 # Defaults for local dev (Ollama) - matches config.template.toml
 ENV PROVIDER="ollama"
-ENV ZEROCLAW_MODEL="llama3.2"
-ENV ZEROCLAW_GATEWAY_PORT=3000
+ENV VELACLAW_MODEL="llama3.2"
+ENV VELACLAW_GATEWAY_PORT=3000
 
 # Note: API_KEY is intentionally NOT set here to avoid confusion.
 # It is set in config.toml as the Ollama URL.
 
-WORKDIR /zeroclaw-data
+WORKDIR /velaclaw-data
 USER 65534:65534
 EXPOSE 3000
-ENTRYPOINT ["zeroclaw"]
+ENTRYPOINT ["velaclaw"]
 CMD ["gateway"]
 
 # ── Stage 3: Production Runtime (Distroless) ─────────────────
 FROM gcr.io/distroless/cc-debian13:nonroot@sha256:8f960b7fc6a5d6e28bb07f982655925d6206678bd9a6cde2ad00ddb5e2077d78 AS release
 
-COPY --from=builder /app/zeroclaw /usr/local/bin/zeroclaw
-COPY --from=builder /zeroclaw-data /zeroclaw-data
+COPY --from=builder /app/velaclaw /usr/local/bin/velaclaw
+COPY --from=builder /velaclaw-data /velaclaw-data
 
 # Environment setup
-ENV ZEROCLAW_WORKSPACE=/zeroclaw-data/workspace
-ENV HOME=/zeroclaw-data
+ENV VELACLAW_WORKSPACE=/velaclaw-data/workspace
+ENV HOME=/velaclaw-data
 # Default provider (model is set in config.toml, not here,
 # so config file edits are not silently overridden)
 ENV PROVIDER="openrouter"
-ENV ZEROCLAW_GATEWAY_PORT=3000
+ENV VELACLAW_GATEWAY_PORT=3000
 
 # API_KEY must be provided at runtime!
 
-WORKDIR /zeroclaw-data
+WORKDIR /velaclaw-data
 USER 65534:65534
 EXPOSE 3000
-ENTRYPOINT ["zeroclaw"]
+ENTRYPOINT ["velaclaw"]
 CMD ["gateway"]

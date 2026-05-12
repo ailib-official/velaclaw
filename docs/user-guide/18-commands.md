@@ -1,6 +1,6 @@
 # 第十八章：命令参考
 
-本章提供 ZeroSpider 所有命令的快速参考。
+本章提供 VelaClaw 所有命令的快速参考。
 
 ---
 
@@ -9,20 +9,20 @@
 ### 查看帮助
 
 ```bash
-zerospider --help
-zerospider [command] --help
+velaclaw --help
+velaclaw [command] --help
 ```
 
 ### 查看版本
 
 ```bash
-zerospider --version
+velaclaw --version
 ```
 
 ### 查看状态
 
 ```bash
-zerospider status
+velaclaw status
 ```
 
 ---
@@ -33,13 +33,13 @@ zerospider status
 
 ```bash
 # 快速配置
-zerospider onboard
+velaclaw onboard
 
 # 交互式配置
-zerospider onboard --interactive
+velaclaw onboard --interactive
 
 # 指定参数
-zerospider onboard --api-key sk-xxx --provider openai/gpt-5.2
+velaclaw onboard --api-key sk-xxx --provider openai/gpt-5.2
 ```
 
 ---
@@ -50,22 +50,22 @@ zerospider onboard --api-key sk-xxx --provider openai/gpt-5.2
 
 ```bash
 # 交互模式
-zerospider agent
+velaclaw agent
 
 # 单次对话
-zerospider agent --message "你好"
+velaclaw agent --message "你好"
 
 # 指定模型
-zerospider agent --provider openai --model gpt-4o
+velaclaw agent --provider openai --model gpt-4o
 
 # 设置温度
-zerospider agent --temperature 0.7
+velaclaw agent --temperature 0.7
 
 # 启用智能选择
-zerospider agent --smart
+velaclaw agent --smart
 
 # 启用多模型协商
-zerospider agent --negotiate voting
+velaclaw agent --negotiate voting
 ```
 
 ---
@@ -75,20 +75,20 @@ zerospider agent --negotiate voting
 ### providers - 列出支持的 Provider
 
 ```bash
-zerospider providers
+velaclaw providers
 ```
 
 ### models - 管理模型
 
 ```bash
 # 刷新模型列表
-zerospider models refresh
+velaclaw models refresh
 
 # 刷新特定 Provider
-zerospider models refresh --provider openai
+velaclaw models refresh --provider openai
 
 # 强制刷新
-zerospider models refresh --force
+velaclaw models refresh --force
 ```
 
 ---
@@ -99,22 +99,22 @@ zerospider models refresh --force
 
 ```bash
 # 查看认证状态
-zerospider auth status
+velaclaw auth status
 
 # 列出认证配置
-zerospider auth list
+velaclaw auth list
 
 # 粘贴 Token
-zerospider auth paste-token --provider anthropic
+velaclaw auth paste-token --provider anthropic
 
 # OAuth 登录
-zerospider auth login --provider openai-codex --device-code
+velaclaw auth login --provider openai-codex --device-code
 
 # 切换配置
-zerospider auth use --provider openai --profile work
+velaclaw auth use --provider openai --profile work
 
 # 删除认证
-zerospider auth logout --provider openai
+velaclaw auth logout --provider openai
 ```
 
 ---
@@ -125,22 +125,22 @@ zerospider auth logout --provider openai
 
 ```bash
 # 列出渠道
-zerospider channel list
+velaclaw channel list
 
 # 启动渠道
-zerospider channel start
+velaclaw channel start
 
 # 健康检查
-zerospider channel doctor
+velaclaw channel doctor
 
 # 添加渠道
-zerospider channel add telegram '{"token": "YOUR_TOKEN"}'
+velaclaw channel add telegram '{"token": "YOUR_TOKEN"}'
 
 # 删除渠道
-zerospider channel remove telegram
+velaclaw channel remove telegram
 
 # 绑定 Telegram 用户
-zerospider channel bind-telegram username_or_id
+velaclaw channel bind-telegram username_or_id
 ```
 
 ---
@@ -151,35 +151,35 @@ zerospider channel bind-telegram username_or_id
 
 ```bash
 # 列出任务
-zerospider cron list
+velaclaw cron list
 
 # 添加任务（cron 表达式）
-zerospider cron add "0 9 * * *" "提醒内容"
+velaclaw cron add "0 9 * * *" "提醒内容"
 
 # 添加任务（指定时间）
-zerospider cron add-at "2024-12-31T23:59:00" "新年快乐"
+velaclaw cron add-at "2024-12-31T23:59:00" "新年快乐"
 
 # 添加任务（固定间隔）
-zerospider cron add-every 3600000 "每小时提醒"  # 毫秒
+velaclaw cron add-every 3600000 "每小时提醒"  # 毫秒
 
 # 添加任务（延迟执行）
-zerospider cron once "30m" "30分钟后提醒"
+velaclaw cron once "30m" "30分钟后提醒"
 
 # 删除任务
-zerospider cron remove task_id
+velaclaw cron remove task_id
 
 # 更新任务
-zerospider cron update task_id --expression "0 10 * * *"
+velaclaw cron update task_id --expression "0 10 * * *"
 
 # 暂停/恢复
-zerospider cron pause task_id
-zerospider cron resume task_id
+velaclaw cron pause task_id
+velaclaw cron resume task_id
 
 # 立即执行
-zerospider cron run task_id
+velaclaw cron run task_id
 
 # 查看执行历史
-zerospider cron runs
+velaclaw cron runs
 ```
 
 ---
@@ -190,38 +190,38 @@ zerospider cron runs
 
 ```bash
 # 启动守护进程
-zerospider daemon
+velaclaw daemon
 
 # 指定端口
-zerospider daemon --port 8080
+velaclaw daemon --port 8080
 
 # 指定主机
-zerospider daemon --host 0.0.0.0
+velaclaw daemon --host 0.0.0.0
 ```
 
 ### gateway - 启动网关
 
 ```bash
-zerospider gateway --port 8080
+velaclaw gateway --port 8080
 ```
 
 ### service - 系统服务管理
 
 ```bash
 # 安装服务
-zerospider service install
+velaclaw service install
 
 # 启动服务
-zerospider service start
+velaclaw service start
 
 # 停止服务
-zerospider service stop
+velaclaw service stop
 
 # 查看状态
-zerospider service status
+velaclaw service status
 
 # 卸载服务
-zerospider service uninstall
+velaclaw service uninstall
 ```
 
 ---
@@ -232,13 +232,13 @@ zerospider service uninstall
 
 ```bash
 # 全面诊断
-zerospider doctor
+velaclaw doctor
 
 # 检查模型
-zerospider doctor models
+velaclaw doctor models
 
 # 检查特定 Provider
-zerospider doctor models --provider openai
+velaclaw doctor models --provider openai
 ```
 
 ---
@@ -249,13 +249,13 @@ zerospider doctor models --provider openai
 
 ```bash
 # 列出技能
-zerospider skills list
+velaclaw skills list
 
 # 安装技能
-zerospider skills install https://github.com/user/skill
+velaclaw skills install https://github.com/user/skill
 
 # 删除技能
-zerospider skills remove skill_name
+velaclaw skills remove skill_name
 ```
 
 ---
@@ -266,7 +266,7 @@ zerospider skills remove skill_name
 
 ```bash
 # 查看配置 Schema
-zerospider config schema
+velaclaw config schema
 ```
 
 ---
@@ -277,7 +277,7 @@ zerospider config schema
 
 ```bash
 # 查看集成详情
-zerospider integrations info composio
+velaclaw integrations info composio
 ```
 
 ---
@@ -288,26 +288,26 @@ zerospider integrations info composio
 
 ```bash
 # 发现 USB 设备
-zerospider hardware discover
+velaclaw hardware discover
 
 # 检查设备
-zerospider hardware introspect --path /dev/ttyACM0
+velaclaw hardware introspect --path /dev/ttyACM0
 
 # 获取芯片信息
-zerospider hardware info --chip STM32F401RETx
+velaclaw hardware info --chip STM32F401RETx
 ```
 
 ### peripheral - 外设管理
 
 ```bash
 # 列出外设
-zerospider peripheral list
+velaclaw peripheral list
 
 # 添加外设
-zerospider peripheral add nucleo-f401re /dev/ttyACM0
+velaclaw peripheral add nucleo-f401re /dev/ttyACM0
 
 # 刷写固件
-zerospider peripheral flash --port /dev/ttyACM0
+velaclaw peripheral flash --port /dev/ttyACM0
 ```
 
 ---
@@ -318,13 +318,13 @@ zerospider peripheral flash --port /dev/ttyACM0
 
 ```bash
 # 从 OpenClaw 迁移
-zerospider migrate openclaw
+velaclaw migrate openclaw
 
 # 指定源目录
-zerospider migrate openclaw --source /path/to/openclaw
+velaclaw migrate openclaw --source /path/to/openclaw
 
 # 预览（不写入）
-zerospider migrate openclaw --dry-run
+velaclaw migrate openclaw --dry-run
 ```
 
 ---
@@ -335,25 +335,25 @@ zerospider migrate openclaw --dry-run
 
 ```bash
 # 部署到服务器
-zerospider deploy server_name
+velaclaw deploy server_name
 
 # 查看状态
-zerospider deploy status server_name
+velaclaw deploy status server_name
 
 # 健康检查
-zerospider deploy health-check server_name
+velaclaw deploy health-check server_name
 
 # 更新
-zerospider deploy update server_name
+velaclaw deploy update server_name
 
 # 回滚
-zerospider deploy rollback server_name
+velaclaw deploy rollback server_name
 
 # 查看日志
-zerospider deploy logs server_name --follow
+velaclaw deploy logs server_name --follow
 
 # 重启
-zerospider deploy restart server_name
+velaclaw deploy restart server_name
 ```
 
 ---

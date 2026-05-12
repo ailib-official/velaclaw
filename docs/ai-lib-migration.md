@@ -1,20 +1,20 @@
-# ZeroSpider ↔ ai-lib-rust / ai-protocol migration
+# VelaClaw ↔ ai-lib-rust / ai-protocol migration
 
-English summary + 中文：本页固定 **版本矩阵** 与本地开发方式，对应 `ZEROSPIDER_AI_LIB_MIGRATION_PLAN.md` Phase 0。
+English summary + 中文：本页固定 **版本矩阵** 与本地开发方式，对应 `VELACLAW_AI_LIB_MIGRATION_PLAN.md` Phase 0。
 
 **User-facing migration** from built-in HTTP shorthands to `provider/model` + `AI_PROTOCOL_DIR`: see **`docs/migration-legacy-to-protocol.md`**.
 
-**Clone / Git remote hygiene:** canonical development remote is **`ailib-official/zerospider`**; do not leave `main` tracking an archived hiddenpath default (see **`CONTRIBUTING.md`** § “Canonical Git remote”).
+**Clone / Git remote hygiene:** canonical development remote is **`ailib-official/velaclaw`**; do not leave `main` tracking an archived hiddenpath default (see **`CONTRIBUTING.md`** § “Canonical Git remote”).
 
 ## Compatibility window (Phase 6)
 
-ZeroSpider is **pre-1.0**; treat minors as potentially breaking until 1.0.
+VelaClaw is **pre-1.0**; treat minors as potentially breaking until 1.0.
 
 | Area | Policy |
 |------|--------|
 | `ai-lib-rust` (crates.io; ZS-ML-012) | Pin **0.9.6+** within the same minor; run `cargo test --features ai-protocol --locked` after any bump; BYOK credential chain uses `ai_lib_rust::credentials`. Local debugging may use `[patch.crates-io]` toward a git checkout — do not ship that patch in canonical releases unless policy explicitly allows it. |
 | `ai-protocol` (Git) | Pin a **tag or commit** for reproducible QA; document the pin in your team runbook. Between tags, expect manifest schema drift — re-run protocol smoke tests when moving pins. |
-| ZeroSpider releases | Until 1.0, follow `CHANGELOG.md` [Unreleased]. ZS-ML-015 removed `legacy-providers`; chat providers now use `ai-protocol` manifests only. |
+| VelaClaw releases | Until 1.0, follow `CHANGELOG.md` [Unreleased]. ZS-ML-015 removed `legacy-providers`; chat providers now use `ai-protocol` manifests only. |
 
 ## Version matrix (pin for reproducible builds)
 
@@ -31,11 +31,11 @@ Patch bumps (0.9.x) should stay semver-compatible; re-run `cargo test --features
 |----------|---------|
 | `AI_PROTOCOL_DIR` | Root of an `ai-protocol` clone (contains provider manifests / schema). Required for manifest-driven `AiClient` resolution at runtime. |
 
-Optional: `AI_PROTOCOL_PATH` is recognized by some ai-lib tooling as an alias—prefer `AI_PROTOCOL_DIR` for ZeroSpider docs consistency.
+Optional: `AI_PROTOCOL_PATH` is recognized by some ai-lib tooling as an alias—prefer `AI_PROTOCOL_DIR` for VelaClaw docs consistency.
 
 ## BYOK credential availability
 
-ZeroSpider does not maintain a separate provider credential table for the protocol path. Provider availability shown by `zerospider models protocol-providers` is delegated to ai-lib-rust's unified credential chain:
+VelaClaw does not maintain a separate provider credential table for the protocol path. Provider availability shown by `velaclaw models protocol-providers` is delegated to ai-lib-rust's unified credential chain:
 
 1. explicit application credential, when a caller supplies one to ai-lib;
 2. the active manifest auth block (`endpoint.auth` first, then top-level `auth` for V1 compatibility);
@@ -63,31 +63,31 @@ cargo check --features ai-protocol
 cargo test --features ai-protocol
 
 # Manifest-only (same as default features today: `ai-protocol` only)
-cargo test -p zerospider --no-default-features --features ai-protocol
+cargo test -p velaclaw --no-default-features --features ai-protocol
 
 # Routing compile gate
-cargo check -p zerospider --features "ai-protocol routing_mvp" --lib
+cargo check -p velaclaw --features "ai-protocol routing_mvp" --lib
 ```
 
 Feature flags:
 
 - **`ai-protocol`** — enables optional `ai-lib-rust`, `protocol_registry`, and protocol CLI. **On by default.**
-- **Legacy HTTP providers removed (ZS-ML-015)** — built-in string-key adapters (`openrouter`, `anthropic`, `custom:`, …) are no longer compiled by ZeroSpider. Add or update ai-protocol manifests instead.
-- **`routing_mvp`** — forwards `ai-lib-rust`’s experimental routing feature (optional). **Off by default.** Enable with `--features "ai-protocol routing_mvp"` when you need that code path; CI runs `cargo check -p zerospider --features "ai-protocol routing_mvp" --lib` to prevent bitrot. **Metrics:** if `AiClient` exposes a metrics API in a future `ai-lib-rust` release, wire it to your observability layer without duplicating transport retry counters already covered here vs `[reliability]`.
+- **Legacy HTTP providers removed (ZS-ML-015)** — built-in string-key adapters (`openrouter`, `anthropic`, `custom:`, …) are no longer compiled by VelaClaw. Add or update ai-protocol manifests instead.
+- **`routing_mvp`** — forwards `ai-lib-rust`’s experimental routing feature (optional). **Off by default.** Enable with `--features "ai-protocol routing_mvp"` when you need that code path; CI runs `cargo check -p velaclaw --features "ai-protocol routing_mvp" --lib` to prevent bitrot. **Metrics:** if `AiClient` exposes a metrics API in a future `ai-lib-rust` release, wire it to your observability layer without duplicating transport retry counters already covered here vs `[reliability]`.
 
 ### Deferred ai-lib-rust feature decisions (ZS-ML-009)
 
-ZeroSpider currently uses `ai-lib-rust` for chat and streaming only. The optional
+VelaClaw currently uses `ai-lib-rust` for chat and streaming only. The optional
 `ai-lib-rust` features `embeddings`, `batch`, and `telemetry` are intentionally
-**not enabled** in `Cargo.toml` until ZeroSpider has concrete callers for them.
+**not enabled** in `Cargo.toml` until VelaClaw has concrete callers for them.
 
 | ai-lib-rust feature | Decision | Rationale |
 |---------------------|----------|-----------|
-| `embeddings` | Deferred / removed from dependency features | No ZeroSpider embedding path currently calls ai-lib; enabling it would add dependency weight without runtime value. |
-| `batch` | Deferred / removed from dependency features | No batch API surface is wired in ZeroSpider. |
-| `telemetry` | Deferred / removed from dependency features | ZeroSpider’s existing telemetry path is `observability-otel`; ai-lib metrics must be wired deliberately later to avoid duplicate counters. |
+| `embeddings` | Deferred / removed from dependency features | No VelaClaw embedding path currently calls ai-lib; enabling it would add dependency weight without runtime value. |
+| `batch` | Deferred / removed from dependency features | No batch API surface is wired in VelaClaw. |
+| `telemetry` | Deferred / removed from dependency features | VelaClaw’s existing telemetry path is `observability-otel`; ai-lib metrics must be wired deliberately later to avoid duplicate counters. |
 
-When adding any of these paths later, introduce a dedicated ZeroSpider feature,
+When adding any of these paths later, introduce a dedicated VelaClaw feature,
 document the OpenTelemetry / metrics boundary, and add focused tests before
 turning on the corresponding `ai-lib-rust` feature.
 
@@ -96,9 +96,9 @@ turning on the corresponding `ai-lib-rust` feature.
 With `AI_PROTOCOL_DIR` set to a **local** ai-protocol checkout:
 
 ```bash
-zerospider models protocol-providers
-zerospider models protocol-models
-zerospider models protocol-providers --json
+velaclaw models protocol-providers
+velaclaw models protocol-models
+velaclaw models protocol-providers --json
 ```
 
 ## Config: logical provider / model ids (Phase 2)
@@ -128,7 +128,7 @@ fallback_providers = [
 
 ## Resilience boundaries (Phase 4)
 
-ZeroSpider layers **two** independent mechanisms; keep them from overlapping in confusing ways:
+VelaClaw layers **two** independent mechanisms; keep them from overlapping in confusing ways:
 
 | Layer | What it does | Where |
 |-------|----------------|--------|
@@ -138,9 +138,9 @@ ZeroSpider layers **two** independent mechanisms; keep them from overlapping in 
 **Guidance**
 
 - Prefer **one** layer to own a given failure class: e.g. let ai-lib handle 429 backoff for a single logical model; use `fallback_providers` when you truly want a different backend (another provider id or `custom:` URL).
-- Optional ai-lib features such as **`routing_mvp`** or future **`AiClient::metrics()`** integration are not required for the manifest path; enable deliberately when you add routing or SLO dashboards. As of ZS-ML-009, ai-lib `telemetry` is not enabled and does not feed ZeroSpider’s OpenTelemetry pipeline.
+- Optional ai-lib features such as **`routing_mvp`** or future **`AiClient::metrics()`** integration are not required for the manifest path; enable deliberately when you add routing or SLO dashboards. As of ZS-ML-009, ai-lib `telemetry` is not enabled and does not feed VelaClaw’s OpenTelemetry pipeline.
 
 ## Next steps
 
 - `docs/migration-legacy-to-protocol.md` — legacy shorthands, `AI_PROTOCOL_DIR`, and build/test matrix.
-- `active/projects/zerospider/ZEROSPIDER_AI_LIB_MIGRATION_PLAN.md` in **ai-lib-plans** for phased PRs.
+- `active/projects/velaclaw/VELACLAW_AI_LIB_MIGRATION_PLAN.md` in **ai-lib-plans** for phased PRs.

@@ -9,10 +9,10 @@ the **protocol-first** model: logical ids like `openai/gpt-4o-mini` resolved thr
 
 | Term | Meaning |
 |------|--------|
-| **Legacy path** | Removed in ZS-ML-015: old string keys (`openrouter`, `anthropic`, `custom:…`) no longer compile into ZeroSpider. |
+| **Legacy path** | Removed in ZS-ML-015: old string keys (`openrouter`, `anthropic`, `custom:…`) no longer compile into VelaClaw. |
 | **Default path (today)** | `default = ["ai-protocol"]` in `Cargo.toml` — all model providers resolve through `ProtocolBackedProvider` and ai-protocol manifests. |
 | **Protocol root** | Directory where YAML/JSON under `v2/providers` (or `dist/…`) describe providers and models. Set via **`AI_PROTOCOL_DIR`**. |
-| **BYOK availability** | Whether ai-lib-rust can resolve a credential for the provider through the unified credential chain. ZeroSpider reports the result but does not inspect or log secret values. |
+| **BYOK availability** | Whether ai-lib-rust can resolve a credential for the provider through the unified credential chain. VelaClaw reports the result but does not inspect or log secret values. |
 
 ## 1. Environment variables
 
@@ -24,11 +24,11 @@ the **protocol-first** model: logical ids like `openai/gpt-4o-mini` resolved thr
 
 If `AI_PROTOCOL_DIR` is wrong or points at a non-directory, `AiClient::new("provider/model")` fails. Quick setup prints a **yellow tip** when you choose a `provider/model` id but no usable local root is configured.
 
-`zerospider models protocol-providers` uses the same ai-lib credential resolver for its `available` column, so it catches both V2 `endpoint.auth.token_env` and conventional fallbacks such as `OPENAI_API_KEY`.
+`velaclaw models protocol-providers` uses the same ai-lib credential resolver for its `available` column, so it catches both V2 `endpoint.auth.token_env` and conventional fallbacks such as `OPENAI_API_KEY`.
 
 ## 2. Shorthand: old provider name → new logical id
 
-ZeroSpider still accepts the **same string shape** in `default_provider` / `default_model` once you adopt manifests. Typical mappings (exact logical ids come from the YAML under your checkout):
+VelaClaw still accepts the **same string shape** in `default_provider` / `default_model` once you adopt manifests. Typical mappings (exact logical ids come from the YAML under your checkout):
 
 | Legacy `provider` key (examples) | New style (illustrative) | Notes |
 |----------------------------------|-------------------------|--------|
@@ -50,11 +50,11 @@ legacy HTTP factory. The last `main` commit before removal was PR #31
 |---------|----------|
 | `cargo test` / default features | **Protocol path** only — matches production default. |
 | `cargo test --no-default-features --features ai-protocol` | **Manifest-only** build (no legacy factory). |
-| `cargo check -p zerospider --features "ai-protocol routing_mvp" --lib` | Routing compile gate. |
+| `cargo check -p velaclaw --features "ai-protocol routing_mvp" --lib` | Routing compile gate. |
 
-Current ai-lib-rust feature decision: ZeroSpider does **not** enable ai-lib-rust
+Current ai-lib-rust feature decision: VelaClaw does **not** enable ai-lib-rust
 `embeddings`, `batch`, or `telemetry` features yet. Chat/streaming stays on the
-protocol path; embeddings and batch APIs need explicit ZeroSpider call sites
+protocol path; embeddings and batch APIs need explicit VelaClaw call sites
 before enabling those dependency features. Telemetry continues through
 `observability-otel`; ai-lib metrics should be wired in a future task only with a
 documented no-duplicate-counter boundary.
@@ -73,7 +73,7 @@ documented no-duplicate-counter boundary.
 
 - `docs/ai-lib-migration.md` — version matrix, feature flags, build commands.
 - `CONTRIBUTING.md` — clone layout and `AI_PROTOCOL_DIR` for contributors.
-- `active/projects/zerospider/ZEROSPIDER_AI_LIB_MIGRATION_PLAN.md` in **ai-lib-plans** — phases and PR list.
+- `active/projects/velaclaw/VELACLAW_AI_LIB_MIGRATION_PLAN.md` in **ai-lib-plans** — phases and PR list.
 
 ---
 

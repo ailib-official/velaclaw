@@ -2,7 +2,7 @@
 
 ## 概述
 
-在将 ai-lib-rust 集成到 ZeroClaw 的过程中，发现了一些差距和改进机会。本文档总结了 ai-lib-rust 和 ai-protocol 项目的新需求。
+在将 ai-lib-rust 集成到 VelaClaw 的过程中，发现了一些差距和改进机会。本文档总结了 ai-lib-rust 和 ai-protocol 项目的新需求。
 
 ---
 
@@ -93,7 +93,7 @@ impl AiClient {
 }
 ```
 
-**用例**：ZeroClaw 的 ProviderScorer 需要实时指标进行自适应模型选择。
+**用例**：VelaClaw 的 ProviderScorer 需要实时指标进行自适应模型选择。
 
 ---
 
@@ -117,7 +117,7 @@ impl MultiModelClient {
 }
 ```
 
-**用例**：简化 ZeroClaw 中的多 Provider 场景。
+**用例**：简化 VelaClaw 中的多 Provider 场景。
 
 ---
 
@@ -142,7 +142,7 @@ pub enum NegotiationStrategy {
 }
 ```
 
-**用例**：ZeroClaw 的 Agent 循环可以利用内置协商功能。
+**用例**：VelaClaw 的 Agent 循环可以利用内置协商功能。
 
 ---
 
@@ -174,7 +174,7 @@ impl Error {
 }
 ```
 
-**用例**：ZeroClaw 的 ReliableProvider 可以做出更智能的重试决策。
+**用例**：VelaClaw 的 ReliableProvider 可以做出更智能的重试决策。
 
 ---
 
@@ -354,13 +354,13 @@ health:
 建议在 ai-protocol 中添加功能矩阵文档：
 
 ```
-| 功能          | ai-lib-rust | ZeroClaw | 说明                    |
+| 功能          | ai-lib-rust | VelaClaw | 说明                    |
 |--------------|-------------|----------|--------------------------|
 | embeddings   | ✅          | ❌       | 需要功能标志            |
 | batch        | ✅          | ✅       | 已集成                  |
-| negotiation  | ❌          | ✅       | ZeroClaw 实现           |
-| scoring      | ❌          | ✅       | ZeroClaw 实现           |
-| multi-model  | ❌          | ✅       | ZeroClaw 实现           |
+| negotiation  | ❌          | ✅       | VelaClaw 实现           |
+| scoring      | ❌          | ✅       | VelaClaw 实现           |
+| multi-model  | ❌          | ✅       | VelaClaw 实现           |
 ```
 
 ### 3.2 共享测试固件
@@ -410,7 +410,7 @@ ai-lib-rust >= v0.9.0（model() 覆盖）
 
 ## 5. 拟议贡献
 
-ZeroClaw 团队可以回馈：
+VelaClaw 团队可以回馈：
 
 1. **评分系统**：`ProviderScorer` 实现可以泛化并移至 ai-lib-rust
 2. **选择逻辑**：`AdaptiveSelector` 模式可以为 ai-lib-rust 的模型选择提供参考
@@ -419,5 +419,5 @@ ZeroClaw 团队可以回馈：
 
 ---
 
-*文档生成自 ZeroClaw feat/ai-protocol-integration 分支*
+*文档生成自 VelaClaw feat/ai-protocol-integration 分支*
 *日期：2026-02-20*

@@ -1,6 +1,6 @@
 # 第十四章：自动化与定时任务
 
-本章介绍如何让 ZeroClaw 自动执行定时任务。
+本章介绍如何让 VelaClaw 自动执行定时任务。
 
 ---
 
@@ -44,7 +44,7 @@
 ### 查看任务列表
 
 ```bash
-zeroclaw cron list
+velaclaw cron list
 ```
 
 输出：
@@ -68,13 +68,13 @@ zeroclaw cron list
 
 ```bash
 # 每天 9 点执行
-zeroclaw cron add "0 9 * * *" "提醒：开会时间"
+velaclaw cron add "0 9 * * *" "提醒：开会时间"
 
 # 每周一 8 点执行
-zeroclaw cron add "0 8 * * 1" "发送周报"
+velaclaw cron add "0 8 * * 1" "发送周报"
 
 # 每小时执行
-zeroclaw cron add "0 * * * *" "检查状态"
+velaclaw cron add "0 * * * *" "检查状态"
 ```
 
 **Cron 表达式格式**：
@@ -103,7 +103,7 @@ zeroclaw cron add "0 * * * *" "检查状态"
 
 ```bash
 # 每 30 分钟执行一次
-zeroclaw cron add-every 1800000 "检查状态"
+velaclaw cron add-every 1800000 "检查状态"
 
 # 参数单位：毫秒
 # 1800000ms = 30分钟
@@ -113,14 +113,14 @@ zeroclaw cron add-every 1800000 "检查状态"
 
 ```bash
 # 在特定时间执行一次
-zeroclaw cron add-at "2024-12-31T23:59:00" "新年快乐！"
+velaclaw cron add-at "2024-12-31T23:59:00" "新年快乐！"
 ```
 
 **方式四：延迟执行**
 
 ```bash
 # 30 分钟后执行一次
-zeroclaw cron once "30m" "提醒休息"
+velaclaw cron once "30m" "提醒休息"
 
 # 支持的格式：
 # 30m = 30 分钟
@@ -131,33 +131,33 @@ zeroclaw cron once "30m" "提醒休息"
 ### 删除任务
 
 ```bash
-zeroclaw cron remove task_1
+velaclaw cron remove task_1
 ```
 
 ### 暂停/恢复任务
 
 ```bash
 # 暂停
-zeroclaw cron pause task_1
+velaclaw cron pause task_1
 
 # 恢复
-zeroclaw cron resume task_1
+velaclaw cron resume task_1
 ```
 
 ### 更新任务
 
 ```bash
 # 更新时间
-zeroclaw cron update task_1 --expression "0 10 * * *"
+velaclaw cron update task_1 --expression "0 10 * * *"
 
 # 更新命令
-zeroclaw cron update task_1 --command "新的提醒内容"
+velaclaw cron update task_1 --command "新的提醒内容"
 ```
 
 ### 立即执行
 
 ```bash
-zeroclaw cron run task_1
+velaclaw cron run task_1
 ```
 
 ---
@@ -168,14 +168,14 @@ zeroclaw cron run task_1
 
 ```bash
 # 每天早上提醒
-zeroclaw cron add "0 8 * * *" "发送消息到 Telegram: 早上好！新的一天开始了"
+velaclaw cron add "0 8 * * *" "发送消息到 Telegram: 早上好！新的一天开始了"
 ```
 
 ### AI 任务
 
 ```bash
 # 每天生成日报
-zeroclaw cron add "0 18 * * *" "AI: 总结今天的工作进展"
+velaclaw cron add "0 18 * * *" "AI: 总结今天的工作进展"
 
 # AI 会根据记忆内容生成总结
 ```
@@ -184,14 +184,14 @@ zeroclaw cron add "0 18 * * *" "AI: 总结今天的工作进展"
 
 ```bash
 # 定期备份数据
-zeroclaw cron add "0 2 * * *" "EXEC: cp -r ~/.zeroclaw ~/.zeroclaw_backup"
+velaclaw cron add "0 2 * * *" "EXEC: cp -r ~/.velaclaw ~/.velaclaw_backup"
 ```
 
 ### 查询信息
 
 ```bash
 # 定期查询天气
-zeroclaw cron add "0 7 * * *" "搜索: 北京今天天气"
+velaclaw cron add "0 7 * * *" "搜索: 北京今天天气"
 ```
 
 ---
@@ -201,7 +201,7 @@ zeroclaw cron add "0 7 * * *" "搜索: 北京今天天气"
 ### 日常工作安排
 
 ```yaml
-# ~/.zeroclaw/config.yaml
+# ~/.velaclaw/config.yaml
 cron:
   tasks:
     - id: morning_reminder
@@ -262,7 +262,7 @@ cron:
 或在命令中指定：
 
 ```bash
-zeroclaw cron add "0 9 * * *" "提醒" --tz Asia/Shanghai
+velaclaw cron add "0 9 * * *" "提醒" --tz Asia/Shanghai
 ```
 
 ---
@@ -270,7 +270,7 @@ zeroclaw cron add "0 9 * * *" "提醒" --tz Asia/Shanghai
 ## 查看执行历史
 
 ```bash
-zeroclaw cron runs
+velaclaw cron runs
 ```
 
 输出：
@@ -298,17 +298,17 @@ zeroclaw cron runs
 
 1. 确认守护进程正在运行
    ```bash
-   zeroclaw status
+   velaclaw status
    ```
 
 2. 检查任务状态
    ```bash
-   zeroclaw cron list
+   velaclaw cron list
    ```
 
 3. 查看日志
    ```bash
-   tail -f ~/.zeroclaw/logs/cron.log
+   tail -f ~/.velaclaw/logs/cron.log
    ```
 
 ### 时区问题
@@ -318,7 +318,7 @@ zeroclaw cron runs
 timedatectl
 
 # 在配置中明确指定时区
-zeroclaw cron update task_1 --tz Asia/Shanghai
+velaclaw cron update task_1 --tz Asia/Shanghai
 ```
 
 ---

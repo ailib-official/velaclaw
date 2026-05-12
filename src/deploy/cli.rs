@@ -110,10 +110,10 @@ fn create_deployment_config(
     // Auto-detect local binary path
     let local_binary = std::env::current_exe()
         .and_then(|p| p.canonicalize())
-        .unwrap_or_else(|_| PathBuf::from("./target/release/zerospider"));
+        .unwrap_or_else(|_| PathBuf::from("./target/release/velaclaw"));
 
     DeploymentConfig {
-        name: "zerospider".to_string(),
+        name: "velaclaw".to_string(),
         version: version.to_string(),
         local_binary,
         binary_path: PathBuf::from(&settings.binary_path),
@@ -146,7 +146,7 @@ async fn handle_deploy(
     deployer.set_config(dep_config);
 
     deployer
-        .deploy(server_id, "zerospider")
+        .deploy(server_id, "velaclaw")
         .await
         .context("Deployment failed")?;
 
@@ -301,7 +301,7 @@ async fn handle_update(
     deployer.set_config(dep_config);
 
     deployer
-        .deploy(server_id, "zerospider")
+        .deploy(server_id, "velaclaw")
         .await
         .context("Update failed")?;
 

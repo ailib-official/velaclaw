@@ -1,13 +1,13 @@
 # 第十九章：配置参考
 
-本章提供 ZeroSpider 完整配置文件的参考。
+本章提供 VelaClaw 完整配置文件的参考。
 
 ---
 
 ## 配置文件位置
 
 ```
-~/.zerospider/config.yaml
+~/.velaclaw/config.yaml
 ```
 
 ---
@@ -16,7 +16,7 @@
 
 ```yaml
 # ===========================================
-# ZeroSpider 配置文件
+# VelaClaw 配置文件
 # ===========================================
 
 # -------------------------------------------
@@ -245,7 +245,7 @@ logging:
   level: info
   
   # 文件路径
-  file: ~/.zerospider/logs/zeroclaw.log
+  file: ~/.velaclaw/logs/velaclaw.log
   
   # 最大文件大小（MB）
   max_size: 10
@@ -266,7 +266,7 @@ logging:
 | `ANTHROPIC_API_KEY` | Anthropic API 密钥 |
 | `OPENROUTER_API_KEY` | OpenRouter API 密钥 |
 | `DEEPSEEK_API_KEY` | DeepSeek API 密钥 |
-| `ZEROCLAW_CONFIG` | 配置文件路径 |
+| `VELACLAW_CONFIG` | 配置文件路径 |
 | `RUST_LOG` | 日志级别 |
 
 ---

@@ -1,4 +1,4 @@
-# ZeroSpider 🕷️
+# VelaClaw 🕷️
 
 **Protocol-driven autonomous AI agent runtime with intelligent model selection and multi-model negotiation.**
 
@@ -13,7 +13,7 @@
 
 ## Overview
 
-ZeroSpider is a Rust-first autonomous AI agent runtime that integrates with the [ai-protocol](https://github.com/ailib-official/ai-protocol) ecosystem for intelligent, protocol-driven AI operations.
+VelaClaw is a Rust-first autonomous AI agent runtime that integrates with the [ai-protocol](https://github.com/ailib-official/ai-protocol) ecosystem for intelligent, protocol-driven AI operations.
 
 ### Key Features
 
@@ -39,8 +39,8 @@ ZeroSpider is a Rust-first autonomous AI agent runtime that integrates with the 
 
 ```bash
 # Clone the repository
-git clone https://github.com/ailib-official/zerospider.git
-cd zerospider
+git clone https://github.com/ailib-official/velaclaw.git
+cd velaclaw
 
 # Build with default protocol support
 cargo build
@@ -56,7 +56,7 @@ rustup target add aarch64-unknown-linux-gnu
 cargo build --release --target aarch64-unknown-linux-gnu
 
 # Binary location
-ls target/aarch64-unknown-linux-gnu/release/zerospider
+ls target/aarch64-unknown-linux-gnu/release/velaclaw
 ```
 
 ### Run
@@ -91,7 +91,7 @@ export ANTHROPIC_API_KEY=sk-ant-...
 ### Config File
 
 ```toml
-# ~/.zerospider/config.toml
+# ~/.velaclaw/config.toml
 default_provider = "openai/gpt-5.2"
 default_model = "openai/gpt-5.2"
 ```
@@ -138,7 +138,7 @@ default_model = "openai/gpt-5.2"
 
 ## Dashboard
 
-When running the gateway (`zerospider gateway`), a monitoring dashboard is available at `GET /dashboard`:
+When running the gateway (`velaclaw gateway`), a monitoring dashboard is available at `GET /dashboard`:
 
 - **Status**: Health and pairing state
 - **Cost**: Session, daily, monthly costs and token usage (when `[cost] enabled = true`)
@@ -150,31 +150,31 @@ The dashboard auto-refreshes every 30 seconds.
 
 ## Remote Deployment
 
-ZeroSpider supports controlled remote deployment via SSH with the `--features remote-deploy` flag.
+VelaClaw supports controlled remote deployment via SSH with the `--features remote-deploy` flag.
 
 ### Deploy Commands
 
 ```bash
 # Deploy to a remote server
-zerospider deploy deploy --server <server-id>
+velaclaw deploy deploy --server <server-id>
 
 # Check deployment status
-zerospider deploy status --server <server-id>
+velaclaw deploy status --server <server-id>
 
 # Run health check
-zerospider deploy health-check --server <server-id>
+velaclaw deploy health-check --server <server-id>
 
 # List configured deployment targets
-zerospider deploy list
+velaclaw deploy list
 
 # Rollback to previous deployment
-zerospider deploy rollback --server <server-id>
+velaclaw deploy rollback --server <server-id>
 
 # Update to new version
-zerospider deploy update --server <server-id> --version <version>
+velaclaw deploy update --server <server-id> --version <version>
 
 # Sync configuration
-zerospider deploy sync-config --server <server-id>
+velaclaw deploy sync-config --server <server-id>
 ```
 
 ### Configuration
@@ -193,8 +193,8 @@ labels = ["env:production", "region:us-west"]
 
 [deploy.settings]
 mode = "direct"  # Options: direct, docker, systemd
-binary_path = "/usr/local/bin/zerospider"
-working_dir = "/opt/zerospider"
+binary_path = "/usr/local/bin/velaclaw"
+working_dir = "/opt/velaclaw"
 auto_start = true
 health_check_interval_secs = 30
 restart_on_failure = true
@@ -204,7 +204,7 @@ max_restarts = 3
 
 ## Architecture
 
-ZeroSpider uses a trait-driven, modular architecture:
+VelaClaw uses a trait-driven, modular architecture:
 
 - **Providers**: AI model backends (OpenAI, Anthropic, local models, etc.)
 - **Channels**: Communication platforms (Telegram, Discord, Matrix, etc.)
@@ -216,14 +216,14 @@ ZeroSpider uses a trait-driven, modular architecture:
 
 ## Upstream Dependencies
 
-ZeroSpider integrates with:
+VelaClaw integrates with:
 
 - [ai-lib-rust](https://crates.io/crates/ai-lib-rust) - Protocol-driven AI API client (crates.io, enable with `--features ai-protocol`)
 - [ai-protocol](https://github.com/ailib-official/ai-protocol) - Provider YAML configs (clone and set `AI_PROTOCOL_DIR`)
 
 ### Sync with Upstream
 
-ZeroSpider tracks [zeroclaw-labs/zeroclaw](https://github.com/zeroclaw-labs/zeroclaw) for updates:
+VelaClaw tracks [velaclaw-labs/velaclaw](https://github.com/velaclaw-labs/velaclaw) for updates:
 
 ```bash
 # List upstream changes
@@ -260,7 +260,7 @@ at your option.
 
 ## Acknowledgments
 
-ZeroSpider is a fork of [ZeroClaw](https://github.com/ZeroClaw-Labs/zeroclaw) with additional features:
+VelaClaw is a fork of [VelaClaw](https://github.com/VelaClaw-Labs/velaclaw) with additional features:
 - ai-protocol integration
 - Provider scoring and smart routing
 - Multi-model negotiation

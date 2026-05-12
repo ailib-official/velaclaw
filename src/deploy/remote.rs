@@ -69,16 +69,16 @@ impl Default for DeploymentConfig {
         // Auto-detect current binary path
         let local_binary = std::env::current_exe()
             .and_then(|p| p.canonicalize())
-            .unwrap_or_else(|_| PathBuf::from("./target/release/zerospider"));
+            .unwrap_or_else(|_| PathBuf::from("./target/release/velaclaw"));
 
         Self {
-            name: "zerospider".to_string(),
+            name: "velaclaw".to_string(),
             version: "latest".to_string(),
             local_binary,
-            binary_path: PathBuf::from("/usr/local/bin/zerospider"),
+            binary_path: PathBuf::from("/usr/local/bin/velaclaw"),
             config_path: None,
             env_vars: HashMap::new(),
-            working_dir: PathBuf::from("/opt/zerospider"),
+            working_dir: PathBuf::from("/opt/velaclaw"),
             auto_start: true,
             health_check_interval: Duration::from_secs(30),
             restart_on_failure: true,
@@ -263,20 +263,14 @@ impl RemoteDeployer {
             DeploymentMode::Docker => vec![
                 DeploymentStep::new(
                     "pull_image",
-                    format!("docker pull zerospider:{}", config.version),
+                    format!("docker pull velaclaw:{}", config.version),
                 ),
-                DeploymentStep::new(
-                    "stop_existing",
-                    "docker stop zerospider || true".to_string(),
-                ),
-                DeploymentStep::new(
-                    "remove_existing",
-                    "docker rm zerospider || true".to_string(),
-                ),
+                DeploymentStep::new("stop_existing", "docker stop velaclaw || true".to_string()),
+                DeploymentStep::new("remove_existing", "docker rm velaclaw || true".to_string()),
                 DeploymentStep::new(
                     "run_container",
                     format!(
-                        "docker run -d --name zerospider -p 8080:8080 zerospider:{}",
+                        "docker run -d --name velaclaw -p 8080:8080 velaclaw:{}",
                         config.version
                     ),
                 ),
@@ -298,11 +292,11 @@ impl RemoteDeployer {
                 ),
                 DeploymentStep::new(
                     "enable_service",
-                    format!("{} systemctl enable zerospider", sudo_prefix).to_string(),
+                    format!("{} systemctl enable velaclaw", sudo_prefix).to_string(),
                 ),
                 DeploymentStep::new(
                     "start_service",
-                    format!("{} systemctl start zerospider", sudo_prefix).to_string(),
+                    format!("{} systemctl start velaclaw", sudo_prefix).to_string(),
                 ),
             ],
         }
@@ -351,7 +345,7 @@ impl RemoteDeployer {
             .ok_or_else(|| anyhow::anyhow!("Target not found: {}", target_id))?;
 
         let result = self
-            .execute_raw(target, "pgrep -x zerospider > /dev/null")
+            .execute_raw(target, "pgrep -x velaclaw > /dev/null")
             .await;
 
         if let Some(status) = self.statuses.get_mut(target_id) {
@@ -369,16 +363,13 @@ impl RemoteDeployer {
             .ok_or_else(|| anyhow::anyhow!("Target not found: {}", target_id))?;
 
         let rollback_steps = match self.mode {
-            DeploymentMode::Direct => vec!["pkill -x zerospider || true", "rm -rf /opt/zerospider"],
+            DeploymentMode::Direct => vec!["pkill -x velaclaw || true", "rm -rf /opt/velaclaw"],
             DeploymentMode::Docker => {
-                vec![
-                    "docker stop zerospider || true",
-                    "docker rm zerospider || true",
-                ]
+                vec!["docker stop velaclaw || true", "docker rm velaclaw || true"]
             }
             DeploymentMode::Systemd => vec![
-                "systemctl stop zerospider || true",
-                "systemctl disable zerospider || true",
+                "systemctl stop velaclaw || true",
+                "systemctl disable velaclaw || true",
             ],
         };
 
@@ -422,7 +413,7 @@ mod tests {
     #[test]
     fn test_deployment_config_default() {
         let config = DeploymentConfig::default();
-        assert_eq!(config.name, "zerospider");
+        assert_eq!(config.name, "velaclaw");
         assert!(config.auto_start);
         assert!(config.restart_on_failure);
     }

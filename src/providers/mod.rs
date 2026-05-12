@@ -16,7 +16,7 @@
 //! # Extension
 //!
 //! To add a new provider, add or update an ai-protocol manifest instead of
-//! wiring vendor-specific HTTP code in ZeroSpider.
+//! wiring vendor-specific HTTP code in VelaClaw.
 
 pub mod openai_codex;
 pub mod reliable;
@@ -36,7 +36,7 @@ use reliable::ReliableProvider;
 use std::path::PathBuf;
 
 const MAX_API_ERROR_CHARS: usize = 200;
-const PROVIDER_MODE_ENV: &str = "ZEROCLAW_PROVIDER_MODE";
+const PROVIDER_MODE_ENV: &str = "VELACLAW_PROVIDER_MODE";
 
 pub(crate) fn is_minimax_intl_alias(name: &str) -> bool {
     matches!(
@@ -174,7 +174,7 @@ fn protocol_only_mode_enabled() -> bool {
 #[derive(Debug, Clone)]
 pub struct ProviderRuntimeOptions {
     pub auth_profile_override: Option<String>,
-    pub zerospider_dir: Option<PathBuf>,
+    pub velaclaw_dir: Option<PathBuf>,
     pub secrets_encrypt: bool,
     pub reasoning_enabled: Option<bool>,
 }
@@ -183,7 +183,7 @@ impl Default for ProviderRuntimeOptions {
     fn default() -> Self {
         Self {
             auth_profile_override: None,
-            zerospider_dir: None,
+            velaclaw_dir: None,
             secrets_encrypt: true,
             reasoning_enabled: None,
         }
@@ -543,7 +543,7 @@ pub struct ProviderInfo {
     pub local: bool,
 }
 
-/// Return protocol-first provider examples for `zerospider providers list`.
+/// Return protocol-first provider examples for `velaclaw providers list`.
 pub fn list_providers() -> Vec<ProviderInfo> {
     vec![
         ProviderInfo {

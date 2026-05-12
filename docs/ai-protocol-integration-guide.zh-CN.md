@@ -34,12 +34,12 @@ cargo build --features remote-deploy          # 远程部署
 
 ### 概述
 
-`ProtocolBackedProvider` 将 ZeroClaw 的 Provider trait 桥接到 ai-lib-rust 的 AiClient，实现配置驱动的 Provider 设置，无需修改代码。
+`ProtocolBackedProvider` 将 VelaClaw 的 Provider trait 桥接到 ai-lib-rust 的 AiClient，实现配置驱动的 Provider 设置，无需修改代码。
 
 ### 使用方法
 
 ```rust
-use zeroclaw::providers::ProtocolBackedProvider;
+use velaclaw::providers::ProtocolBackedProvider;
 
 // 创建协议驱动的 Provider
 let provider = ProtocolBackedProvider::new(
@@ -104,7 +104,7 @@ capabilities:
 ### 基本用法
 
 ```rust
-use zeroclaw::providers::scoring::{ProviderScorer, ScoringConfig, ScoringWeights};
+use velaclaw::providers::scoring::{ProviderScorer, ScoringConfig, ScoringWeights};
 
 // 使用自定义权重创建评分器
 let config = ScoringConfig {
@@ -162,10 +162,10 @@ score = w_latency × 延迟分数
 ### 使用方法
 
 ```rust
-use zeroclaw::providers::selector::{
+use velaclaw::providers::selector::{
     AdaptiveSelector, ModelProfile, SelectionCriteria, TaskType,
 };
-use zeroclaw::providers::scoring::ProviderScorer;
+use velaclaw::providers::scoring::ProviderScorer;
 
 let scorer = ProviderScorer::default();
 let mut selector = AdaptiveSelector::new(scorer);
@@ -234,7 +234,7 @@ let task = TaskType::from_prompt("翻译成中文");
 ### 使用方法
 
 ```rust
-use zeroclaw::agent::negotiation::{
+use velaclaw::agent::negotiation::{
     Negotiator, NegotiationStrategy, ModelResponse,
 };
 
@@ -288,7 +288,7 @@ let result = negotiator.negotiate(responses);
 ### 使用方法
 
 ```rust
-use zeroclaw::agent::parallel::{
+use velaclaw::agent::parallel::{
     ParallelExecutor, Task, TaskProcessor,
 };
 use std::sync::Arc;
@@ -332,7 +332,7 @@ let result = executor.race(
 
 ### 概述
 
-使用配置驱动的设置和健康监控将 ZeroClaw 部署到远程服务器。
+使用配置驱动的设置和健康监控将 VelaClaw 部署到远程服务器。
 
 ### 部署模式
 
@@ -345,7 +345,7 @@ let result = executor.race(
 ### 使用方法
 
 ```rust
-use zeroclaw::deploy::{
+use velaclaw::deploy::{
     RemoteDeployer, DeploymentTarget, DeploymentConfig, DeploymentMode,
 };
 
@@ -361,17 +361,17 @@ deployer.register_target(
 
 // 配置部署
 deployer.set_config(DeploymentConfig {
-    name: "zeroclaw".into(),
+    name: "velaclaw".into(),
     version: "latest".into(),
-    binary_path: "/usr/local/bin/zeroclaw".into(),
-    working_dir: "/opt/zeroclaw".into(),
+    binary_path: "/usr/local/bin/velaclaw".into(),
+    working_dir: "/opt/velaclaw".into(),
     auto_start: true,
     restart_on_failure: true,
     ..Default::default()
 });
 
 // 部署
-deployer.deploy("prod-1", "zeroclaw").await?;
+deployer.deploy("prod-1", "velaclaw").await?;
 
 // 健康检查
 let healthy = deployer.health_check("prod-1").await?;
@@ -408,11 +408,11 @@ deployer.rollback("prod-1").await?;
 ### 完整集成示例
 
 ```rust
-use zeroclaw::providers::{
+use velaclaw::providers::{
     ProtocolBackedProvider, ProviderScorer, AdaptiveSelector, SelectionCriteria, TaskType,
 };
-use zeroclaw::agent::negotiation::{Negotiator, NegotiationStrategy};
-use zeroclaw::agent::parallel::ParallelExecutor;
+use velaclaw::agent::negotiation::{Negotiator, NegotiationStrategy};
+use velaclaw::agent::parallel::ParallelExecutor;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

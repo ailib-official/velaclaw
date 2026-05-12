@@ -277,7 +277,7 @@ mod tests {
         let _guard = ENV_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let _env = EnvGuard::set("ZEROSPIDER_PT074_TOKEN", Some("test-token"));
+        let _env = EnvGuard::set("VELACLAW_PT074_TOKEN", Some("test-token"));
         let dir = tempfile::tempdir().expect("tempdir");
         let providers = dir.path().join("v2").join("providers");
         fs::create_dir_all(&providers).expect("provider dir");
@@ -298,7 +298,7 @@ endpoint:
   base_url: https://example.com/v1
   auth:
     type: bearer
-    token_env: ZEROSPIDER_PT074_TOKEN
+    token_env: VELACLAW_PT074_TOKEN
 "#,
         )
         .expect("manifest");
@@ -309,7 +309,7 @@ endpoint:
             .iter()
             .find(|provider| provider.id == "pt074")
             .expect("provider");
-        assert_eq!(provider.required_envs, vec!["ZEROSPIDER_PT074_TOKEN"]);
+        assert_eq!(provider.required_envs, vec!["VELACLAW_PT074_TOKEN"]);
         assert!(provider.available);
     }
 
@@ -318,7 +318,7 @@ endpoint:
         let _guard = ENV_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let _manifest_env = EnvGuard::set("ZEROSPIDER_PT074_MISSING_TOKEN", None);
+        let _manifest_env = EnvGuard::set("VELACLAW_PT074_MISSING_TOKEN", None);
         let _conventional_env = EnvGuard::set("PT074_PROVIDER_API_KEY", Some("test-token"));
         let dir = tempfile::tempdir().expect("tempdir");
         let providers = dir.path().join("v2").join("providers");
@@ -340,7 +340,7 @@ endpoint:
   base_url: https://example.com/v1
   auth:
     type: bearer
-    token_env: ZEROSPIDER_PT074_MISSING_TOKEN
+    token_env: VELACLAW_PT074_MISSING_TOKEN
 "#,
         )
         .expect("manifest");
@@ -351,10 +351,7 @@ endpoint:
             .iter()
             .find(|provider| provider.id == "pt074")
             .expect("provider");
-        assert_eq!(
-            provider.required_envs,
-            vec!["ZEROSPIDER_PT074_MISSING_TOKEN"]
-        );
+        assert_eq!(provider.required_envs, vec!["VELACLAW_PT074_MISSING_TOKEN"]);
         assert!(provider.available);
     }
 }

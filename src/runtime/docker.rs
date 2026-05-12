@@ -67,9 +67,9 @@ impl RuntimeAdapter for DockerRuntime {
 
     fn storage_path(&self) -> PathBuf {
         if self.config.mount_workspace {
-            PathBuf::from("/workspace/.zerospider")
+            PathBuf::from("/workspace/.velaclaw")
         } else {
-            PathBuf::from("/tmp/.zerospider")
+            PathBuf::from("/tmp/.velaclaw")
         }
     }
 

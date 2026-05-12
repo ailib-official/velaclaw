@@ -377,7 +377,7 @@ mod tests {
     async fn new_does_not_panic_inside_tokio_runtime() {
         let outcome = std::panic::catch_unwind(|| {
             PostgresMemory::new(
-                "postgres://zerospider:password@127.0.0.1:1/zerospider",
+                "postgres://velaclaw:password@127.0.0.1:1/velaclaw",
                 "public",
                 "memories",
                 Some(1),

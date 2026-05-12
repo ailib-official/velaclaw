@@ -1,6 +1,6 @@
 # 第五章：智能模型选择
 
-本章介绍 ZeroClaw 的智能模型选择功能，让 AI 自动为你选择最合适的模型。
+本章介绍 VelaClaw 的智能模型选择功能，让 AI 自动为你选择最合适的模型。
 
 ---
 
@@ -26,7 +26,7 @@
 
 **传统方式**：你每次都要手动选择用哪个模型
 
-**智能选择**：ZeroClaw 自动判断你的问题类型，选择最合适的模型
+**智能选择**：VelaClaw 自动判断你的问题类型，选择最合适的模型
 
 ### 核心能力
 
@@ -45,12 +45,12 @@
 
 ```bash
 # 启用智能选择
-zeroclaw agent --smart
+velaclaw agent --smart
 ```
 
 ### 方式二：配置文件
 
-编辑 `~/.zeroclaw/config.yaml`：
+编辑 `~/.velaclaw/config.yaml`：
 
 ```yaml
 routing:
@@ -60,7 +60,7 @@ routing:
 ### 方式三：启动时指定
 
 ```bash
-zeroclaw daemon --smart
+velaclaw daemon --smart
 ```
 
 ---
@@ -69,7 +69,7 @@ zeroclaw daemon --smart
 
 ### 四维评分系统
 
-ZeroClaw 从四个维度评估每个模型：
+VelaClaw 从四个维度评估每个模型：
 
 ```
 评分 = 延迟分数 × 权重 
@@ -87,7 +87,7 @@ ZeroClaw 从四个维度评估每个模型：
 
 ### 任务类型识别
 
-ZeroClaw 自动识别任务类型：
+VelaClaw 自动识别任务类型：
 
 | 任务类型 | 触发词示例 | 推荐模型特点 |
 |----------|------------|--------------|
@@ -133,7 +133,7 @@ ZeroClaw 自动识别任务类型：
           │
           ▼
 用户输入: "帮我写一个 Python 排序函数"
-ZeroClaw: [使用 Claude Sonnet 回答]
+VelaClaw: [使用 Claude Sonnet 回答]
 ```
 
 ---
@@ -142,7 +142,7 @@ ZeroClaw: [使用 Claude Sonnet 回答]
 
 ### 设置偏好
 
-编辑 `~/.zeroclaw/config.yaml`：
+编辑 `~/.velaclaw/config.yaml`：
 
 ```yaml
 routing:
@@ -211,7 +211,7 @@ routing:
 ```
 用户: 帮我写一个 Python 函数，实现二分查找
 
-ZeroClaw [自动选择 Claude Sonnet]:
+VelaClaw [自动选择 Claude Sonnet]:
 好的，这是一个二分查找的实现：
 
 ```python
@@ -244,7 +244,7 @@ def binary_search(arr, target):
 ```
 用户: 今天天气怎么样？
 
-ZeroClaw [自动选择 GPT-4o-mini]:
+VelaClaw [自动选择 GPT-4o-mini]:
 抱歉，我无法获取实时天气信息。建议你查看手机天气应用或搜索当地天气预报。
 
 [已选择模型: gpt-4o-mini | 原因: 简单对话 | 成本: 低]
@@ -255,7 +255,7 @@ ZeroClaw [自动选择 GPT-4o-mini]:
 ```
 用户: 分析人工智能对就业市场的长期影响
 
-ZeroClaw [自动选择 GPT-4o]:
+VelaClaw [自动选择 GPT-4o]:
 人工智能对就业市场的影响是多方面的...
 
 [详细的长篇分析]
@@ -267,7 +267,7 @@ ZeroClaw [自动选择 GPT-4o]:
 
 ```bash
 # 启用调试模式
-zeroclaw agent --smart --debug
+velaclaw agent --smart --debug
 ```
 
 输出：
@@ -286,7 +286,7 @@ zeroclaw agent --smart --debug
 ### 查看使用统计
 
 ```bash
-zeroclaw stats
+velaclaw stats
 ```
 
 输出：
@@ -327,7 +327,7 @@ zeroclaw stats
 **可以**。你可以随时手动指定模型：
 
 ```bash
-zeroclaw agent --model gpt-4o
+velaclaw agent --model gpt-4o
 ```
 
 ### Q: 如何关闭智能选择？

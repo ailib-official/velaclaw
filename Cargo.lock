@@ -8714,7 +8714,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "zeroclaw-robot-kit"
+name = "velaclaw-robot-kit"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -8796,7 +8796,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "zerospider"
+name = "velaclaw"
 version = "0.3.0"
 dependencies = [
  "ai-lib-rust",

@@ -1,5 +1,5 @@
 #!/bin/bash
-# 同步上游 zeroclaw 仓库的变更到 zerospider
+# 同步上游 velaclaw 仓库的变更到 velaclaw
 # 用法: ./sync-upstream.sh [--dry-run] [--list] [--cherry-pick <commit>]
 
 set -e
@@ -29,7 +29,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-echo "=== ZeroSpider 上游同步 ==="
+echo "=== VelaClaw 上游同步 ==="
 echo ""
 
 echo "正在获取上游变更..."

@@ -6,7 +6,7 @@ pub mod remote;
 /// DeployCommands for deploy subcommands.
 #[derive(clap::Parser, Debug)]
 pub enum DeployCommands {
-    /// Deploy ZeroClaw to a remote server
+    /// Deploy VelaClaw to a remote server
     Deploy {
         /// Server ID to deploy to
         #[arg(short, long)]

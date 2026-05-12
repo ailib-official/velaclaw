@@ -1,17 +1,17 @@
-# Contributing to ZeroSpider
+# Contributing to VelaClaw
 
-Thanks for your interest in contributing. This guide will help you get started. Some later sections still reference the upstream “ZeroClaw” naming in paths and examples; the **ai-protocol** / **ai-lib** workflow is documented here and in `docs/ai-lib-migration.md`.
+Thanks for your interest in contributing. This guide will help you get started. Some later sections still reference the upstream “VelaClaw” naming in paths and examples; the **ai-protocol** / **ai-lib** workflow is documented here and in `docs/ai-lib-migration.md`.
 
 ## Canonical Git remote (ZS-ML-011 / Phase 7)
 
-Development and PRs use **`https://github.com/ailib-official/zerospider`**. Older clones sometimes still use `origin -> github.com/hiddenpath/zerospider` with `main` tracking that archived remote — fix by either:
+Development and PRs use **`https://github.com/ailib-official/velaclaw`**. Older clones sometimes still use `origin -> github.com/hiddenpath/velaclaw` with `main` tracking that archived remote — fix by either:
 
 - renaming remotes (`ailib-official` → `origin`, archive remote renamed), **or**
 - keeping both remotes and running `git branch --set-upstream-to=ailib-official/main main` so `git pull`/`git status` reflect the canonical default branch only.
 
 Verification: `git remote -v`, `git branch -vv`, and `git rev-parse main` equals `git rev-parse ailib-official/main` when synced.
 
-## ZeroSpider: ai-protocol checkout and `AI_PROTOCOL_DIR`
+## VelaClaw: ai-protocol checkout and `AI_PROTOCOL_DIR`
 
 Provider manifests and JSON Schema come from the [ai-protocol](https://github.com/ailib-official/ai-protocol) repository. For any build or test that resolves models through the protocol provider graph, you need a local clone and `AI_PROTOCOL_DIR` pointing at its root (the directory that contains the manifest tree / schema the project expects).
 
@@ -25,7 +25,7 @@ cargo check --features ai-protocol
 cargo test --features ai-protocol
 ```
 
-If you do not set `AI_PROTOCOL_DIR`, follow the same migration doc for the supported fallback behavior and CI expectations. Prefer **`AI_PROTOCOL_DIR`** for ZeroSpider documentation consistency (some tools also accept `AI_PROTOCOL_PATH` as an alias).
+If you do not set `AI_PROTOCOL_DIR`, follow the same migration doc for the supported fallback behavior and CI expectations. Prefer **`AI_PROTOCOL_DIR`** for VelaClaw documentation consistency (some tools also accept `AI_PROTOCOL_PATH` as an alias).
 
 ZS-ML-015 removed the old built-in HTTP provider factory. New provider support belongs in
 `ai-protocol` manifests and should be exercised through `provider/model` tests.
@@ -34,8 +34,8 @@ ZS-ML-015 removed the old built-in HTTP provider factory. New provider support b
 
 ```bash
 # Clone the canonical repo (avoid hiddenpath as default upstream)
-git clone https://github.com/ailib-official/zerospider.git
-cd zerospider
+git clone https://github.com/ailib-official/velaclaw.git
+cd velaclaw
 
 # Enable the pre-push hook (runs fmt, clippy, tests before every push)
 git config core.hooksPath .githooks
@@ -72,25 +72,25 @@ The repo includes a pre-push hook in `.githooks/` that enforces `./scripts/ci/ru
 For an opt-in strict lint pass during pre-push, set:
 
 ```bash
-ZEROCLAW_STRICT_LINT=1 git push
+VELACLAW_STRICT_LINT=1 git push
 ```
 
 For an opt-in strict lint delta pass during pre-push (changed Rust lines only), set:
 
 ```bash
-ZEROCLAW_STRICT_DELTA_LINT=1 git push
+VELACLAW_STRICT_DELTA_LINT=1 git push
 ```
 
 For an opt-in docs quality pass during pre-push (changed-line markdown gate), set:
 
 ```bash
-ZEROCLAW_DOCS_LINT=1 git push
+VELACLAW_DOCS_LINT=1 git push
 ```
 
 For an opt-in docs links pass during pre-push (added-links gate), set:
 
 ```bash
-ZEROCLAW_DOCS_LINKS=1 git push
+VELACLAW_DOCS_LINKS=1 git push
 ```
 
 For full CI parity in Docker, run:
@@ -109,7 +109,7 @@ git push --no-verify
 
 ## Local Secret Management (Required)
 
-ZeroClaw supports layered secret management for local development and CI hygiene.
+VelaClaw supports layered secret management for local development and CI hygiene.
 
 ### Secret Storage Options
 
@@ -118,11 +118,11 @@ ZeroClaw supports layered secret management for local development and CI hygiene
     - `.env` files are Git-ignored and should stay local
     - Best for temporary/local API keys
 
-2. **Config file** (`~/.zeroclaw/config.toml`)
+2. **Config file** (`~/.velaclaw/config.toml`)
     - Persistent setup for long-term use
     - When `secrets.encrypt = true` (default), secret values are encrypted before save
-    - Secret key is stored at `~/.zeroclaw/.secret_key` with restricted permissions
-    - Use `zeroclaw onboard` for guided setup
+    - Secret key is stored at `~/.velaclaw/.secret_key` with restricted permissions
+    - Use `velaclaw onboard` for guided setup
 
 ### Runtime Resolution Rules
 
@@ -130,12 +130,12 @@ API key resolution follows this order:
 
 1. Explicit key passed from config/CLI
 2. Provider-specific env vars (`OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, ...)
-3. Generic env vars (`ZEROCLAW_API_KEY`, `API_KEY`)
+3. Generic env vars (`VELACLAW_API_KEY`, `API_KEY`)
 
 Provider/model config overrides:
 
-- `ZEROCLAW_PROVIDER` / `PROVIDER`
-- `ZEROCLAW_MODEL`
+- `VELACLAW_PROVIDER` / `PROVIDER`
+- `VELACLAW_MODEL`
 
 See `.env.example` for practical examples and currently supported provider key env vars.
 
@@ -182,7 +182,7 @@ If gitleaks is not installed, the pre-commit hook prints a warning and continues
 - API keys, tokens, passwords, or credentials (plain or encrypted)
 - OAuth tokens or session identifiers
 - Webhook signing secrets
-- `~/.zeroclaw/.secret_key` or similar key files
+- `~/.velaclaw/.secret_key` or similar key files
 - Personal identifiers or real user data in tests/fixtures
 
 ### If a Secret Is Committed Accidentally
@@ -242,7 +242,7 @@ Before requesting review, ensure all of the following are true:
 - Security impact and rollback path are explicitly described.
 - No personal/sensitive data is introduced in code/docs/tests/fixtures/logs/examples/commit messages.
 - Tests/fixtures/examples use neutral project-scoped wording (no identity-specific or first-person phrasing).
-- If identity-like wording is required, use ZeroClaw-centric labels only (for example: `ZeroClawAgent`, `ZeroClawOperator`, `zeroclaw_user`).
+- If identity-like wording is required, use VelaClaw-centric labels only (for example: `VelaClawAgent`, `VelaClawOperator`, `velaclaw_user`).
 - If docs were changed, update `docs/README.md` navigation and reciprocal links with related docs.
 - If a new operational doc was added, start from `docs/doc-template.md` and keep risk/rollback/troubleshooting sections where applicable.
 - Linked issue (or rationale for no issue) is included.
@@ -269,7 +269,7 @@ When PR traffic is high (especially with AI-assisted contributions), these rules
 - **Security-first review**: changes in `src/security/`, runtime, gateway, and CI need stricter validation.
 - **Risk-first triage**: use labels (`risk: high`, `risk: medium`, `risk: low`) to route review depth.
 - **Privacy-first hygiene**: redact/anonymize sensitive payloads and keep tests/examples neutral and project-scoped.
-- **Identity normalization**: when identity traits are unavoidable, use ZeroClaw/project-native roles instead of personal or real-world identities.
+- **Identity normalization**: when identity traits are unavoidable, use VelaClaw/project-native roles instead of personal or real-world identities.
 - **Supersede hygiene**: if your PR replaces an older open PR, add `Supersedes #...` and request maintainers close the outdated one.
 
 Full maintainer workflow: [`docs/pr-workflow.md`](docs/pr-workflow.md).
@@ -294,7 +294,7 @@ Agent implementation playbook lives in [`AGENTS.md`](AGENTS.md).
 
 ## Architecture: Trait-Based Pluggability
 
-ZeroClaw's architecture is built on **traits** — every subsystem is swappable. This means contributing a new integration is as simple as implementing a trait and registering it in the factory function.
+VelaClaw's architecture is built on **traits** — every subsystem is swappable. This means contributing a new integration is as simple as implementing a trait and registering it in the factory function.
 
 ```
 src/
@@ -316,7 +316,7 @@ Use these defaults unless an existing subsystem pattern clearly overrides them.
 - **Trait implementers**: keep predictable suffixes (`*Provider`, `*Channel`, `*Tool`, `*Memory`, `*Observer`, `*RuntimeAdapter`).
 - **Factory keys**: keep lowercase and stable (`openai`, `discord`, `shell`); avoid adding aliases without migration need.
 - **Tests**: use behavior-oriented names (`subject_expected_behavior`) and neutral project-scoped fixtures.
-- **Identity-like labels**: if unavoidable, use ZeroClaw-native identifiers only (`ZeroClawAgent`, `zeroclaw_user`, `zeroclaw_node`).
+- **Identity-like labels**: if unavoidable, use VelaClaw-native identifiers only (`VelaClawAgent`, `velaclaw_user`, `velaclaw_node`).
 
 ## Architecture Boundary Rules (Required)
 
@@ -342,7 +342,7 @@ Use these quick examples to align implementation choices before opening a PR.
 - **Good test name**: `allowlist_denies_unknown_user`, `provider_returns_error_on_invalid_model`
 
 - **Bad identity-like label**: `john_user`, `alice_bot`
-- **Good identity-like label**: `ZeroClawAgent`, `zeroclaw_user`, `zeroclaw_node`
+- **Good identity-like label**: `VelaClawAgent`, `velaclaw_user`, `velaclaw_node`
 
 ### Architecture boundary examples
 
@@ -502,7 +502,7 @@ impl Tool for YourTool {
 - [ ] Follows code naming conventions and architecture boundary rules in this guide
 - [ ] No personal/sensitive data in code/docs/tests/fixtures/logs/examples/commit messages
 - [ ] Test names/messages/fixtures/examples are neutral and project-focused
-- [ ] Any required identity-like wording uses ZeroClaw/project-native labels only
+- [ ] Any required identity-like wording uses VelaClaw/project-native labels only
 
 ## Commit Convention
 

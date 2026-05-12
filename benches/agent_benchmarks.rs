@@ -1,4 +1,4 @@
-//! Performance benchmarks for ZeroClaw hot paths.
+//! Performance benchmarks for VelaClaw hot paths.
 //!
 //! Benchmarks cover:
 //!   - Tool dispatch (XML parsing, native parsing)
@@ -7,20 +7,20 @@
 //!
 //! Run: `cargo bench`
 //!
-//! Ref: https://github.com/zeroclaw-labs/zeroclaw/issues/618 (item 7)
+//! Ref: https://github.com/velaclaw-labs/velaclaw/issues/618 (item 7)
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use std::hint::black_box;
 use std::sync::{Arc, Mutex};
 
-use zerospider::agent::agent::Agent;
-use zerospider::agent::dispatcher::{NativeToolDispatcher, ToolDispatcher, XmlToolDispatcher};
-use zerospider::config::MemoryConfig;
-use zerospider::memory;
-use zerospider::memory::{Memory, MemoryCategory};
-use zerospider::observability::{NoopObserver, Observer};
-use zerospider::providers::{ChatRequest, ChatResponse, Provider, ToolCall};
-use zerospider::tools::{Tool, ToolResult};
+use velaclaw::agent::agent::Agent;
+use velaclaw::agent::dispatcher::{NativeToolDispatcher, ToolDispatcher, XmlToolDispatcher};
+use velaclaw::config::MemoryConfig;
+use velaclaw::memory;
+use velaclaw::memory::{Memory, MemoryCategory};
+use velaclaw::observability::{NoopObserver, Observer};
+use velaclaw::providers::{ChatRequest, ChatResponse, Provider, ToolCall};
+use velaclaw::tools::{Tool, ToolResult};
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -145,7 +145,7 @@ fn bench_xml_parsing(c: &mut Criterion) {
         text: Some(
             r#"Here is my analysis.
 <tool_call>
-{"name": "search", "arguments": {"query": "zeroclaw architecture"}}
+{"name": "search", "arguments": {"query": "velaclaw architecture"}}
 </tool_call>
 Let me know if you need more."#
                 .into(),
@@ -191,7 +191,7 @@ fn bench_native_parsing(c: &mut Criterion) {
             ToolCall {
                 id: "tc1".into(),
                 name: "search".into(),
-                arguments: r#"{"query": "zeroclaw"}"#.into(),
+                arguments: r#"{"query": "velaclaw"}"#.into(),
             },
             ToolCall {
                 id: "tc2".into(),
@@ -220,7 +220,7 @@ fn bench_memory_operations(c: &mut Criterion) {
         for i in 0..100 {
             mem.store(
                 &format!("key_{i}"),
-                &format!("Content entry number {i} about zeroclaw agent runtime"),
+                &format!("Content entry number {i} about velaclaw agent runtime"),
                 MemoryCategory::Core,
                 None,
             )
@@ -249,7 +249,7 @@ fn bench_memory_operations(c: &mut Criterion) {
     c.bench_function("memory_recall_top10", |b| {
         b.iter(|| {
             rt.block_on(async {
-                mem.recall(black_box("zeroclaw agent"), 10, None)
+                mem.recall(black_box("velaclaw agent"), 10, None)
                     .await
                     .unwrap()
             })

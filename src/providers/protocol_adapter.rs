@@ -1,6 +1,6 @@
 //! Protocol-backed provider adapter.
 //!
-//! Bridges ai-lib-rust's AiClient to ZeroSpider's Provider trait,
+//! Bridges ai-lib-rust's AiClient to VelaClaw's Provider trait,
 //! enabling protocol-driven provider configuration.
 //! 协议适配器负责将 ai-lib-rust 客户端桥接到本地 Provider 接口。
 //!
@@ -540,7 +540,7 @@ mod tests {
         let partial = ProtocolBackedProvider::stream_event_to_chunk(
             ai_lib_rust::StreamingEvent::PartialToolCall {
                 tool_call_id: "call_1".to_string(),
-                arguments: r#"{"query":"zerospider"}"#.to_string(),
+                arguments: r#"{"query":"velaclaw"}"#.to_string(),
                 index: Some(0),
                 is_complete: Some(false),
             },
@@ -550,7 +550,7 @@ mod tests {
             partial.tool_call_delta,
             Some(StreamToolCallDelta::Arguments {
                 id: "call_1".to_string(),
-                arguments: r#"{"query":"zerospider"}"#.to_string(),
+                arguments: r#"{"query":"velaclaw"}"#.to_string(),
                 index: Some(0),
                 is_complete: Some(false),
             })

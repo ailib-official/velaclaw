@@ -34,12 +34,12 @@ cargo build --features remote-deploy          # Remote deployment
 
 ### Overview
 
-The `ProtocolBackedProvider` bridges ZeroClaw's Provider trait to ai-lib-rust's AiClient, enabling configuration-driven provider setup without code changes.
+The `ProtocolBackedProvider` bridges VelaClaw's Provider trait to ai-lib-rust's AiClient, enabling configuration-driven provider setup without code changes.
 
 ### Usage
 
 ```rust
-use zeroclaw::providers::ProtocolBackedProvider;
+use velaclaw::providers::ProtocolBackedProvider;
 
 // Create a protocol-backed provider
 let provider = ProtocolBackedProvider::new(
@@ -104,7 +104,7 @@ The scoring system evaluates providers across four dimensions:
 ### Basic Usage
 
 ```rust
-use zeroclaw::providers::scoring::{ProviderScorer, ScoringConfig, ScoringWeights};
+use velaclaw::providers::scoring::{ProviderScorer, ScoringConfig, ScoringWeights};
 
 // Create scorer with custom weights
 let config = ScoringConfig {
@@ -162,10 +162,10 @@ The selector automatically chooses the best model based on:
 ### Usage
 
 ```rust
-use zeroclaw::providers::selector::{
+use velaclaw::providers::selector::{
     AdaptiveSelector, ModelProfile, SelectionCriteria, TaskType,
 };
-use zeroclaw::providers::scoring::ProviderScorer;
+use velaclaw::providers::scoring::ProviderScorer;
 
 let scorer = ProviderScorer::default();
 let mut selector = AdaptiveSelector::new(scorer);
@@ -234,7 +234,7 @@ When multiple models provide responses, the negotiation system decides the final
 ### Usage
 
 ```rust
-use zeroclaw::agent::negotiation::{
+use velaclaw::agent::negotiation::{
     Negotiator, NegotiationStrategy, ModelResponse,
 };
 
@@ -288,7 +288,7 @@ Execute tasks in parallel with various patterns for optimal throughput.
 ### Usage
 
 ```rust
-use zeroclaw::agent::parallel::{
+use velaclaw::agent::parallel::{
     ParallelExecutor, Task, TaskProcessor,
 };
 use std::sync::Arc;
@@ -332,7 +332,7 @@ let result = executor.race(
 
 ### Overview
 
-Deploy ZeroClaw to remote servers with configuration-driven setup and health monitoring.
+Deploy VelaClaw to remote servers with configuration-driven setup and health monitoring.
 
 ### Deployment Modes
 
@@ -345,7 +345,7 @@ Deploy ZeroClaw to remote servers with configuration-driven setup and health mon
 ### Usage
 
 ```rust
-use zeroclaw::deploy::{
+use velaclaw::deploy::{
     RemoteDeployer, DeploymentTarget, DeploymentConfig, DeploymentMode,
 };
 
@@ -361,17 +361,17 @@ deployer.register_target(
 
 // Configure deployment
 deployer.set_config(DeploymentConfig {
-    name: "zeroclaw".into(),
+    name: "velaclaw".into(),
     version: "latest".into(),
-    binary_path: "/usr/local/bin/zeroclaw".into(),
-    working_dir: "/opt/zeroclaw".into(),
+    binary_path: "/usr/local/bin/velaclaw".into(),
+    working_dir: "/opt/velaclaw".into(),
     auto_start: true,
     restart_on_failure: true,
     ..Default::default()
 });
 
 // Deploy
-deployer.deploy("prod-1", "zeroclaw").await?;
+deployer.deploy("prod-1", "velaclaw").await?;
 
 // Health check
 let healthy = deployer.health_check("prod-1").await?;
@@ -408,11 +408,11 @@ deployer.rollback("prod-1").await?;
 ### Full Integration Example
 
 ```rust
-use zeroclaw::providers::{
+use velaclaw::providers::{
     ProtocolBackedProvider, ProviderScorer, AdaptiveSelector, SelectionCriteria, TaskType,
 };
-use zeroclaw::agent::negotiation::{Negotiator, NegotiationStrategy};
-use zeroclaw::agent::parallel::ParallelExecutor;
+use velaclaw::agent::negotiation::{Negotiator, NegotiationStrategy};
+use velaclaw::agent::parallel::ParallelExecutor;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

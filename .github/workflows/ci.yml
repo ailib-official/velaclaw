@@ -1,4 +1,4 @@
-# ZeroSpider — minimal CI (migration plan Phase 0: ai-protocol graph must compile).
+# VelaClaw — minimal CI (migration plan Phase 0: ai-protocol graph must compile).
 name: CI
 
 on:
@@ -40,13 +40,13 @@ jobs:
         run: cargo check --workspace --features ai-protocol --locked
 
       - name: cargo check (ai-protocol + routing_mvp — compile gate)
-        run: cargo check -p zerospider --features "ai-protocol routing_mvp" --lib --locked
+        run: cargo check -p velaclaw --features "ai-protocol routing_mvp" --lib --locked
 
       - name: cargo test (ai-protocol feature)
         run: cargo test --workspace --features ai-protocol --locked
 
       - name: cargo check (protocol-only, no default features)
-        run: cargo check -p zerospider --no-default-features --features ai-protocol --lib --locked
+        run: cargo check -p velaclaw --no-default-features --features ai-protocol --lib --locked
 
       - name: cargo test (protocol-only, no default features)
-        run: cargo test -p zerospider --no-default-features --features ai-protocol --locked
+        run: cargo test -p velaclaw --no-default-features --features ai-protocol --locked

@@ -82,7 +82,7 @@ const CUSTOM_MODEL_SENTINEL: &str = "__custom_model__";
 fn has_launchable_channels(channels: &ChannelsConfig) -> bool {
     let ChannelsConfig {
         cli: _,     // `cli` is always available and does not require channel server startup
-        webhook: _, // webhook traffic is handled by gateway, not `zerospider channel start`
+        webhook: _, // webhook traffic is handled by gateway, not `velaclaw channel start`
         telegram,
         discord,
         slack,
@@ -123,7 +123,7 @@ pub async fn run_wizard(force: bool) -> Result<Config> {
 
     println!(
         "  {}",
-        style("Welcome to ZeroClaw — the fastest, smallest AI assistant.")
+        style("Welcome to VelaClaw — the fastest, smallest AI assistant.")
             .white()
             .bold()
     );
@@ -140,7 +140,7 @@ pub async fn run_wizard(force: bool) -> Result<Config> {
     print_step(2, 9, "AI Provider & API Key");
     let (provider, api_key, model, provider_api_url) = setup_provider(&workspace_dir)?;
 
-    print_step(3, 9, "Channels (How You Talk to ZeroClaw)");
+    print_step(3, 9, "Channels (How You Talk to VelaClaw)");
     let channels_config = setup_channels()?;
 
     print_step(4, 9, "Tunnel (Expose to Internet)");
@@ -246,7 +246,7 @@ pub async fn run_wizard(force: bool) -> Result<Config> {
             );
             println!();
             // Signal to main.rs to call start_channels after wizard returns
-            std::env::set_var("ZEROCLAW_AUTOSTART_CHANNELS", "1");
+            std::env::set_var("VELACLAW_AUTOSTART_CHANNELS", "1");
         }
     }
 
@@ -266,7 +266,7 @@ pub async fn run_channels_repair_wizard() -> Result<Config> {
 
     let mut config = Config::load_or_init().await?;
 
-    print_step(1, 1, "Channels (How You Talk to ZeroClaw)");
+    print_step(1, 1, "Channels (How You Talk to VelaClaw)");
     config.channels_config = setup_channels()?;
     config.save().await?;
     persist_workspace_selection(&config.config_path).await?;
@@ -298,7 +298,7 @@ pub async fn run_channels_repair_wizard() -> Result<Config> {
             );
             println!();
             // Signal to main.rs to call start_channels after wizard returns
-            std::env::set_var("ZEROCLAW_AUTOSTART_CHANNELS", "1");
+            std::env::set_var("VELACLAW_AUTOSTART_CHANNELS", "1");
         }
     }
 
@@ -308,8 +308,8 @@ pub async fn run_channels_repair_wizard() -> Result<Config> {
 // ── Quick setup (zero prompts) ───────────────────────────────────
 
 /// Non-interactive setup: generates a sensible default config instantly.
-/// Use `zerospider onboard` or `zerospider onboard --api-key sk-... --provider openai/gpt-5.2 --memory sqlite|lucid`.
-/// Use `zerospider onboard --interactive` for the full wizard.
+/// Use `velaclaw onboard` or `velaclaw onboard --api-key sk-... --provider openai/gpt-5.2 --memory sqlite|lucid`.
+/// Use `velaclaw onboard --interactive` for the full wizard.
 fn backend_key_from_choice(choice: usize) -> &'static str {
     selectable_memory_backends()
         .get(choice)
@@ -389,9 +389,9 @@ async fn run_quick_setup_with_home(
     );
     println!();
 
-    let zerospider_dir = home.join(".zerospider");
-    let workspace_dir = zerospider_dir.join("workspace");
-    let config_path = zerospider_dir.join("config.toml");
+    let velaclaw_dir = home.join(".velaclaw");
+    let workspace_dir = velaclaw_dir.join("workspace");
+    let config_path = velaclaw_dir.join("config.toml");
 
     ensure_onboard_overwrite_allowed(&config_path, force)?;
     fs::create_dir_all(&workspace_dir).context("Failed to create workspace directory")?;
@@ -460,7 +460,7 @@ async fn run_quick_setup_with_home(
     let default_ctx = ProjectContext {
         user_name: std::env::var("USER").unwrap_or_else(|_| "User".into()),
         timezone: "UTC".into(),
-        agent_name: "ZeroClaw".into(),
+        agent_name: "VelaClaw".into(),
         communication_style:
             "Be warm, natural, and clear. Use occasional relevant emojis (1-2 max) and avoid robotic phrasing."
                 .into(),
@@ -536,13 +536,13 @@ async fn run_quick_setup_with_home(
     println!("  {}", style("Next steps:").white().bold());
     if credential_override.is_none() {
         println!("    1. Set your API key:  export OPENAI_API_KEY=\"sk-...\"");
-        println!("    2. Or edit:           ~/.zerospider/config.toml");
-        println!("    3. Chat:              zerospider agent -m \"Hello!\"");
-        println!("    4. Gateway:           zerospider gateway");
+        println!("    2. Or edit:           ~/.velaclaw/config.toml");
+        println!("    3. Chat:              velaclaw agent -m \"Hello!\"");
+        println!("    4. Gateway:           velaclaw gateway");
     } else {
-        println!("    1. Chat:     zerospider agent -m \"Hello!\"");
-        println!("    2. Gateway:  zerospider gateway");
-        println!("    3. Status:   zerospider status");
+        println!("    1. Chat:     velaclaw agent -m \"Hello!\"");
+        println!("    2. Gateway:  velaclaw gateway");
+        println!("    3. Status:   velaclaw status");
     }
     println!();
 
@@ -1582,7 +1582,7 @@ pub fn run_models_refresh(
             print_model_preview(&cached.models);
             println!();
             println!(
-                "Tip: run `zerospider models refresh --force --provider {}` to fetch latest now.",
+                "Tip: run `velaclaw models refresh --force --provider {}` to fetch latest now.",
                 provider_name
             );
             return Ok(());
@@ -1707,7 +1707,7 @@ fn setup_workspace() -> Result<(PathBuf, PathBuf)> {
     let home = directories::UserDirs::new()
         .map(|u| u.home_dir().to_path_buf())
         .context("Could not find home directory")?;
-    let default_dir = home.join(".zerospider");
+    let default_dir = home.join(".velaclaw");
 
     print_bullet(&format!(
         "Default location: {}",
@@ -1719,7 +1719,7 @@ fn setup_workspace() -> Result<(PathBuf, PathBuf)> {
         .default(true)
         .interact()?;
 
-    let zerospider_dir = if use_default {
+    let velaclaw_dir = if use_default {
         default_dir
     } else {
         let custom: String = Input::new()
@@ -1729,8 +1729,8 @@ fn setup_workspace() -> Result<(PathBuf, PathBuf)> {
         PathBuf::from(expanded)
     };
 
-    let workspace_dir = zerospider_dir.join("workspace");
-    let config_path = zerospider_dir.join("config.toml");
+    let workspace_dir = velaclaw_dir.join("workspace");
+    let config_path = velaclaw_dir.join("config.toml");
 
     fs::create_dir_all(&workspace_dir).context("Failed to create workspace directory")?;
 
@@ -2379,7 +2379,7 @@ fn provider_supports_keyless_local_usage(provider_name: &str) -> bool {
 // ── Step 5: Tool Mode & Security ────────────────────────────────
 
 fn setup_tool_mode() -> Result<(ComposioConfig, SecretsConfig)> {
-    print_bullet("Choose how ZeroClaw connects to external apps.");
+    print_bullet("Choose how VelaClaw connects to external apps.");
     print_bullet("You can always change this later in config.toml.");
     println!();
 
@@ -2402,7 +2402,7 @@ fn setup_tool_mode() -> Result<(ComposioConfig, SecretsConfig)> {
             style("— 1000+ OAuth integrations (Gmail, Notion, GitHub, Slack, ...)").dim()
         );
         print_bullet("Get your API key at: https://app.composio.dev/settings");
-        print_bullet("ZeroClaw uses Composio as a tool — your core agent stays local.");
+        print_bullet("VelaClaw uses Composio as a tool — your core agent stays local.");
         println!();
 
         let api_key: String = Input::new()
@@ -2439,7 +2439,7 @@ fn setup_tool_mode() -> Result<(ComposioConfig, SecretsConfig)> {
 
     // ── Encrypted secrets ──
     println!();
-    print_bullet("ZeroClaw can encrypt API keys stored in config.toml.");
+    print_bullet("VelaClaw can encrypt API keys stored in config.toml.");
     print_bullet("A local key file protects against plaintext exposure and accidental leaks.");
 
     let encrypt = Confirm::new()
@@ -2469,7 +2469,7 @@ fn setup_tool_mode() -> Result<(ComposioConfig, SecretsConfig)> {
 // ── Step 6: Hardware (Physical World) ───────────────────────────
 
 fn setup_hardware() -> Result<HardwareConfig> {
-    print_bullet("ZeroClaw can talk to physical hardware (LEDs, sensors, motors).");
+    print_bullet("VelaClaw can talk to physical hardware (LEDs, sensors, motors).");
     print_bullet("Scanning for connected devices...");
     println!();
 
@@ -2526,7 +2526,7 @@ fn setup_hardware() -> Result<HardwareConfig> {
     let recommended = hardware::recommended_wizard_default(&devices);
 
     let choice = Select::new()
-        .with_prompt("  How should ZeroClaw interact with the physical world?")
+        .with_prompt("  How should VelaClaw interact with the physical world?")
         .items(&options)
         .default(recommended)
         .interact()?;
@@ -2701,7 +2701,7 @@ fn setup_project_context() -> Result<ProjectContext> {
 
     let agent_name: String = Input::new()
         .with_prompt("  Agent name")
-        .default("ZeroClaw".into())
+        .default("VelaClaw".into())
         .interact_text()?;
 
     let style_options = vec![
@@ -2755,7 +2755,7 @@ fn setup_project_context() -> Result<ProjectContext> {
 // ── Step 6: Memory Configuration ───────────────────────────────
 
 fn setup_memory() -> Result<MemoryConfig> {
-    print_bullet("Choose how ZeroClaw stores and searches memories.");
+    print_bullet("Choose how VelaClaw stores and searches memories.");
     print_bullet("You can always change this later in config.toml.");
     println!();
 
@@ -2795,7 +2795,7 @@ fn setup_memory() -> Result<MemoryConfig> {
 
 #[allow(clippy::too_many_lines)]
 fn setup_channels() -> Result<ChannelsConfig> {
-    print_bullet("Channels let you talk to ZeroClaw from anywhere.");
+    print_bullet("Channels let you talk to VelaClaw from anywhere.");
     print_bullet("CLI is always available. Connect more channels now.");
     println!();
 
@@ -2954,7 +2954,7 @@ fn setup_channels() -> Result<ChannelsConfig> {
                 println!(
                     "  {} {}",
                     style("Telegram Setup").white().bold(),
-                    style("— talk to ZeroClaw from Telegram").dim()
+                    style("— talk to VelaClaw from Telegram").dim()
                 );
                 print_bullet("1. Open Telegram and message @BotFather");
                 print_bullet("2. Send /newbot and follow the prompts");
@@ -3052,7 +3052,7 @@ fn setup_channels() -> Result<ChannelsConfig> {
                 println!(
                     "  {} {}",
                     style("Discord Setup").white().bold(),
-                    style("— talk to ZeroClaw from Discord").dim()
+                    style("— talk to VelaClaw from Discord").dim()
                 );
                 print_bullet("1. Go to https://discord.com/developers/applications");
                 print_bullet("2. Create a New Application → Bot → Copy token");
@@ -3151,7 +3151,7 @@ fn setup_channels() -> Result<ChannelsConfig> {
                 println!(
                     "  {} {}",
                     style("Slack Setup").white().bold(),
-                    style("— talk to ZeroClaw from Slack").dim()
+                    style("— talk to VelaClaw from Slack").dim()
                 );
                 print_bullet("1. Go to https://api.slack.com/apps → Create New App");
                 print_bullet("2. Add Bot Token Scopes: chat:write, channels:history");
@@ -3287,7 +3287,7 @@ fn setup_channels() -> Result<ChannelsConfig> {
                     continue;
                 }
 
-                print_bullet("ZeroClaw reads your iMessage database and replies via AppleScript.");
+                print_bullet("VelaClaw reads your iMessage database and replies via AppleScript.");
                 print_bullet(
                     "You need to grant Full Disk Access to your terminal in System Settings.",
                 );
@@ -3452,7 +3452,7 @@ fn setup_channels() -> Result<ChannelsConfig> {
 
                     let session_path: String = Input::new()
                         .with_prompt("  Session database path")
-                        .default("~/.zerospider/state/whatsapp-web/session.db".into())
+                        .default("~/.velaclaw/state/whatsapp-web/session.db".into())
                         .interact_text()?;
 
                     if session_path.trim().is_empty() {
@@ -3542,7 +3542,7 @@ fn setup_channels() -> Result<ChannelsConfig> {
 
                 let verify_token: String = Input::new()
                     .with_prompt("  Webhook verify token (create your own)")
-                    .default("zerospider-whatsapp-verify".into())
+                    .default("velaclaw-whatsapp-verify".into())
                     .interact_text()?;
 
                 // Test connection (run entirely in separate thread — Response must be used/dropped there)
@@ -3598,7 +3598,7 @@ fn setup_channels() -> Result<ChannelsConfig> {
                     access_token: Some(access_token.trim().to_string()),
                     phone_number_id: Some(phone_number_id.trim().to_string()),
                     verify_token: Some(verify_token.trim().to_string()),
-                    app_secret: None, // Can be set via ZEROCLAW_WHATSAPP_APP_SECRET env var
+                    app_secret: None, // Can be set via VELACLAW_WHATSAPP_APP_SECRET env var
                     session_path: None,
                     pair_phone: None,
                     pair_code: None,
@@ -4021,7 +4021,7 @@ fn setup_channels() -> Result<ChannelsConfig> {
                 println!(
                     "  {} {}",
                     style("Lark/Feishu Setup").white().bold(),
-                    style("— talk to ZeroClaw from Lark or Feishu").dim()
+                    style("— talk to VelaClaw from Lark or Feishu").dim()
                 );
                 print_bullet(
                     "1. Go to Lark/Feishu Open Platform (open.larksuite.com / open.feishu.cn)",
@@ -4418,7 +4418,7 @@ fn setup_tunnel() -> Result<crate::config::TunnelConfig> {
 #[allow(clippy::too_many_lines)]
 fn scaffold_workspace(workspace_dir: &Path, ctx: &ProjectContext) -> Result<()> {
     let agent = if ctx.agent_name.is_empty() {
-        "ZeroClaw"
+        "VelaClaw"
     } else {
         &ctx.agent_name
     };
@@ -4705,7 +4705,7 @@ fn print_summary(config: &Config) {
     println!(
         "  {}  {}",
         style("⚡").cyan(),
-        style("ZeroClaw is ready!").white().bold()
+        style("VelaClaw is ready!").white().bold()
     );
     println!(
         "  {}",
@@ -4875,7 +4875,7 @@ fn print_summary(config: &Config) {
             );
             println!(
                 "       {}",
-                style("zerospider auth login --provider openai-codex --device-code").yellow()
+                style("velaclaw auth login --provider openai-codex --device-code").yellow()
             );
         } else if provider == "anthropic" {
             println!(
@@ -4889,7 +4889,7 @@ fn print_summary(config: &Config) {
             println!(
                 "       {}",
                 style(
-                    "or: zerospider auth paste-token --provider anthropic --auth-kind authorization"
+                    "or: velaclaw auth paste-token --provider anthropic --auth-kind authorization"
                 )
                 .yellow()
             );
@@ -4915,7 +4915,7 @@ fn print_summary(config: &Config) {
             style(format!("{step}.")).cyan().bold(),
             style("Launch your channels").white().bold()
         );
-        println!("       {}", style("zerospider channel start").yellow());
+        println!("       {}", style("velaclaw channel start").yellow());
         println!();
         step += 1;
     }
@@ -4926,7 +4926,7 @@ fn print_summary(config: &Config) {
     );
     println!(
         "       {}",
-        style("zerospider agent -m \"Hello, ZeroClaw!\"").yellow()
+        style("velaclaw agent -m \"Hello, VelaClaw!\"").yellow()
     );
     println!();
     step += 1;
@@ -4935,7 +4935,7 @@ fn print_summary(config: &Config) {
         "    {} Start interactive CLI mode:",
         style(format!("{step}.")).cyan().bold()
     );
-    println!("       {}", style("zerospider agent").yellow());
+    println!("       {}", style("velaclaw agent").yellow());
     println!();
     step += 1;
 
@@ -4943,7 +4943,7 @@ fn print_summary(config: &Config) {
         "    {} Check full status:",
         style(format!("{step}.")).cyan().bold()
     );
-    println!("       {}", style("zerospider status").yellow());
+    println!("       {}", style("velaclaw status").yellow());
 
     println!();
     println!(
@@ -5026,10 +5026,10 @@ mod tests {
     #[tokio::test]
     async fn quick_setup_existing_config_requires_force_when_non_interactive() {
         let tmp = TempDir::new().unwrap();
-        let zerospider_dir = tmp.path().join(".zerospider");
-        let config_path = zerospider_dir.join("config.toml");
+        let velaclaw_dir = tmp.path().join(".velaclaw");
+        let config_path = velaclaw_dir.join("config.toml");
 
-        tokio::fs::create_dir_all(&zerospider_dir).await.unwrap();
+        tokio::fs::create_dir_all(&velaclaw_dir).await.unwrap();
         tokio::fs::write(
             &config_path,
             format!("default_provider = \"{DEFAULT_PROTOCOL_MODEL_ID}\"\n"),
@@ -5056,10 +5056,10 @@ mod tests {
     #[tokio::test]
     async fn quick_setup_existing_config_overwrites_with_force() {
         let tmp = TempDir::new().unwrap();
-        let zerospider_dir = tmp.path().join(".zerospider");
-        let config_path = zerospider_dir.join("config.toml");
+        let velaclaw_dir = tmp.path().join(".velaclaw");
+        let config_path = velaclaw_dir.join("config.toml");
 
-        tokio::fs::create_dir_all(&zerospider_dir).await.unwrap();
+        tokio::fs::create_dir_all(&velaclaw_dir).await.unwrap();
         tokio::fs::write(
             &config_path,
             "default_provider = \"anthropic\"\ndefault_model = \"stale-model\"\n",
@@ -5275,8 +5275,8 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            identity.contains("**Name:** ZeroClaw"),
-            "should default agent name to ZeroClaw"
+            identity.contains("**Name:** VelaClaw"),
+            "should default agent name to VelaClaw"
         );
 
         let user_md = tokio::fs::read_to_string(tmp.path().join("USER.md"))
@@ -5484,7 +5484,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let ctx = ProjectContext {
             user_name: "José María".into(),
-            agent_name: "ZeroClaw-v2".into(),
+            agent_name: "VelaClaw-v2".into(),
             timezone: "Europe/Madrid".into(),
             communication_style: "Be direct.".into(),
         };
@@ -5498,7 +5498,7 @@ mod tests {
         let soul = tokio::fs::read_to_string(tmp.path().join("SOUL.md"))
             .await
             .unwrap();
-        assert!(soul.contains("ZeroClaw-v2"));
+        assert!(soul.contains("VelaClaw-v2"));
     }
 
     // ── scaffold_workspace: full personalization round-trip ─────

@@ -8,7 +8,7 @@
 //! Verifies sender/reply_target field contracts to prevent field swaps.
 
 use async_trait::async_trait;
-use zerospider::channels::traits::{Channel, ChannelMessage, SendMessage};
+use velaclaw::channels::traits::{Channel, ChannelMessage, SendMessage};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ChannelMessage construction and field semantics

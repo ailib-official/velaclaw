@@ -15,19 +15,19 @@
 
 // #[test]
 // fn test_deploy_list_command() {
-//     // This test would verify that `zerospider deploy list` works correctly
+//     // This test would verify that `velaclaw deploy list` works correctly
 //     // with proper output formatting.
 // }
 
 // #[test]
 // fn test_deploy_status_command() {
-//     // This test would verify that `zerospider deploy status --server <id>`
+//     // This test would verify that `velaclaw deploy status --server <id>`
 //     // returns proper status information.
 // }
 
 // #[test]
 // fn test_deploy_health_check_command() {
-//     // This test would verify that `zerospider deploy health-check --server <id>`
+//     // This test would verify that `velaclaw deploy health-check --server <id>`
 //     // performs health checks correctly.
 // }
 

@@ -61,7 +61,7 @@ impl ProxyConfigTool {
     fn parse_scope(raw: &str) -> Option<ProxyScope> {
         match raw.trim().to_ascii_lowercase().as_str() {
             "environment" | "env" => Some(ProxyScope::Environment),
-            "zerospider" | "internal" | "core" => Some(ProxyScope::Zeroclaw),
+            "velaclaw" | "internal" | "core" => Some(ProxyScope::Velaclaw),
             "services" | "service" => Some(ProxyScope::Services),
             _ => None,
         }
@@ -185,7 +185,7 @@ impl ProxyConfigTool {
                 .as_str()
                 .ok_or_else(|| anyhow::anyhow!("'scope' must be a string"))?;
             proxy.scope = Self::parse_scope(scope).ok_or_else(|| {
-                anyhow::anyhow!("Invalid scope '{scope}'. Use environment|zerospider|services")
+                anyhow::anyhow!("Invalid scope '{scope}'. Use environment|velaclaw|services")
             })?;
         }
 
@@ -342,7 +342,7 @@ impl Tool for ProxyConfigTool {
     }
 
     fn description(&self) -> &str {
-        "Manage ZeroClaw proxy settings (scope: environment | zerospider | services), including runtime and process env application"
+        "Manage VelaClaw proxy settings (scope: environment | velaclaw | services), including runtime and process env application"
     }
 
     fn parameters_schema(&self) -> Value {
@@ -360,7 +360,7 @@ impl Tool for ProxyConfigTool {
                 },
                 "scope": {
                     "type": "string",
-                    "description": "Proxy scope: environment | zerospider | services"
+                    "description": "Proxy scope: environment | velaclaw | services"
                 },
                 "http_proxy": {
                     "type": ["string", "null"],

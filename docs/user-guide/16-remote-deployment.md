@@ -2,7 +2,7 @@
 
 ## Overview
 
-ZeroSpider provides controlled remote deployment capabilities, allowing you to deploy and manage AI agents on remote servers via SSH. This feature is available with the `--features remote-deploy` compile flag.
+VelaClaw provides controlled remote deployment capabilities, allowing you to deploy and manage AI agents on remote servers via SSH. This feature is available with the `--features remote-deploy` compile flag.
 
 ## Features
 
@@ -27,7 +27,7 @@ cargo build --release --features remote-deploy
 ```bash
 # Option 1: Run directly on remote server
 ssh user@remote-server
-wget https://raw.githubusercontent.com/ailib-official/zerospider/main/bootstrap.sh
+wget https://raw.githubusercontent.com/ailib-official/velaclaw/main/bootstrap.sh
 chmod +x bootstrap.sh
 sudo bash bootstrap.sh
 ```
@@ -43,19 +43,19 @@ ssh user@remote-server 'sudo bash /tmp/bootstrap.sh'
 The bootstrap script (`bootstrap.sh`) automatically:
 
 1. **Creates deploy user** (if not exists)
-2. **Sets up directories**: `/opt/zerospider`, `/opt/zerospider/logs`
+2. **Sets up directories**: `/opt/velaclaw`, `/opt/velaclaw/logs`
 3. **Sets file permissions**: Ownership for deploy user on all directories
 4. **Configures sudoers**: Passwordless sudo for deploy user for:
    - systemctl commands (daemon-reload, enable, start, stop, restart)
    - Directory creation and ownership
    - Binary installation
 5. **Adds to docker group** (if Docker is installed)
-6. **Creates systemd service file**: `/etc/systemd/system/zerospider.service`
-7. **Creates marker file**: `/opt/zerospider/.bootstrap-complete` to prevent re-running
+6. **Creates systemd service file**: `/etc/systemd/system/velaclaw.service`
+7. **Creates marker file**: `/opt/velaclaw/.bootstrap-complete` to prevent re-running
 
 ### Configuration
 
-Add deployment targets to your `~/.zerospider/config.toml`:
+Add deployment targets to your `~/.velaclaw/config.toml`:
 
 ```toml
 [deploy]
@@ -77,9 +77,9 @@ labels = ["env:staging", "region:us-west"]
 
 [deploy.settings]
 mode = "systemd"                     # Options: direct, docker, systemd
-binary_path = "/usr/local/bin/zerospider"
-working_dir = "/opt/zerospider"
-config_path = "/opt/zerospider/config.toml"
+binary_path = "/usr/local/bin/velaclaw"
+working_dir = "/opt/velaclaw"
+config_path = "/opt/velaclaw/config.toml"
 auto_start = true
 health_check_interval_secs = 30
 restart_on_failure = true
@@ -91,37 +91,37 @@ use_sudo = true                       # Use sudo for systemctl/docker commands
 
 ```bash
 # Deploy to the prod-001 server
-zerospider deploy deploy --server prod-001
+velaclaw deploy deploy --server prod-001
 
 # Check the deployment status
-zerospider deploy status --server prod-001
+velaclaw deploy status --server prod-001
 
 # Run a health check
-zerospider deploy health-check --server prod-001
+velaclaw deploy health-check --server prod-001
 
 # Validate deployment readiness before deploying (NEW)
-zerospider deploy validate --server prod-001
+velaclaw deploy validate --server prod-001
 ```
 
 ## Commands
 
 ### deploy
 
-Deploy ZeroSpider to a remote server:
+Deploy VelaClaw to a remote server:
 
 ```bash
-zerospider deploy deploy --server <server-id>
+velaclaw deploy deploy --server <server-id>
 ```
 
 Example:
 ```bash
-zerospider deploy deploy --server prod-001
+velaclaw deploy deploy --server prod-001
 ```
 
 Process:
 1. Validates deployment target configuration
 2. Creates remote working directory
-3. Uploads the ZeroSpider binary
+3. Uploads the VelaClaw binary
 4. Configures the server based on deployment mode
 5. Starts the service (if `auto_start = true`)
 
@@ -130,7 +130,7 @@ Process:
 Display deployment status for a specific server:
 
 ```bash
-zerospider deploy status --server <server-id>
+velaclaw deploy status --server <server-id>
 ```
 
 Example output:
@@ -148,11 +148,11 @@ Example output:
 Run a health check on a deployed server:
 
 ```bash
-zerospider deploy health-check --server <server-id>
+velaclaw deploy health-check --server <server-id>
 ```
 
 The health check verifies that:
-- The ZeroSpider process is running
+- The VelaClaw process is running
 - The service is responding to requests
 
 ### list
@@ -160,7 +160,7 @@ The health check verifies that:
 List all configured deployment targets:
 
 ```bash
-zerospider deploy list
+velaclaw deploy list
 ```
 
 Example output:
@@ -178,11 +178,11 @@ Example output:
 Rollback to the previous deployment:
 
 ```bash
-zerospider deploy rollback --server <server-id>
+velaclaw deploy rollback --server <server-id>
 ```
 
 This will:
-1. Stop the current ZeroSpider service
+1. Stop the current VelaClaw service
 2. Restore the previous version
 3. Restart the service
 
@@ -191,14 +191,14 @@ This will:
 Update to a specific version:
 
 ```bash
-zerospider deploy update --server <server-id> --version <version>
+velaclaw deploy update --server <server-id> --version <version>
 ```
 
 If version is not specified, updates to "latest" (current binary).
 
 Example:
 ```bash
-zerospider deploy update --server prod-001 --version v0.3.0
+velaclaw deploy update --server prod-001 --version v0.3.0
 ```
 
 ### sync-config
@@ -206,10 +206,10 @@ zerospider deploy update --server prod-001 --version v0.3.0
 Synchronize the local configuration to the remote server:
 
 ```bash
-zerospider deploy sync-config --server <server-id>
+velaclaw deploy sync-config --server <server-id>
 ```
 
-This uploads your local `~/.zerospider/config.toml` to the remote server with the path specified in `deploy.settings.config_path`.
+This uploads your local `~/.velaclaw/config.toml` to the remote server with the path specified in `deploy.settings.config_path`.
 
 ## Deployment Modes
 
@@ -217,13 +217,13 @@ This uploads your local `~/.zerospider/config.toml` to the remote server with th
 
 | Mode | Requirements | Setup | Advantages |
 |------|-------------|-------|-----------|
-| **Direct** | Write access to `/usr/local/bin/`, `/opt/zerospider` | Run bootstrap.sh | Simple, no runtime dependencies |
+| **Direct** | Write access to `/usr/local/bin/`, `/opt/velaclaw` | Run bootstrap.sh | Simple, no runtime dependencies |
 | **Docker** | Docker daemon, deploy user in docker group | Run bootstrap.sh | Containerized, easy version management |
 | **Systemd** | systemctl, sudo configured in bootstrap.sh | Run bootstrap.sh | Auto-restart, managed service, logs in journald |
 
 ### Direct Mode
 
-Deploys ZeroSpider as a standalone binary process:
+Deploys VelaClaw as a standalone binary process:
 
 ```toml
 [deploy.settings]
@@ -237,7 +237,7 @@ Recommended for:
 
 ### Docker Mode
 
-Deploys ZeroSpider in a Docker container:
+Deploys VelaClaw in a Docker container:
 
 ```toml
 [deploy.settings]
@@ -255,7 +255,7 @@ Requirements:
 
 ### Systemd Mode
 
-Deploys ZeroSpider as a systemd service:
+Deploys VelaClaw as a systemd service:
 
 ```toml
 [deploy.settings]
@@ -271,7 +271,7 @@ Recommended for:
 
 ### Using Default SSH Key
 
-If no `ssh_key` is specified, ZeroSpider uses the default SSH key path:
+If no `ssh_key` is specified, VelaClaw uses the default SSH key path:
 - `~/.ssh/identity`
 - `~/.ssh/id_rsa`
 - `~/.ssh/id_ed25519`
@@ -311,7 +311,7 @@ ls -la ~/.ssh/id_ed25519  # Should be -rw------- (600)
 **Symptom**: Permission denied when creating directories or installing binary:
 
 ```
-Permission denied: mkdir -p /opt/zerospider
+Permission denied: mkdir -p /opt/velaclaw
 ```
 
 **Solution**: Run bootstrap.sh on remote server:
@@ -325,10 +325,10 @@ If bootstrap script was already run, ensure directories exist:
 ssh deploy@192.168.1.100
 
 # Check directory permissions
-ls -la /opt/zerospider
+ls -la /opt/velaclaw
 
 # Ensure the deploy user has write access
-sudo chown -R deploy:deploy /opt/zerospider
+sudo chown -R deploy:deploy /opt/velaclaw
 ```
 
 ### systemctl Requires Permissions
@@ -344,12 +344,12 @@ Permission denied: systemctl daemon-reload
 ```bash
 # On remote server, run as root:
 echo "deploy ALL=(ALL) NOPASSWD: /usr/bin/systemctl daemon-reload, \
-    /usr/bin/systemctl enable zerospider, \
-    /usr/bin/systemctl start zerospider, \
-    /usr/bin/systemctl stop zerospider, \
-    /usr/bin/systemctl restart zerospider" | \
-    sudo tee /etc/sudoers.d/deployer-zerospider
-sudo chmod 0440 /etc/sudoers.d/deployer-zerospider
+    /usr/bin/systemctl enable velaclaw, \
+    /usr/bin/systemctl start velaclaw, \
+    /usr/bin/systemctl stop velaclaw, \
+    /usr/bin/systemctl restart velaclaw" | \
+    sudo tee /etc/sudoers.d/deployer-velaclaw
+sudo chmod 0440 /etc/sudoers.d/deployer-velaclaw
 ```
 
 ### Docker Permission Denied
@@ -370,7 +370,7 @@ ssh deploy@remote-server  # Logout and login again
 
 **Symptom**:
 ```
-Error: pull access denied for zerospider:latest
+Error: pull access denied for velaclaw:latest
 ```
 
 **Solution 1** (if using private registry): Configure Docker credentials
@@ -378,10 +378,10 @@ Error: pull access denied for zerospider:latest
 **Solution 2** (if using public hub): Build custom image first:
 ```bash
 # On local machine:
-docker build -t zerospider:latest .
+docker build -t velaclaw:latest .
 # Tag and push to registry
-docker tag zerospider:latest registry.example.com/zerospider:latest
-docker push registry.example.com/zerospider:latest
+docker tag velaclaw:latest registry.example.com/velaclaw:latest
+docker push registry.example.com/velaclaw:latest
 ```
 
 ### Service Not Starting
@@ -390,17 +390,17 @@ If the service starts but immediately crashes:
 
 ```bash
 # Check if the process is running
-pgrep zerospider
+pgrep velaclaw
 
 # Check systemd logs (if using systemd mode)
-sudo systemctl status zerospider
-sudo journalctl -u zerospider -n 50
+sudo systemctl status velaclaw
+sudo journalctl -u velaclaw -n 50
 
 # Check logs in working directory
-tail -f /opt/zerospider/logs/zerospider.log
+tail -f /opt/velaclaw/logs/velaclaw.log
 
 # Manual test - run binary directly
-cd /opt/zerospider && /usr/local/bin/zerospider
+cd /opt/velaclaw && /usr/local/bin/velaclaw
 ```
 
 ## Advanced Configuration
@@ -447,7 +447,7 @@ labels = ["region:us-east", "env:production", "service:agent"]
 
 Example queries (future feature):
 ```bash
-zerospider deploy list --labels env:production,region:us-west
+velaclaw deploy list --labels env:production,region:us-west
 ```
 
 ## Security Considerations
@@ -459,7 +459,7 @@ zerospider deploy list --labels env:production,region:us-west
 3. **Use non-root user**: Deploy and run as a non-privileged user
 4. **Limit SSH access**: Use firewall rules to restrict SSH access
 
-### ZeroSpider Configuration
+### VelaClaw Configuration
 
 1. **Enable workspace-only mode** for remote deployments:
    ```toml

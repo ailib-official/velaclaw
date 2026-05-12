@@ -6,7 +6,7 @@
 //! Tests request/response serialization to verify required fields are present
 //! for provider-facing message contracts after legacy HTTP adapters moved out.
 
-use zerospider::providers::traits::{ChatMessage, ChatResponse, ToolCall};
+use velaclaw::providers::traits::{ChatMessage, ChatResponse, ToolCall};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ChatMessage serialization

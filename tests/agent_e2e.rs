@@ -5,24 +5,24 @@
 //! external service dependencies. They complement the unit tests in
 //! `src/agent/tests.rs` by running at the integration test boundary.
 //!
-//! Ref: https://github.com/zerospider-labs/zerospider/issues/618 (item 6)
+//! Ref: https://github.com/velaclaw-labs/velaclaw/issues/618 (item 6)
 
 use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::json;
 use std::sync::{Arc, Mutex};
-use zerospider::agent::agent::Agent;
-use zerospider::agent::dispatcher::{NativeToolDispatcher, XmlToolDispatcher};
-use zerospider::agent::memory_loader::MemoryLoader;
-use zerospider::config::MemoryConfig;
-use zerospider::memory;
-use zerospider::memory::Memory;
-use zerospider::observability::{NoopObserver, Observer};
-use zerospider::providers::traits::ChatMessage;
-use zerospider::providers::{
+use velaclaw::agent::agent::Agent;
+use velaclaw::agent::dispatcher::{NativeToolDispatcher, XmlToolDispatcher};
+use velaclaw::agent::memory_loader::MemoryLoader;
+use velaclaw::config::MemoryConfig;
+use velaclaw::memory;
+use velaclaw::memory::Memory;
+use velaclaw::observability::{NoopObserver, Observer};
+use velaclaw::providers::traits::ChatMessage;
+use velaclaw::providers::{
     ChatRequest, ChatResponse, ConversationMessage, Provider, ProviderRuntimeOptions, ToolCall,
 };
-use zerospider::tools::{Tool, ToolResult};
+use velaclaw::tools::{Tool, ToolResult};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Mock infrastructure
@@ -578,7 +578,7 @@ async fn e2e_multi_turn_with_memory_enrichment() {
     let (provider, recorded) =
         RecordingProvider::new(vec![text_response("answer 1"), text_response("answer 2")]);
 
-    let memory_context = "[Memory context]\n- project: zerospider\n\n";
+    let memory_context = "[Memory context]\n- project: velaclaw\n\n";
     let loader = StaticMemoryLoader::new(memory_context);
 
     let mut agent = build_recording_agent(Box::new(provider), vec![], Some(Box::new(loader)));
@@ -595,7 +595,7 @@ async fn e2e_multi_turn_with_memory_enrichment() {
     // Turn 1: user message is enriched
     let req1_user = requests[0].iter().find(|m| m.role == "user").unwrap();
     assert!(req1_user.content.contains("[Memory context]"));
-    assert!(req1_user.content.contains("project: zerospider"));
+    assert!(req1_user.content.contains("project: velaclaw"));
     assert!(req1_user.content.ends_with("first question"));
 
     // Turn 2: both user messages enriched, assistant from turn 1 present
@@ -649,13 +649,13 @@ async fn e2e_empty_memory_context_passthrough() {
 /// Sends a real multi-turn conversation to OpenAI Codex and verifies
 /// the model retains context from earlier messages.
 ///
-/// Requires valid OAuth credentials in `~/.zerospider/`.
+/// Requires valid OAuth credentials in `~/.velaclaw/`.
 /// Run manually: `cargo test e2e_live_openai_codex_multi_turn -- --ignored`
 #[tokio::test]
 #[ignore]
 async fn e2e_live_openai_codex_multi_turn() {
-    use zerospider::providers::openai_codex::OpenAiCodexProvider;
-    use zerospider::providers::traits::Provider;
+    use velaclaw::providers::openai_codex::OpenAiCodexProvider;
+    use velaclaw::providers::traits::Provider;
 
     let provider = OpenAiCodexProvider::new(&ProviderRuntimeOptions::default());
     let model = "gpt-5.3-codex";

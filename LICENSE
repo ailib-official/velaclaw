@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2025 ZeroClaw Labs
+Copyright (c) 2025 VelaClaw Labs
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -25,11 +25,11 @@ SOFTWARE.
 TRADEMARK NOTICE
 
 This license does not grant permission to use the trade names, trademarks,
-service marks, or product names of ZeroClaw Labs, including "ZeroClaw",
-"zeroclaw-labs", or associated logos, except as required for reasonable and
+service marks, or product names of VelaClaw Labs, including "VelaClaw",
+"velaclaw-labs", or associated logos, except as required for reasonable and
 customary use in describing the origin of the Software.
 
-Unauthorized use of the ZeroClaw name or branding to imply endorsement,
+Unauthorized use of the VelaClaw name or branding to imply endorsement,
 affiliation, or origin is strictly prohibited. See TRADEMARK.md for details.
 
 ================================================================================
@@ -49,7 +49,7 @@ grant rights under both licenses. See CLA.md for the contributor agreement.
 
 ================================================================================
 
-This product includes software developed by ZeroClaw Labs and contributors:
-https://github.com/zeroclaw-labs/zeroclaw/graphs/contributors
+This product includes software developed by VelaClaw Labs and contributors:
+https://github.com/velaclaw-labs/velaclaw/graphs/contributors
 
 See NOTICE for full contributor attribution.

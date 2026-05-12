@@ -310,7 +310,7 @@ mod tests {
     #[cfg(unix)]
     async fn shell_does_not_leak_api_key() {
         let _g1 = EnvGuard::set("API_KEY", "sk-test-secret-12345");
-        let _g2 = EnvGuard::set("ZEROCLAW_API_KEY", "sk-test-secret-67890");
+        let _g2 = EnvGuard::set("VELACLAW_API_KEY", "sk-test-secret-67890");
 
         let tool = ShellTool::new(test_security_with_env_cmd(), test_runtime());
         let result = tool
@@ -324,7 +324,7 @@ mod tests {
         );
         assert!(
             !result.output.contains("sk-test-secret-67890"),
-            "ZEROCLAW_API_KEY leaked to shell command output"
+            "VELACLAW_API_KEY leaked to shell command output"
         );
     }
 
@@ -366,7 +366,7 @@ mod tests {
 
         let tool = ShellTool::new(security.clone(), test_runtime());
         let denied = tool
-            .execute(json!({"command": "touch zerospider_shell_approval_test"}))
+            .execute(json!({"command": "touch velaclaw_shell_approval_test"}))
             .await
             .expect("unapproved command should return a result");
         assert!(!denied.success);
@@ -378,15 +378,15 @@ mod tests {
 
         let allowed = tool
             .execute(json!({
-                "command": "touch zerospider_shell_approval_test",
+                "command": "touch velaclaw_shell_approval_test",
                 "approved": true
             }))
             .await
             .expect("approved command execution should succeed");
         assert!(allowed.success);
 
-        let _ = tokio::fs::remove_file(std::env::temp_dir().join("zerospider_shell_approval_test"))
-            .await;
+        let _ =
+            tokio::fs::remove_file(std::env::temp_dir().join("velaclaw_shell_approval_test")).await;
     }
 
     // ── §5.2 Shell timeout enforcement tests ─────────────────

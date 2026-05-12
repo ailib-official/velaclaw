@@ -1,4 +1,4 @@
-# ZeroSpider 🕷️
+# VelaClaw 🕷️
 
 **协议驱动的自主 AI Agent 运行时，支持智能模型选择和多模型协商。**
 
@@ -13,7 +13,7 @@
 
 ## 概述
 
-ZeroSpider 是一个 Rust 优先的自主 AI Agent 运行时，集成了 [ai-protocol](https://github.com/ailib-official/ai-protocol) 生态系统，实现智能的、协议驱动的 AI 操作。
+VelaClaw 是一个 Rust 优先的自主 AI Agent 运行时，集成了 [ai-protocol](https://github.com/ailib-official/ai-protocol) 生态系统，实现智能的、协议驱动的 AI 操作。
 
 ### 核心特性
 
@@ -39,8 +39,8 @@ ZeroSpider 是一个 Rust 优先的自主 AI Agent 运行时，集成了 [ai-pro
 
 ```bash
 # 克隆仓库
-git clone https://github.com/ailib-official/zerospider.git
-cd zerospider
+git clone https://github.com/ailib-official/velaclaw.git
+cd velaclaw
 
 # 使用默认协议支持构建
 cargo build
@@ -56,7 +56,7 @@ rustup target add aarch64-unknown-linux-gnu
 cargo build --release --target aarch64-unknown-linux-gnu
 
 # 二进制文件位置
-ls target/aarch64-unknown-linux-gnu/release/zerospider
+ls target/aarch64-unknown-linux-gnu/release/velaclaw
 ```
 
 ### 运行
@@ -91,7 +91,7 @@ export ANTHROPIC_API_KEY=sk-ant-...
 ### 配置文件
 
 ```toml
-# ~/.zerospider/config.toml
+# ~/.velaclaw/config.toml
 default_provider = "openai/gpt-5.2"
 default_model = "openai/gpt-5.2"
 ```
@@ -137,7 +137,7 @@ default_model = "openai/gpt-5.2"
 
 ## 仪表盘
 
-运行网关（`zerospider gateway`）时，可通过 `GET /dashboard` 访问监控仪表盘：
+运行网关（`velaclaw gateway`）时，可通过 `GET /dashboard` 访问监控仪表盘：
 
 - **状态**：健康与配对状态
 - **成本**：会话、日、月成本及 Token 用量（需在配置中启用 `[cost] enabled = true`）
@@ -149,7 +149,7 @@ default_model = "openai/gpt-5.2"
 
 ## 架构
 
-ZeroSpider 使用 trait 驱动的模块化架构：
+VelaClaw 使用 trait 驱动的模块化架构：
 
 - **Providers**：AI 模型后端（OpenAI、Anthropic、本地模型等）
 - **Channels**：通信平台（Telegram、Discord、Matrix 等）
@@ -161,14 +161,14 @@ ZeroSpider 使用 trait 驱动的模块化架构：
 
 ## 上游依赖
 
-ZeroSpider 集成了：
+VelaClaw 集成了：
 
 - [ai-lib-rust](https://crates.io/crates/ai-lib-rust) - 协议驱动的 AI API 客户端（crates.io，使用 `--features ai-protocol` 启用）
 - [ai-protocol](https://github.com/ailib-official/ai-protocol) - Provider YAML 配置（克隆后设置 `AI_PROTOCOL_DIR`）
 
 ### 同步上游更新
 
-ZeroSpider 追踪 [zeroclaw-labs/zeroclaw](https://github.com/zeroclaw-labs/zeroclaw) 的更新：
+VelaClaw 追踪 [velaclaw-labs/velaclaw](https://github.com/velaclaw-labs/velaclaw) 的更新：
 
 ```bash
 # 列出上游变更
@@ -203,7 +203,7 @@ ZeroSpider 追踪 [zeroclaw-labs/zeroclaw](https://github.com/zeroclaw-labs/zero
 
 ## 致谢
 
-ZeroSpider 是 [ZeroClaw](https://github.com/ZeroClaw-Labs/zeroclaw) 的分支，增加了以下功能：
+VelaClaw 是 [VelaClaw](https://github.com/VelaClaw-Labs/velaclaw) 的分支，增加了以下功能：
 - ai-protocol 集成
 - Provider 评分和智能路由
 - 多模型协商

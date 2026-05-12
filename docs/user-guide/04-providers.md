@@ -1,6 +1,6 @@
 # 第四章：AI 模型与 Provider
 
-本章介绍 ZeroClaw 支持的所有 AI 模型和提供商。
+本章介绍 VelaClaw 支持的所有 AI 模型和提供商。
 
 ---
 
@@ -18,7 +18,7 @@
 ### 查看所有 Provider
 
 ```bash
-zeroclaw providers
+velaclaw providers
 ```
 
 输出：
@@ -175,13 +175,13 @@ model: gpt-4o
 
 ```bash
 # 刷新所有 Provider 的模型列表
-zeroclaw models refresh
+velaclaw models refresh
 
 # 刷新特定 Provider
-zeroclaw models refresh --provider openai
+velaclaw models refresh --provider openai
 
 # 强制刷新（忽略缓存）
-zeroclaw models refresh --force
+velaclaw models refresh --force
 ```
 
 ---
@@ -190,7 +190,7 @@ zeroclaw models refresh --force
 
 ### 基本配置
 
-编辑 `~/.zeroclaw/config.yaml`：
+编辑 `~/.velaclaw/config.yaml`：
 
 ```yaml
 # 默认 Provider 和模型
@@ -252,7 +252,7 @@ models:
 ### 查看认证状态
 
 ```bash
-zeroclaw auth status
+velaclaw auth status
 ```
 
 输出：
@@ -285,14 +285,14 @@ export DEEPSEEK_API_KEY="sk-xxx"
 **方式二：交互式配置**
 
 ```bash
-zeroclaw onboard --interactive
+velaclaw onboard --interactive
 ```
 
 **方式三：手动配置**
 
 ```bash
 # 粘贴 API 密钥
-zeroclaw auth paste-token --provider anthropic
+velaclaw auth paste-token --provider anthropic
 ```
 
 ### OAuth 认证
@@ -301,7 +301,7 @@ zeroclaw auth paste-token --provider anthropic
 
 ```bash
 # OpenAI Codex OAuth
-zeroclaw auth login --provider openai-codex --device-code
+velaclaw auth login --provider openai-codex --device-code
 
 # 按提示完成 OAuth 流程
 ```
@@ -310,16 +310,16 @@ zeroclaw auth login --provider openai-codex --device-code
 
 ```bash
 # 列出所有配置
-zeroclaw auth list
+velaclaw auth list
 
 # 切换配置
-zeroclaw auth use --provider openai --profile work
+velaclaw auth use --provider openai --profile work
 ```
 
 ### 删除认证
 
 ```bash
-zeroclaw auth logout --provider openai
+velaclaw auth logout --provider openai
 ```
 
 ---
@@ -329,7 +329,7 @@ zeroclaw auth logout --provider openai
 ### Q: 如何查看当前使用的模型？
 
 ```bash
-zeroclaw status
+velaclaw status
 ```
 
 ### Q: 模型调用失败怎么办？
@@ -338,27 +338,27 @@ zeroclaw status
 
 1. 确认 API 密钥有效
    ```bash
-   zeroclaw auth status
+   velaclaw auth status
    ```
 
 2. 检查网络连接
    ```bash
-   zeroclaw doctor
+   velaclaw doctor
    ```
 
 3. 查看错误日志
    ```bash
-   cat ~/.zeroclaw/logs/error.log
+   cat ~/.velaclaw/logs/error.log
    ```
 
 ### Q: 如何测试模型是否可用？
 
 ```bash
 # 测试特定 Provider
-zeroclaw doctor models --provider openai
+velaclaw doctor models --provider openai
 
 # 测试所有 Provider
-zeroclaw doctor models
+velaclaw doctor models
 ```
 
 ---

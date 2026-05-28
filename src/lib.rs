@@ -1,4 +1,12 @@
 //! VelaClaw 核心库，定义主要的命令枚举与共享组件。
+//
+// matrix-sdk 在 rustc 1.94+ 触发 async layout 查询深度溢出。
+// matrix-sdk 0.16.1 已在自身 lib.rs 内置 `#![recursion_limit = "256"]` 修复其本体编译；
+// 但 async-trait 把 MatrixChannel::listen() 的 future 装入
+// Pin<Box<dyn Future + Send>>，Send-bound 的证明在 velaclaw 端仍需穿透
+// matrix-sdk-crypto 多层 Instrumented<ManuallyDrop<..>> 包装，默认 128 会触发 E0275。
+// 仅当启用 channel-matrix 时把限制同步抬到 256，避免影响其它 feature 的构建画像。
+#![cfg_attr(feature = "channel-matrix", recursion_limit = "256")]
 #![warn(clippy::all, clippy::pedantic)]
 #![allow(
     clippy::assigning_clones,

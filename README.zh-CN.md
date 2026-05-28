@@ -32,7 +32,7 @@ VelaClaw 是一个 Rust 优先的自主 AI Agent 运行时，集成了 [ai-proto
 
 ### 前置条件
 
-- Rust 1.70+（2021 版本）
+- Rust 1.87+（2021 版本；由 `rust-toolchain.toml` 锁定）
 - 本地 [ai-protocol](https://github.com/ailib-official/ai-protocol) checkout，用于 Provider manifests
 
 ### 构建
@@ -62,14 +62,15 @@ ls target/aarch64-unknown-linux-gnu/release/velaclaw
 ### 运行
 
 ```bash
-# 启用智能模型选择
-cargo run --features smart-routing -- --smart
-
-# 启用多模型协商
-cargo run --features multi-model -- --negotiate
-
-# 使用默认协议模型 ID（openai/gpt-5.2）发送一条消息
+# 使用默认协议 provider/model 发送一条消息
 cargo run -- agent -m "Hello"
+
+# 指定具体的 provider/model id
+cargo run -- agent -p openai/gpt-5.2 -m "Hello"
+
+# 启用实验性多端点路由（ai-lib-rust/routing_mvp）。
+# 这是构建期开关，无需额外 CLI 参数。
+cargo build --features routing_mvp
 ```
 
 ---
@@ -126,14 +127,26 @@ default_model = "openai/gpt-5.2"
 
 ## 功能标志
 
-| 标志 | 描述 |
-|------|------|
-| `ai-protocol` | 启用 ai-lib-rust 集成（通过 `protocol:provider/model` 使用协议驱动 Provider） |
-| `smart-routing` | 启用 Provider 评分和自适应模型选择 |
-| `multi-model` | 启用多模型协商和并行任务 |
-| `remote-deploy` | 启用受控远程部署 |
-| `hardware` | 启用硬件外设支持 |
-| `channel-matrix` | 启用带 E2EE 的 Matrix 通道 |
+只有在 `Cargo.toml [features]` 中声明的标志才有效。`ai-protocol` 默认启用，其它皆为可选。
+
+| 标志 | 分组 | 描述 |
+|------|------|------|
+| `ai-protocol`（默认） | AI | 通过 `ai-lib-rust` 的协议驱动 Provider（`provider/model` id，依赖 `AI_PROTOCOL_DIR`）。 |
+| `routing_mvp` | AI | 通过 `ai-lib-rust/routing_mvp` 的实验性多端点路由。 |
+| `channel-matrix` | 通道 | Matrix 客户端 + E2EE 解密（需要 matrix-sdk ≥ 0.16.1）。 |
+| `channel-lark` | 通道 | 飞书/Lark WebSocket 长连接通道。 |
+| `whatsapp-web` | 通道 | 原生 WhatsApp Web 客户端（wa-rs）。 |
+| `hardware` | 硬件 | USB 设备发现 + 串口外设框架。 |
+| `peripheral-rpi` | 硬件 | 树莓派 GPIO 外设（仅 Linux）。 |
+| `probe` | 硬件 | `probe-rs` STM32/Nucleo 内存读取。 |
+| `memory-postgres` | 存储 | 在默认 SQLite 之外启用 PostgreSQL 记忆后端。 |
+| `rag-pdf` | 存储 | 用于数据手册 RAG 的 PDF 提取。 |
+| `observability-otel` | 运维 | OTLP trace + metrics 导出。 |
+| `remote-deploy` | 运维 | 通过 SSH 的受控远程部署。 |
+| `browser-native` | 工具 | Rust 原生浏览器自动化（fantoccini）。 |
+| `sandbox-landlock` | 安全 | 用于工具执行的 Linux Landlock 沙箱。 |
+
+文案中提到的"智能模型选择"和"多模型协商"目前仍是路线图设计文档：[`docs/user-guide/05-smart-routing.md`](docs/user-guide/05-smart-routing.md) 与 [`docs/user-guide/13-negotiation.md`](docs/user-guide/13-negotiation.md)，**尚未**作为 Cargo feature 或 CLI 参数对外暴露。
 
 ## 仪表盘
 
@@ -203,9 +216,8 @@ VelaClaw 追踪 [velaclaw-labs/velaclaw](https://github.com/velaclaw-labs/velacl
 
 ## 致谢
 
-VelaClaw 是 [VelaClaw](https://github.com/VelaClaw-Labs/velaclaw) 的分支，增加了以下功能：
-- ai-protocol 集成
-- Provider 评分和智能路由
-- 多模型协商
-- 并行任务执行
-- 远程部署
+VelaClaw 是 ZeroSpider/ZeroClaw 项目重命名后的延续（重命名追踪号 ZS-RN-001 / ZS-RN-002，详见 `git log`）。上游规范仓库为 [`velaclaw-labs/velaclaw`](https://github.com/velaclaw-labs/velaclaw)；维护流程见 [同步上游更新](#同步上游更新)。
+
+基于：
+- [`ai-lib-rust`](https://crates.io/crates/ai-lib-rust) —— 协议驱动的 AI API 客户端（使用 `--features ai-protocol` 启用，默认开启）。
+- [`ai-protocol`](https://github.com/ailib-official/ai-protocol) —— Provider manifest YAML 集合（克隆后设置 `AI_PROTOCOL_DIR`）。

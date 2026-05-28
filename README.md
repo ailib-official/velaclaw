@@ -32,7 +32,7 @@ VelaClaw is a Rust-first autonomous AI agent runtime that integrates with the [a
 
 ### Prerequisites
 
-- Rust 1.70+ (2021 edition)
+- Rust 1.87+ (2021 edition; tracked by `rust-toolchain.toml`)
 - A local [ai-protocol](https://github.com/ailib-official/ai-protocol) checkout for provider manifests
 
 ### Build
@@ -62,14 +62,15 @@ ls target/aarch64-unknown-linux-gnu/release/velaclaw
 ### Run
 
 ```bash
-# Enable smart model selection
-cargo run --features smart-routing -- --smart
-
-# Enable multi-model negotiation
-cargo run --features multi-model -- --negotiate
-
-# Run with the default protocol model id (openai/gpt-5.2)
+# One-shot message against the default protocol provider/model
 cargo run -- agent -m "Hello"
+
+# Pick a specific provider/model id
+cargo run -- agent -p openai/gpt-5.2 -m "Hello"
+
+# Enable experimental multi-endpoint routing (ai-lib-rust/routing_mvp).
+# This is a build-time opt-in; no extra CLI flag is required.
+cargo build --features routing_mvp
 ```
 
 ---
@@ -127,14 +128,26 @@ default_model = "openai/gpt-5.2"
 
 ## Feature Flags
 
-| Flag | Description |
-|------|-------------|
-| `ai-protocol` | Enable ai-lib-rust integration (protocol-driven providers via `protocol:provider/model`) |
-| `smart-routing` | Enable provider scoring and adaptive model selection |
-| `multi-model` | Enable multi-model negotiation and parallel tasks |
-| `remote-deploy` | Enable controlled remote deployment |
-| `hardware` | Enable hardware peripherals support |
-| `channel-matrix` | Enable Matrix channel with E2EE |
+Only the flags declared in `Cargo.toml [features]` are valid. `ai-protocol` is on by default; everything else is opt-in.
+
+| Flag | Group | Description |
+|------|-------|-------------|
+| `ai-protocol` (default) | AI | Protocol-driven providers via `ai-lib-rust` (`provider/model` ids backed by `AI_PROTOCOL_DIR`). |
+| `routing_mvp` | AI | Experimental multi-endpoint routing via `ai-lib-rust/routing_mvp`. |
+| `channel-matrix` | Channels | Matrix client + E2EE decryption (requires matrix-sdk ≥ 0.16.1). |
+| `channel-lark` | Channels | Feishu/Lark WebSocket long-connection channel. |
+| `whatsapp-web` | Channels | Native WhatsApp Web client (wa-rs). |
+| `hardware` | Hardware | USB hardware discovery + serial peripheral framework. |
+| `peripheral-rpi` | Hardware | Raspberry Pi GPIO peripherals (Linux only). |
+| `probe` | Hardware | `probe-rs` STM32/Nucleo memory read. |
+| `memory-postgres` | Storage | PostgreSQL memory backend in addition to the default SQLite. |
+| `rag-pdf` | Storage | PDF ingestion for datasheet RAG. |
+| `observability-otel` | Operations | OTLP trace + metrics export. |
+| `remote-deploy` | Operations | Controlled remote deployment via SSH. |
+| `browser-native` | Tools | Rust-native browser automation (fantoccini). |
+| `sandbox-landlock` | Security | Linux Landlock sandbox for tool execution. |
+
+The roadmap surfaces "intelligent model selection" and "multi-model negotiation" — the design docs live under [`docs/user-guide/05-smart-routing.md`](docs/user-guide/05-smart-routing.md) and [`docs/user-guide/13-negotiation.md`](docs/user-guide/13-negotiation.md). They are **not** yet exposed as Cargo features or CLI flags.
 
 ## Dashboard
 
@@ -260,9 +273,8 @@ at your option.
 
 ## Acknowledgments
 
-VelaClaw is a fork of [VelaClaw](https://github.com/VelaClaw-Labs/velaclaw) with additional features:
-- ai-protocol integration
-- Provider scoring and smart routing
-- Multi-model negotiation
-- Parallel task execution
-- Remote deployment
+VelaClaw is the post-rename continuation of the ZeroSpider/ZeroClaw project (renamed via ZS-RN-001 / ZS-RN-002, see `git log`). Upstream canonical repository: [`velaclaw-labs/velaclaw`](https://github.com/velaclaw-labs/velaclaw); see [Sync with Upstream](#sync-with-upstream) for the maintenance workflow.
+
+Built on:
+- [`ai-lib-rust`](https://crates.io/crates/ai-lib-rust) — protocol-driven AI API client (enable with `--features ai-protocol`, on by default).
+- [`ai-protocol`](https://github.com/ailib-official/ai-protocol) — provider manifest YAMLs (clone and set `AI_PROTOCOL_DIR`).

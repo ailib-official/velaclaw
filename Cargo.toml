@@ -27,8 +27,13 @@ tokio-util = { version = "0.7", default-features = false }
 # HTTP client - minimal features
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "blocking", "multipart", "stream", "socks"] }
 
-# Matrix client + E2EE decryption
-matrix-sdk = { version = "0.16", optional = true, default-features = false, features = ["e2e-encryption", "rustls-tls", "markdown"] }
+# Matrix client + E2EE decryption.
+# Pin floor to 0.16.1: upstream backport matrix-org/matrix-rust-sdk#6489 added
+# `#![recursion_limit = "256"]` inside matrix-sdk's own lib.rs, fixing the
+# rustc 1.94+ "queries overflow the depth limit" error during matrix-sdk
+# compilation. 0.16.0 lacks that attribute and no longer builds on stable rustc.
+# 0.16.1 is a drop-in patch release (MSRV unchanged at 1.88).
+matrix-sdk = { version = "0.16.1", optional = true, default-features = false, features = ["e2e-encryption", "rustls-tls", "markdown"] }
 
 # Serialization
 serde = { version = "1.0", default-features = false, features = ["derive"] }
@@ -90,8 +95,11 @@ async-trait = "0.1"
 # HMAC-SHA256 (Zhipu/GLM JWT auth)
 ring = "0.17"
 
-# Protobuf encode/decode (Lark WS frame codec, WhatsApp storage)
-prost = { version = "0.14", default-features = false, optional = true }
+# Protobuf encode/decode (Lark WS frame codec, WhatsApp storage).
+# `derive` is required because `src/channels/lark.rs` uses `#[derive(prost::Message)]`
+# on its WebSocket frame structs; without it builds with `--features channel-lark`
+# fail with "cannot find attribute `prost` in this scope".
+prost = { version = "0.14", default-features = false, features = ["derive", "std"], optional = true }
 
 # Memory / persistence
 rusqlite = { version = "0.37", features = ["bundled"] }

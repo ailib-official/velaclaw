@@ -50,3 +50,53 @@ jobs:
 
       - name: cargo test (protocol-only, no default features)
         run: cargo test -p velaclaw --no-default-features --features ai-protocol --locked
+
+  # Feature-matrix guard: non-default feature surfaces must compile and pass
+  # clippy `-D warnings`. Without this, optional features rot silently between
+  # releases (historical regressions: D1 hardware missing trait import, D2
+  # channel-lark prost-derive disabled, D3 channel-matrix recursion-limit
+  # overflow — all repaired in the preceding fix(features) PR). Runs only
+  # after the protocol-required job is green so transient base failures do
+  # not amplify across the matrix.
+  #
+  # Coverage is intentionally additive: only features that are *currently*
+  # clippy-clean are gated here. The following feature flags compile but
+  # still emit clippy warnings in their feature-gated code and will be added
+  # to this matrix as separate, scoped cleanup PRs land:
+  #
+  #   * sandbox-landlock  (1 lint: clippy::assertions_on_constants in tests)
+  #   * whatsapp-web      (7 lints incl. wildcard import, large_futures)
+  #   * peripheral-rpi    (3 lints: redundant_closure + cast_possible_truncation)
+  #   * rag-pdf           (1 lint: collapsible_if)
+  #   * probe             (11 lints incl. format_collect, wildcard_in_or_patterns)
+  #
+  # Once those are cleaned up, append them to the `feature:` list below.
+  rust-feature-matrix:
+    needs: rust-protocol-required
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        feature:
+          - browser-native
+          - channel-lark
+          - channel-matrix
+          - hardware
+          - memory-postgres
+          - observability-otel
+          - remote-deploy
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: feature-${{ matrix.feature }}
+
+      - name: cargo clippy (--features ${{ matrix.feature }})
+        run: cargo clippy -p velaclaw --features "${{ matrix.feature }}" --all-targets --locked -- -D warnings

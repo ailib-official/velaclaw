@@ -243,7 +243,7 @@ impl Provider for ProtocolBackedProvider {
         &self,
         system_prompt: Option<&str>,
         message: &str,
-        model: &str,
+        _model: &str,
         temperature: f64,
     ) -> anyhow::Result<String> {
         let mut messages = Vec::new();
@@ -263,7 +263,7 @@ impl Provider for ProtocolBackedProvider {
     async fn chat_with_history(
         &self,
         messages: &[ChatMessage],
-        model: &str,
+        _model: &str,
         temperature: f64,
     ) -> anyhow::Result<String> {
         let converted = Self::convert_messages(messages);
@@ -279,7 +279,7 @@ impl Provider for ProtocolBackedProvider {
     async fn chat(
         &self,
         request: ChatRequest<'_>,
-        model: &str,
+        _model: &str,
         temperature: f64,
     ) -> anyhow::Result<ChatResponse> {
         let converted = Self::convert_messages(request.messages);
@@ -323,7 +323,7 @@ impl Provider for ProtocolBackedProvider {
         &self,
         messages: &[ChatMessage],
         tools: &[serde_json::Value],
-        model: &str,
+        _model: &str,
         temperature: f64,
     ) -> anyhow::Result<ChatResponse> {
         let converted = Self::convert_messages(messages);
@@ -361,7 +361,7 @@ impl Provider for ProtocolBackedProvider {
         &self,
         system_prompt: Option<&str>,
         message: &str,
-        model: &str,
+        _model: &str,
         temperature: f64,
         _options: StreamOptions,
     ) -> stream::BoxStream<'static, StreamResult<StreamChunk>> {

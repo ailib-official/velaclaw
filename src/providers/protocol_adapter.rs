@@ -252,14 +252,10 @@ impl Provider for ProtocolBackedProvider {
         }
         messages.push(ai_lib_rust::Message::user(message));
 
-        let response = Self::execute_chat_with_retry(
-            self.client.as_ref(),
-            messages,
-            temperature,
-            None,
-        )
-        .await
-        .map_err(|e| anyhow::anyhow!("Protocol provider error: {}", e))?;
+        let response =
+            Self::execute_chat_with_retry(self.client.as_ref(), messages, temperature, None)
+                .await
+                .map_err(|e| anyhow::anyhow!("Protocol provider error: {}", e))?;
 
         Ok(response.content)
     }
@@ -272,14 +268,10 @@ impl Provider for ProtocolBackedProvider {
     ) -> anyhow::Result<String> {
         let converted = Self::convert_messages(messages);
 
-        let response = Self::execute_chat_with_retry(
-            self.client.as_ref(),
-            converted,
-            temperature,
-            None,
-        )
-        .await
-        .map_err(|e| anyhow::anyhow!("Protocol provider error: {}", e))?;
+        let response =
+            Self::execute_chat_with_retry(self.client.as_ref(), converted, temperature, None)
+                .await
+                .map_err(|e| anyhow::anyhow!("Protocol provider error: {}", e))?;
 
         Ok(response.content)
     }
@@ -308,14 +300,10 @@ impl Provider for ProtocolBackedProvider {
                 .collect::<Vec<_>>()
         });
 
-        let response = Self::execute_chat_with_retry(
-            self.client.as_ref(),
-            converted,
-            temperature,
-            tools,
-        )
-        .await
-        .map_err(|e| anyhow::anyhow!("Protocol provider error: {}", e))?;
+        let response =
+            Self::execute_chat_with_retry(self.client.as_ref(), converted, temperature, tools)
+                .await
+                .map_err(|e| anyhow::anyhow!("Protocol provider error: {}", e))?;
 
         Ok(ChatResponse {
             text: Some(response.content),
@@ -346,14 +334,10 @@ impl Provider for ProtocolBackedProvider {
             Some(tools.to_vec())
         };
 
-        let response = Self::execute_chat_with_retry(
-            self.client.as_ref(),
-            converted,
-            temperature,
-            tools_opt,
-        )
-        .await
-        .map_err(|e| anyhow::anyhow!("Protocol provider error: {}", e))?;
+        let response =
+            Self::execute_chat_with_retry(self.client.as_ref(), converted, temperature, tools_opt)
+                .await
+                .map_err(|e| anyhow::anyhow!("Protocol provider error: {}", e))?;
 
         Ok(ChatResponse {
             text: Some(response.content),

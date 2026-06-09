@@ -1,0 +1,16 @@
+# VelaClaw trial config — copy to ~/.velaclaw/config.toml after `velaclaw onboard`
+# 试运行配置示例 — 执行 onboard 后复制到 ~/.velaclaw/config.toml
+#
+# Required environment (see docs/trial-readiness.md):
+#   export AI_PROTOCOL_DIR=/path/to/ai-protocol
+#   export AI_PROXY_URL=http://192.168.2.13:8887
+#   export DEEPSEEK_API_KEY=...
+#   export NVIDIA_API_KEY=...
+
+default_provider = "deepseek/deepseek-v4-pro"
+default_model = "deepseek-v4-pro"
+default_temperature = 0.7
+
+# Optional fallback chain (VL-TRIAL-001-I)
+# [reliability]
+# fallback_providers = ["nvidia/moonshotai/kimi-k2-instruct"]

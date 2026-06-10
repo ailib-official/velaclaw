@@ -121,7 +121,7 @@ which = "7.0"
 # WebSocket client channels (Discord/Lark/DingTalk)
 tokio-tungstenite = { version = "0.29", features = ["rustls-tls-webpki-roots"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
-regex = "1.10"
+regex = "1.12"
 hostname = "0.4.2"
 rustls = "0.23"
 rustls-pki-types = "1.14.1"
@@ -129,7 +129,7 @@ tokio-rustls = "0.26.4"
 webpki-roots = "1.0.7"
 
 # email
-lettre = { version = "0.11.21", default-features = false, features = ["builder", "smtp-transport", "rustls-tls"] }
+lettre = { version = "0.11.22", default-features = false, features = ["builder", "smtp-transport", "rustls-tls"] }
 mail-parser = "0.11.3"
 async-imap = { version = "0.11",features = ["runtime-tokio"], default-features = false }
 

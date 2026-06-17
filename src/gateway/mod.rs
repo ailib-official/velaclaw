@@ -11,8 +11,11 @@
 
 mod chat_api;
 mod chat_ws;
+mod config_api;
 mod local_control;
+mod memory_api;
 mod providers_api;
+mod sessions_api;
 mod static_embed;
 
 use crate::channels::{Channel, LinqChannel, NextcloudTalkChannel, SendMessage, WhatsAppChannel};
@@ -30,7 +33,7 @@ use axum::{
     extract::{ConnectInfo, Query, State},
     http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Json},
-    routing::{get, post},
+    routing::{delete, get, post, put},
     Router,
 };
 use parking_lot::Mutex;
@@ -606,6 +609,21 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
         .route("/api/dashboard", get(handle_dashboard_api))
         .route("/api/chat", post(chat_api::handle_post_chat))
         .route("/api/providers", get(providers_api::handle_get_providers))
+        .route("/api/sessions", get(sessions_api::handle_list_sessions))
+        .route("/api/sessions", post(sessions_api::handle_create_session))
+        .route("/api/sessions/{id}", get(sessions_api::handle_get_session))
+        .route(
+            "/api/sessions/{id}",
+            delete(sessions_api::handle_delete_session),
+        )
+        .route("/api/memory", get(memory_api::handle_list_memory))
+        .route("/api/memory/{id}", get(memory_api::handle_get_memory))
+        .route("/api/config", get(config_api::handle_get_config))
+        .route("/api/config", put(config_api::handle_put_config))
+        .route(
+            "/api/config/schema",
+            get(config_api::handle_get_config_schema),
+        )
         .route("/ws", get(chat_ws::handle_ws_chat))
         .route("/chat", get(static_embed::handle_chat_ui))
         .route("/chat/{*asset_path}", get(static_embed::handle_chat_ui))

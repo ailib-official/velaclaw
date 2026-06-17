@@ -1,10 +1,12 @@
 //! Agent-loop chat execution for Local Control API (VL-ARCH-001).
 //! 本地控制 API 的 agent 循环对话执行（VL-ARCH-001）。
 
+use super::sessions::ChatSessionStore;
 use super::types::{ChatApiRequest, ChatApiResponse, ChatMessageInput};
 use crate::agent::agent::Agent;
 use crate::config::Config;
 use anyhow::{anyhow, Context, Result};
+use std::path::Path;
 use uuid::Uuid;
 
 /// Apply per-request model/temperature overrides onto a config clone.
@@ -55,6 +57,34 @@ pub async fn run_agent_chat(config: &Config, req: &ChatApiRequest) -> Result<Cha
         usage: None,
         cost: None,
     })
+}
+
+/// Append the latest user turn and assistant reply to a persisted session, if `session_id` is set.
+pub async fn persist_chat_turn(
+    workspace_dir: &Path,
+    session_id: Option<&str>,
+    req: &ChatApiRequest,
+    assistant_content: &str,
+) -> Result<()> {
+    let Some(id) = session_id.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Ok(());
+    };
+
+    let user_message = extract_last_user_message(&req.messages)?;
+    let store = ChatSessionStore::new(workspace_dir);
+    let to_store = vec![
+        ChatMessageInput {
+            role: "user".into(),
+            content: user_message,
+        },
+        ChatMessageInput {
+            role: "assistant".into(),
+            content: assistant_content.to_string(),
+        },
+    ];
+    store
+        .append_messages(id, &to_store, req.model_id.as_deref())
+        .await
 }
 
 /// Split assistant text into stream-sized chunks for WebSocket `delta` frames.
@@ -118,6 +148,7 @@ mod tests {
         base.default_model = Some("old/model".into());
         let req = ChatApiRequest {
             messages: vec![],
+            session_id: None,
             model_id: Some("deepseek/deepseek-v4-pro".into()),
             temperature: Some(0.2),
             max_tokens: None,

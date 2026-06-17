@@ -2,7 +2,7 @@
 //! GET `/ws` — 经 agent 循环的 WebSocket 流式对话（VL-UI-002）。
 
 use super::local_control::auth::{check_pairing_auth, unauthorized_response};
-use super::local_control::runner::{chunk_text_for_stream, run_agent_chat};
+use super::local_control::runner::{chunk_text_for_stream, persist_chat_turn, run_agent_chat};
 use super::local_control::types::{ChatApiRequest, WsClientMessage, WsServerMessage};
 use super::AppState;
 use axum::extract::ws::{Message, WebSocket};
@@ -81,6 +81,7 @@ async fn handle_ws_socket(mut socket: WebSocket, state: AppState) {
 
         let req = ChatApiRequest {
             messages: client.messages,
+            session_id: client.session_id,
             model_id: client.model_id,
             temperature: client.temperature,
             max_tokens: None,
@@ -89,6 +90,16 @@ async fn handle_ws_socket(mut socket: WebSocket, state: AppState) {
         let config = state.config.lock().clone();
         match run_agent_chat(&config, &req).await {
             Ok(resp) => {
+                if let Err(e) = persist_chat_turn(
+                    &config.workspace_dir,
+                    req.session_id.as_deref(),
+                    &req,
+                    &resp.content,
+                )
+                .await
+                {
+                    tracing::warn!("session persist failed: {e:#}");
+                }
                 for chunk in chunk_text_for_stream(&resp.content, WS_CHUNK_SIZE) {
                     let delta = WsServerMessage::Delta { content: chunk };
                     if send_frame(&mut socket, &delta).await.is_err() {

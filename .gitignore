@@ -30,3 +30,5 @@ venv/
 credentials.json
 .worktrees/
 .work/
+ui-chat/node_modules/
+ui-chat/dist/

@@ -72,6 +72,16 @@ cargo run --features multi-model -- --negotiate
 cargo run -- agent -m "Hello"
 ```
 
+### Web Chat UI
+
+With the gateway running (`velaclaw daemon`), open **http://127.0.0.1:8080/chat** in your browser for the local Web Chat UI.
+
+1. Pair once: `POST http://127.0.0.1:8080/pair` with your pairing code, then paste the bearer token into the chat UI.
+2. Select a model from the dropdown (requires BYOK credentials for providers in your ai-protocol checkout).
+3. Messages stream over WebSocket (`/ws`) using the same agent loop as the CLI.
+
+For frontend development, run `npm ci && npm run dev` inside `ui-chat/` (Vite proxies API calls to the gateway).
+
 ---
 
 ## Configuration

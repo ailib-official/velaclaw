@@ -18,7 +18,7 @@ pub async fn handle_get_config(
     ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
-    if let Err(response) = authorize(&state, peer_addr, &headers).await {
+    if let Err(response) = authorize(&state, peer_addr, &headers) {
         return response.into_response();
     }
 
@@ -33,7 +33,7 @@ pub async fn handle_get_config_schema(
     ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
-    if let Err(response) = authorize(&state, peer_addr, &headers).await {
+    if let Err(response) = authorize(&state, peer_addr, &headers) {
         return response.into_response();
     }
 
@@ -49,7 +49,7 @@ pub async fn handle_put_config(
     headers: HeaderMap,
     body: Result<Json<Value>, axum::extract::rejection::JsonRejection>,
 ) -> impl IntoResponse {
-    if let Err(response) = authorize(&state, peer_addr, &headers).await {
+    if let Err(response) = authorize(&state, peer_addr, &headers) {
         return response.into_response();
     }
 
@@ -73,7 +73,7 @@ pub async fn handle_put_config(
         .into_response();
     }
 
-    let mut updated = {
+    let updated = {
         let current = state.config.lock().clone();
         merge_config_patch(&current, &patch)
     };
@@ -164,7 +164,7 @@ fn deep_merge(base: &mut Value, patch: &Value) {
     }
 }
 
-async fn authorize(
+fn authorize(
     state: &AppState,
     peer_addr: SocketAddr,
     headers: &HeaderMap,

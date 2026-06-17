@@ -38,7 +38,7 @@ pub async fn handle_list_memory(
     headers: HeaderMap,
     Query(query): Query<MemoryListQuery>,
 ) -> impl IntoResponse {
-    if let Err(response) = authorize(&state, peer_addr, &headers).await {
+    if let Err(response) = authorize(&state, peer_addr, &headers) {
         return response.into_response();
     }
 
@@ -80,7 +80,7 @@ pub async fn handle_get_memory(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
-    if let Err(response) = authorize(&state, peer_addr, &headers).await {
+    if let Err(response) = authorize(&state, peer_addr, &headers) {
         return response.into_response();
     }
 
@@ -107,7 +107,7 @@ fn redact_memory_content(content: &str) -> String {
     out
 }
 
-async fn authorize(
+fn authorize(
     state: &AppState,
     peer_addr: SocketAddr,
     headers: &HeaderMap,

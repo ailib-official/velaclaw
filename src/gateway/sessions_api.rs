@@ -29,7 +29,7 @@ pub async fn handle_list_sessions(
     ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
-    if let Err(response) = authorize(&state, peer_addr, &headers).await {
+    if let Err(response) = authorize(&state, peer_addr, &headers) {
         return response.into_response();
     }
 
@@ -53,7 +53,7 @@ pub async fn handle_create_session(
     headers: HeaderMap,
     body: Result<Json<CreateSessionBody>, axum::extract::rejection::JsonRejection>,
 ) -> impl IntoResponse {
-    if let Err(response) = authorize(&state, peer_addr, &headers).await {
+    if let Err(response) = authorize(&state, peer_addr, &headers) {
         return response.into_response();
     }
 
@@ -84,7 +84,7 @@ pub async fn handle_get_session(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
-    if let Err(response) = authorize(&state, peer_addr, &headers).await {
+    if let Err(response) = authorize(&state, peer_addr, &headers) {
         return response.into_response();
     }
 
@@ -105,7 +105,7 @@ pub async fn handle_delete_session(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
-    if let Err(response) = authorize(&state, peer_addr, &headers).await {
+    if let Err(response) = authorize(&state, peer_addr, &headers) {
         return response.into_response();
     }
 
@@ -119,7 +119,7 @@ pub async fn handle_delete_session(
     }
 }
 
-async fn authorize(
+fn authorize(
     state: &AppState,
     peer_addr: SocketAddr,
     headers: &HeaderMap,

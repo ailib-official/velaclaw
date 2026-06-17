@@ -78,9 +78,6 @@ mod tests {
     fn maps_chat_root_to_index() {
         assert_eq!(resolve_embed_path("/chat"), "index.html");
         assert_eq!(resolve_embed_path("/chat/"), "index.html");
-        assert_eq!(
-            resolve_embed_path("/chat/assets/app.js"),
-            "assets/app.js"
-        );
+        assert_eq!(resolve_embed_path("/chat/assets/app.js"), "assets/app.js");
     }
 }

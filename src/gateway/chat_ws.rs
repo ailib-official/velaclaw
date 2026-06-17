@@ -1,16 +1,15 @@
 //! GET `/ws` — WebSocket streaming chat via agent loop (VL-UI-002).
 //! GET `/ws` — 经 agent 循环的 WebSocket 流式对话（VL-UI-002）。
 
-use super::local_control::{
-    check_pairing_auth, chunk_text_for_stream, run_agent_chat, unauthorized_response,
-    ChatApiRequest, WsClientMessage, WsServerMessage,
-};
+use super::local_control::auth::{check_pairing_auth, unauthorized_response};
+use super::local_control::runner::{chunk_text_for_stream, run_agent_chat};
+use super::local_control::types::{ChatApiRequest, WsClientMessage, WsServerMessage};
 use super::AppState;
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{Query, State, WebSocketUpgrade};
 use axum::http::HeaderMap;
 use axum::response::IntoResponse;
-use futures_util::{SinkExt, StreamExt};
+use futures_util::StreamExt;
 use serde::Deserialize;
 
 const WS_CHUNK_SIZE: usize = 48;

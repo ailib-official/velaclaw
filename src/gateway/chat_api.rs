@@ -1,7 +1,9 @@
 //! POST `/api/chat` — non-streaming agent-loop chat (VL-UI-002).
 //! POST `/api/chat` — 非流式 agent 循环对话（VL-UI-002）。
 
-use super::local_control::{check_pairing_auth, run_agent_chat, ChatApiRequest};
+use super::local_control::auth::check_pairing_auth;
+use super::local_control::runner::run_agent_chat;
+use super::local_control::types::ChatApiRequest;
 use super::{client_key_from_request, AppState, RATE_LIMIT_WINDOW_SECS};
 use axum::extract::{ConnectInfo, State};
 use axum::http::{HeaderMap, StatusCode};

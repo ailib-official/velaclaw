@@ -1,9 +1,8 @@
 //! GET `/api/providers` — protocol registry metadata (VL-UI-002).
 //! GET `/api/providers` — 协议注册表元数据（VL-UI-002）。
 
-use super::local_control::{
-    check_pairing_auth, ModelApiEntry, ProviderApiEntry, ProvidersApiResponse,
-};
+use super::local_control::auth::check_pairing_auth;
+use super::local_control::types::{ModelApiEntry, ProviderApiEntry, ProvidersApiResponse};
 use super::{client_key_from_request, AppState, RATE_LIMIT_WINDOW_SECS};
 use axum::extract::{ConnectInfo, State};
 use axum::http::{HeaderMap, StatusCode};

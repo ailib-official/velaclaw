@@ -1,0 +1,12 @@
+# BYOK example — copy to ~/.velaclaw/config.toml after `velaclaw onboard`
+# 协议模式 BYOK 配置示例
+#
+# Set AI_PROTOCOL_DIR to a local ai-protocol checkout and provider API keys
+# (e.g. DEEPSEEK_API_KEY). See docs/migration-legacy-to-protocol.md.
+
+default_provider = "deepseek/deepseek-v4-pro"
+default_model = "deepseek-v4-pro"
+default_temperature = 0.7
+
+# Optional fallback (configure in [reliability] when enabled):
+# fallback_providers = ["nvidia/moonshotai/kimi-k2-instruct"]

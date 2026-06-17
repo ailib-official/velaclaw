@@ -6,22 +6,42 @@
     type ChatMessage,
   } from "./lib/chat";
   import {
+    createSession,
+    deleteSession,
+    fetchConfig,
     fetchHealth,
+    fetchMemory,
     fetchProviders,
+    fetchSession,
+    fetchSessions,
     loadToken,
+    putConfig,
     saveToken,
+    type MemoryEntry,
     type ProviderModel,
+    type SessionSummary,
   } from "./lib/api";
 
+  type Tab = "chat" | "memory" | "settings";
+
   let token = $state(loadToken());
+  let tab = $state<Tab>("chat");
   let models = $state<ProviderModel[]>([]);
   let selectedModel = $state("");
   let messages = $state<ChatMessage[]>([]);
+  let sessions = $state<SessionSummary[]>([]);
+  let activeSessionId = $state<string | null>(null);
   let input = $state("");
   let streaming = $state(false);
   let status = $state("connecting");
   let toast = $state("");
   let cancelStream: (() => void) | null = null;
+
+  let memoryQuery = $state("");
+  let memoryEntries = $state<MemoryEntry[]>([]);
+  let configModel = $state("");
+  let configTemperature = $state("0.7");
+  let aiProtocolDir = $state("");
 
   let listEl: HTMLDivElement | undefined;
 
@@ -51,13 +71,107 @@
     }
   }
 
+  async function loadSessions() {
+    if (!token) return;
+    try {
+      sessions = await fetchSessions(token);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function selectSession(id: string) {
+    try {
+      const detail = await fetchSession(token, id);
+      activeSessionId = detail.id;
+      messages = detail.messages.map((m) => ({
+        role: m.role as ChatMessage["role"],
+        content: m.content,
+      }));
+      if (detail.model_id) selectedModel = detail.model_id;
+      scrollToBottom();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function newSession() {
+    try {
+      const session = await createSession(token, undefined, selectedModel || undefined);
+      activeSessionId = session.id;
+      messages = [];
+      await loadSessions();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function removeSession(id: string) {
+    try {
+      await deleteSession(token, id);
+      if (activeSessionId === id) {
+        activeSessionId = null;
+        messages = [];
+      }
+      await loadSessions();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function loadMemory() {
+    if (!token) return;
+    try {
+      const data = await fetchMemory(token, memoryQuery || undefined);
+      memoryEntries = data.entries;
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function loadSettings() {
+    if (!token) return;
+    try {
+      const cfg = await fetchConfig(token);
+      configModel = String(cfg.default_model ?? "");
+      configTemperature = String(cfg.default_temperature ?? "0.7");
+      aiProtocolDir = String(
+        (cfg as { runtime?: { ai_protocol_dir?: string } }).runtime?.ai_protocol_dir ?? "",
+      );
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function saveSettings() {
+    try {
+      const temp = parseFloat(configTemperature);
+      await putConfig(token, {
+        default_model: configModel || null,
+        default_temperature: Number.isFinite(temp) ? temp : 0.7,
+      });
+      showToast("Settings saved");
+      await refreshMeta();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e));
+    }
+  }
+
   onMount(() => {
     refreshMeta();
+    loadSessions();
   });
 
   function saveTokenAndRefresh() {
     saveToken(token);
     refreshMeta();
+    loadSessions();
+  }
+
+  function switchTab(next: Tab) {
+    tab = next;
+    if (next === "memory") loadMemory();
+    if (next === "settings") loadSettings();
   }
 
   function renderMarkdown(text: string): string {
@@ -70,7 +184,15 @@
       .replace(/\n/g, "<br/>");
   }
 
-  function send() {
+  async function ensureSession() {
+    if (activeSessionId) return activeSessionId;
+    const session = await createSession(token, undefined, selectedModel || undefined);
+    activeSessionId = session.id;
+    await loadSessions();
+    return session.id;
+  }
+
+  async function send() {
     const text = input.trim();
     if (!text || streaming) return;
     input = "";
@@ -78,9 +200,19 @@
     streaming = true;
     scrollToBottom();
 
+    let sessionId: string | undefined;
+    try {
+      sessionId = await ensureSession();
+    } catch (e) {
+      streaming = false;
+      showToast(e instanceof Error ? e.message : String(e));
+      return;
+    }
+
     const history = messages;
     cancelStream = streamChat({
       token,
+      sessionId,
       messages: history,
       modelId: selectedModel || undefined,
       onDelta: (chunk) => {
@@ -91,6 +223,7 @@
         streaming = false;
         cancelStream = null;
         scrollToBottom();
+        loadSessions();
       },
       onError: (msg) => {
         streaming = false;
@@ -110,7 +243,12 @@
 
 <div class="layout">
   <header>
-    <h1>VelaClaw Chat</h1>
+    <h1>VelaClaw</h1>
+    <nav class="tabs">
+      <button type="button" class:active={tab === "chat"} onclick={() => switchTab("chat")}>Chat</button>
+      <button type="button" class:active={tab === "memory"} onclick={() => switchTab("memory")}>Memory</button>
+      <button type="button" class:active={tab === "settings"} onclick={() => switchTab("settings")}>Settings</button>
+    </nav>
     <span class="badge" class:ok={status === "online"}>{status}</span>
   </header>
 
@@ -120,46 +258,104 @@
       <input type="password" bind:value={token} placeholder="from POST /pair" />
     </label>
     <button type="button" onclick={saveTokenAndRefresh}>Save token</button>
-    <label>
-      Model
-      <select bind:value={selectedModel} disabled={models.length === 0}>
-        {#if models.length === 0}
-          <option value="">No models (check BYOK)</option>
-        {:else}
-          {#each models as m}
-            <option value={m.logical_id}>{m.logical_id}</option>
-          {/each}
-        {/if}
-      </select>
-    </label>
+    {#if tab === "chat"}
+      <label>
+        Model
+        <select bind:value={selectedModel} disabled={models.length === 0}>
+          {#if models.length === 0}
+            <option value="">No models (check BYOK)</option>
+          {:else}
+            {#each models as m}
+              <option value={m.logical_id}>{m.logical_id}</option>
+            {/each}
+          {/if}
+        </select>
+      </label>
+    {/if}
   </section>
 
-  <div class="messages" bind:this={listEl}>
-    {#each messages as msg}
-      <article class={msg.role}>
-        <div class="role">{msg.role}</div>
-        {#if msg.role === "assistant"}
-          <div class="body">{@html renderMarkdown(msg.content)}</div>
-        {:else}
-          <div class="body">{msg.content}</div>
-        {/if}
-      </article>
-    {/each}
-    {#if streaming}
-      <p class="typing">Streaming…</p>
-    {/if}
-  </div>
+  {#if tab === "chat"}
+    <div class="chat-grid">
+      <aside class="sessions">
+        <div class="sessions-head">
+          <strong>Sessions</strong>
+          <button type="button" onclick={newSession}>+ New</button>
+        </div>
+        <ul>
+          {#each sessions as s}
+            <li class:active={s.id === activeSessionId}>
+              <button type="button" class="session-title" onclick={() => selectSession(s.id)}>
+                {s.title}
+              </button>
+              <button type="button" class="session-del" onclick={() => removeSession(s.id)} title="Delete">×</button>
+            </li>
+          {/each}
+        </ul>
+      </aside>
 
-  <footer>
-    <textarea
-      rows="3"
-      bind:value={input}
-      onkeydown={onKeydown}
-      placeholder="Message… (Enter to send)"
-      disabled={streaming}
-    ></textarea>
-    <button type="button" onclick={send} disabled={streaming || !input.trim()}>Send</button>
-  </footer>
+      <div class="chat-main">
+        <div class="messages" bind:this={listEl}>
+          {#each messages as msg}
+            <article class={msg.role}>
+              <div class="role">{msg.role}</div>
+              {#if msg.role === "assistant"}
+                <div class="body">{@html renderMarkdown(msg.content)}</div>
+              {:else}
+                <div class="body">{msg.content}</div>
+              {/if}
+            </article>
+          {/each}
+          {#if streaming}
+            <p class="typing">Streaming…</p>
+          {/if}
+        </div>
+
+        <footer>
+          <textarea
+            rows="3"
+            bind:value={input}
+            onkeydown={onKeydown}
+            placeholder="Message… (Enter to send)"
+            disabled={streaming}
+          ></textarea>
+          <button type="button" onclick={send} disabled={streaming || !input.trim()}>Send</button>
+        </footer>
+      </div>
+    </div>
+  {:else if tab === "memory"}
+    <section class="panel">
+      <div class="panel-head">
+        <input type="search" bind:value={memoryQuery} placeholder="Search memory…" />
+        <button type="button" onclick={loadMemory}>Search</button>
+      </div>
+      <ul class="memory-list">
+        {#each memoryEntries as entry}
+          <li>
+            <div class="mem-meta">{entry.category} · {entry.timestamp}</div>
+            <div class="mem-key">{entry.key}</div>
+            <div class="mem-body">{entry.content}</div>
+          </li>
+        {/each}
+      </ul>
+    </section>
+  {:else}
+    <section class="panel settings">
+      <p class="hint">API keys cannot be set here — configure BYOK via environment variables.</p>
+      <label>
+        Default model
+        <input type="text" bind:value={configModel} placeholder="provider/model" />
+      </label>
+      <label>
+        Temperature
+        <input type="text" bind:value={configTemperature} />
+      </label>
+      <label>
+        AI_PROTOCOL_DIR (read-only)
+        <input type="text" value={aiProtocolDir} readonly />
+      </label>
+      <button type="button" onclick={saveSettings}>Save settings</button>
+    </section>
+  {/if}
 
   {#if toast}
     <div class="toast" role="alert">{toast}</div>
@@ -168,7 +364,7 @@
 
 <style>
   .layout {
-    max-width: 900px;
+    max-width: 1100px;
     margin: 0 auto;
     padding: 1rem;
     min-height: 100vh;
@@ -180,17 +376,32 @@
     display: flex;
     align-items: center;
     gap: 0.75rem;
+    flex-wrap: wrap;
   }
   h1 {
     margin: 0;
     font-size: 1.25rem;
     color: #38bdf8;
   }
+  .tabs {
+    display: flex;
+    gap: 0.25rem;
+  }
+  .tabs button {
+    background: #1e293b;
+    color: #94a3b8;
+    padding: 0.35rem 0.75rem;
+  }
+  .tabs button.active {
+    background: #0284c7;
+    color: white;
+  }
   .badge {
     font-size: 0.75rem;
     padding: 0.15rem 0.5rem;
     border-radius: 999px;
     background: #334155;
+    margin-left: auto;
   }
   .badge.ok {
     background: #14532d;
@@ -229,6 +440,56 @@
   button:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+  .chat-grid {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    gap: 0.75rem;
+    flex: 1;
+    min-height: 400px;
+  }
+  .sessions {
+    background: #1e293b;
+    border-radius: 8px;
+    padding: 0.5rem;
+    overflow-y: auto;
+  }
+  .sessions-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+    font-size: 0.85rem;
+  }
+  .sessions ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .sessions li {
+    display: flex;
+    gap: 0.25rem;
+    margin-bottom: 0.25rem;
+  }
+  .sessions li.active .session-title {
+    background: #0c4a6e;
+  }
+  .session-title {
+    flex: 1;
+    text-align: left;
+    font-size: 0.8rem;
+    background: #334155;
+    padding: 0.4rem 0.5rem;
+  }
+  .session-del {
+    padding: 0.25rem 0.5rem;
+    background: #475569;
+  }
+  .chat-main {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    min-height: 0;
   }
   .messages {
     flex: 1;
@@ -279,6 +540,56 @@
     font-size: 0.85rem;
     margin: 0;
   }
+  .panel {
+    background: #1e293b;
+    border-radius: 8px;
+    padding: 1rem;
+    flex: 1;
+  }
+  .panel-head {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+  }
+  .panel-head input {
+    flex: 1;
+  }
+  .memory-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+  .memory-list li {
+    background: #334155;
+    border-radius: 8px;
+    padding: 0.75rem;
+  }
+  .mem-meta {
+    font-size: 0.7rem;
+    color: #94a3b8;
+  }
+  .mem-key {
+    font-weight: 600;
+    margin: 0.25rem 0;
+  }
+  .mem-body {
+    font-size: 0.9rem;
+    white-space: pre-wrap;
+  }
+  .settings {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    max-width: 480px;
+  }
+  .hint {
+    font-size: 0.85rem;
+    color: #94a3b8;
+    margin: 0;
+  }
   .toast {
     position: fixed;
     bottom: 1rem;
@@ -288,5 +599,10 @@
     padding: 0.75rem 1rem;
     border-radius: 8px;
     max-width: 360px;
+  }
+  @media (max-width: 720px) {
+    .chat-grid {
+      grid-template-columns: 1fr;
+    }
   }
 </style>

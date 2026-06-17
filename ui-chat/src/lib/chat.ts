@@ -16,6 +16,7 @@ export interface WsServerFrame {
 export interface StreamChatOptions {
   token: string;
   messages: ChatMessage[];
+  sessionId?: string;
   modelId?: string;
   temperature?: number;
   onDelta: (chunk: string) => void;
@@ -38,6 +39,7 @@ export function streamChat(opts: StreamChatOptions): () => void {
     socket.send(
       JSON.stringify({
         type: "chat",
+        session_id: opts.sessionId,
         messages: opts.messages,
         model_id: opts.modelId,
         temperature: opts.temperature,

@@ -13,6 +13,8 @@ pub struct ChatMessageInput {
 pub struct ChatApiRequest {
     pub messages: Vec<ChatMessageInput>,
     #[serde(default)]
+    pub session_id: Option<String>,
+    #[serde(default)]
     pub model_id: Option<String>,
     #[serde(default)]
     pub temperature: Option<f64>,

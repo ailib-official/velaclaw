@@ -2,7 +2,7 @@
 //! POST `/api/chat` — 非流式 agent 循环对话（VL-UI-002）。
 
 use super::local_control::auth::check_pairing_auth;
-use super::local_control::runner::run_agent_chat;
+use super::local_control::runner::{persist_chat_turn, run_agent_chat};
 use super::local_control::types::ChatApiRequest;
 use super::{client_key_from_request, AppState, RATE_LIMIT_WINDOW_SECS};
 use axum::extract::{ConnectInfo, State};
@@ -50,7 +50,19 @@ pub async fn handle_post_chat(
 
     let config = state.config.lock().clone();
     match run_agent_chat(&config, &req).await {
-        Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
+        Ok(resp) => {
+            if let Err(e) = persist_chat_turn(
+                &config.workspace_dir,
+                req.session_id.as_deref(),
+                &req,
+                &resp.content,
+            )
+            .await
+            {
+                tracing::warn!("session persist failed: {e:#}");
+            }
+            (StatusCode::OK, Json(resp)).into_response()
+        }
         Err(e) => {
             tracing::warn!("POST /api/chat failed: {e:#}");
             let err = serde_json::json!({ "error": e.to_string() });

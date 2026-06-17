@@ -14,6 +14,7 @@ readme = "README.md"
 keywords = ["ai", "agent", "protocol", "llm", "assistant"]
 categories = ["command-line-utilities", "api-bindings", "science"]
 rust-version = "1.87"
+build = "build.rs"
 
 [dependencies]
 # CLI - minimal and fast
@@ -138,6 +139,7 @@ axum = { version = "0.8", default-features = false, features = ["http1", "json",
 tower = { version = "0.5", default-features = false }
 tower-http = { version = "0.6", default-features = false, features = ["limit", "timeout"] }
 http-body-util = "0.1"
+rust-embed = { version = "8", default-features = false }
 
 # OpenTelemetry — OTLP trace + metrics export.
 # Use the blocking HTTP exporter client to avoid Tokio-reactor panics in

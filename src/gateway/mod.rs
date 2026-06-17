@@ -13,6 +13,7 @@ mod chat_api;
 mod chat_ws;
 mod local_control;
 mod providers_api;
+mod static_embed;
 
 use crate::channels::{Channel, LinqChannel, NextcloudTalkChannel, SendMessage, WhatsAppChannel};
 use crate::config::{Config, DEFAULT_PROTOCOL_MODEL_ID};
@@ -606,6 +607,8 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
         .route("/api/chat", post(chat_api::handle_post_chat))
         .route("/api/providers", get(providers_api::handle_get_providers))
         .route("/ws", get(chat_ws::handle_ws_chat))
+        .route("/chat", get(static_embed::handle_chat_ui))
+        .route("/chat/{*asset_path}", get(static_embed::handle_chat_ui))
         .route("/pair", post(handle_pair))
         .route("/webhook", post(handle_webhook))
         .route("/whatsapp", get(handle_whatsapp_verify))

@@ -16,6 +16,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 pub struct Agent {
+    #[cfg(feature = "ai-protocol")]
+    execution: Option<crate::execution::ExecutionHandle>,
     provider: Box<dyn Provider>,
     tools: Vec<Box<dyn Tool>>,
     tool_specs: Vec<ToolSpec>,
@@ -38,6 +40,8 @@ pub struct Agent {
 }
 
 pub struct AgentBuilder {
+    #[cfg(feature = "ai-protocol")]
+    execution: Option<crate::execution::ExecutionHandle>,
     provider: Option<Box<dyn Provider>>,
     tools: Option<Vec<Box<dyn Tool>>>,
     memory: Option<Arc<dyn Memory>>,
@@ -60,6 +64,8 @@ pub struct AgentBuilder {
 impl AgentBuilder {
     pub fn new() -> Self {
         Self {
+            #[cfg(feature = "ai-protocol")]
+            execution: None,
             provider: None,
             tools: None,
             memory: None,
@@ -82,6 +88,12 @@ impl AgentBuilder {
 
     pub fn provider(mut self, provider: Box<dyn Provider>) -> Self {
         self.provider = Some(provider);
+        self
+    }
+
+    #[cfg(feature = "ai-protocol")]
+    pub fn execution(mut self, execution: Option<crate::execution::ExecutionHandle>) -> Self {
+        self.execution = execution;
         self
     }
 
@@ -178,6 +190,8 @@ impl AgentBuilder {
         let tool_specs = tools.iter().map(|tool| tool.spec()).collect();
 
         Ok(Agent {
+            #[cfg(feature = "ai-protocol")]
+            execution: self.execution,
             provider: self
                 .provider
                 .ok_or_else(|| anyhow::anyhow!("provider is required"))?,
@@ -279,20 +293,40 @@ impl Agent {
             .as_deref()
             .unwrap_or(DEFAULT_PROTOCOL_MODEL_ID);
 
-        let model_name = config
-            .default_model
-            .as_deref()
-            .unwrap_or(DEFAULT_PROTOCOL_MODEL_ID)
-            .to_string();
+        let provider_runtime_options = providers::ProviderRuntimeOptions {
+            auth_profile_override: None,
+            velaclaw_dir: config.config_path.parent().map(std::path::PathBuf::from),
+            secrets_encrypt: config.secrets.encrypt,
+            reasoning_enabled: config.runtime.reasoning_enabled,
+        };
 
-        let provider: Box<dyn Provider> = providers::create_routed_provider(
-            provider_name,
-            config.api_key.as_deref(),
-            config.api_url.as_deref(),
-            &config.reliability,
-            &config.model_routes,
-            &model_name,
-        )?;
+        #[cfg(feature = "ai-protocol")]
+        let (execution, provider, model_name) = {
+            let (execution, provider) =
+                crate::execution::bootstrap_routed_provider(config, &provider_runtime_options)?;
+            let model_name = execution.logical_model_id().to_string();
+            (execution, provider, model_name)
+        };
+
+        #[cfg(not(feature = "ai-protocol"))]
+        let (provider, model_name) = {
+            let model_name = config
+                .default_model
+                .as_deref()
+                .unwrap_or(DEFAULT_PROTOCOL_MODEL_ID)
+                .to_string();
+            let provider = providers::create_routed_provider(
+                provider_name,
+                config.api_key.as_deref(),
+                config.api_url.as_deref(),
+                &config.reliability,
+                &config.model_routes,
+                &model_name,
+            )?;
+            (provider, model_name)
+        };
+
+        let provider: Box<dyn Provider> = provider;
 
         let dispatcher_choice = config.agent.tool_dispatcher.as_str();
         let tool_dispatcher: Box<dyn ToolDispatcher> = match dispatcher_choice {
@@ -305,8 +339,14 @@ impl Agent {
         let available_hints: Vec<String> =
             config.model_routes.iter().map(|r| r.hint.clone()).collect();
 
-        Agent::builder()
-            .provider(provider)
+        #[cfg(feature = "ai-protocol")]
+        let mut builder = Agent::builder()
+            .execution(Some(execution))
+            .provider(provider);
+        #[cfg(not(feature = "ai-protocol"))]
+        let mut builder = Agent::builder().provider(provider);
+
+        builder
             .tools(tools)
             .memory(memory)
             .observer(observer)
@@ -330,6 +370,12 @@ impl Agent {
             .skills_prompt_mode(config.skills.prompt_injection_mode)
             .auto_save(config.memory.auto_save)
             .build()
+    }
+
+    /// BYOK execution handle when the agent was built from config (VL-EVO-001).
+    #[cfg(feature = "ai-protocol")]
+    pub fn execution(&self) -> Option<&crate::execution::ExecutionHandle> {
+        self.execution.as_ref()
     }
 
     fn trim_history(&mut self) {

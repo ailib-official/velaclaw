@@ -220,10 +220,10 @@ mod tests {
         let store = ChatSessionStore::new(dir.path());
 
         let created = store
-            .create(Some("Test".into()), Some("deepseek/model".into()))
+            .create(None, Some("deepseek/model".into()))
             .await
             .unwrap();
-        assert_eq!(created.title, "Test");
+        assert_eq!(created.title, "New chat");
 
         let listed = store.list().await.unwrap();
         assert_eq!(listed.len(), 1);

@@ -6,8 +6,10 @@ mod runner;
 mod types;
 
 pub use auth::{bearer_token_from_headers, check_pairing_auth};
-pub use runner::{apply_chat_overrides, chunk_text_for_stream, extract_last_user_message, run_agent_chat};
+pub use runner::{
+    apply_chat_overrides, chunk_text_for_stream, extract_last_user_message, run_agent_chat,
+};
 pub use types::{
-    ChatApiRequest, ChatApiResponse, ChatMessageInput, ChatUsage, ProvidersApiResponse,
-    ProviderApiEntry, ModelApiEntry, WsClientMessage, WsServerMessage,
+    ChatApiRequest, ChatApiResponse, ChatMessageInput, ChatUsage, ModelApiEntry, ProviderApiEntry,
+    ProvidersApiResponse, WsClientMessage, WsServerMessage,
 };

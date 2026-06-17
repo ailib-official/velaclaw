@@ -28,13 +28,7 @@ pub async fn handle_ws_chat(
     headers: HeaderMap,
     Query(query): Query<WsQuery>,
 ) -> impl IntoResponse {
-    if check_pairing_auth(
-        &state.pairing,
-        &headers,
-        query.token.as_deref(),
-    )
-    .is_err()
-    {
+    if check_pairing_auth(&state.pairing, &headers, query.token.as_deref()).is_err() {
         return unauthorized_response().into_response();
     }
 
@@ -124,5 +118,8 @@ async fn handle_ws_socket(mut socket: WebSocket, state: AppState) {
 
 async fn send_frame(socket: &mut WebSocket, frame: &WsServerMessage) -> Result<(), ()> {
     let text = serde_json::to_string(frame).map_err(|_| ())?;
-    socket.send(Message::Text(text.into())).await.map_err(|_| ())
+    socket
+        .send(Message::Text(text.into()))
+        .await
+        .map_err(|_| ())
 }

@@ -9,6 +9,11 @@
 //!
 //! This module coordinates HTTP entry points and model dispatch for the gateway.
 
+mod chat_api;
+mod chat_ws;
+mod local_control;
+mod providers_api;
+
 use crate::channels::{Channel, LinqChannel, NextcloudTalkChannel, SendMessage, WhatsAppChannel};
 use crate::config::{Config, DEFAULT_PROTOCOL_MODEL_ID};
 use crate::memory::{self, Memory, MemoryCategory};
@@ -242,7 +247,7 @@ fn forwarded_client_ip(headers: &HeaderMap) -> Option<IpAddr> {
         .and_then(parse_client_ip)
 }
 
-fn client_key_from_request(
+pub(crate) fn client_key_from_request(
     peer_addr: Option<SocketAddr>,
     headers: &HeaderMap,
     trust_forwarded_headers: bool,
@@ -598,6 +603,9 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
         .route("/metrics", get(handle_metrics))
         .route("/dashboard", get(handle_dashboard))
         .route("/api/dashboard", get(handle_dashboard_api))
+        .route("/api/chat", post(chat_api::handle_post_chat))
+        .route("/api/providers", get(providers_api::handle_get_providers))
+        .route("/ws", get(chat_ws::handle_ws_chat))
         .route("/pair", post(handle_pair))
         .route("/webhook", post(handle_webhook))
         .route("/whatsapp", get(handle_whatsapp_verify))

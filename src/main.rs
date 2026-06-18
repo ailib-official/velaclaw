@@ -75,6 +75,8 @@ mod observability;
 mod onboard;
 mod peripherals;
 #[cfg(feature = "ai-protocol")]
+mod execution;
+#[cfg(feature = "ai-protocol")]
 mod protocol_registry;
 mod providers;
 mod runtime;

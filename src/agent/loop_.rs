@@ -1565,9 +1565,9 @@ pub async fn run(
 
     #[cfg(feature = "ai-protocol")]
     let (provider, model_name) = {
-        let (execution, provider) =
+        let (exec_handle, provider) =
             crate::execution::bootstrap_routed_provider(&config, &provider_runtime_options)?;
-        let model_name = execution.logical_model_id().to_string();
+        let model_name = exec_handle.logical_model_id().to_string();
         (provider, model_name)
     };
 
@@ -2030,9 +2030,9 @@ pub async fn process_message(config: Config, message: &str) -> Result<String> {
     };
     #[cfg(feature = "ai-protocol")]
     let (provider, model_name) = {
-        let (execution, provider) =
+        let (exec_handle, provider) =
             crate::execution::bootstrap_routed_provider(&config, &provider_runtime_options)?;
-        let model_name = execution.logical_model_id().to_string();
+        let model_name = exec_handle.logical_model_id().to_string();
         (provider, model_name)
     };
     #[cfg(not(feature = "ai-protocol"))]

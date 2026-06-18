@@ -297,10 +297,10 @@ impl Agent {
 
         #[cfg(feature = "ai-protocol")]
         let (execution, provider, model_name) = {
-            let (execution, provider) =
+            let (exec_handle, provider) =
                 crate::execution::bootstrap_routed_provider(config, &provider_runtime_options)?;
-            let model_name = execution.logical_model_id().to_string();
-            (execution, provider, model_name)
+            let model_name = exec_handle.logical_model_id().to_string();
+            (exec_handle, provider, model_name)
         };
 
         #[cfg(not(feature = "ai-protocol"))]

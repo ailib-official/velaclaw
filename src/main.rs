@@ -62,6 +62,8 @@ mod cron;
 mod daemon;
 mod deploy;
 mod doctor;
+#[cfg(feature = "ai-protocol")]
+mod execution;
 mod gateway;
 mod hardware;
 mod health;
@@ -74,8 +76,6 @@ mod multimodal;
 mod observability;
 mod onboard;
 mod peripherals;
-#[cfg(feature = "ai-protocol")]
-mod execution;
 #[cfg(feature = "ai-protocol")]
 mod protocol_registry;
 mod providers;

@@ -3,8 +3,7 @@
 
 mod handle;
 
-pub use crate::config::{ExecutionRoutingConfig, ProviderRoutingMode};
-pub use handle::{logical_model_id_from_config, ExecutionHandle};
+pub use handle::ExecutionHandle;
 
 /// Build the agent provider stack via [`ExecutionHandle`] (BYOK sole path to ai-lib-rust).
 pub fn bootstrap_routed_provider(

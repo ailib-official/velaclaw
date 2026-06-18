@@ -136,7 +136,9 @@ mod tests {
     fn prism_mode_rejected_at_handle_construction() {
         let mut config = Config::default();
         config.routing.provider_mode = ProviderRoutingMode::Prism;
-        let err = ExecutionHandle::from_config(&config).unwrap_err();
-        assert!(err.to_string().contains("VL-EVO-002"));
+        match ExecutionHandle::from_config(&config) {
+            Err(err) => assert!(err.to_string().contains("VL-EVO-002")),
+            Ok(_) => panic!("expected prism routing to be rejected"),
+        }
     }
 }

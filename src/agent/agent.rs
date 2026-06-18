@@ -288,11 +288,6 @@ impl Agent {
             config,
         );
 
-        let provider_name = config
-            .default_provider
-            .as_deref()
-            .unwrap_or(DEFAULT_PROTOCOL_MODEL_ID);
-
         let provider_runtime_options = providers::ProviderRuntimeOptions {
             auth_profile_override: None,
             velaclaw_dir: config.config_path.parent().map(std::path::PathBuf::from),
@@ -310,6 +305,10 @@ impl Agent {
 
         #[cfg(not(feature = "ai-protocol"))]
         let (provider, model_name) = {
+            let provider_name = config
+                .default_provider
+                .as_deref()
+                .unwrap_or(DEFAULT_PROTOCOL_MODEL_ID);
             let model_name = config
                 .default_model
                 .as_deref()
@@ -340,11 +339,11 @@ impl Agent {
             config.model_routes.iter().map(|r| r.hint.clone()).collect();
 
         #[cfg(feature = "ai-protocol")]
-        let mut builder = Agent::builder()
+        let builder = Agent::builder()
             .execution(Some(execution))
             .provider(provider);
         #[cfg(not(feature = "ai-protocol"))]
-        let mut builder = Agent::builder().provider(provider);
+        let builder = Agent::builder().provider(provider);
 
         builder
             .tools(tools)

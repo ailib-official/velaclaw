@@ -6,11 +6,20 @@ export interface ChatMessage {
 }
 
 export interface WsServerFrame {
-  type: "delta" | "done" | "error";
+  type: "delta" | "done" | "error" | "approval_required";
   content?: string;
   message?: string;
   usage?: { input_tokens: number; output_tokens: number };
   cost?: number;
+  id?: string;
+  tool_name?: string;
+  arguments_summary?: string;
+}
+
+export interface ApprovalRequiredPayload {
+  id: string;
+  tool_name: string;
+  arguments_summary: string;
 }
 
 export interface StreamChatOptions {
@@ -22,6 +31,7 @@ export interface StreamChatOptions {
   onDelta: (chunk: string) => void;
   onDone: (frame: WsServerFrame) => void;
   onError: (message: string) => void;
+  onApprovalRequired?: (payload: ApprovalRequiredPayload) => void;
 }
 
 function wsUrl(token: string): string {
@@ -58,6 +68,12 @@ export function streamChat(opts: StreamChatOptions): () => void {
     }
     if (frame.type === "delta" && frame.content) {
       opts.onDelta(frame.content);
+    } else if (frame.type === "approval_required" && frame.id && frame.tool_name) {
+      opts.onApprovalRequired?.({
+        id: frame.id,
+        tool_name: frame.tool_name,
+        arguments_summary: frame.arguments_summary ?? "",
+      });
     } else if (frame.type === "done") {
       opts.onDone(frame);
       socket.close();

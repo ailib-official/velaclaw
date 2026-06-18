@@ -1,6 +1,6 @@
 //! CLI handlers for deploy commands.
 
-use crate::config::Config;
+use velaclaw::config::Config;
 use crate::deploy::remote::{DeploymentConfig, DeploymentMode, DeploymentStatus, RemoteDeployer};
 use anyhow::{bail, Context, Result};
 use std::collections::HashMap;
@@ -12,7 +12,7 @@ pub async fn handle_command(
     deploy_command: crate::deploy::DeployCommands,
     config: &Config,
 ) -> Result<()> {
-    let deploy_config = crate::config::DeployConfig::default();
+    let deploy_config = velaclaw::config::DeployConfig::default();
     let targets = load_deploy_config(config, &deploy_config)?;
 
     match deploy_command {
@@ -40,7 +40,7 @@ pub async fn handle_command(
 /// Load deploy configuration from config.
 fn load_deploy_config(
     config: &Config,
-    _deploy_cfg: &crate::config::DeployConfig,
+    _deploy_cfg: &velaclaw::config::DeployConfig,
 ) -> Result<Vec<crate::deploy::remote::DeploymentTarget>> {
     if config.deploy.servers.is_empty() {
         bail!(
@@ -61,7 +61,7 @@ fn load_deploy_config(
 
 /// Convert DeploymentTargetConfig to DeploymentTarget.
 fn convert_target_config(
-    cfg: &crate::config::DeploymentTargetConfig,
+    cfg: &velaclaw::config::DeploymentTargetConfig,
 ) -> Result<crate::deploy::remote::DeploymentTarget> {
     // Convert labels from Vec<String> to HashMap<String, String>
     let labels: HashMap<String, String> = cfg
@@ -104,7 +104,7 @@ fn parse_deployment_mode(mode_str: &str) -> DeploymentMode {
 
 /// Create deployment config from settings.
 fn create_deployment_config(
-    settings: &crate::config::DeploymentSettingsConfig,
+    settings: &velaclaw::config::DeploymentSettingsConfig,
     version: &str,
 ) -> DeploymentConfig {
     // Auto-detect local binary path
@@ -132,7 +132,7 @@ fn create_deployment_config(
 async fn handle_deploy(
     server_id: &str,
     targets: &[crate::deploy::remote::DeploymentTarget],
-    deploy_config: crate::config::DeployConfig,
+    deploy_config: velaclaw::config::DeployConfig,
 ) -> Result<()> {
     let target = find_target(server_id, targets)?;
 
@@ -273,7 +273,7 @@ async fn handle_update(
     server_id: &str,
     version: Option<String>,
     targets: &[crate::deploy::remote::DeploymentTarget],
-    deploy_config: crate::config::DeployConfig,
+    deploy_config: velaclaw::config::DeployConfig,
 ) -> Result<()> {
     let target = find_target(server_id, targets)?;
 
@@ -334,7 +334,7 @@ fn find_target<'a>(
 async fn handle_validate(
     server_id: &str,
     targets: &[crate::deploy::remote::DeploymentTarget],
-    deploy_config: crate::config::DeployConfig,
+    deploy_config: velaclaw::config::DeployConfig,
 ) -> Result<()> {
     let target = find_target(server_id, targets)?;
 

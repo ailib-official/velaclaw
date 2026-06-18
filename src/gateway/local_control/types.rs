@@ -89,6 +89,11 @@ pub enum WsServerMessage {
     Error {
         message: String,
     },
+    ApprovalRequired {
+        id: String,
+        tool_name: String,
+        arguments_summary: String,
+    },
 }
 
 #[cfg(test)]

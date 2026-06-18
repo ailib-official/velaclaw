@@ -49,49 +49,21 @@ fn parse_temperature(s: &str) -> std::result::Result<f64, String> {
     Ok(t)
 }
 
-mod agent;
-mod approval;
-mod auth;
-mod channels;
-mod rag {
-    pub use velaclaw::rag::*;
-}
-mod config;
-mod cost;
-mod cron;
-mod daemon;
+// Binary-only modules (not part of the `velaclaw` library crate).
 mod deploy;
-mod doctor;
-#[cfg(feature = "ai-protocol")]
-mod execution;
-mod gateway;
-mod hardware;
-mod health;
-mod heartbeat;
-mod identity;
-mod integrations;
-mod memory;
-mod migration;
-mod multimodal;
-mod observability;
-mod onboard;
-mod peripherals;
-#[cfg(feature = "ai-protocol")]
-mod protocol_registry;
-mod providers;
-mod runtime;
-mod security;
-mod service;
 mod skillforge;
-mod skills;
-mod tools;
-mod tunnel;
-mod util;
 
-use config::{Config, DEFAULT_PROTOCOL_MODEL_ID};
-
-// Re-export so binary's hardware/peripherals modules can use velaclaw::HardwareCommands etc.
-pub use velaclaw::{HardwareCommands, PeripheralCommands};
+// Thin binary: shared implementation lives in the library crate (`src/lib.rs`).
+// Do not re-declare `mod agent;` etc. here — that compiles every source file twice
+// and breaks whenever a new lib module (e.g. `execution`) is added without mirroring main.
+use velaclaw::{
+    agent, approval, auth, channels, config, cost, cron, daemon, doctor, gateway, hardware,
+    health, heartbeat, identity, integrations, memory, migration, multimodal, observability,
+    onboard, peripherals, providers, rag, runtime, security, service, skills, tools, tunnel,
+    util, ChannelCommands, CronCommands, HardwareCommands, IntegrationCommands, MemoryCommands,
+    MigrateCommands, PeripheralCommands, ServiceCommands, SkillCommands, Config,
+    DEFAULT_PROTOCOL_MODEL_ID,
+};
 
 /// `VelaClaw` - Protocol-driven autonomous AI agent runtime.
 #[derive(Parser, Debug)]
@@ -105,22 +77,6 @@ struct Cli {
 
     #[command(subcommand)]
     command: Commands,
-}
-
-#[derive(Subcommand, Debug)]
-enum ServiceCommands {
-    /// Install daemon service unit for auto-start and restart
-    Install,
-    /// Start daemon service
-    Start,
-    /// Stop daemon service
-    Stop,
-    /// Restart daemon service to apply latest config
-    Restart,
-    /// Check daemon service status
-    Status,
-    /// Uninstall daemon service unit
-    Uninstall,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
@@ -361,7 +317,7 @@ Examples:
   velaclaw hardware info --chip STM32F401RETx")]
     Hardware {
         #[command(subcommand)]
-        hardware_command: velaclaw::HardwareCommands,
+        hardware_command: HardwareCommands,
     },
 
     /// Manage hardware peripherals (STM32, RPi GPIO, etc.)
@@ -380,7 +336,7 @@ Examples:
   velaclaw peripheral flash-nucleo")]
     Peripheral {
         #[command(subcommand)]
-        peripheral_command: velaclaw::PeripheralCommands,
+        peripheral_command: PeripheralCommands,
     },
 
     /// Manage agent memory (list, get, stats, clear)
@@ -541,89 +497,6 @@ enum AuthCommands {
 }
 
 #[derive(Subcommand, Debug)]
-enum MigrateCommands {
-    /// Import memory from an `OpenClaw` workspace into this `VelaClaw` workspace
-    Openclaw {
-        /// Optional path to `OpenClaw` workspace (defaults to ~/.openclaw/workspace)
-        #[arg(long)]
-        source: Option<std::path::PathBuf>,
-
-        /// Validate and preview migration without writing any data
-        #[arg(long)]
-        dry_run: bool,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-enum CronCommands {
-    /// List all scheduled tasks
-    List,
-    /// Add a new scheduled task
-    Add {
-        /// Cron expression
-        expression: String,
-        /// Optional IANA timezone (e.g. America/Los_Angeles)
-        #[arg(long)]
-        tz: Option<String>,
-        /// Command to run
-        command: String,
-    },
-    /// Add a one-shot scheduled task at an RFC3339 timestamp
-    AddAt {
-        /// One-shot timestamp in RFC3339 format
-        at: String,
-        /// Command to run
-        command: String,
-    },
-    /// Add a fixed-interval scheduled task
-    AddEvery {
-        /// Interval in milliseconds
-        every_ms: u64,
-        /// Command to run
-        command: String,
-    },
-    /// Add a one-shot delayed task (e.g. "30m", "2h", "1d")
-    Once {
-        /// Delay duration
-        delay: String,
-        /// Command to run
-        command: String,
-    },
-    /// Remove a scheduled task
-    Remove {
-        /// Task ID
-        id: String,
-    },
-    /// Update a scheduled task
-    Update {
-        /// Task ID
-        id: String,
-        /// New cron expression
-        #[arg(long)]
-        expression: Option<String>,
-        /// New IANA timezone
-        #[arg(long)]
-        tz: Option<String>,
-        /// New command to run
-        #[arg(long)]
-        command: Option<String>,
-        /// New job name
-        #[arg(long)]
-        name: Option<String>,
-    },
-    /// Pause a scheduled task
-    Pause {
-        /// Task ID
-        id: String,
-    },
-    /// Resume a paused task
-    Resume {
-        /// Task ID
-        id: String,
-    },
-}
-
-#[derive(Subcommand, Debug)]
 enum ModelCommands {
     /// Refresh and cache provider models
     Refresh {
@@ -660,88 +533,6 @@ enum DoctorCommands {
         /// Prefer cached catalogs when available (skip forced live refresh)
         #[arg(long)]
         use_cache: bool,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-enum ChannelCommands {
-    /// List configured channels
-    List,
-    /// Start all configured channels (Telegram, Discord, Slack)
-    Start,
-    /// Run health checks for configured channels
-    Doctor,
-    /// Add a new channel
-    Add {
-        /// Channel type
-        channel_type: String,
-        /// Configuration JSON
-        config: String,
-    },
-    /// Remove a channel
-    Remove {
-        /// Channel name
-        name: String,
-    },
-    /// Bind a Telegram identity (username or numeric user ID) into allowlist
-    BindTelegram {
-        /// Telegram identity to allow (username without '@' or numeric user ID)
-        identity: String,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-enum SkillCommands {
-    /// List installed skills
-    List,
-    /// Install a skill from a GitHub URL or local path
-    Install {
-        /// GitHub URL or local path
-        source: String,
-    },
-    /// Remove an installed skill
-    Remove {
-        /// Skill name
-        name: String,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-enum MemoryCommands {
-    /// List memory entries with optional filters
-    List {
-        #[arg(long)]
-        category: Option<String>,
-        #[arg(long)]
-        session: Option<String>,
-        #[arg(long, default_value = "50")]
-        limit: usize,
-        #[arg(long, default_value = "0")]
-        offset: usize,
-    },
-    /// Get a specific memory entry by key
-    Get { key: String },
-    /// Show memory backend statistics and health
-    Stats,
-    /// Clear memories by category, by key, or clear all
-    Clear {
-        /// Delete a single entry by key (supports prefix match)
-        #[arg(long)]
-        key: Option<String>,
-        #[arg(long)]
-        category: Option<String>,
-        /// Skip confirmation prompt
-        #[arg(long)]
-        yes: bool,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-enum IntegrationCommands {
-    /// Show details about a specific integration
-    Info {
-        /// Integration name
-        name: String,
     },
 }
 

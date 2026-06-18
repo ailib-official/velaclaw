@@ -41,11 +41,18 @@ pub fn extract_last_user_message(messages: &[ChatMessageInput]) -> Result<String
 }
 
 /// Run a single agent turn via `Agent::from_config` + `turn` (full tool loop).
-pub async fn run_agent_chat(config: &Config, req: &ChatApiRequest) -> Result<ChatApiResponse> {
+pub async fn run_agent_chat(
+    config: &Config,
+    req: &ChatApiRequest,
+    approval_hub: Option<&Arc<crate::approval::ApprovalHub>>,
+) -> Result<ChatApiResponse> {
     let user_message = extract_last_user_message(&req.messages)?;
     let effective_config = apply_chat_overrides(config.clone(), req);
 
     let mut agent = Agent::from_config(&effective_config).context("failed to build agent")?;
+    if let Some(hub) = approval_hub {
+        agent.enable_gateway_approval(Arc::clone(hub), &effective_config.autonomy);
+    }
     let content = agent
         .turn(&user_message)
         .await

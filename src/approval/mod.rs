@@ -3,6 +3,10 @@
 //! Provides a pre-execution hook that prompts the user before tool calls,
 //! with session-scoped "Always" allowlists and audit logging.
 
+mod hub;
+
+pub use hub::{ApprovalHub, ApprovalRequiredEvent};
+
 use crate::config::AutonomyConfig;
 use crate::security::AutonomyLevel;
 use chrono::Utc;
@@ -151,6 +155,16 @@ impl ApprovalManager {
     /// approval is only supported on CLI for now).
     pub fn prompt_cli(&self, request: &ApprovalRequest) -> ApprovalResponse {
         prompt_cli_interactive(request)
+    }
+
+    /// Wait for a gateway/Web UI approval via [`ApprovalHub`].
+    pub async fn prompt_gateway(
+        &self,
+        hub: &ApprovalHub,
+        request: &ApprovalRequest,
+    ) -> ApprovalResponse {
+        let summary = summarize_args(&request.arguments);
+        hub.request(request, &summary).await
     }
 }
 

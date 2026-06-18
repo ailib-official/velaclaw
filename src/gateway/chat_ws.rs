@@ -11,6 +11,8 @@ use axum::http::HeaderMap;
 use axum::response::IntoResponse;
 use futures_util::StreamExt;
 use serde::Deserialize;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 const WS_CHUNK_SIZE: usize = 48;
 
@@ -34,8 +36,13 @@ pub async fn handle_ws_chat(
     ws.on_upgrade(move |socket| handle_ws_socket(socket, state))
 }
 
-async fn handle_ws_socket(mut socket: WebSocket, state: AppState) {
-    while let Some(msg) = socket.next().await {
+async fn handle_ws_socket(socket: WebSocket, state: AppState) {
+    let socket = Arc::new(Mutex::new(socket));
+
+    while let Some(msg) = {
+        let mut guard = socket.lock().await;
+        guard.next().await
+    } {
         let msg = match msg {
             Ok(Message::Text(text)) => text,
             Ok(Message::Close(_)) => break,
@@ -52,7 +59,7 @@ async fn handle_ws_socket(mut socket: WebSocket, state: AppState) {
                 let frame = WsServerMessage::Error {
                     message: format!("Invalid JSON: {e}"),
                 };
-                if send_frame(&mut socket, &frame).await.is_err() {
+                if send_frame(socket.clone(), &frame).await.is_err() {
                     break;
                 }
                 continue;
@@ -63,7 +70,7 @@ async fn handle_ws_socket(mut socket: WebSocket, state: AppState) {
             let frame = WsServerMessage::Error {
                 message: format!("Unsupported message type: {}", client.msg_type),
             };
-            if send_frame(&mut socket, &frame).await.is_err() {
+            if send_frame(socket.clone(), &frame).await.is_err() {
                 break;
             }
             continue;
@@ -73,7 +80,7 @@ async fn handle_ws_socket(mut socket: WebSocket, state: AppState) {
             let frame = WsServerMessage::Error {
                 message: "messages must not be empty".into(),
             };
-            if send_frame(&mut socket, &frame).await.is_err() {
+            if send_frame(socket.clone(), &frame).await.is_err() {
                 break;
             }
             continue;
@@ -88,7 +95,26 @@ async fn handle_ws_socket(mut socket: WebSocket, state: AppState) {
         };
 
         let config = state.config.lock().clone();
-        match run_agent_chat(&config, &req).await {
+        let hub = state.approval_hub.clone();
+        let mut approval_sub = hub.subscribe();
+        let sock_fwd = socket.clone();
+        let forwarder = tokio::spawn(async move {
+            while let Ok(ev) = approval_sub.recv().await {
+                let frame = WsServerMessage::ApprovalRequired {
+                    id: ev.id,
+                    tool_name: ev.tool_name,
+                    arguments_summary: ev.arguments_summary,
+                };
+                if send_frame(sock_fwd.clone(), &frame).await.is_err() {
+                    break;
+                }
+            }
+        });
+
+        let chat_result = run_agent_chat(&config, &req, Some(&hub)).await;
+        forwarder.abort();
+
+        match chat_result {
             Ok(resp) => {
                 if let Err(e) = persist_chat_turn(
                     &config.workspace_dir,
@@ -102,7 +128,7 @@ async fn handle_ws_socket(mut socket: WebSocket, state: AppState) {
                 }
                 for chunk in chunk_text_for_stream(&resp.content, WS_CHUNK_SIZE) {
                     let delta = WsServerMessage::Delta { content: chunk };
-                    if send_frame(&mut socket, &delta).await.is_err() {
+                    if send_frame(socket.clone(), &delta).await.is_err() {
                         return;
                     }
                 }
@@ -110,7 +136,7 @@ async fn handle_ws_socket(mut socket: WebSocket, state: AppState) {
                     usage: resp.usage,
                     cost: resp.cost,
                 };
-                if send_frame(&mut socket, &done).await.is_err() {
+                if send_frame(socket.clone(), &done).await.is_err() {
                     return;
                 }
             }
@@ -118,7 +144,7 @@ async fn handle_ws_socket(mut socket: WebSocket, state: AppState) {
                 let frame = WsServerMessage::Error {
                     message: e.to_string(),
                 };
-                if send_frame(&mut socket, &frame).await.is_err() {
+                if send_frame(socket.clone(), &frame).await.is_err() {
                     break;
                 }
             }
@@ -126,9 +152,10 @@ async fn handle_ws_socket(mut socket: WebSocket, state: AppState) {
     }
 }
 
-async fn send_frame(socket: &mut WebSocket, frame: &WsServerMessage) -> Result<(), ()> {
+async fn send_frame(socket: Arc<Mutex<WebSocket>>, frame: &WsServerMessage) -> Result<(), ()> {
     let text = serde_json::to_string(frame).map_err(|_| ())?;
-    socket
+    let mut guard = socket.lock().await;
+    guard
         .send(Message::Text(text.into()))
         .await
         .map_err(|_| ())

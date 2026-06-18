@@ -6,23 +6,33 @@
     type ChatMessage,
   } from "./lib/chat";
   import {
+    createCronJob,
     createSession,
+    deleteCronJob,
     deleteSession,
     fetchConfig,
+    fetchCronJobs,
     fetchHealth,
     fetchMemory,
     fetchProviders,
     fetchSession,
     fetchSessions,
+    fetchTools,
     loadToken,
     putConfig,
+    respondApproval,
+    runCronJob,
     saveToken,
+    testProvider,
+    type CronJob,
     type MemoryEntry,
     type ProviderModel,
     type SessionSummary,
+    type ToolCatalogEntry,
   } from "./lib/api";
+  import type { ApprovalRequiredPayload } from "./lib/chat";
 
-  type Tab = "chat" | "memory" | "settings";
+  type Tab = "chat" | "memory" | "cron" | "tools" | "settings";
 
   let token = $state(loadToken());
   let tab = $state<Tab>("chat");
@@ -43,6 +53,14 @@
   let configTemperature = $state("0.7");
   let aiProtocolDir = $state("");
 
+  let cronJobs = $state<CronJob[]>([]);
+  let cronExpression = $state("0 9 * * *");
+  let cronCommand = $state("");
+  let toolCatalog = $state<ToolCatalogEntry[]>([]);
+  let pendingApproval = $state<ApprovalRequiredPayload | null>(null);
+  let providerTestMsg = $state("");
+  let providers = $state<{ id: string; available: boolean }[]>([]);
+
   let listEl: HTMLDivElement | undefined;
 
   function showToast(msg: string) {
@@ -60,8 +78,9 @@
     try {
       const health = await fetchHealth();
       status = health.status === "ok" ? "online" : "degraded";
-      const providers = await fetchProviders(token);
-      models = providers.models.filter((m) => m.available);
+      const providersRes = await fetchProviders(token);
+      models = providersRes.models.filter((m) => m.available);
+      providers = providersRes.providers;
       if (!selectedModel && models.length > 0) {
         selectedModel = models[0].logical_id;
       }
@@ -129,6 +148,81 @@
     }
   }
 
+  async function loadCron() {
+    if (!token) return;
+    try {
+      cronJobs = await fetchCronJobs(token);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function addCronJob() {
+    if (!cronExpression.trim() || !cronCommand.trim()) return;
+    try {
+      await createCronJob(token, {
+        expression: cronExpression.trim(),
+        command: cronCommand.trim(),
+      });
+      cronCommand = "";
+      await loadCron();
+      showToast("Cron job created");
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function removeCronJob(id: string) {
+    try {
+      await deleteCronJob(token, id);
+      await loadCron();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function triggerCronJob(id: string) {
+    try {
+      const result = await runCronJob(token, id);
+      showToast(result.success ? "Job ran OK" : `Run failed: ${result.output}`);
+      await loadCron();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function loadTools() {
+    if (!token) return;
+    try {
+      toolCatalog = await fetchTools(token);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function handleApproval(approved: boolean, always = false) {
+    if (!pendingApproval) return;
+    const id = pendingApproval.id;
+    try {
+      await respondApproval(token, id, approved, always);
+      pendingApproval = null;
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function runProviderTest(providerId: string) {
+    providerTestMsg = "Testing…";
+    try {
+      const result = await testProvider(token, providerId);
+      providerTestMsg = result.ok
+        ? `${providerId}: OK`
+        : `${providerId}: ${result.message ?? "failed"}`;
+    } catch (e) {
+      providerTestMsg = e instanceof Error ? e.message : String(e);
+    }
+  }
+
   async function loadSettings() {
     if (!token) return;
     try {
@@ -171,6 +265,8 @@
   function switchTab(next: Tab) {
     tab = next;
     if (next === "memory") loadMemory();
+    if (next === "cron") loadCron();
+    if (next === "tools") loadTools();
     if (next === "settings") loadSettings();
   }
 
@@ -230,6 +326,9 @@
         cancelStream = null;
         showToast(msg);
       },
+      onApprovalRequired: (payload) => {
+        pendingApproval = payload;
+      },
     });
   }
 
@@ -247,7 +346,10 @@
     <nav class="tabs">
       <button type="button" class:active={tab === "chat"} onclick={() => switchTab("chat")}>Chat</button>
       <button type="button" class:active={tab === "memory"} onclick={() => switchTab("memory")}>Memory</button>
+      <button type="button" class:active={tab === "cron"} onclick={() => switchTab("cron")}>Cron</button>
+      <button type="button" class:active={tab === "tools"} onclick={() => switchTab("tools")}>Tools</button>
       <button type="button" class:active={tab === "settings"} onclick={() => switchTab("settings")}>Settings</button>
+      <a class="dash-link" href="/dashboard" target="_blank" rel="noopener">Dashboard ↗</a>
     </nav>
     <span class="badge" class:ok={status === "online"}>{status}</span>
   </header>
@@ -338,6 +440,55 @@
         {/each}
       </ul>
     </section>
+  {:else if tab === "cron"}
+    <section class="panel">
+      <div class="panel-head cron-form">
+        <label>
+          Cron expression
+          <input type="text" bind:value={cronExpression} placeholder="0 9 * * *" />
+        </label>
+        <label>
+          Command
+          <input type="text" bind:value={cronCommand} placeholder="velaclaw agent …" />
+        </label>
+        <button type="button" onclick={addCronJob}>Add job</button>
+      </div>
+      <ul class="cron-list">
+        {#each cronJobs as job}
+          <li>
+            <div class="cron-meta">
+              <code>{job.expression}</code>
+              {#if job.last_status}
+                <span class="cron-status">{job.last_status}</span>
+              {/if}
+            </div>
+            <div class="cron-cmd">{job.command}</div>
+            <div class="cron-actions">
+              <button type="button" onclick={() => triggerCronJob(job.id)}>Run now</button>
+              <button type="button" class="danger" onclick={() => removeCronJob(job.id)}>Delete</button>
+            </div>
+          </li>
+        {/each}
+        {#if cronJobs.length === 0}
+          <li class="empty">No cron jobs yet.</li>
+        {/if}
+      </ul>
+    </section>
+  {:else if tab === "tools"}
+    <section class="panel">
+      <p class="hint">Tools available to the agent at runtime (from gateway config).</p>
+      <ul class="tools-list">
+        {#each toolCatalog as tool}
+          <li>
+            <div class="tool-name">{tool.name}</div>
+            <div class="tool-desc">{tool.description}</div>
+          </li>
+        {/each}
+        {#if toolCatalog.length === 0}
+          <li class="empty">No tools loaded — check token and gateway.</li>
+        {/if}
+      </ul>
+    </section>
   {:else}
     <section class="panel settings">
       <p class="hint">API keys cannot be set here — configure BYOK via environment variables.</p>
@@ -354,7 +505,37 @@
         <input type="text" value={aiProtocolDir} readonly />
       </label>
       <button type="button" onclick={saveSettings}>Save settings</button>
+      {#if providers.length > 0}
+        <div class="provider-tests">
+          <strong>Provider connectivity</strong>
+          {#each providers as p}
+            <div class="provider-row">
+              <span>{p.id}</span>
+              <span class:ok={p.available} class:bad={!p.available}>{p.available ? "BYOK OK" : "missing env"}</span>
+              <button type="button" onclick={() => runProviderTest(p.id)} disabled={!p.available}>Test</button>
+            </div>
+          {/each}
+          {#if providerTestMsg}
+            <p class="hint">{providerTestMsg}</p>
+          {/if}
+        </div>
+      {/if}
     </section>
+  {/if}
+
+  {#if pendingApproval}
+    <div class="modal-backdrop" role="presentation">
+      <div class="modal" role="dialog" aria-labelledby="approval-title">
+        <h2 id="approval-title">Tool approval required</h2>
+        <p><strong>{pendingApproval.tool_name}</strong></p>
+        <pre class="approval-args">{pendingApproval.arguments_summary}</pre>
+        <div class="modal-actions">
+          <button type="button" class="danger" onclick={() => handleApproval(false)}>Deny</button>
+          <button type="button" onclick={() => handleApproval(true)}>Allow once</button>
+          <button type="button" onclick={() => handleApproval(true, true)}>Always allow</button>
+        </div>
+      </div>
+    </div>
   {/if}
 
   {#if toast}
@@ -395,6 +576,12 @@
   .tabs button.active {
     background: #0284c7;
     color: white;
+  }
+  .dash-link {
+    font-size: 0.8rem;
+    color: #38bdf8;
+    text-decoration: none;
+    padding: 0.35rem 0.5rem;
   }
   .badge {
     font-size: 0.75rem;
@@ -589,6 +776,114 @@
     font-size: 0.85rem;
     color: #94a3b8;
     margin: 0;
+  }
+  .cron-form {
+    flex-wrap: wrap;
+    align-items: end;
+  }
+  .cron-list,
+  .tools-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+  .cron-list li,
+  .tools-list li {
+    background: #334155;
+    border-radius: 8px;
+    padding: 0.75rem;
+  }
+  .cron-list li.empty,
+  .tools-list li.empty {
+    color: #94a3b8;
+    font-size: 0.9rem;
+  }
+  .cron-meta {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    font-size: 0.85rem;
+  }
+  .cron-status {
+    color: #86efac;
+    font-size: 0.75rem;
+  }
+  .cron-cmd {
+    margin: 0.35rem 0;
+    font-family: monospace;
+    font-size: 0.85rem;
+  }
+  .cron-actions {
+    display: flex;
+    gap: 0.5rem;
+  }
+  button.danger {
+    background: #b91c1c;
+  }
+  .tool-name {
+    font-weight: 600;
+    font-family: monospace;
+  }
+  .tool-desc {
+    font-size: 0.85rem;
+    color: #cbd5e1;
+    margin-top: 0.25rem;
+  }
+  .provider-tests {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+  }
+  .provider-row {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    font-size: 0.85rem;
+  }
+  .provider-row .ok {
+    color: #86efac;
+  }
+  .provider-row .bad {
+    color: #fca5a5;
+  }
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.75);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+  }
+  .modal {
+    background: #1e293b;
+    border: 1px solid #475569;
+    border-radius: 12px;
+    padding: 1.25rem;
+    max-width: 480px;
+    width: 90%;
+  }
+  .modal h2 {
+    margin: 0 0 0.75rem;
+    font-size: 1.1rem;
+  }
+  .approval-args {
+    background: #0f172a;
+    padding: 0.75rem;
+    border-radius: 6px;
+    overflow-x: auto;
+    font-size: 0.8rem;
+    white-space: pre-wrap;
+  }
+  .modal-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 1rem;
+    flex-wrap: wrap;
   }
   .toast {
     position: fixed;

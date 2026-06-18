@@ -3930,14 +3930,14 @@ mod tests {
     }
 
     #[test]
-    fn routing_defaults_to_byok_json() {
+    async fn routing_defaults_to_byok_json() {
         let raw = r"{}";
         let cfg: ExecutionRoutingConfig = serde_json::from_str(raw).unwrap();
         assert_eq!(cfg.provider_mode, ProviderRoutingMode::Byok);
     }
 
     #[test]
-    fn routing_parses_prism_mode_json() {
+    async fn routing_parses_prism_mode_json() {
         let raw = r#"{"provider_mode":"prism"}"#;
         let cfg: ExecutionRoutingConfig = serde_json::from_str(raw).unwrap();
         assert_eq!(cfg.provider_mode, ProviderRoutingMode::Prism);

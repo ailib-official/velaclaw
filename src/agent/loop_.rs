@@ -1,5 +1,7 @@
 use crate::approval::{ApprovalManager, ApprovalRequest, ApprovalResponse};
-use crate::config::{Config, DEFAULT_PROTOCOL_MODEL_ID};
+use crate::config::Config;
+#[cfg(not(feature = "ai-protocol"))]
+use crate::config::DEFAULT_PROTOCOL_MODEL_ID;
 use crate::memory::{self, Memory, MemoryCategory};
 use crate::multimodal;
 use crate::observability::{self, Observer, ObserverEvent};
@@ -1492,6 +1494,9 @@ pub async fn run(
     temperature: f64,
     peripheral_overrides: Vec<String>,
 ) -> Result<String> {
+    #[cfg(feature = "ai-protocol")]
+    let _ = (&provider_override, &model_override);
+
     // ── Wire up agnostic subsystems ──────────────────────────────
     let base_observer = observability::create_observer(&config.observability);
     let observer: Arc<dyn Observer> = Arc::from(base_observer);
@@ -2053,6 +2058,9 @@ pub async fn process_message(config: Config, message: &str) -> Result<String> {
         (provider, model_name)
     };
     let provider: Box<dyn Provider> = provider;
+    let provider_name = model_name
+        .split_once('/')
+        .map_or(model_name.as_str(), |(provider, _)| provider);
 
     let hardware_rag: Option<crate::rag::HardwareRag> = config
         .peripherals

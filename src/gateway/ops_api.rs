@@ -184,11 +184,7 @@ pub async fn handle_run_cron(
         Err(e) => return api_error(StatusCode::NOT_FOUND, &e.to_string()).into_response(),
     };
     let (success, output) = execute_job_now(&config, &job).await;
-    (
-        StatusCode::OK,
-        Json(CronRunResponse { success, output }),
-    )
-        .into_response()
+    (StatusCode::OK, Json(CronRunResponse { success, output })).into_response()
 }
 
 #[derive(Debug, Serialize)]
@@ -216,14 +212,12 @@ pub async fn handle_list_tools(
         &config.autonomy,
         &config.workspace_dir,
     ));
-    let runtime: Arc<dyn runtime::RuntimeAdapter> =
-        match runtime::create_runtime(&config.runtime) {
-            Ok(r) => Arc::from(r),
-            Err(e) => {
-                return api_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string())
-                    .into_response();
-            }
-        };
+    let runtime: Arc<dyn runtime::RuntimeAdapter> = match runtime::create_runtime(&config.runtime) {
+        Ok(r) => Arc::from(r),
+        Err(e) => {
+            return api_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response();
+        }
+    };
     let config_arc = Arc::new(config.clone());
     let tool_list = tools::all_tools_with_runtime(
         config_arc,
@@ -270,10 +264,7 @@ pub async fn handle_respond_approval(
     if let Err(e) = authorize(&state, peer_addr, &headers) {
         return e.into_response();
     }
-    if state
-        .approval_hub
-        .respond(&id, body.approved, body.always)
-    {
+    if state.approval_hub.respond(&id, body.approved, body.always) {
         (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response()
     } else {
         api_error(StatusCode::NOT_FOUND, "Unknown or expired approval id").into_response()

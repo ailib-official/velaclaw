@@ -1,11 +1,11 @@
 //! CLI handlers for deploy commands.
 
-use velaclaw::config::Config;
 use crate::deploy::remote::{DeploymentConfig, DeploymentMode, DeploymentStatus, RemoteDeployer};
 use anyhow::{bail, Context, Result};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use tracing::info;
+use velaclaw::config::Config;
 
 /// Handle deploy subcommands.
 pub async fn handle_command(

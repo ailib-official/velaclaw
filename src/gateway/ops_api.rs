@@ -19,10 +19,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 fn api_error(status: StatusCode, message: &str) -> (StatusCode, Json<serde_json::Value>) {
-    (
-        status,
-        Json(serde_json::json!({ "error": message })),
-    )
+    (status, Json(serde_json::json!({ "error": message })))
 }
 
 fn authorize(
@@ -301,32 +298,33 @@ pub async fn handle_test_provider(
         return e.into_response();
     }
     let config = state.config.lock().clone();
-    let provider: Arc<dyn providers::Provider> = match providers::create_resilient_provider_with_options(
-        &provider_id,
-        config.api_key.as_deref(),
-        config.api_url.as_deref(),
-        &config.reliability,
-        &providers::ProviderRuntimeOptions {
-            auth_profile_override: None,
-            velaclaw_dir: config.config_path.parent().map(std::path::PathBuf::from),
-            secrets_encrypt: config.secrets.encrypt,
-            reasoning_enabled: config.runtime.reasoning_enabled,
-        },
-        None,
-    ) {
-        Ok(p) => Arc::from(p),
-        Err(e) => {
-            return (
-                StatusCode::OK,
-                Json(ProviderTestResponse {
-                    ok: false,
-                    provider_id,
-                    message: Some(e.to_string()),
-                }),
-            )
-                .into_response();
-        }
-    };
+    let provider: Arc<dyn providers::Provider> =
+        match providers::create_resilient_provider_with_options(
+            &provider_id,
+            config.api_key.as_deref(),
+            config.api_url.as_deref(),
+            &config.reliability,
+            &providers::ProviderRuntimeOptions {
+                auth_profile_override: None,
+                velaclaw_dir: config.config_path.parent().map(std::path::PathBuf::from),
+                secrets_encrypt: config.secrets.encrypt,
+                reasoning_enabled: config.runtime.reasoning_enabled,
+            },
+            None,
+        ) {
+            Ok(p) => Arc::from(p),
+            Err(e) => {
+                return (
+                    StatusCode::OK,
+                    Json(ProviderTestResponse {
+                        ok: false,
+                        provider_id,
+                        message: Some(e.to_string()),
+                    }),
+                )
+                    .into_response();
+            }
+        };
 
     let model = config
         .default_model

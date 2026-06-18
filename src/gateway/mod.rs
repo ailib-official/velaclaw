@@ -345,6 +345,7 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
             secrets_encrypt: config.secrets.encrypt,
             reasoning_enabled: config.runtime.reasoning_enabled,
         },
+        None,
     )?);
     let model = config.default_model.clone().unwrap_or_else(|| {
         providers::parse_protocol_provider_model(provider_name)

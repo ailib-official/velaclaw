@@ -501,6 +501,7 @@ async fn maybe_apply_runtime_config_update(ctx: &ChannelRuntimeContext) -> Resul
         next_defaults.api_url.as_deref(),
         &next_defaults.reliability,
         &ctx.provider_runtime_options,
+        None,
     )?;
     let next_default_provider: Arc<dyn Provider> = Arc::from(next_default_provider);
 
@@ -740,6 +741,7 @@ async fn create_resilient_provider_nonblocking(
             api_url.as_deref(),
             &reliability,
             &provider_runtime_options,
+            None,
         )
     })
     .await

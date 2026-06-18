@@ -24,15 +24,6 @@ use std::time::Duration;
 /// Higher-level resilience (circuit breakers, etc.) belongs in ai-lib contact/policy — do not duplicate.
 const MAX_RETRIES: u32 = 2;
 
-fn effective_model_id(provider_id: &str, model_id: &str, override_model: &str) -> String {
-    let t = override_model.trim();
-    if t.is_empty() {
-        format!("{provider_id}/{model_id}")
-    } else {
-        t.to_string()
-    }
-}
-
 pub struct ProtocolBackedProvider {
     client: Arc<ai_lib_rust::AiClient>,
     provider_id: String,
@@ -56,6 +47,19 @@ pub async fn resolve_ai_client(model_id: &str) -> anyhow::Result<ai_lib_rust::Ai
 }
 
 impl ProtocolBackedProvider {
+    /// Wrap an existing `AiClient` (model bound at construction; no per-request override).
+    pub fn from_client(
+        client: Arc<ai_lib_rust::AiClient>,
+        logical_model_id: &str,
+    ) -> anyhow::Result<Self> {
+        let (provider_id, model_id) = Self::split_logical_model_id(logical_model_id)?;
+        Ok(Self {
+            client,
+            provider_id,
+            model_id,
+        })
+    }
+
     pub fn new(
         provider_id: &str,
         model_id: &str,
@@ -86,21 +90,22 @@ See `docs/migration-legacy-to-protocol.md`."
                 )
             })?;
 
-        Ok(Self {
-            client: Arc::new(client),
-            provider_id: provider_id.to_string(),
-            model_id: model_id.to_string(),
-        })
+        Self::from_client(Arc::new(client), &model)
+    }
+
+    fn split_logical_model_id(logical_model_id: &str) -> anyhow::Result<(String, String)> {
+        let trimmed = logical_model_id.trim();
+        let (provider_id, model_id) = trimmed.split_once('/').ok_or_else(|| {
+            anyhow::anyhow!("logical model id must be provider/model, got `{trimmed}`")
+        })?;
+        if provider_id.is_empty() || model_id.is_empty() {
+            anyhow::bail!("logical model id must be provider/model, got `{trimmed}`");
+        }
+        Ok((provider_id.to_string(), model_id.to_string()))
     }
 
     pub fn provider_id(&self) -> &str {
         &self.provider_id
-    }
-
-    /// Reserved for future per-request model overrides; API model comes from `AiClient.model_id`.
-    #[allow(dead_code)]
-    fn effective_model(&self, override_model: &str) -> String {
-        effective_model_id(&self.provider_id, &self.model_id, override_model)
     }
 
     fn convert_messages(messages: &[ChatMessage]) -> Vec<ai_lib_rust::Message> {
@@ -560,18 +565,5 @@ mod tests {
                 stop_reason: None,
             });
         assert!(metadata.is_none());
-    }
-
-    #[test]
-    fn effective_model_id_empty_override_is_provider_slash_model() {
-        assert_eq!(effective_model_id("openai", "gpt-4o", ""), "openai/gpt-4o");
-    }
-
-    #[test]
-    fn effective_model_id_non_empty_override_wins() {
-        assert_eq!(
-            effective_model_id("openai", "gpt-4o", "anthropic/claude-3-5-sonnet"),
-            "anthropic/claude-3-5-sonnet"
-        );
     }
 }

@@ -100,6 +100,10 @@ pub struct Config {
     #[serde(default)]
     pub skills: SkillsConfig,
 
+    /// Execution-layer routing (`[routing]`): BYOK direct vs embedded Prism (VL-EVO-001).
+    #[serde(default)]
+    pub routing: ExecutionRoutingConfig,
+
     /// Model routing rules — route `hint:<name>` to specific provider+model combos.
     #[serde(default)]
     pub model_routes: Vec<ModelRouteConfig>,
@@ -2001,6 +2005,32 @@ impl Default for SchedulerConfig {
     }
 }
 
+// ── Execution routing (VL-EVO-001) ───────────────────────────────
+
+/// How VelaClaw routes LLM execution after strategy-layer model selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ProviderRoutingMode {
+    /// Direct provider API via `ai-lib-rust` `AiClient` (BYOK, keys stay local).
+    #[default]
+    Byok,
+    /// In-process `prism-core` router (VL-EVO-002; not implemented in EVO-001).
+    Prism,
+}
+
+/// `[routing]` — execution-layer provider routing intent.
+///
+/// ```toml
+/// [routing]
+/// provider_mode = "byok"   # default; use "prism" after VL-EVO-002
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+pub struct ExecutionRoutingConfig {
+    /// `byok` (default): `AiClient` direct. `prism`: embedded router (EVO-002).
+    #[serde(default)]
+    pub provider_mode: ProviderRoutingMode,
+}
+
 // ── Model routing ────────────────────────────────────────────────
 
 /// Route a task hint to a specific provider + model.
@@ -2929,6 +2959,7 @@ impl Default for Config {
             scheduler: SchedulerConfig::default(),
             agent: AgentConfig::default(),
             skills: SkillsConfig::default(),
+            routing: ExecutionRoutingConfig::default(),
             model_routes: Vec::new(),
             embedding_routes: Vec::new(),
             heartbeat: HeartbeatConfig::default(),
@@ -3888,6 +3919,7 @@ mod tests {
         assert_eq!(c.default_model.as_deref(), Some(DEFAULT_PROTOCOL_MODEL_ID));
         assert!((c.default_temperature - 0.7).abs() < f64::EPSILON);
         assert!(c.api_key.is_none());
+        assert_eq!(c.routing.provider_mode, ProviderRoutingMode::Byok);
         assert!(!c.skills.open_skills_enabled);
         assert_eq!(
             c.skills.prompt_injection_mode,
@@ -3895,6 +3927,20 @@ mod tests {
         );
         assert!(c.workspace_dir.to_string_lossy().contains("workspace"));
         assert!(c.config_path.to_string_lossy().contains("config.toml"));
+    }
+
+    #[test]
+    async fn routing_defaults_to_byok_json() {
+        let raw = r"{}";
+        let cfg: ExecutionRoutingConfig = serde_json::from_str(raw).unwrap();
+        assert_eq!(cfg.provider_mode, ProviderRoutingMode::Byok);
+    }
+
+    #[test]
+    async fn routing_parses_prism_mode_json() {
+        let raw = r#"{"provider_mode":"prism"}"#;
+        let cfg: ExecutionRoutingConfig = serde_json::from_str(raw).unwrap();
+        assert_eq!(cfg.provider_mode, ProviderRoutingMode::Prism);
     }
 
     #[test]
@@ -4074,6 +4120,7 @@ default_temperature = 0.7
             reliability: ReliabilityConfig::default(),
             scheduler: SchedulerConfig::default(),
             skills: SkillsConfig::default(),
+            routing: ExecutionRoutingConfig::default(),
             model_routes: Vec::new(),
             embedding_routes: Vec::new(),
             query_classification: QueryClassificationConfig::default(),
@@ -4310,6 +4357,7 @@ tool_dispatcher = "xml"
             reliability: ReliabilityConfig::default(),
             scheduler: SchedulerConfig::default(),
             skills: SkillsConfig::default(),
+            routing: ExecutionRoutingConfig::default(),
             model_routes: Vec::new(),
             embedding_routes: Vec::new(),
             query_classification: QueryClassificationConfig::default(),

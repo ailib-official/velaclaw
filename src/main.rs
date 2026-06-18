@@ -62,6 +62,8 @@ mod cron;
 mod daemon;
 mod deploy;
 mod doctor;
+#[cfg(feature = "ai-protocol")]
+mod execution;
 mod gateway;
 mod hardware;
 mod health;

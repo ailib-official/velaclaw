@@ -1,5 +1,7 @@
 use crate::approval::{ApprovalManager, ApprovalRequest, ApprovalResponse};
-use crate::config::{Config, DEFAULT_PROTOCOL_MODEL_ID};
+use crate::config::Config;
+#[cfg(not(feature = "ai-protocol"))]
+use crate::config::DEFAULT_PROTOCOL_MODEL_ID;
 use crate::memory::{self, Memory, MemoryCategory};
 use crate::multimodal;
 use crate::observability::{self, Observer, ObserverEvent};
@@ -1492,6 +1494,9 @@ pub async fn run(
     temperature: f64,
     peripheral_overrides: Vec<String>,
 ) -> Result<String> {
+    #[cfg(feature = "ai-protocol")]
+    let _ = (&provider_override, &model_override);
+
     // ── Wire up agnostic subsystems ──────────────────────────────
     let base_observer = observability::create_observer(&config.observability);
     let observer: Arc<dyn Observer> = Arc::from(base_observer);
@@ -1551,16 +1556,6 @@ pub async fn run(
     }
 
     // ── Resolve provider ─────────────────────────────────────────
-    let provider_name = provider_override
-        .as_deref()
-        .or(config.default_provider.as_deref())
-        .unwrap_or(DEFAULT_PROTOCOL_MODEL_ID);
-
-    let model_name = model_override
-        .as_deref()
-        .or(config.default_model.as_deref())
-        .unwrap_or(DEFAULT_PROTOCOL_MODEL_ID);
-
     let provider_runtime_options = providers::ProviderRuntimeOptions {
         auth_profile_override: None,
         velaclaw_dir: config.config_path.parent().map(std::path::PathBuf::from),
@@ -1568,18 +1563,48 @@ pub async fn run(
         reasoning_enabled: config.runtime.reasoning_enabled,
     };
 
-    let provider: Box<dyn Provider> = providers::create_routed_provider_with_options(
-        provider_name,
-        config.api_key.as_deref(),
-        config.api_url.as_deref(),
-        &config.reliability,
-        &config.model_routes,
-        model_name,
-        &provider_runtime_options,
-    )?;
+    #[cfg(feature = "ai-protocol")]
+    let (provider, model_name) = {
+        let (exec_handle, provider) =
+            crate::execution::bootstrap_routed_provider(&config, &provider_runtime_options)?;
+        let model_name = exec_handle.logical_model_id().to_string();
+        (provider, model_name)
+    };
+
+    #[cfg(not(feature = "ai-protocol"))]
+    let (provider, model_name) = {
+        let provider_name = provider_override
+            .as_deref()
+            .or(config.default_provider.as_deref())
+            .unwrap_or(DEFAULT_PROTOCOL_MODEL_ID);
+        let model_name = model_override
+            .as_deref()
+            .or(config.default_model.as_deref())
+            .unwrap_or(DEFAULT_PROTOCOL_MODEL_ID)
+            .to_string();
+        let provider = providers::create_routed_provider_with_options(
+            provider_name,
+            config.api_key.as_deref(),
+            config.api_url.as_deref(),
+            &config.reliability,
+            &config.model_routes,
+            &model_name,
+            &provider_runtime_options,
+            None,
+        )?;
+        (provider, model_name)
+    };
+
+    let provider: Box<dyn Provider> = provider;
+    let provider_name = model_name
+        .split_once('/')
+        .map_or(model_name.as_str(), |(provider, _)| provider);
 
     observer.record_event(&ObserverEvent::AgentStart {
-        provider: provider_name.to_string(),
+        provider: model_name
+            .split_once('/')
+            .map_or(model_name.as_str(), |(provider, _)| provider)
+            .to_string(),
         model: model_name.to_string(),
     });
 
@@ -1717,7 +1742,7 @@ pub async fn run(
     let native_tools = provider.supports_native_tools();
     let mut system_prompt = crate::channels::build_system_prompt_with_mode(
         &config.workspace_dir,
-        model_name,
+        &model_name,
         &tool_descs,
         &skills,
         Some(&config.identity),
@@ -1774,7 +1799,7 @@ pub async fn run(
             &tools_registry,
             observer.as_ref(),
             provider_name,
-            model_name,
+            &model_name,
             temperature,
             false,
             Some(&approval_manager),
@@ -1893,7 +1918,7 @@ pub async fn run(
                 &tools_registry,
                 observer.as_ref(),
                 provider_name,
-                model_name,
+                &model_name,
                 temperature,
                 false,
                 Some(&approval_manager),
@@ -1926,7 +1951,7 @@ pub async fn run(
             if let Ok(compacted) = auto_compact_history(
                 &mut history,
                 provider.as_ref(),
-                model_name,
+                &model_name,
                 config.agent.max_history_messages,
             )
             .await
@@ -1997,29 +2022,45 @@ pub async fn process_message(config: Config, message: &str) -> Result<String> {
         crate::peripherals::create_peripheral_tools(&config.peripherals).await?;
     tools_registry.extend(peripheral_tools);
 
-    let provider_name = config
-        .default_provider
-        .as_deref()
-        .unwrap_or(DEFAULT_PROTOCOL_MODEL_ID);
-    let model_name = config
-        .default_model
-        .clone()
-        .unwrap_or_else(|| "anthropic/claude-sonnet-4-20250514".into());
     let provider_runtime_options = providers::ProviderRuntimeOptions {
         auth_profile_override: None,
         velaclaw_dir: config.config_path.parent().map(std::path::PathBuf::from),
         secrets_encrypt: config.secrets.encrypt,
         reasoning_enabled: config.runtime.reasoning_enabled,
     };
-    let provider: Box<dyn Provider> = providers::create_routed_provider_with_options(
-        provider_name,
-        config.api_key.as_deref(),
-        config.api_url.as_deref(),
-        &config.reliability,
-        &config.model_routes,
-        &model_name,
-        &provider_runtime_options,
-    )?;
+    #[cfg(feature = "ai-protocol")]
+    let (provider, model_name) = {
+        let (exec_handle, provider) =
+            crate::execution::bootstrap_routed_provider(&config, &provider_runtime_options)?;
+        let model_name = exec_handle.logical_model_id().to_string();
+        (provider, model_name)
+    };
+    #[cfg(not(feature = "ai-protocol"))]
+    let (provider, model_name) = {
+        let provider_name = config
+            .default_provider
+            .as_deref()
+            .unwrap_or(DEFAULT_PROTOCOL_MODEL_ID);
+        let model_name = config
+            .default_model
+            .clone()
+            .unwrap_or_else(|| "anthropic/claude-sonnet-4-20250514".into());
+        let provider = providers::create_routed_provider_with_options(
+            provider_name,
+            config.api_key.as_deref(),
+            config.api_url.as_deref(),
+            &config.reliability,
+            &config.model_routes,
+            &model_name,
+            &provider_runtime_options,
+            None,
+        )?;
+        (provider, model_name)
+    };
+    let provider: Box<dyn Provider> = provider;
+    let provider_name = model_name
+        .split_once('/')
+        .map_or(model_name.as_str(), |(provider, _)| provider);
 
     let hardware_rag: Option<crate::rag::HardwareRag> = config
         .peripherals

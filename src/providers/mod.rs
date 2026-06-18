@@ -389,6 +389,7 @@ pub fn create_resilient_provider(
         api_url,
         reliability,
         &ProviderRuntimeOptions::default(),
+        None,
     )
 }
 
@@ -399,11 +400,14 @@ pub fn create_resilient_provider_with_options(
     api_url: Option<&str>,
     reliability: &crate::config::ReliabilityConfig,
     options: &ProviderRuntimeOptions,
+    primary_override: Option<Box<dyn Provider>>,
 ) -> anyhow::Result<Box<dyn Provider>> {
     let mut providers: Vec<(String, Box<dyn Provider>)> = Vec::new();
 
-    let primary_provider =
-        create_provider_with_url_and_options(primary_name, api_key, api_url, options)?;
+    let primary_provider = match primary_override {
+        Some(provider) => provider,
+        None => create_provider_with_url_and_options(primary_name, api_key, api_url, options)?,
+    };
     providers.push((primary_name.to_string(), primary_provider));
 
     for fallback in &reliability.fallback_providers {
@@ -453,6 +457,7 @@ pub fn create_routed_provider(
         model_routes,
         default_model,
         &ProviderRuntimeOptions::default(),
+        None,
     )
 }
 
@@ -465,6 +470,7 @@ pub fn create_routed_provider_with_options(
     model_routes: &[crate::config::ModelRouteConfig],
     default_model: &str,
     options: &ProviderRuntimeOptions,
+    primary_override: Option<Box<dyn Provider>>,
 ) -> anyhow::Result<Box<dyn Provider>> {
     if model_routes.is_empty() {
         return create_resilient_provider_with_options(
@@ -473,6 +479,7 @@ pub fn create_routed_provider_with_options(
             api_url,
             reliability,
             options,
+            primary_override,
         );
     }
 
@@ -484,6 +491,7 @@ pub fn create_routed_provider_with_options(
     }
 
     let mut providers: Vec<(String, Box<dyn Provider>)> = Vec::new();
+    let mut primary_override = primary_override;
     for name in &needed {
         let routed_credential = model_routes
             .iter()
@@ -496,7 +504,19 @@ pub fn create_routed_provider_with_options(
             });
         let key = routed_credential.or(api_key);
         let url = if name == primary_name { api_url } else { None };
-        match create_resilient_provider_with_options(name, key, url, reliability, options) {
+        let override_for_name = if name == primary_name {
+            primary_override.take()
+        } else {
+            None
+        };
+        match create_resilient_provider_with_options(
+            name,
+            key,
+            url,
+            reliability,
+            options,
+            override_for_name,
+        ) {
             Ok(provider) => providers.push((name.clone(), provider)),
             Err(e) => {
                 if name == primary_name {

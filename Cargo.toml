@@ -146,7 +146,7 @@ rust-embed = { version = "8", default-features = false }
 # OpenTelemetry background batch threads when VelaClaw emits spans/metrics from
 # non-Tokio contexts.
 opentelemetry = { version = "0.32", default-features = false, features = ["trace", "metrics"], optional = true }
-opentelemetry_sdk = { version = "0.31", default-features = false, features = ["trace", "metrics"], optional = true }
+opentelemetry_sdk = { version = "0.32", default-features = false, features = ["trace", "metrics"], optional = true }
 opentelemetry-otlp = { version = "0.31", default-features = false, features = ["trace", "metrics", "http-proto", "reqwest-blocking-client", "reqwest-rustls-webpki-roots"], optional = true }
 
 # Serial port for peripheral communication (STM32, etc.)

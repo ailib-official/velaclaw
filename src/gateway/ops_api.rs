@@ -10,7 +10,7 @@ use crate::cron::{
 use crate::providers::{self, ChatMessage, ChatRequest};
 use crate::runtime;
 use crate::security::SecurityPolicy;
-use crate::tools::{self, Tool};
+use crate::tools;
 use axum::extract::{ConnectInfo, Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Json};
@@ -34,12 +34,7 @@ fn authorize(
             "Too many requests. Please retry later.",
         ));
     }
-    check_pairing_auth(&state.pairing, headers, None).map_err(|r| {
-        (
-            r.status(),
-            Json(serde_json::json!({ "error": "Unauthorized" })),
-        )
-    })?;
+    check_pairing_auth(&state.pairing, headers, None)?;
     Ok(())
 }
 
@@ -144,7 +139,7 @@ pub async fn handle_update_cron(
         enabled: body.enabled,
         ..CronJobPatch::default()
     };
-    match update_job(&config, &id, &patch) {
+    match update_job(&config, &id, patch) {
         Ok(job) => (StatusCode::OK, Json(job)).into_response(),
         Err(e) => api_error(StatusCode::BAD_REQUEST, &e.to_string()).into_response(),
     }
@@ -222,13 +217,21 @@ pub async fn handle_list_tools(
         }
     };
     let config_arc = Arc::new(config.clone());
+    let (composio_key, composio_entity_id) = if config.composio.enabled {
+        (
+            config.composio.api_key.as_deref(),
+            Some(config.composio.entity_id.as_str()),
+        )
+    } else {
+        (None, None)
+    };
     let tool_list = tools::all_tools_with_runtime(
         config_arc,
         &security,
         runtime,
         state.mem.clone(),
-        config.composio.api_key.as_deref(),
-        config.composio.entity_id.as_deref(),
+        composio_key,
+        composio_entity_id,
         &config.browser,
         &config.http_request,
         &config.workspace_dir,

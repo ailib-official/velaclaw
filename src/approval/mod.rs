@@ -5,7 +5,7 @@
 
 mod hub;
 
-pub use hub::{ApprovalHub, ApprovalRequiredEvent};
+pub use hub::ApprovalHub;
 
 use crate::config::AutonomyConfig;
 use crate::security::AutonomyLevel;

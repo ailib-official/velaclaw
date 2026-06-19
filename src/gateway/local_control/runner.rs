@@ -7,6 +7,7 @@ use crate::agent::agent::Agent;
 use crate::config::Config;
 use anyhow::{anyhow, Context, Result};
 use std::path::Path;
+use std::sync::Arc;
 use uuid::Uuid;
 
 /// Apply per-request model/temperature overrides onto a config clone.

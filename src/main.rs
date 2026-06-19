@@ -57,11 +57,10 @@ mod skillforge;
 // Do not re-declare `mod agent;` etc. here — that compiles every source file twice
 // and breaks whenever a new lib module (e.g. `execution`) is added without mirroring main.
 use velaclaw::{
-    agent, approval, auth, channels, config, cost, cron, daemon, doctor, gateway, hardware, health,
-    heartbeat, identity, integrations, memory, migration, multimodal, observability, onboard,
-    peripherals, providers, rag, runtime, security, service, skills, tools, tunnel, util,
-    ChannelCommands, Config, CronCommands, HardwareCommands, IntegrationCommands, MemoryCommands,
-    MigrateCommands, PeripheralCommands, ServiceCommands, SkillCommands, DEFAULT_PROTOCOL_MODEL_ID,
+    agent, auth, channels, config, cron, daemon, doctor, gateway, hardware, integrations, memory,
+    migration, onboard, peripherals, providers, security, service, skills, ChannelCommands, Config,
+    CronCommands, HardwareCommands, IntegrationCommands, MemoryCommands, MigrateCommands,
+    PeripheralCommands, ServiceCommands, SkillCommands, DEFAULT_PROTOCOL_MODEL_ID,
 };
 
 /// `VelaClaw` - Protocol-driven autonomous AI agent runtime.

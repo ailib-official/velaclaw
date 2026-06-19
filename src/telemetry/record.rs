@@ -91,7 +91,7 @@ fn json_contains_forbidden_key(value: &Value) -> bool {
                 let lower = key.to_ascii_lowercase();
                 if FORBIDDEN_PAYLOAD_KEYS
                     .iter()
-                    .any(|forbidden| lower.contains(forbidden))
+                    .any(|forbidden| lower == *forbidden)
                 {
                     return true;
                 }

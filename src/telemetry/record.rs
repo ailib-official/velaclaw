@@ -58,21 +58,25 @@ impl ByokUsageRecord {
 
 /// Parse token counts from ai-lib `UnifiedResponse.usage` JSON.
 pub fn parse_token_counts(usage: &Value) -> (u32, u32, Option<u32>) {
-    let prompt = usage
-        .get("prompt_tokens")
-        .or_else(|| usage.get("input_tokens"))
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0) as u32;
-    let completion = usage
-        .get("completion_tokens")
-        .or_else(|| usage.get("output_tokens"))
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0) as u32;
+    let prompt = usage_u64_field(usage, &["prompt_tokens", "input_tokens"]);
+    let completion = usage_u64_field(usage, &["completion_tokens", "output_tokens"]);
     let reasoning = usage
         .get("reasoning_tokens")
         .and_then(|v| v.as_u64())
-        .map(|n| n as u32);
+        .map(usage_u64_to_u32);
     (prompt, completion, reasoning)
+}
+
+fn usage_u64_field(usage: &Value, keys: &[&str]) -> u32 {
+    keys.iter()
+        .find_map(|key| usage.get(*key))
+        .and_then(|v| v.as_u64())
+        .map(usage_u64_to_u32)
+        .unwrap_or(0)
+}
+
+fn usage_u64_to_u32(n: u64) -> u32 {
+    u32::try_from(n).unwrap_or(u32::MAX)
 }
 
 /// Returns true when serialized JSON contains no forbidden secret/prompt fields.

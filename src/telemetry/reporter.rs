@@ -35,10 +35,7 @@ impl ByokTelemetryReporter {
             .clone()
             .filter(|s| !s.trim().is_empty())
             .unwrap_or_else(|| DEFAULT_USER_ID.to_string());
-        let http = Client::builder()
-            .timeout(POST_TIMEOUT)
-            .build()
-            .ok()?;
+        let http = Client::builder().timeout(POST_TIMEOUT).build().ok()?;
         Some(Arc::new(Self {
             endpoint: endpoint.to_string(),
             user_id,

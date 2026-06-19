@@ -14,6 +14,7 @@ mod chat_ws;
 mod config_api;
 mod local_control;
 mod memory_api;
+mod ops_api;
 mod providers_api;
 mod sessions_api;
 mod static_embed;
@@ -303,6 +304,8 @@ pub struct AppState {
     pub observer: Arc<dyn crate::observability::Observer>,
     /// Optional cost tracker for dashboard
     pub cost_tracker: Option<Arc<crate::cost::CostTracker>>,
+    /// Pending tool approvals for Web UI (VL-UI-004)
+    pub approval_hub: Arc<crate::approval::ApprovalHub>,
 }
 
 /// Run the HTTP gateway using axum with proper HTTP/1.1 compliance.
@@ -580,6 +583,8 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
         .ok()
         .map(Arc::new);
 
+    let approval_hub = Arc::new(crate::approval::ApprovalHub::new());
+
     let state = AppState {
         config: config_state,
         provider,
@@ -600,6 +605,7 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
         nextcloud_talk_webhook_secret,
         observer,
         cost_tracker,
+        approval_hub,
     };
 
     // Build router with middleware
@@ -624,6 +630,21 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
         .route(
             "/api/config/schema",
             get(config_api::handle_get_config_schema),
+        )
+        .route("/api/cron", get(ops_api::handle_list_cron))
+        .route("/api/cron", post(ops_api::handle_create_cron))
+        .route("/api/cron/{id}", get(ops_api::handle_get_cron))
+        .route("/api/cron/{id}", put(ops_api::handle_update_cron))
+        .route("/api/cron/{id}", delete(ops_api::handle_delete_cron))
+        .route("/api/cron/{id}/run", post(ops_api::handle_run_cron))
+        .route("/api/tools", get(ops_api::handle_list_tools))
+        .route(
+            "/api/providers/{id}/test",
+            post(ops_api::handle_test_provider),
+        )
+        .route(
+            "/api/approvals/{id}/respond",
+            post(ops_api::handle_respond_approval),
         )
         .route("/ws", get(chat_ws::handle_ws_chat))
         .route("/chat", get(static_embed::handle_chat_ui))
@@ -1556,6 +1577,7 @@ mod tests {
             nextcloud_talk_webhook_secret: None,
             observer: Arc::new(crate::observability::NoopObserver),
             cost_tracker: None,
+            approval_hub: Arc::new(crate::approval::ApprovalHub::new()),
         };
 
         let response = handle_metrics(State(state)).await.into_response();
@@ -1602,6 +1624,7 @@ mod tests {
             nextcloud_talk_webhook_secret: None,
             observer,
             cost_tracker: None,
+            approval_hub: Arc::new(crate::approval::ApprovalHub::new()),
         };
 
         let response = handle_metrics(State(state)).await.into_response();
@@ -1965,6 +1988,7 @@ mod tests {
             nextcloud_talk_webhook_secret: None,
             observer: Arc::new(crate::observability::NoopObserver),
             cost_tracker: None,
+            approval_hub: Arc::new(crate::approval::ApprovalHub::new()),
         };
 
         let mut headers = HeaderMap::new();
@@ -2026,6 +2050,7 @@ mod tests {
             nextcloud_talk_webhook_secret: None,
             observer: Arc::new(crate::observability::NoopObserver),
             cost_tracker: None,
+            approval_hub: Arc::new(crate::approval::ApprovalHub::new()),
         };
 
         let headers = HeaderMap::new();
@@ -2099,6 +2124,7 @@ mod tests {
             nextcloud_talk_webhook_secret: None,
             observer: Arc::new(crate::observability::NoopObserver),
             cost_tracker: None,
+            approval_hub: Arc::new(crate::approval::ApprovalHub::new()),
         };
 
         let response = handle_webhook(
@@ -2144,6 +2170,7 @@ mod tests {
             nextcloud_talk_webhook_secret: None,
             observer: Arc::new(crate::observability::NoopObserver),
             cost_tracker: None,
+            approval_hub: Arc::new(crate::approval::ApprovalHub::new()),
         };
 
         let mut headers = HeaderMap::new();
@@ -2194,6 +2221,7 @@ mod tests {
             nextcloud_talk_webhook_secret: None,
             observer: Arc::new(crate::observability::NoopObserver),
             cost_tracker: None,
+            approval_hub: Arc::new(crate::approval::ApprovalHub::new()),
         };
 
         let mut headers = HeaderMap::new();
@@ -2249,6 +2277,7 @@ mod tests {
             nextcloud_talk_webhook_secret: None,
             observer: Arc::new(crate::observability::NoopObserver),
             cost_tracker: None,
+            approval_hub: Arc::new(crate::approval::ApprovalHub::new()),
         };
 
         let response = handle_nextcloud_talk_webhook(
@@ -2300,6 +2329,7 @@ mod tests {
             nextcloud_talk_webhook_secret: Some(Arc::from(secret)),
             observer: Arc::new(crate::observability::NoopObserver),
             cost_tracker: None,
+            approval_hub: Arc::new(crate::approval::ApprovalHub::new()),
         };
 
         let mut headers = HeaderMap::new();

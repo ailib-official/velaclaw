@@ -3,6 +3,7 @@ use crate::agent::dispatcher::{
 };
 use crate::agent::memory_loader::{DefaultMemoryLoader, MemoryLoader};
 use crate::agent::prompt::{PromptContext, SystemPromptBuilder};
+use crate::approval::{ApprovalHub, ApprovalManager, ApprovalRequest, ApprovalResponse};
 use crate::config::{Config, DEFAULT_PROTOCOL_MODEL_ID};
 use crate::memory::{self, Memory, MemoryCategory};
 use crate::observability::{self, Observer, ObserverEvent};
@@ -37,6 +38,7 @@ pub struct Agent {
     history: Vec<ConversationMessage>,
     classification_config: crate::config::QueryClassificationConfig,
     available_hints: Vec<String>,
+    gateway_approval: Option<(ApprovalManager, Arc<ApprovalHub>)>,
 }
 
 pub struct AgentBuilder {
@@ -227,6 +229,7 @@ impl AgentBuilder {
             history: Vec::new(),
             classification_config: self.classification_config.unwrap_or_default(),
             available_hints: self.available_hints.unwrap_or_default(),
+            gateway_approval: None,
         })
     }
 }
@@ -242,6 +245,15 @@ impl Agent {
 
     pub fn clear_history(&mut self) {
         self.history.clear();
+    }
+
+    /// Enable interactive tool approval for gateway/Web chat (`VL-UI-004`).
+    pub fn enable_gateway_approval(
+        &mut self,
+        hub: Arc<ApprovalHub>,
+        autonomy: &crate::config::AutonomyConfig,
+    ) {
+        self.gateway_approval = Some((ApprovalManager::from_config(autonomy), hub));
     }
 
     pub fn from_config(config: &Config) -> Result<Self> {
@@ -421,6 +433,25 @@ impl Agent {
     async fn execute_tool_call(&self, call: &ParsedToolCall) -> ToolExecutionResult {
         let start = Instant::now();
 
+        if let Some((mgr, hub)) = &self.gateway_approval {
+            if mgr.needs_approval(&call.name) {
+                let request = ApprovalRequest {
+                    tool_name: call.name.clone(),
+                    arguments: call.arguments.clone(),
+                };
+                let decision = mgr.prompt_gateway(hub, &request).await;
+                mgr.record_decision(&call.name, &call.arguments, decision, "web");
+                if decision == ApprovalResponse::No {
+                    return ToolExecutionResult {
+                        name: call.name.clone(),
+                        output: "Denied by user.".to_string(),
+                        success: false,
+                        tool_call_id: call.tool_call_id.clone(),
+                    };
+                }
+            }
+        }
+
         let result = if let Some(tool) = self.tools.iter().find(|t| t.name() == call.name) {
             match tool.execute(call.arguments.clone()).await {
                 Ok(r) => {
@@ -457,7 +488,7 @@ impl Agent {
     }
 
     async fn execute_tools(&self, calls: &[ParsedToolCall]) -> Vec<ToolExecutionResult> {
-        if !self.config.parallel_tools {
+        if !self.config.parallel_tools || self.gateway_approval.is_some() {
             let mut results = Vec::with_capacity(calls.len());
             for call in calls {
                 results.push(self.execute_tool_call(call).await);

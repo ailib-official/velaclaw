@@ -104,6 +104,10 @@ pub struct Config {
     #[serde(default)]
     pub routing: ExecutionRoutingConfig,
 
+    /// BYOK usage telemetry to Prism (`[telemetry]`, VL-EVO-003).
+    #[serde(default)]
+    pub telemetry: TelemetryConfig,
+
     /// Model routing rules — route `hint:<name>` to specific provider+model combos.
     #[serde(default)]
     pub model_routes: Vec<ModelRouteConfig>,
@@ -2031,6 +2035,27 @@ pub struct ExecutionRoutingConfig {
     pub provider_mode: ProviderRoutingMode,
 }
 
+/// `[telemetry]` — optional BYOK usage reporting (VL-EVO-003 / VL-ARCH-001 D5).
+///
+/// ```toml
+/// [telemetry]
+/// enabled = true
+/// endpoint = "https://api.prism.example/v1/usage"
+/// user_id = "my-install-id"   # optional; default "velaclaw-local"
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+pub struct TelemetryConfig {
+    /// When false, no usage records are sent (default).
+    #[serde(default)]
+    pub enabled: bool,
+    /// HTTP endpoint accepting prism-core `UsageRecord` JSON bodies.
+    #[serde(default)]
+    pub endpoint: Option<String>,
+    /// Logical install / user id for Prism aggregation.
+    #[serde(default)]
+    pub user_id: Option<String>,
+}
+
 // ── Model routing ────────────────────────────────────────────────
 
 /// Route a task hint to a specific provider + model.
@@ -2960,6 +2985,7 @@ impl Default for Config {
             agent: AgentConfig::default(),
             skills: SkillsConfig::default(),
             routing: ExecutionRoutingConfig::default(),
+            telemetry: TelemetryConfig::default(),
             model_routes: Vec::new(),
             embedding_routes: Vec::new(),
             heartbeat: HeartbeatConfig::default(),

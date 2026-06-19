@@ -155,8 +155,5 @@ async fn handle_ws_socket(socket: WebSocket, state: AppState) {
 async fn send_frame(socket: Arc<Mutex<WebSocket>>, frame: &WsServerMessage) -> Result<(), ()> {
     let text = serde_json::to_string(frame).map_err(|_| ())?;
     let mut guard = socket.lock().await;
-    guard
-        .send(Message::Text(text.into()))
-        .await
-        .map_err(|_| ())
+    guard.send(Message::Text(text.into())).await.map_err(|_| ())
 }

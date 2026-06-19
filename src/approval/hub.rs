@@ -46,11 +46,7 @@ impl ApprovalHub {
     }
 
     /// Register a pending approval and wait for `respond` or timeout.
-    pub async fn request(
-        &self,
-        request: &ApprovalRequest,
-        summary: &str,
-    ) -> ApprovalResponse {
+    pub async fn request(&self, request: &ApprovalRequest, summary: &str) -> ApprovalResponse {
         let id = Uuid::new_v4().to_string();
         let (tx, rx) = oneshot::channel();
         {
@@ -113,11 +109,7 @@ mod tests {
             arguments: serde_json::json!({"command": "ls"}),
         };
 
-        let handle = tokio::spawn(async move {
-            hub_wait
-                .request(&req, "command: ls")
-                .await
-        });
+        let handle = tokio::spawn(async move { hub_wait.request(&req, "command: ls").await });
 
         tokio::time::sleep(Duration::from_millis(20)).await;
         let pending: Vec<_> = hub.pending.lock().keys().cloned().collect();

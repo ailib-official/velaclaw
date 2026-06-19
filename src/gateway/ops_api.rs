@@ -3,10 +3,10 @@
 
 use super::local_control::auth::check_pairing_auth;
 use super::{client_key_from_request, AppState};
+use crate::cron::scheduler::execute_job_now;
 use crate::cron::{
     add_shell_job, get_job, list_jobs, remove_job, update_job, CronJob, CronJobPatch, Schedule,
 };
-use crate::cron::scheduler::execute_job_now;
 use crate::providers::{self, ChatMessage, ChatRequest};
 use crate::runtime;
 use crate::security::SecurityPolicy;
@@ -34,8 +34,12 @@ fn authorize(
             "Too many requests. Please retry later.",
         ));
     }
-    check_pairing_auth(&state.pairing, headers, None)
-        .map_err(|r| (r.status(), Json(serde_json::json!({ "error": "Unauthorized" }))))?;
+    check_pairing_auth(&state.pairing, headers, None).map_err(|r| {
+        (
+            r.status(),
+            Json(serde_json::json!({ "error": "Unauthorized" })),
+        )
+    })?;
     Ok(())
 }
 
@@ -130,10 +134,9 @@ pub async fn handle_update_cron(
         return e.into_response();
     }
     let config = state.config.lock().clone();
-    let schedule = body.expression.map(|expr| Schedule::Cron {
-        expr,
-        tz: body.tz,
-    });
+    let schedule = body
+        .expression
+        .map(|expr| Schedule::Cron { expr, tz: body.tz });
     let patch = CronJobPatch {
         schedule,
         command: body.command,

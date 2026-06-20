@@ -3,6 +3,9 @@
 
 mod handle;
 
+#[cfg(feature = "prism-router")]
+mod prism;
+
 pub use handle::ExecutionHandle;
 
 /// Build the agent provider stack via [`ExecutionHandle`] (BYOK sole path to ai-lib-rust).

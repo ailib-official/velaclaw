@@ -75,6 +75,21 @@ documented no-duplicate-counter boundary.
 - `CONTRIBUTING.md` — clone layout and `AI_PROTOCOL_DIR` for contributors.
 - `active/projects/velaclaw/VELACLAW_AI_LIB_MIGRATION_PLAN.md` in **ai-lib-plans** — phases and PR list.
 
+## 7. Embedded Prism routing (optional)
+
+When `[routing] provider_mode = "prism"`, VelaClaw uses the in-process
+`prism-core-routing` crate (not HTTP to a separate gateway). Configure Prism-managed
+provider keys via environment variables such as `PRISM_GROQ_API_KEY`,
+`PRISM_DEEPSEEK_API_KEY`, etc. Default `provider_mode = "byok"` keeps your own API keys
+local and uses `ai-lib-rust` `AiClient` direct access.
+
+```toml
+[routing]
+provider_mode = "prism"
+
+default_model = "llama-3.1-8b-instant"
+```
+
 ---
 
 *ZS-ML-005 / Phase 5: legacy factory gating, migration story, and test matrix. ZS-ML-006 extends wizard

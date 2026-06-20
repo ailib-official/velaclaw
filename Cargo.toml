@@ -157,6 +157,9 @@ ai-lib-rust = { version = "0.9.6", optional = true }
 async-stream = { version = "0.3", optional = true }
 serde_yaml = { version = "0.9", optional = true }
 
+# prism-core-routing — embedded prism-core router (VL-EVO-002; crates.io package name)
+prism-core-routing = { version = "0.1", optional = true, default-features = false, features = ["router"] }
+
 # USB device enumeration (hardware discovery) — only on platforms nusb supports
 # (Linux, macOS, Windows). Android/Termux uses target_os="android" and is excluded.
 [target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
@@ -210,7 +213,9 @@ rag-pdf = ["dep:pdf-extract"]
 # whatsapp-web = Native WhatsApp Web client with custom rusqlite storage backend
 whatsapp-web = ["dep:wa-rs", "dep:wa-rs-core", "dep:wa-rs-binary", "dep:wa-rs-proto", "dep:wa-rs-ureq-http", "dep:wa-rs-tokio-transport", "dep:serde-big-array", "dep:prost"]
 # ai-protocol = Protocol-driven providers via ai-lib-rust (requires AI_PROTOCOL_DIR)
-ai-protocol = ["dep:ai-lib-rust", "dep:async-stream", "dep:serde_yaml"]
+ai-protocol = ["dep:ai-lib-rust", "dep:async-stream", "dep:serde_yaml", "prism-router"]
+# prism-router = in-process prism-core fallback routing (VL-EVO-002)
+prism-router = ["dep:prism-core-routing"]
 # routing_mvp = ai-lib-rust experimental multi-endpoint routing (opt-in; ZS-ML-004 / migration Phase 4)
 routing_mvp = ["ai-protocol", "ai-lib-rust/routing_mvp"]
 # remote-deploy = Controlled remote deployment via SSH

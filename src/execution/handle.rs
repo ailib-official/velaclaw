@@ -1,5 +1,5 @@
-//! In-process execution handle — sole BYOK path to `ai-lib-rust` (VL-EVO-001).
-//! 进程内执行句柄：BYOK 场景下 agent 循环到 ai-lib-rust 的唯一入口。
+//! In-process execution handle — BYOK (`ai-lib-rust`) and Prism router paths (VL-EVO-001/002).
+//! 进程内执行句柄：BYOK 与内嵌 Prism 路由。
 
 use crate::config::{
     Config, ExecutionRoutingConfig, ProviderRoutingMode, DEFAULT_PROTOCOL_MODEL_ID,
@@ -8,9 +8,14 @@ use crate::providers::{self, Provider};
 use crate::telemetry::ByokTelemetryReporter;
 use std::sync::Arc;
 
-/// Backend for the execution layer. EVO-001 implements BYOK only.
+#[cfg(feature = "prism-router")]
+use super::prism::PrismRouterHandle;
+
+/// Backend for the execution layer.
 pub enum ExecutionBackend {
     Byok(Arc<ai_lib_rust::AiClient>),
+    #[cfg(feature = "prism-router")]
+    Prism(PrismRouterHandle),
 }
 
 /// Unified execution entry from strategy layer to ai-lib-rust / prism-core.
@@ -22,28 +27,39 @@ pub struct ExecutionHandle {
 }
 
 impl ExecutionHandle {
-    /// Build a BYOK handle from top-level config (sync; blocks on `AiClient::new`).
+    /// Build an execution handle from top-level config (sync; may block on init).
     pub fn from_config(config: &Config) -> anyhow::Result<Self> {
-        if config.routing.provider_mode == ProviderRoutingMode::Prism {
-            anyhow::bail!(
-                "routing.provider_mode = \"prism\" requires embedded prism-core (VL-EVO-002); \
-                 use \"byok\" (default) for direct provider access"
-            );
-        }
-
         let logical_model_id = logical_model_id_from_config(config);
-        let client = init_ai_client_sync(&logical_model_id)?;
+        let routing = config.routing.clone();
         let telemetry = ByokTelemetryReporter::from_config(&config.telemetry);
 
+        let backend = match config.routing.provider_mode {
+            ProviderRoutingMode::Byok => {
+                ExecutionBackend::Byok(init_ai_client_sync(&logical_model_id)?)
+            }
+            ProviderRoutingMode::Prism => {
+                #[cfg(feature = "prism-router")]
+                {
+                    ExecutionBackend::Prism(PrismRouterHandle::from_config(config)?)
+                }
+                #[cfg(not(feature = "prism-router"))]
+                {
+                    anyhow::bail!(
+                        "routing.provider_mode = \"prism\" requires the prism-router Cargo feature"
+                    );
+                }
+            }
+        };
+
         Ok(Self {
-            backend: ExecutionBackend::Byok(client),
+            backend,
             logical_model_id,
-            routing: config.routing.clone(),
+            routing,
             telemetry,
         })
     }
 
-    /// Logical `provider/model` id bound on the `AiClient` (no per-request override).
+    /// Logical `provider/model` id for the configured execution path.
     pub fn logical_model_id(&self) -> &str {
         &self.logical_model_id
     }
@@ -52,29 +68,51 @@ impl ExecutionHandle {
         &self.routing
     }
 
+    /// Whether this handle uses BYOK direct `AiClient` execution.
+    pub fn is_byok(&self) -> bool {
+        matches!(self.backend, ExecutionBackend::Byok(_))
+    }
+
+    /// Whether this handle uses embedded prism-core routing.
+    pub fn is_prism_routed(&self) -> bool {
+        #[cfg(feature = "prism-router")]
+        {
+            matches!(self.backend, ExecutionBackend::Prism(_))
+        }
+        #[cfg(not(feature = "prism-router"))]
+        {
+            false
+        }
+    }
+
     /// Shared `AiClient` for BYOK execution.
     pub fn byok_client(&self) -> Option<Arc<ai_lib_rust::AiClient>> {
         match &self.backend {
             ExecutionBackend::Byok(client) => Some(Arc::clone(client)),
+            #[cfg(feature = "prism-router")]
+            ExecutionBackend::Prism(_) => None,
         }
     }
 
-    /// Trait adapter for tool-loop compatibility; chat uses the bound `AiClient` model only.
+    /// Trait adapter for tool-loop compatibility.
     pub fn provider_adapter(&self) -> anyhow::Result<Box<dyn Provider>> {
-        let client = self
-            .byok_client()
-            .ok_or_else(|| anyhow::anyhow!("BYOK client not available"))?;
-        Ok(Box::new(
-            providers::protocol_adapter::ProtocolBackedProvider::from_client(
-                client,
-                &self.logical_model_id,
-                self.telemetry.clone(),
-            )?,
-        ))
+        match &self.backend {
+            ExecutionBackend::Byok(client) => Ok(Box::new(
+                providers::protocol_adapter::ProtocolBackedProvider::from_client(
+                    Arc::clone(client),
+                    &self.logical_model_id,
+                    self.telemetry.clone(),
+                )?,
+            )),
+            #[cfg(feature = "prism-router")]
+            ExecutionBackend::Prism(prism) => {
+                Ok(Box::new(prism.provider(self.telemetry.clone())?))
+            }
+        }
     }
 }
 
-/// Resolve the logical model id used to construct `AiClient`.
+/// Resolve the logical model id used to construct `AiClient` or prism router.
 pub fn logical_model_id_from_config(config: &Config) -> String {
     let model = config
         .default_model
@@ -138,12 +176,32 @@ mod tests {
     }
 
     #[test]
-    fn prism_mode_rejected_at_handle_construction() {
+    fn byok_mode_selected_by_default() {
+        let config = Config::default();
+        assert_eq!(config.routing.provider_mode, ProviderRoutingMode::Byok);
+    }
+
+    #[cfg(feature = "prism-router")]
+    #[test]
+    fn prism_mode_requires_prism_api_keys() {
         let mut config = Config::default();
         config.routing.provider_mode = ProviderRoutingMode::Prism;
-        match ExecutionHandle::from_config(&config) {
-            Err(err) => assert!(err.to_string().contains("VL-EVO-002")),
-            Ok(_) => panic!("expected prism routing to be rejected"),
+        config.default_model = Some("llama-3.1-8b-instant".into());
+        let err = ExecutionHandle::from_config(&config).unwrap_err();
+        assert!(err.to_string().contains("PRISM_"));
+    }
+
+    #[cfg(feature = "prism-router")]
+    #[test]
+    fn byok_handle_exposes_ai_client() {
+        // Without AI_PROTOCOL_DIR this may fail; skip when env not configured.
+        if std::env::var("AI_PROTOCOL_DIR").is_err() {
+            return;
+        }
+        let config = Config::default();
+        if let Ok(handle) = ExecutionHandle::from_config(&config) {
+            assert!(handle.is_byok());
+            assert!(handle.byok_client().is_some());
         }
     }
 }

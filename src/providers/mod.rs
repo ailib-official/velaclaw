@@ -354,11 +354,9 @@ fn create_provider_with_url_and_options(
 
     #[cfg(feature = "ai-protocol")]
     if let Some((provider_id, model_id)) = parse_protocol_provider_model(trimmed) {
-        return Ok(Box::new(protocol_adapter::ProtocolBackedProvider::new(
-            provider_id,
-            model_id,
-            None,
-        )?));
+        return Ok(Box::new(
+            protocol_adapter::ProtocolBackedProvider::from_logical_model(provider_id, model_id)?,
+        ));
     }
 
     #[cfg(not(feature = "ai-protocol"))]

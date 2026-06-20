@@ -35,7 +35,7 @@ impl ExecutionHandle {
 
         let backend = match config.routing.provider_mode {
             ProviderRoutingMode::Byok => {
-                ExecutionBackend::Byok(init_ai_client_sync(&logical_model_id)?)
+                ExecutionBackend::Byok(super::byok::init_ai_client_sync(&logical_model_id)?)
             }
             ProviderRoutingMode::Prism => {
                 #[cfg(feature = "prism-router")]
@@ -129,25 +129,6 @@ pub fn logical_model_id_from_config(config: &Config) -> String {
     }
 
     format!("{provider}/{model}")
-}
-
-fn init_ai_client_sync(model_id: &str) -> anyhow::Result<Arc<ai_lib_rust::AiClient>> {
-    let client = if tokio::runtime::Handle::try_current().is_ok() {
-        let model_for_thread = model_id.to_string();
-        std::thread::spawn(move || {
-            let rt = tokio::runtime::Runtime::new()?;
-            rt.block_on(async {
-                providers::protocol_adapter::resolve_ai_client(&model_for_thread).await
-            })
-        })
-        .join()
-        .map_err(|_| anyhow::anyhow!("execution handle initialization thread panicked"))??
-    } else {
-        let rt = tokio::runtime::Runtime::new()?;
-        rt.block_on(providers::protocol_adapter::resolve_ai_client(model_id))?
-    };
-
-    Ok(Arc::new(client))
 }
 
 #[cfg(test)]

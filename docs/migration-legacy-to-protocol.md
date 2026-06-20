@@ -90,6 +90,17 @@ provider_mode = "prism"
 default_model = "llama-3.1-8b-instant"
 ```
 
+## 8. Adapter layer (VL-EVO-004)
+
+`ProtocolBackedProvider` is a **thin trait bridge** only: it maps VelaClaw's
+`Provider` interface to an `AiClient` already constructed by `ExecutionHandle`.
+Transport retry, client bootstrap, and BYOK telemetry emission live in
+`src/execution/byok.rs` — not in the adapter.
+
+Agent startup uses `execution::bootstrap_routed_provider`; standalone
+`create_provider("openai/gpt-4o")` calls the same execution bootstrap via
+`ProtocolBackedProvider::from_logical_model`.
+
 ---
 
 *ZS-ML-005 / Phase 5: legacy factory gating, migration story, and test matrix. ZS-ML-006 extends wizard

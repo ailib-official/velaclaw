@@ -5,7 +5,7 @@
 //! (init, transport retry, telemetry) live in `crate::execution::byok`.
 //! 协议适配器仅负责 trait 桥接；执行逻辑归执行层。
 
-use crate::execution::byok::execute_chat_with_retry;
+use crate::execution::execute_chat_with_retry;
 use crate::providers::traits::{
     ChatMessage, ChatRequest, ChatResponse, Provider, ProviderCapabilities, StreamChunk,
     StreamOptions, StreamResult, ToolCall, ToolsPayload,

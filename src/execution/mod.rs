@@ -7,7 +7,9 @@ mod handle;
 #[cfg(feature = "prism-router")]
 pub mod prism;
 
-pub use byok::{init_ai_client_sync, resolve_ai_client, split_logical_model_id};
+pub use byok::{
+    execute_chat_with_retry, init_ai_client_sync, resolve_ai_client, split_logical_model_id,
+};
 pub use handle::{logical_model_id_from_config, ExecutionHandle};
 
 /// Build the agent provider stack via [`ExecutionHandle`] (BYOK sole path to ai-lib-rust).

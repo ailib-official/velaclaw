@@ -26,6 +26,9 @@ pub mod traits;
 #[cfg(feature = "ai-protocol")]
 pub mod protocol_adapter;
 
+#[cfg(feature = "prism-router")]
+pub mod prism_adapter;
+
 #[allow(unused_imports)]
 pub use traits::{
     ChatMessage, ChatRequest, ChatResponse, ConversationMessage, Provider, ProviderCapabilityError,

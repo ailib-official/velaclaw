@@ -2018,7 +2018,7 @@ pub enum ProviderRoutingMode {
     /// Direct provider API via `ai-lib-rust` `AiClient` (BYOK, keys stay local).
     #[default]
     Byok,
-    /// In-process `prism-core` router (VL-EVO-002; not implemented in EVO-001).
+    /// In-process `prism-core` router (VL-EVO-002; requires `PRISM_*_API_KEY` env vars).
     Prism,
 }
 
@@ -2026,7 +2026,7 @@ pub enum ProviderRoutingMode {
 ///
 /// ```toml
 /// [routing]
-/// provider_mode = "byok"   # default; use "prism" after VL-EVO-002
+/// provider_mode = "byok"   # default; use "prism" for embedded prism-core routing
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 pub struct ExecutionRoutingConfig {

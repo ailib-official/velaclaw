@@ -105,9 +105,7 @@ impl ExecutionHandle {
                 )?,
             )),
             #[cfg(feature = "prism-router")]
-            ExecutionBackend::Prism(prism) => {
-                Ok(Box::new(prism.provider(self.telemetry.clone())?))
-            }
+            ExecutionBackend::Prism(prism) => Ok(Box::new(prism.provider(self.telemetry.clone())?)),
         }
     }
 }

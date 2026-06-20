@@ -1,9 +1,7 @@
 //! Prism-routed provider — embedded `prism-core` router + libcurl proxy (VL-EVO-002).
 //! Prism 路由提供者：内嵌 prism-core 路由与 libcurl 转发。
 
-use crate::providers::traits::{
-    ChatMessage, Provider, ProviderCapabilities, ToolsPayload,
-};
+use crate::providers::traits::{ChatMessage, Provider, ProviderCapabilities, ToolsPayload};
 use crate::telemetry::ByokTelemetryReporter;
 use async_trait::async_trait;
 use prism_core::config::{ConfigProvider, EnvConfig, ModelEntry, ProviderEntry};
@@ -31,8 +29,7 @@ impl PrismBackedProvider {
         logical_model_id: String,
         telemetry: Option<Arc<ByokTelemetryReporter>>,
     ) -> anyhow::Result<Self> {
-        let route_model_id =
-            crate::execution::prism::route_model_id(&logical_model_id).to_string();
+        let route_model_id = crate::execution::prism::route_model_id(&logical_model_id).to_string();
         Ok(Self {
             router,
             env,
@@ -48,11 +45,7 @@ impl PrismBackedProvider {
             .collect()
     }
 
-    async fn execute_chat(
-        &self,
-        messages: Vec<Value>,
-        temperature: f64,
-    ) -> anyhow::Result<String> {
+    async fn execute_chat(&self, messages: Vec<Value>, temperature: f64) -> anyhow::Result<String> {
         let router = Arc::clone(&self.router);
         let env = Arc::clone(&self.env);
         let route_model = self.route_model_id.clone();
@@ -97,8 +90,7 @@ fn execute_openai_chat_blocking(
             api_key: decision.api_key.clone(),
         };
         let resp = proxy::curl_proxy(url, &headers, &body, &proxy_cfg);
-        let latency_ms =
-            u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+        let latency_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
         let error_class = ErrorClass::from_status(resp.status);
 
         router.report_result(&RequestResult {

@@ -5,6 +5,7 @@ use crate::config::{
     Config, ExecutionRoutingConfig, ProviderRoutingMode, DEFAULT_PROTOCOL_MODEL_ID,
 };
 use crate::providers::{self, Provider};
+use crate::telemetry::ByokTelemetryReporter;
 use std::sync::Arc;
 
 /// Backend for the execution layer. EVO-001 implements BYOK only.
@@ -17,6 +18,7 @@ pub struct ExecutionHandle {
     backend: ExecutionBackend,
     logical_model_id: String,
     routing: ExecutionRoutingConfig,
+    telemetry: Option<Arc<ByokTelemetryReporter>>,
 }
 
 impl ExecutionHandle {
@@ -31,11 +33,13 @@ impl ExecutionHandle {
 
         let logical_model_id = logical_model_id_from_config(config);
         let client = init_ai_client_sync(&logical_model_id)?;
+        let telemetry = ByokTelemetryReporter::from_config(&config.telemetry);
 
         Ok(Self {
             backend: ExecutionBackend::Byok(client),
             logical_model_id,
             routing: config.routing.clone(),
+            telemetry,
         })
     }
 
@@ -64,6 +68,7 @@ impl ExecutionHandle {
             providers::protocol_adapter::ProtocolBackedProvider::from_client(
                 client,
                 &self.logical_model_id,
+                self.telemetry.clone(),
             )?,
         ))
     }

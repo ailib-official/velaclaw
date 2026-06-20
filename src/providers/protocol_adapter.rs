@@ -12,11 +12,12 @@ use crate::providers::traits::{
     ChatMessage, ChatRequest, ChatResponse, Provider, ProviderCapabilities, StreamChunk,
     StreamOptions, StreamResult, ToolCall, ToolsPayload,
 };
+use crate::telemetry::ByokTelemetryReporter;
 use crate::tools::ToolSpec;
 use async_trait::async_trait;
 use futures_util::{stream, StreamExt};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// Max retries for retryable protocol errors.
 ///
@@ -28,6 +29,7 @@ pub struct ProtocolBackedProvider {
     client: Arc<ai_lib_rust::AiClient>,
     provider_id: String,
     model_id: String,
+    telemetry: Option<Arc<ByokTelemetryReporter>>,
 }
 
 /// Build an [`ai_lib_rust::AiClient`] for a logical model id (`provider/model`).
@@ -51,12 +53,14 @@ impl ProtocolBackedProvider {
     pub fn from_client(
         client: Arc<ai_lib_rust::AiClient>,
         logical_model_id: &str,
+        telemetry: Option<Arc<ByokTelemetryReporter>>,
     ) -> anyhow::Result<Self> {
         let (provider_id, model_id) = Self::split_logical_model_id(logical_model_id)?;
         Ok(Self {
             client,
             provider_id,
             model_id,
+            telemetry,
         })
     }
 
@@ -90,7 +94,7 @@ See `docs/migration-legacy-to-protocol.md`."
                 )
             })?;
 
-        Self::from_client(Arc::new(client), &model)
+        Self::from_client(Arc::new(client), &model, None)
     }
 
     fn split_logical_model_id(logical_model_id: &str) -> anyhow::Result<(String, String)> {
@@ -179,12 +183,14 @@ See `docs/migration-legacy-to-protocol.md`."
     /// those stay in the app layer. Optional `ai-lib-rust` `routing_mvp` affects client
     /// construction upstream; we do not duplicate routing policy here.
     async fn execute_chat_with_retry(
-        client: &ai_lib_rust::AiClient,
+        &self,
         messages: Vec<ai_lib_rust::Message>,
         temperature: f64,
         tools: Option<Vec<serde_json::Value>>,
     ) -> Result<ai_lib_rust::client::UnifiedResponse, ai_lib_rust::Error> {
-        let mut builder = client
+        let started = Instant::now();
+        let mut builder = self
+            .client
             .chat()
             .messages(messages.clone())
             .temperature(temperature);
@@ -194,7 +200,10 @@ See `docs/migration-legacy-to-protocol.md`."
             }
         }
         let mut last_err: ai_lib_rust::Error = match builder.execute().await {
-            Ok(r) => return Ok(r),
+            Ok(r) => {
+                self.maybe_emit_telemetry(&r, started.elapsed());
+                return Ok(r);
+            }
             Err(e) => e,
         };
         for attempt in 1..=MAX_RETRIES {
@@ -217,7 +226,8 @@ See `docs/migration-legacy-to-protocol.md`."
                 );
                 tokio::time::sleep(backoff).await;
             }
-            let mut builder = client
+            let mut builder = self
+                .client
                 .chat()
                 .messages(messages.clone())
                 .temperature(temperature);
@@ -227,11 +237,29 @@ See `docs/migration-legacy-to-protocol.md`."
                 }
             }
             last_err = match builder.execute().await {
-                Ok(r) => return Ok(r),
+                Ok(r) => {
+                    self.maybe_emit_telemetry(&r, started.elapsed());
+                    return Ok(r);
+                }
                 Err(e) => e,
             };
         }
         Err(last_err)
+    }
+
+    fn maybe_emit_telemetry(
+        &self,
+        response: &ai_lib_rust::client::UnifiedResponse,
+        latency: Duration,
+    ) {
+        if let Some(ref telemetry) = self.telemetry {
+            telemetry.emit_byok_success(
+                &self.provider_id,
+                &self.model_id,
+                response.usage.as_ref(),
+                latency,
+            );
+        }
     }
 }
 
@@ -257,10 +285,10 @@ impl Provider for ProtocolBackedProvider {
         }
         messages.push(ai_lib_rust::Message::user(message));
 
-        let response =
-            Self::execute_chat_with_retry(self.client.as_ref(), messages, temperature, None)
-                .await
-                .map_err(|e| anyhow::anyhow!("Protocol provider error: {}", e))?;
+        let response = self
+            .execute_chat_with_retry(messages, temperature, None)
+            .await
+            .map_err(|e| anyhow::anyhow!("Protocol provider error: {}", e))?;
 
         Ok(response.content)
     }
@@ -273,10 +301,10 @@ impl Provider for ProtocolBackedProvider {
     ) -> anyhow::Result<String> {
         let converted = Self::convert_messages(messages);
 
-        let response =
-            Self::execute_chat_with_retry(self.client.as_ref(), converted, temperature, None)
-                .await
-                .map_err(|e| anyhow::anyhow!("Protocol provider error: {}", e))?;
+        let response = self
+            .execute_chat_with_retry(converted, temperature, None)
+            .await
+            .map_err(|e| anyhow::anyhow!("Protocol provider error: {}", e))?;
 
         Ok(response.content)
     }
@@ -305,10 +333,10 @@ impl Provider for ProtocolBackedProvider {
                 .collect::<Vec<_>>()
         });
 
-        let response =
-            Self::execute_chat_with_retry(self.client.as_ref(), converted, temperature, tools)
-                .await
-                .map_err(|e| anyhow::anyhow!("Protocol provider error: {}", e))?;
+        let response = self
+            .execute_chat_with_retry(converted, temperature, tools)
+            .await
+            .map_err(|e| anyhow::anyhow!("Protocol provider error: {}", e))?;
 
         Ok(ChatResponse {
             text: Some(response.content),
@@ -339,10 +367,10 @@ impl Provider for ProtocolBackedProvider {
             Some(tools.to_vec())
         };
 
-        let response =
-            Self::execute_chat_with_retry(self.client.as_ref(), converted, temperature, tools_opt)
-                .await
-                .map_err(|e| anyhow::anyhow!("Protocol provider error: {}", e))?;
+        let response = self
+            .execute_chat_with_retry(converted, temperature, tools_opt)
+            .await
+            .map_err(|e| anyhow::anyhow!("Protocol provider error: {}", e))?;
 
         Ok(ChatResponse {
             text: Some(response.content),

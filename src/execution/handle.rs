@@ -185,8 +185,10 @@ mod tests {
         let mut config = Config::default();
         config.routing.provider_mode = ProviderRoutingMode::Prism;
         config.default_model = Some("llama-3.1-8b-instant".into());
-        let err = ExecutionHandle::from_config(&config).unwrap_err();
-        assert!(err.to_string().contains("PRISM_"));
+        match ExecutionHandle::from_config(&config) {
+            Err(e) => assert!(e.to_string().contains("PRISM_")),
+            Ok(_) => panic!("expected prism mode to fail without PRISM_* API keys"),
+        }
     }
 
     #[cfg(feature = "prism-router")]

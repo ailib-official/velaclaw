@@ -111,7 +111,7 @@ fn execute_openai_chat_blocking(
                     resp.body
                 );
             }
-            ErrorClass::Retryable | ErrorClass::RateLimited => continue,
+            ErrorClass::Retryable | ErrorClass::RateLimited => {}
         }
     }
 

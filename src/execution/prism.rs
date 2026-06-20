@@ -116,7 +116,7 @@ mod tests {
         let mut urls = HashMap::new();
         urls.insert("groq".into(), "https://api.groq.com".into());
         FallbackRouter::new(
-            vec![("llama-3.1-8b-instant".into(), vec!["groq".into())],
+            vec![("llama-3.1-8b-instant".into(), vec!["groq".into()])],
             urls,
             KeyPool::new(keys),
         )
@@ -124,14 +124,22 @@ mod tests {
 
     #[test]
     fn route_model_id_strips_provider_prefix() {
-        assert_eq!(route_model_id("groq/llama-3.1-8b-instant"), "llama-3.1-8b-instant");
-        assert_eq!(route_model_id("llama-3.1-8b-instant"), "llama-3.1-8b-instant");
+        assert_eq!(
+            route_model_id("groq/llama-3.1-8b-instant"),
+            "llama-3.1-8b-instant"
+        );
+        assert_eq!(
+            route_model_id("llama-3.1-8b-instant"),
+            "llama-3.1-8b-instant"
+        );
     }
 
     #[test]
     fn embedded_router_returns_route_decision() {
         let router = test_router();
-        let decision = router.route("llama-3.1-8b-instant").expect("route decision");
+        let decision = router
+            .route("llama-3.1-8b-instant")
+            .expect("route decision");
         assert_eq!(decision.provider_id, "groq");
     }
 }

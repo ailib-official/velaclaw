@@ -1,11 +1,13 @@
 //! Execution layer — strategy/execution boundary (VL-ARCH-001 / VL-EVO-001).
 //! 执行层：策略层与 ai-lib-rust / prism-core 之间的边界。
 
+mod byok;
 mod handle;
 
 #[cfg(feature = "prism-router")]
 pub mod prism;
 
+pub use byok::{init_ai_client_sync, resolve_ai_client, split_logical_model_id};
 pub use handle::{logical_model_id_from_config, ExecutionHandle};
 
 /// Build the agent provider stack via [`ExecutionHandle`] (BYOK sole path to ai-lib-rust).

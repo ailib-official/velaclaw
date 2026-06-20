@@ -1,13 +1,11 @@
-//! Protocol-backed provider adapter.
+//! Protocol-backed provider adapter — **trait bridge only** (VL-EVO-004).
 //!
-//! Bridges ai-lib-rust's AiClient to VelaClaw's Provider trait,
-//! enabling protocol-driven provider configuration.
-//! 协议适配器负责将 ai-lib-rust 客户端桥接到本地 Provider 接口。
-//!
-//! Uses ai-lib-rust 0.9+ features:
-//! - `tools_json()` for tool/function calling
-//! - `Error::is_retryable()` / `retry_after()` for automatic retries on rate limits
+//! Maps VelaClaw's [`Provider`] trait to an existing `AiClient` built by
+//! [`ExecutionHandle`](crate::execution::ExecutionHandle). Execution semantics
+//! (init, transport retry, telemetry) live in `crate::execution::byok`.
+//! 协议适配器仅负责 trait 桥接；执行逻辑归执行层。
 
+use crate::execution::byok::execute_chat_with_retry;
 use crate::providers::traits::{
     ChatMessage, ChatRequest, ChatResponse, Provider, ProviderCapabilities, StreamChunk,
     StreamOptions, StreamResult, ToolCall, ToolsPayload,
@@ -17,35 +15,12 @@ use crate::tools::ToolSpec;
 use async_trait::async_trait;
 use futures_util::{stream, StreamExt};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
-
-/// Max retries for retryable protocol errors.
-///
-/// Retry policy: only `ai_lib_rust::Error::is_retryable` / `retry_after` drive retries here.
-/// Higher-level resilience (circuit breakers, etc.) belongs in ai-lib contact/policy — do not duplicate.
-const MAX_RETRIES: u32 = 2;
 
 pub struct ProtocolBackedProvider {
     client: Arc<ai_lib_rust::AiClient>,
     provider_id: String,
     model_id: String,
     telemetry: Option<Arc<ByokTelemetryReporter>>,
-}
-
-/// Build an [`ai_lib_rust::AiClient`] for a logical model id (`provider/model`).
-pub async fn resolve_ai_client(model_id: &str) -> anyhow::Result<ai_lib_rust::AiClient> {
-    ai_lib_rust::AiClient::new(model_id).await.map_err(|e| {
-        let base = format!("AiClient::new({model_id}): {e}");
-        if model_id.contains('/') {
-            anyhow::anyhow!(
-                "{base}\n\
-                 Hint: logical `provider/model` ids need a local ai-protocol checkout — set `AI_PROTOCOL_DIR` \
-                 to the repository root (a directory on disk, not a URL). See `docs/migration-legacy-to-protocol.md`."
-            )
-        } else {
-            anyhow::anyhow!(base)
-        }
-    })
 }
 
 impl ProtocolBackedProvider {
@@ -55,7 +30,7 @@ impl ProtocolBackedProvider {
         logical_model_id: &str,
         telemetry: Option<Arc<ByokTelemetryReporter>>,
     ) -> anyhow::Result<Self> {
-        let (provider_id, model_id) = Self::split_logical_model_id(logical_model_id)?;
+        let (provider_id, model_id) = crate::execution::split_logical_model_id(logical_model_id)?;
         Ok(Self {
             client,
             provider_id,
@@ -64,52 +39,38 @@ impl ProtocolBackedProvider {
         })
     }
 
-    pub fn new(
-        provider_id: &str,
-        model_id: &str,
-        _credential: Option<&str>,
-    ) -> anyhow::Result<Self> {
-        let model = format!("{}/{}", provider_id, model_id);
-
-        let client = if tokio::runtime::Handle::try_current().is_ok() {
-            let model_for_thread = model.clone();
-            std::thread::spawn(move || {
-                let rt = tokio::runtime::Runtime::new()?;
-                rt.block_on(async { ai_lib_rust::AiClient::new(&model_for_thread).await })
-                    .map_err(anyhow::Error::from)
-            })
-            .join()
-            .map_err(|_| anyhow::anyhow!("protocol provider initialization thread panicked"))??
-        } else {
-            let rt = tokio::runtime::Runtime::new()?;
-            rt.block_on(async { ai_lib_rust::AiClient::new(&model).await })?
-        };
-
-        let client = Ok(client).map_err(|e: anyhow::Error| {
-                let base = format!("Failed to build client for {model}: {e}");
-                anyhow::anyhow!(
-                    "{base}\n\
-                     Hint: set `AI_PROTOCOL_DIR` to a local ai-protocol checkout when using `provider/model` ids. \
-See `docs/migration-legacy-to-protocol.md`."
-                )
-            })?;
-
-        Self::from_client(Arc::new(client), &model, None)
-    }
-
-    fn split_logical_model_id(logical_model_id: &str) -> anyhow::Result<(String, String)> {
-        let trimmed = logical_model_id.trim();
-        let (provider_id, model_id) = trimmed.split_once('/').ok_or_else(|| {
-            anyhow::anyhow!("logical model id must be provider/model, got `{trimmed}`")
-        })?;
-        if provider_id.is_empty() || model_id.is_empty() {
-            anyhow::bail!("logical model id must be provider/model, got `{trimmed}`");
-        }
-        Ok((provider_id.to_string(), model_id.to_string()))
+    /// Factory helper for `create_provider` — builds client via execution layer.
+    pub fn from_logical_model(provider_id: &str, model_id: &str) -> anyhow::Result<Self> {
+        let logical = format!("{provider_id}/{model_id}");
+        let client = crate::execution::init_ai_client_sync(&logical)?;
+        Self::from_client(client, &logical, None)
     }
 
     pub fn provider_id(&self) -> &str {
         &self.provider_id
+    }
+
+    fn telemetry_ref(&self) -> Option<&ByokTelemetryReporter> {
+        self.telemetry.as_deref()
+    }
+
+    async fn run_chat(
+        &self,
+        messages: Vec<ai_lib_rust::Message>,
+        temperature: f64,
+        tools: Option<Vec<serde_json::Value>>,
+    ) -> anyhow::Result<ai_lib_rust::client::UnifiedResponse> {
+        execute_chat_with_retry(
+            &self.client,
+            &self.provider_id,
+            &self.model_id,
+            messages,
+            temperature,
+            tools,
+            self.telemetry_ref(),
+        )
+        .await
+        .map_err(|e| anyhow::anyhow!("Protocol provider error: {e}"))
     }
 
     fn convert_messages(messages: &[ChatMessage]) -> Vec<ai_lib_rust::Message> {
@@ -174,93 +135,6 @@ See `docs/migration-legacy-to-protocol.md`."
             | ai_lib_rust::StreamingEvent::FinalCandidate { .. } => None,
         }
     }
-
-    /// Run a chat execute with retry on retryable errors.
-    ///
-    /// **Boundary (migration plan Phase 4–5):** this is **transport-level** retry only
-    /// (`Error::is_retryable` / `retry_after` inside the ai-lib stack). It does **not**
-    /// replace `[reliability]` fallback chains or per-config `ReliableProvider` switching;
-    /// those stay in the app layer. Optional `ai-lib-rust` `routing_mvp` affects client
-    /// construction upstream; we do not duplicate routing policy here.
-    async fn execute_chat_with_retry(
-        &self,
-        messages: Vec<ai_lib_rust::Message>,
-        temperature: f64,
-        tools: Option<Vec<serde_json::Value>>,
-    ) -> Result<ai_lib_rust::client::UnifiedResponse, ai_lib_rust::Error> {
-        let started = Instant::now();
-        let mut builder = self
-            .client
-            .chat()
-            .messages(messages.clone())
-            .temperature(temperature);
-        if let Some(ref t) = tools {
-            if !t.is_empty() {
-                builder = builder.tools_json(t.clone());
-            }
-        }
-        let mut last_err: ai_lib_rust::Error = match builder.execute().await {
-            Ok(r) => {
-                self.maybe_emit_telemetry(&r, started.elapsed());
-                return Ok(r);
-            }
-            Err(e) => e,
-        };
-        for attempt in 1..=MAX_RETRIES {
-            if !last_err.is_retryable() {
-                break;
-            }
-            if let Some(delay) = last_err.retry_after() {
-                tracing::debug!(
-                    "Protocol retry attempt {} after {:?} (retry_after)",
-                    attempt,
-                    delay
-                );
-                tokio::time::sleep(delay).await;
-            } else {
-                let backoff = Duration::from_millis(500 * (1 << attempt));
-                tracing::debug!(
-                    "Protocol retry attempt {} after {:?} (exponential backoff)",
-                    attempt,
-                    backoff
-                );
-                tokio::time::sleep(backoff).await;
-            }
-            let mut builder = self
-                .client
-                .chat()
-                .messages(messages.clone())
-                .temperature(temperature);
-            if let Some(ref t) = tools {
-                if !t.is_empty() {
-                    builder = builder.tools_json(t.clone());
-                }
-            }
-            last_err = match builder.execute().await {
-                Ok(r) => {
-                    self.maybe_emit_telemetry(&r, started.elapsed());
-                    return Ok(r);
-                }
-                Err(e) => e,
-            };
-        }
-        Err(last_err)
-    }
-
-    fn maybe_emit_telemetry(
-        &self,
-        response: &ai_lib_rust::client::UnifiedResponse,
-        latency: Duration,
-    ) {
-        if let Some(ref telemetry) = self.telemetry {
-            telemetry.emit_byok_success(
-                &self.provider_id,
-                &self.model_id,
-                response.usage.as_ref(),
-                latency,
-            );
-        }
-    }
 }
 
 #[async_trait]
@@ -285,10 +159,7 @@ impl Provider for ProtocolBackedProvider {
         }
         messages.push(ai_lib_rust::Message::user(message));
 
-        let response = self
-            .execute_chat_with_retry(messages, temperature, None)
-            .await
-            .map_err(|e| anyhow::anyhow!("Protocol provider error: {}", e))?;
+        let response = self.run_chat(messages, temperature, None).await?;
 
         Ok(response.content)
     }
@@ -301,10 +172,7 @@ impl Provider for ProtocolBackedProvider {
     ) -> anyhow::Result<String> {
         let converted = Self::convert_messages(messages);
 
-        let response = self
-            .execute_chat_with_retry(converted, temperature, None)
-            .await
-            .map_err(|e| anyhow::anyhow!("Protocol provider error: {}", e))?;
+        let response = self.run_chat(converted, temperature, None).await?;
 
         Ok(response.content)
     }
@@ -333,10 +201,7 @@ impl Provider for ProtocolBackedProvider {
                 .collect::<Vec<_>>()
         });
 
-        let response = self
-            .execute_chat_with_retry(converted, temperature, tools)
-            .await
-            .map_err(|e| anyhow::anyhow!("Protocol provider error: {}", e))?;
+        let response = self.run_chat(converted, temperature, tools).await?;
 
         Ok(ChatResponse {
             text: Some(response.content),
@@ -367,10 +232,7 @@ impl Provider for ProtocolBackedProvider {
             Some(tools.to_vec())
         };
 
-        let response = self
-            .execute_chat_with_retry(converted, temperature, tools_opt)
-            .await
-            .map_err(|e| anyhow::anyhow!("Protocol provider error: {}", e))?;
+        let response = self.run_chat(converted, temperature, tools_opt).await?;
 
         Ok(ChatResponse {
             text: Some(response.content),

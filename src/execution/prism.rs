@@ -4,7 +4,7 @@
 use crate::config::Config;
 use crate::providers::prism_adapter::PrismBackedProvider;
 use crate::telemetry::ByokTelemetryReporter;
-use prism_core::config::EnvConfig;
+use prism_core::config::{ConfigProvider, EnvConfig};
 use prism_core::key_pool::{KeyEntry, KeyPool, KeyState};
 use prism_core::router::FallbackRouter;
 use std::collections::HashMap;
@@ -19,7 +19,7 @@ pub struct PrismRouterHandle {
 
 impl PrismRouterHandle {
     pub fn from_config(config: &Config) -> anyhow::Result<Self> {
-        let logical_model_id = super::logical_model_id_from_config(config);
+        let logical_model_id = crate::execution::logical_model_id_from_config(config);
         let env = Arc::new(EnvConfig::from_env());
         let router = build_router(&env, &logical_model_id)?;
         Ok(Self {

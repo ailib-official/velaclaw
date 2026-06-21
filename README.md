@@ -1,278 +1,202 @@
-# VelaClaw 🕷️
+# VelaClaw
 
-**Protocol-driven autonomous AI agent runtime with intelligent model selection and multi-model negotiation.**
+> Rust AI agent runtime — BYOK direct or Prism-routed, protocol-driven.
 
+[![Crates.io](https://img.shields.io/crates/v/velaclaw)](https://crates.io/crates/velaclaw)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE-MIT)
-[![Rust](https://img.shields.io/badge/rust-2021-orange.svg)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/rust-1.87+-orange.svg)](https://www.rust-lang.org/)
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
-[Contributing](CONTRIBUTING.md) · [ai-lib migration (matrix & env)](docs/ai-lib-migration.md)
+> **fr/ja/ru/vi translations are not yet synced with this version. Contributions welcome.**
 
 ---
 
-## Overview
+## What is VelaClaw
 
-VelaClaw is a Rust-first autonomous AI agent runtime that integrates with the [ai-protocol](https://github.com/ailib-official/ai-protocol) ecosystem for intelligent, protocol-driven AI operations.
+VelaClaw is an autonomous AI agent runtime for Rust. Providers are defined as [ai-protocol](https://github.com/ailib-official/ai-protocol) YAML manifests — zero hardcoded provider logic.
 
-### Key Features
+**Two execution modes:**
 
-| Feature | Description |
-|---------|-------------|
-| **Protocol-driven Providers** | Configure AI providers via YAML files without code changes |
-| **Intelligent Model Selection** | Automatically select the best model for each task based on cost, speed, quality, and reliability |
-| **Multi-model Negotiation** | Get multiple AI opinions and synthesize the best response |
-| **Parallel Task Execution** | Execute independent tasks concurrently for faster results |
-| **Remote Deployment** | Deploy agents to remote servers with controlled access |
-| **Hardware Integration** | Support for GPIO, STM32, and other peripherals |
+| Mode | Path | Use when |
+|------|------|----------|
+| **BYOK** (default) | AiClient → provider API directly | You bring your own API keys |
+| **Prism-routed** | Embedded prism-core router → provider | Multi-provider fallback, unknown models, usage telemetry |
+
+VelaClaw is a **reference implementation** of a Rust agent on the ai-lib stack. It is not the only way — use `ai-lib-rust`, `ai-lib-python`, or `ai-lib-ts` to build your own.
+
+---
+
+## Install
+
+```bash
+# From crates.io
+cargo install velaclaw
+
+# Requires ai-protocol manifests
+git clone https://github.com/ailib-official/ai-protocol ~/.velaclaw/ai-protocol
+```
+
+**From source:**
+
+```bash
+git clone https://github.com/ailib-official/velaclaw
+cd velaclaw
+cargo build --release
+```
+
+**MSRV**: Rust 1.87+
 
 ---
 
 ## Quick Start
 
-### Prerequisites
-
-- Rust 1.70+ (2021 edition)
-- A local [ai-protocol](https://github.com/ailib-official/ai-protocol) checkout for provider manifests
-
-### Build
+### 1. Setup
 
 ```bash
-# Clone the repository
-git clone https://github.com/ailib-official/velaclaw.git
-cd velaclaw
-
-# Build with default protocol support
-cargo build
+velaclaw onboard
 ```
 
-### Cross-Compile for Raspberry Pi (aarch64)
+Walks through workspace initialization, API keys, and default model. Creates `~/.velaclaw/config.toml`.
+
+### 2. Chat
 
 ```bash
-# Install target
-rustup target add aarch64-unknown-linux-gnu
+# BYOK mode (default)
+velaclaw agent -m "Explain Rust ownership in one paragraph"
 
-# Build release binary
-cargo build --release --target aarch64-unknown-linux-gnu
+# Specific model
+velaclaw agent -m "What is WASM?" --model openai/gpt-4o-mini
 
-# Binary location
-ls target/aarch64-unknown-linux-gnu/release/velaclaw
+# Prism-routed mode (requires prism-core + provider config)
+velaclaw agent -m "Hello" --provider-mode prism
 ```
 
-### Run
+### 3. Web Chat UI
 
 ```bash
-# Enable smart model selection
-cargo run --features smart-routing -- --smart
-
-# Enable multi-model negotiation
-cargo run --features multi-model -- --negotiate
-
-# Run with the default protocol model id (openai/gpt-5.2)
-cargo run -- agent -m "Hello"
+velaclaw daemon
+# Open http://127.0.0.1:8080/chat
+# Pair: POST http://127.0.0.1:8080/pair with your pairing code
 ```
 
-### Web Chat UI
+---
 
-With the gateway running (`velaclaw daemon`), open **http://127.0.0.1:8080/chat** in your browser for the local Web Chat UI.
+## CLI Commands
 
-1. Pair once: `POST http://127.0.0.1:8080/pair` with your pairing code, then paste the bearer token into the chat UI.
-2. Select a model from the dropdown (requires BYOK credentials for providers in your ai-protocol checkout).
-3. Messages stream over WebSocket (`/ws`) using the same agent loop as the CLI.
+| Command | Description |
+|---------|-------------|
+| `velaclaw agent` | Interactive or one-shot chat |
+| `velaclaw daemon` | Gateway: REST API + WebSocket + Chat SPA at `/chat` |
+| `velaclaw onboard` | Interactive setup wizard |
+| `velaclaw doctor` | Diagnostics and health checks |
+| `velaclaw service` | Manage daemon lifecycle |
+| `velaclaw cron` | Scheduled task engine |
+| `velaclaw channel` | Telegram, Matrix, Lark, Discord |
+| `velaclaw skills` | Extensible skill and tool system |
+| `velaclaw memory` | Conversation storage (SQLite, PostgreSQL, Markdown) |
+| `velaclaw config` | Configuration management |
+| `velaclaw deploy` | Remote SSH deployment (`--features remote-deploy`) |
+| `velaclaw hardware` | GPIO and peripherals (`--features hardware`) |
 
-For frontend development, run `npm ci && npm run dev` inside `ui-chat/` (Vite proxies API calls to the gateway).
+Run `velaclaw --help` for the full command tree.
 
 ---
 
 ## Configuration
 
-### Environment Variables
+### Environment
 
 ```bash
-# AI Protocol directory (for protocol-driven providers)
-# Clone from: git clone https://github.com/ailib-official/ai-protocol
-export AI_PROTOCOL_DIR=/path/to/ai-protocol
-
-# Provider API keys declared by ai-protocol manifests
+export AI_PROTOCOL_DIR=~/.velaclaw/ai-protocol
 export OPENAI_API_KEY=sk-...
 export ANTHROPIC_API_KEY=sk-ant-...
+export DEEPSEEK_API_KEY=sk-...
 ```
 
-### Config File
+### `~/.velaclaw/config.toml`
 
 ```toml
-# ~/.velaclaw/config.toml
-default_provider = "openai/gpt-5.2"
-default_model = "openai/gpt-5.2"
+[routing]
+provider_mode = "byok"   # "byok" (default) or "prism"
+
+[telemetry]
+enabled = false          # BYOK usage reporting to Prism
+endpoint = "https://api.prism.ailib.info"
 ```
-
----
-
-## Documentation
-
-- [User Guide (Chinese)](docs/user-guide.zh-CN.md) - Complete user documentation
-- [Integration Guide](docs/ai-protocol-integration-guide.md) - Developer integration guide
-- [Upstream Requirements](docs/upstream-requirements.md) - Requirements for ai-lib-rust and ai-protocol
-
-### User Guide Chapters
-
-1. [Getting Started](docs/user-guide/01-getting-started.md)
-2. [Basic Concepts](docs/user-guide/02-basic-concepts.md)
-3. [Chat with AI](docs/user-guide/03-chat-with-ai.md)
-4. [Providers](docs/user-guide/04-providers.md)
-5. [Smart Routing](docs/user-guide/05-smart-routing.md)
-6. [Channels](docs/user-guide/06-channels.md)
-7. [Telegram](docs/user-guide/07-telegram.md)
-8. [Tools](docs/user-guide/10-tools.md)
-9. [Negotiation](docs/user-guide/13-negotiation.md)
-10. [Automation](docs/user-guide/14-automation.md)
-11. [Deployment](docs/user-guide/15-deployment.md)
-12. [Remote Deployment](docs/user-guide/16-remote-deployment.md)
-13. [Security](docs/user-guide/17-security.md)
-14. [Commands](docs/user-guide/18-commands.md)
-15. [Configuration](docs/user-guide/19-config.md)
-16. [FAQ](docs/user-guide/20-faq.md)
 
 ---
 
 ## Feature Flags
 
+**Default build** (`cargo build`) enables `ai-protocol` + `prism-router`.
+
 | Flag | Description |
 |------|-------------|
-| `ai-protocol` | Enable ai-lib-rust integration (protocol-driven providers via `protocol:provider/model`) |
-| `smart-routing` | Enable provider scoring and adaptive model selection |
-| `multi-model` | Enable multi-model negotiation and parallel tasks |
-| `remote-deploy` | Enable controlled remote deployment |
-| `hardware` | Enable hardware peripherals support |
-| `channel-matrix` | Enable Matrix channel with E2EE |
-
-## Dashboard
-
-When running the gateway (`velaclaw gateway`), a monitoring dashboard is available at `GET /dashboard`:
-
-- **Status**: Health and pairing state
-- **Cost**: Session, daily, monthly costs and token usage (when `[cost] enabled = true`)
-- **Runtime**: Component health snapshot
-
-The dashboard auto-refreshes every 30 seconds.
+| `ai-protocol` *(default)* | Protocol-driven providers via ai-lib-rust |
+| `prism-router` *(default)* | In-process prism-core routing for unknown providers |
+| `channel-matrix` | Matrix with E2EE |
+| `channel-lark` | Lark / Feishu |
+| `browser-native` | Rust-native browser automation (fantoccini) |
+| `hardware` | GPIO, serial peripherals |
+| `peripheral-rpi` | Raspberry Pi GPIO (rppal) |
+| `remote-deploy` | SSH-based remote deployment |
+| `memory-postgres` | PostgreSQL memory backend |
+| `observability-otel` | OpenTelemetry metrics |
+| `sandbox-landlock` | Linux Landlock sandboxing |
+| `whatsapp-web` | Native WhatsApp Web client |
+| `probe` | probe-rs for Nucleo memory |
+| `rag-pdf` | PDF ingestion for RAG |
 
 ---
-
-## Remote Deployment
-
-VelaClaw supports controlled remote deployment via SSH with the `--features remote-deploy` flag.
-
-### Deploy Commands
-
-```bash
-# Deploy to a remote server
-velaclaw deploy deploy --server <server-id>
-
-# Check deployment status
-velaclaw deploy status --server <server-id>
-
-# Run health check
-velaclaw deploy health-check --server <server-id>
-
-# List configured deployment targets
-velaclaw deploy list
-
-# Rollback to previous deployment
-velaclaw deploy rollback --server <server-id>
-
-# Update to new version
-velaclaw deploy update --server <server-id> --version <version>
-
-# Sync configuration
-velaclaw deploy sync-config --server <server-id>
-```
-
-### Configuration
-
-Configure deployment targets in your `config.toml`:
-
-```toml
-[deploy]
-[[deploy.servers]]
-id = "prod-001"
-host = "192.168.1.100"
-port = 22
-user = "deploy"
-ssh_key = "~/.ssh/id_ed25519"
-labels = ["env:production", "region:us-west"]
-
-[deploy.settings]
-mode = "direct"  # Options: direct, docker, systemd
-binary_path = "/usr/local/bin/velaclaw"
-working_dir = "/opt/velaclaw"
-auto_start = true
-health_check_interval_secs = 30
-restart_on_failure = true
-max_restarts = 3
-```
-
 
 ## Architecture
 
-VelaClaw uses a trait-driven, modular architecture:
+```
+velaclaw
+├── agent      BYOK (AiClient → provider) | Prism (prism-core router)
+├── gateway    REST + WebSocket + /chat SPA
+├── channels   Telegram, Matrix, Lark, Discord
+├── memory     SQLite (default), PostgreSQL, Markdown
+├── skills     Shell, file, browser, MCP, custom tools
+├── cron       Scheduled task engine
+├── telemetry  Optional BYOK usage → Prism (VL-EVO-003)
+└── deploy     Optional remote SSH deploy
+```
 
-- **Providers**: AI model backends (OpenAI, Anthropic, local models, etc.)
-- **Channels**: Communication platforms (Telegram, Discord, Matrix, etc.)
-- **Tools**: Extensible tool execution (shell, file, browser, etc.)
-- **Memory**: Persistent storage backends (SQLite, PostgreSQL, etc.)
-- **Security**: Policy enforcement and secret management
+**Key decisions** (VL-ARCH-001):
+- BYOK uses `AiClient` directly — keys never leave your machine
+- `prism-core-routing` embedded as Cargo dependency (VL-EVO-002)
+- Python/TS agents use their own runtimes, not VelaClaw (VL-ARCH-001 D7)
 
 ---
 
-## Upstream Dependencies
+## Build Profiles
 
-VelaClaw integrates with:
-
-- [ai-lib-rust](https://crates.io/crates/ai-lib-rust) - Protocol-driven AI API client (crates.io, enable with `--features ai-protocol`)
-- [ai-protocol](https://github.com/ailib-official/ai-protocol) - Provider YAML configs (clone and set `AI_PROTOCOL_DIR`)
-
-### Sync with Upstream
-
-VelaClaw tracks [velaclaw-labs/velaclaw](https://github.com/velaclaw-labs/velaclaw) for updates:
+| Profile | When |
+|---------|------|
+| `release` | Production: max LTO, size-optimized, stripped |
+| `release-fast` | Quick builds on 16GB+ RAM (8 codegen units) |
+| `dev` | Development: fast compile, debug symbols |
 
 ```bash
-# List upstream changes
-./sync-upstream.sh --list
-
-# Preview merge
-./sync-upstream.sh --dry-run
-
-# Merge upstream
-./sync-upstream.sh
-
-# Cherry-pick specific commit
-./sync-upstream.sh --cherry-pick <commit-hash>
+cargo build --profile release-fast
+cargo build --release                         # max optimization
+cargo build --release --target aarch64-unknown-linux-gnu  # RPi cross-compile
 ```
+
+---
+
+## Dependencies
+
+- [ai-lib-rust](https://crates.io/crates/ai-lib-rust) — AI client runtime
+- [ai-protocol](https://github.com/ailib-official/ai-protocol) — Provider YAML manifests
+- [prism-core-routing](https://crates.io/crates/prism-core-routing) — Embedded routing (VL-EVO-002)
+
+Tracks upstream [VelaClaw Labs](https://github.com/VelaClaw-Labs/velaclaw) via `sync-upstream.sh`.
 
 ---
 
 ## License
 
-Licensed under either of
-
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
-- MIT license ([LICENSE-MIT](LICENSE-MIT))
-
-at your option.
-
----
-
-## Author
-
-**Luqiang Wang**
-
----
-
-## Acknowledgments
-
-VelaClaw is a fork of [VelaClaw](https://github.com/VelaClaw-Labs/velaclaw) with additional features:
-- ai-protocol integration
-- Provider scoring and smart routing
-- Multi-model negotiation
-- Parallel task execution
-- Remote deployment
+Licensed under either of [Apache License 2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT) at your option.

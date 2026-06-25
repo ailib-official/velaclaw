@@ -94,6 +94,29 @@ impl ExecutionHandle {
         }
     }
 
+    /// Whether native tool calling is fully reliable for the current provider/model
+    /// (VL-TTC-001: dispatcher selection based on manifest tool_calling.native.reliability).
+    pub fn native_tool_calling_is_reliable(&self) -> bool {
+        match &self.backend {
+            ExecutionBackend::Byok(client) => {
+                let tool_calling = client.manifest.extra.get("tool_calling");
+                if let Some(tc) = tool_calling {
+                    if let Some(reliability) = tc
+                        .get("native")
+                        .and_then(|n| n.get("reliability"))
+                        .and_then(|v| v.as_str())
+                    {
+                        return reliability == "full";
+                    }
+                }
+                !self.logical_model_id.starts_with("deepseek")
+                    && !self.logical_model_id.starts_with("ollama")
+            }
+            #[cfg(feature = "prism-router")]
+            ExecutionBackend::Prism(_) => true,
+        }
+    }
+
     /// Trait adapter for tool-loop compatibility.
     pub fn provider_adapter(&self) -> anyhow::Result<Box<dyn Provider>> {
         match &self.backend {

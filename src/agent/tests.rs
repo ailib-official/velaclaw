@@ -1153,11 +1153,10 @@ fn xml_format_results_includes_status_and_output() {
         _ => panic!("Expected Chat variant"),
     };
 
-    assert!(content.contains("shell"));
     assert!(content.contains("file1.txt"));
-    assert!(content.contains("ok"));
-    assert!(content.contains("file_read"));
-    assert!(content.contains("error"));
+    assert!(content.contains("is_error"));
+    assert!(content.contains("not found"));
+    assert!(content.contains("<tool_result"));
 }
 
 #[test]

@@ -340,6 +340,18 @@ impl Agent {
         let provider: Box<dyn Provider> = provider;
 
         let dispatcher_choice = config.agent.tool_dispatcher.as_str();
+        #[cfg(feature = "ai-protocol")]
+        let tool_dispatcher: Box<dyn ToolDispatcher> = match dispatcher_choice {
+            "native" => Box::new(NativeToolDispatcher),
+            "xml" => Box::new(XmlToolDispatcher),
+            _ if provider.supports_native_tools()
+                && execution.native_tool_calling_is_reliable() =>
+            {
+                Box::new(NativeToolDispatcher)
+            }
+            _ => Box::new(XmlToolDispatcher),
+        };
+        #[cfg(not(feature = "ai-protocol"))]
         let tool_dispatcher: Box<dyn ToolDispatcher> = match dispatcher_choice {
             "native" => Box::new(NativeToolDispatcher),
             "xml" => Box::new(XmlToolDispatcher),

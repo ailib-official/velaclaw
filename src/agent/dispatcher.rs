@@ -337,7 +337,7 @@ pub struct NativeToolDispatcher;
 impl ToolDispatcher for NativeToolDispatcher {
     fn parse_response(&self, response: &ChatResponse) -> (String, Vec<ParsedToolCall>) {
         let text = response.text.clone().unwrap_or_default();
-        let calls = response
+        let calls: Vec<ParsedToolCall> = response
             .tool_calls
             .iter()
             .map(|tc| ParsedToolCall {
@@ -353,6 +353,20 @@ impl ToolDispatcher for NativeToolDispatcher {
                 tool_call_id: Some(tc.id.clone()),
             })
             .collect();
+
+        // DeepSeek and similar providers may emit tool calls as text (e.g. DSML)
+        // even when native tool_calls is empty — fall back to text parser.
+        if calls.is_empty() {
+            #[cfg(feature = "ai-protocol")]
+            {
+                let parser = text_parser::create_parser();
+                let (remaining, text_calls) = text_parser::parse_with_parser(&parser, &text);
+                if !text_calls.is_empty() {
+                    return (remaining, text_calls);
+                }
+            }
+        }
+
         (text, calls)
     }
 
@@ -490,5 +504,51 @@ mod tests {
             }
             _ => panic!("expected ToolResults variant"),
         }
+    }
+
+    #[test]
+    #[cfg(feature = "ai-protocol")]
+    fn native_dispatcher_falls_back_to_deepseek_dsml() {
+        let tag = "\u{FF5C}\u{FF5C}DSML\u{FF5C}\u{FF5C}";
+        let text = format!(
+            "Checking server.\n\
+             <{tag}tool_calls>\n\
+             <{tag}invoke name=\"shell\">\n\
+             <{tag}parameter name=\"command\" string=\"true\">echo hi</{tag}parameter>\n\
+             </{tag}invoke>\n\
+             </{tag}tool_calls>"
+        );
+        let response = ChatResponse {
+            text: Some(text),
+            tool_calls: vec![],
+        };
+        let dispatcher = NativeToolDispatcher;
+        let (remaining, calls) = dispatcher.parse_response(&response);
+        assert_eq!(remaining, "Checking server.");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "shell");
+        assert_eq!(calls[0].arguments["command"], "echo hi");
+    }
+
+    #[test]
+    #[cfg(feature = "ai-protocol")]
+    fn xml_dispatcher_parses_deepseek_dsml() {
+        let tag = "\u{FF5C}\u{FF5C}DSML\u{FF5C}\u{FF5C}";
+        let text = format!(
+            "<{tag}tool_calls>\n\
+             <{tag}invoke name=\"shell\">\n\
+             <{tag}parameter name=\"command\" string=\"true\">ls</{tag}parameter>\n\
+             </{tag}invoke>\n\
+             </{tag}tool_calls>"
+        );
+        let response = ChatResponse {
+            text: Some(text),
+            tool_calls: vec![],
+        };
+        let dispatcher = XmlToolDispatcher;
+        let (_, calls) = dispatcher.parse_response(&response);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "shell");
+        assert_eq!(calls[0].arguments["command"], "ls");
     }
 }

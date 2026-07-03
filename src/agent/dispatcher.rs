@@ -33,8 +33,8 @@ pub struct XmlToolDispatcher;
 mod text_parser {
     use super::{ParsedToolCall, Tool, ToolExecutionResult};
     use ai_lib_rust::types::{
-        text_tool::{PromptLevel, TextToolParser},
-        tool::ToolResult as AiToolResult,
+        text_tool::{parse_hybrid_tool_calls, PromptLevel, TextToolParser},
+        tool::{ToolCall, ToolResult as AiToolResult},
         StandardTextToolParser, TextToolConfig, ToolDefinition,
     };
 
@@ -67,13 +67,38 @@ mod text_parser {
         let (remaining, tool_calls) = parser.parse(text);
         let calls = tool_calls
             .into_iter()
-            .map(|tc| ParsedToolCall {
-                name: tc.name,
-                arguments: tc.arguments,
-                tool_call_id: Some(tc.id),
-            })
+            .map(tool_call_to_parsed)
             .collect();
         (remaining, calls)
+    }
+
+    pub fn parse_hybrid_with_parser(
+        parser: &StandardTextToolParser,
+        text: &str,
+        native: &[ParsedToolCall],
+    ) -> (String, Vec<ParsedToolCall>) {
+        let native_core: Vec<ToolCall> = native
+            .iter()
+            .map(|tc| ToolCall {
+                id: tc
+                    .tool_call_id
+                    .clone()
+                    .unwrap_or_else(|| "native".to_string()),
+                name: tc.name.clone(),
+                arguments: tc.arguments.clone(),
+            })
+            .collect();
+        let (remaining, tool_calls) = parse_hybrid_tool_calls(parser, text, &native_core);
+        let calls = tool_calls.into_iter().map(tool_call_to_parsed).collect();
+        (remaining, calls)
+    }
+
+    fn tool_call_to_parsed(tc: ToolCall) -> ParsedToolCall {
+        ParsedToolCall {
+            name: tc.name,
+            arguments: tc.arguments,
+            tool_call_id: Some(tc.id),
+        }
     }
 
     pub fn format_results_with_parser(
@@ -354,16 +379,12 @@ impl ToolDispatcher for NativeToolDispatcher {
             })
             .collect();
 
-        // DeepSeek and similar providers may emit tool calls as text (e.g. DSML)
-        // even when native tool_calls is empty — fall back to text parser.
+        // Native empty + text markup: delegate to ai-lib-core hybrid parser (ARCH-001).
         if calls.is_empty() {
             #[cfg(feature = "ai-protocol")]
             {
                 let parser = text_parser::create_parser();
-                let (remaining, text_calls) = text_parser::parse_with_parser(&parser, &text);
-                if !text_calls.is_empty() {
-                    return (remaining, text_calls);
-                }
+                return text_parser::parse_hybrid_with_parser(&parser, &text, &calls);
             }
         }
 

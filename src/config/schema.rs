@@ -2963,69 +2963,101 @@ pub struct QQConfig {
 
 // ── Config impl ──────────────────────────────────────────────────
 
-impl Default for Config {
-    fn default() -> Self {
-        let home =
-            UserDirs::new().map_or_else(|| PathBuf::from("."), |u| u.home_dir().to_path_buf());
-        let velaclaw_dir = home.join(".velaclaw");
+/// Subset of [`Config`] embedded at build time via `defaults.toml`.
+#[derive(Debug, Deserialize)]
+struct EmbeddedConfigTemplate {
+    #[serde(default)]
+    default_provider: Option<String>,
+    #[serde(default)]
+    default_model: Option<String>,
+    #[serde(default)]
+    default_temperature: Option<f64>,
+    #[serde(default)]
+    autonomy: Option<AutonomyConfig>,
+}
 
-        Self {
-            workspace_dir: velaclaw_dir.join("workspace"),
-            config_path: velaclaw_dir.join("config.toml"),
-            api_key: None,
-            api_url: None,
-            default_provider: Some(DEFAULT_PROTOCOL_MODEL_ID.to_string()),
-            default_model: Some(DEFAULT_PROTOCOL_MODEL_ID.to_string()),
-            default_temperature: 0.7,
-            observability: ObservabilityConfig::default(),
-            autonomy: AutonomyConfig::default(),
-            runtime: RuntimeConfig::default(),
-            reliability: ReliabilityConfig::default(),
-            scheduler: SchedulerConfig::default(),
-            agent: AgentConfig::default(),
-            skills: SkillsConfig::default(),
-            routing: ExecutionRoutingConfig::default(),
-            telemetry: TelemetryConfig::default(),
-            model_routes: Vec::new(),
-            embedding_routes: Vec::new(),
-            heartbeat: HeartbeatConfig::default(),
-            cron: CronConfig::default(),
-            channels_config: ChannelsConfig::default(),
-            memory: MemoryConfig::default(),
-            storage: StorageConfig::default(),
-            tunnel: TunnelConfig::default(),
-            gateway: GatewayConfig::default(),
-            composio: ComposioConfig::default(),
-            secrets: SecretsConfig::default(),
-            browser: BrowserConfig::default(),
-            http_request: HttpRequestConfig::default(),
-            multimodal: MultimodalConfig::default(),
-            web_search: WebSearchConfig::default(),
-            proxy: ProxyConfig::default(),
-            identity: IdentityConfig::default(),
-            cost: CostConfig::default(),
-            peripherals: PeripheralsConfig::default(),
-            deploy: DeployConfig::default(),
-            agents: HashMap::new(),
-            hardware: HardwareConfig::default(),
-            query_classification: QueryClassificationConfig::default(),
-        }
+fn config_skeleton() -> Config {
+    let home =
+        UserDirs::new().map_or_else(|| PathBuf::from("."), |u| u.home_dir().to_path_buf());
+    let velaclaw_dir = home.join(".velaclaw");
+
+    Config {
+        workspace_dir: velaclaw_dir.join("workspace"),
+        config_path: velaclaw_dir.join("config.toml"),
+        api_key: None,
+        api_url: None,
+        default_provider: Some(DEFAULT_PROTOCOL_MODEL_ID.to_string()),
+        default_model: Some(DEFAULT_PROTOCOL_MODEL_ID.to_string()),
+        default_temperature: 0.7,
+        observability: ObservabilityConfig::default(),
+        autonomy: AutonomyConfig::default(),
+        runtime: RuntimeConfig::default(),
+        reliability: ReliabilityConfig::default(),
+        scheduler: SchedulerConfig::default(),
+        agent: AgentConfig::default(),
+        skills: SkillsConfig::default(),
+        routing: ExecutionRoutingConfig::default(),
+        telemetry: TelemetryConfig::default(),
+        model_routes: Vec::new(),
+        embedding_routes: Vec::new(),
+        heartbeat: HeartbeatConfig::default(),
+        cron: CronConfig::default(),
+        channels_config: ChannelsConfig::default(),
+        memory: MemoryConfig::default(),
+        storage: StorageConfig::default(),
+        tunnel: TunnelConfig::default(),
+        gateway: GatewayConfig::default(),
+        composio: ComposioConfig::default(),
+        secrets: SecretsConfig::default(),
+        browser: BrowserConfig::default(),
+        http_request: HttpRequestConfig::default(),
+        multimodal: MultimodalConfig::default(),
+        web_search: WebSearchConfig::default(),
+        proxy: ProxyConfig::default(),
+        identity: IdentityConfig::default(),
+        cost: CostConfig::default(),
+        peripherals: PeripheralsConfig::default(),
+        deploy: DeployConfig::default(),
+        agents: HashMap::new(),
+        hardware: HardwareConfig::default(),
+        query_classification: QueryClassificationConfig::default(),
     }
 }
 
-fn from_embedded_template() -> Result<Config> {
-    let mut config = Config::default();
+impl Default for Config {
+    fn default() -> Self {
+        from_embedded_template().unwrap_or_else(|error| {
+            tracing::warn!(
+                "Failed to load embedded defaults.toml; using Rust fallback: {error}"
+            );
+            config_skeleton()
+        })
+    }
+}
+
+fn apply_embedded_template(config: &mut Config) -> Result<()> {
     let raw = include_str!("defaults.toml");
-    let template: toml::Value = toml::from_str(raw).context("Failed to parse embedded defaults")?;
-    if let Some(v) = template.get("default_provider").and_then(|v| v.as_str()) {
-        config.default_provider = Some(v.to_string());
+    let template: EmbeddedConfigTemplate =
+        toml::from_str(raw).context("Failed to parse embedded defaults.toml")?;
+
+    if let Some(v) = template.default_provider {
+        config.default_provider = Some(v);
     }
-    if let Some(v) = template.get("default_model").and_then(|v| v.as_str()) {
-        config.default_model = Some(v.to_string());
+    if let Some(v) = template.default_model {
+        config.default_model = Some(v);
     }
-    if let Some(v) = template.get("default_temperature").and_then(|v| v.as_float()) {
+    if let Some(v) = template.default_temperature {
         config.default_temperature = v;
     }
+    if let Some(autonomy) = template.autonomy {
+        config.autonomy = autonomy;
+    }
+    Ok(())
+}
+
+fn from_embedded_template() -> Result<Config> {
+    let mut config = config_skeleton();
+    apply_embedded_template(&mut config)?;
     Ok(config)
 }
 
@@ -3950,6 +3982,20 @@ mod tests {
     use tokio_stream::StreamExt;
 
     // ── Defaults ─────────────────────────────────────────────
+
+    #[test]
+    fn embedded_template_matches_protocol_model_id() {
+        let config = from_embedded_template().expect("embedded template should parse");
+        assert_eq!(
+            config.default_provider.as_deref(),
+            Some(DEFAULT_PROTOCOL_MODEL_ID)
+        );
+        assert_eq!(
+            config.default_model.as_deref(),
+            Some(DEFAULT_PROTOCOL_MODEL_ID)
+        );
+        assert!((config.default_temperature - 0.7).abs() < f64::EPSILON);
+    }
 
     #[test]
     async fn config_default_has_sane_values() {

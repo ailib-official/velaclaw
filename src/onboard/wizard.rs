@@ -5,7 +5,7 @@ use crate::config::{
     AutonomyConfig, BrowserConfig, ChannelsConfig, ComposioConfig, Config, DiscordConfig,
     HeartbeatConfig, IMessageConfig, LarkConfig, MatrixConfig, MemoryConfig, ObservabilityConfig,
     RuntimeConfig, SecretsConfig, SlackConfig, StorageConfig, TelegramConfig, WebhookConfig,
-    DEFAULT_PROTOCOL_MODEL_ID,
+    DEFAULT_PROTOCOL_MODEL_ID, DEFAULT_PROTOCOL_MODEL_LABEL,
 };
 use crate::hardware::{self, HardwareConfig};
 use crate::memory::{
@@ -636,7 +636,7 @@ fn curated_models_for_provider(provider_name: &str) -> Vec<(String, String)> {
             ),
             (
                 DEFAULT_PROTOCOL_MODEL_ID.to_string(),
-                "GPT-5.2 (latest flagship)".to_string(),
+                DEFAULT_PROTOCOL_MODEL_LABEL.to_string(),
             ),
             (
                 "openai/gpt-5-mini".to_string(),
@@ -909,6 +909,10 @@ fn curated_models_for_provider(provider_name: &str) -> Vec<(String, String)> {
         ],
         "nvidia" => vec![
             (
+                DEFAULT_PROTOCOL_MODEL_ID.to_string(),
+                format!("{DEFAULT_PROTOCOL_MODEL_LABEL} (recommended)"),
+            ),
+            (
                 "meta/llama-3.3-70b-instruct".to_string(),
                 "Llama 3.3 70B Instruct (balanced default)".to_string(),
             ),
@@ -932,7 +936,7 @@ fn curated_models_for_provider(provider_name: &str) -> Vec<(String, String)> {
             ),
             (
                 DEFAULT_PROTOCOL_MODEL_ID.to_string(),
-                "GPT-5.2 (latest flagship)".to_string(),
+                DEFAULT_PROTOCOL_MODEL_LABEL.to_string(),
             ),
             (
                 "deepseek/deepseek-v3.2".to_string(),
@@ -1782,7 +1786,7 @@ fn setup_provider(workspace_dir: &Path) -> Result<(String, String, String, Optio
         0 => vec![
             (
                 DEFAULT_PROTOCOL_MODEL_ID,
-                "OpenAI GPT-5.2 via ai-protocol (default)",
+                "NVIDIA Nemotron via ai-protocol (free tier default)",
             ),
             (
                 "anthropic/claude-sonnet-4-5-20250929",

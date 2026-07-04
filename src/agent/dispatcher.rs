@@ -65,10 +65,7 @@ mod text_parser {
         text: &str,
     ) -> (String, Vec<ParsedToolCall>) {
         let (remaining, tool_calls) = parser.parse(text);
-        let calls = tool_calls
-            .into_iter()
-            .map(tool_call_to_parsed)
-            .collect();
+        let calls = tool_calls.into_iter().map(tool_call_to_parsed).collect();
         (remaining, calls)
     }
 

@@ -2977,8 +2977,7 @@ struct EmbeddedConfigTemplate {
 }
 
 fn config_skeleton() -> Config {
-    let home =
-        UserDirs::new().map_or_else(|| PathBuf::from("."), |u| u.home_dir().to_path_buf());
+    let home = UserDirs::new().map_or_else(|| PathBuf::from("."), |u| u.home_dir().to_path_buf());
     let velaclaw_dir = home.join(".velaclaw");
 
     Config {
@@ -3027,9 +3026,7 @@ fn config_skeleton() -> Config {
 impl Default for Config {
     fn default() -> Self {
         from_embedded_template().unwrap_or_else(|error| {
-            tracing::warn!(
-                "Failed to load embedded defaults.toml; using Rust fallback: {error}"
-            );
+            tracing::warn!("Failed to load embedded defaults.toml; using Rust fallback: {error}");
             config_skeleton()
         })
     }
@@ -3984,7 +3981,7 @@ mod tests {
     // ── Defaults ─────────────────────────────────────────────
 
     #[test]
-    fn embedded_template_matches_protocol_model_id() {
+    async fn embedded_template_matches_protocol_model_id() {
         let config = from_embedded_template().expect("embedded template should parse");
         assert_eq!(
             config.default_provider.as_deref(),

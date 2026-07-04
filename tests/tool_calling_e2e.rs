@@ -1344,7 +1344,11 @@ mod agent_dispatch {
         let mut agent = build_agent(provider, vec![Box::new(tool)], &tmp);
         let response = agent.turn("check dsml").await.unwrap();
         assert_eq!(response, "done after dsml");
-        assert_eq!(*count.lock().unwrap(), 1, "DSML tool call should execute once");
+        assert_eq!(
+            *count.lock().unwrap(),
+            1,
+            "DSML tool call should execute once"
+        );
     }
 
     /// Malformed native JSON should not block DSML text fallback.

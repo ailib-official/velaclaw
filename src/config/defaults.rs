@@ -6,8 +6,7 @@
 pub const DEFAULT_PROTOCOL_MODEL_ID: &str = "nvidia/nemotron-4-340b-instruct";
 
 /// Human-readable label for [`DEFAULT_PROTOCOL_MODEL_ID`] in onboarding and CLI lists.
-pub const DEFAULT_PROTOCOL_MODEL_LABEL: &str =
-    "NVIDIA Nemotron 340B Instruct (free tier default)";
+pub const DEFAULT_PROTOCOL_MODEL_LABEL: &str = "NVIDIA Nemotron 340B Instruct (free tier default)";
 
 #[cfg(test)]
 mod tests {
@@ -19,9 +18,7 @@ mod tests {
         let template: toml::Value =
             toml::from_str(raw).expect("defaults.toml must parse as valid TOML");
         assert_eq!(
-            template
-                .get("default_provider")
-                .and_then(|v| v.as_str()),
+            template.get("default_provider").and_then(|v| v.as_str()),
             Some(DEFAULT_PROTOCOL_MODEL_ID),
             "default_provider must match DEFAULT_PROTOCOL_MODEL_ID"
         );

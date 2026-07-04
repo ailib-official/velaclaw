@@ -3013,6 +3013,22 @@ impl Default for Config {
     }
 }
 
+fn from_embedded_template() -> Result<Config> {
+    let mut config = Config::default();
+    let raw = include_str!("defaults.toml");
+    let template: toml::Value = toml::from_str(raw).context("Failed to parse embedded defaults")?;
+    if let Some(v) = template.get("default_provider").and_then(|v| v.as_str()) {
+        config.default_provider = Some(v.to_string());
+    }
+    if let Some(v) = template.get("default_model").and_then(|v| v.as_str()) {
+        config.default_model = Some(v.to_string());
+    }
+    if let Some(v) = template.get("default_temperature").and_then(|v| v.as_float()) {
+        config.default_temperature = v;
+    }
+    Ok(config)
+}
+
 fn default_config_and_workspace_dirs() -> Result<(PathBuf, PathBuf)> {
     let config_dir = default_config_dir()?;
     Ok((config_dir.clone(), config_dir.join("workspace")))
@@ -3402,7 +3418,7 @@ impl Config {
             );
             Ok(config)
         } else {
-            let mut config = Config::default();
+            let mut config = from_embedded_template()?;
             config.config_path = config_path.clone();
             config.workspace_dir = workspace_dir;
             config.save().await?;

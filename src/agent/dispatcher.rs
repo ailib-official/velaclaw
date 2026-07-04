@@ -52,7 +52,9 @@ mod text_parser {
         })
     }
 
-    pub fn parser_from_manifest(tool_calling: Option<&serde_json::Value>) -> StandardTextToolParser {
+    pub fn parser_from_manifest(
+        tool_calling: Option<&serde_json::Value>,
+    ) -> StandardTextToolParser {
         tool_calling
             .map(StandardTextToolParser::from_manifest_tool_calling)
             .unwrap_or_else(create_parser)

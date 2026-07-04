@@ -26,8 +26,14 @@ pub trait ToolDispatcher: Send + Sync {
     fn should_send_tool_specs(&self) -> bool;
 }
 
+#[cfg(not(feature = "ai-protocol"))]
 #[derive(Default)]
 pub struct XmlToolDispatcher;
+
+#[cfg(feature = "ai-protocol")]
+pub struct XmlToolDispatcher {
+    parser: ai_lib_rust::types::StandardTextToolParser,
+}
 
 #[cfg(feature = "ai-protocol")]
 mod text_parser {
@@ -44,6 +50,12 @@ mod text_parser {
             prompt_level: PromptLevel::L2,
             ..Default::default()
         })
+    }
+
+    pub fn parser_from_manifest(tool_calling: Option<&serde_json::Value>) -> StandardTextToolParser {
+        tool_calling
+            .map(StandardTextToolParser::from_manifest_tool_calling)
+            .unwrap_or_else(create_parser)
     }
 
     pub fn convert_tool_definitions(tools: &[Box<dyn Tool>]) -> Vec<ToolDefinition> {
@@ -131,23 +143,42 @@ impl XmlToolDispatcher {
     }
 }
 
+/// Build `StandardTextToolParser` from provider manifest `tool_calling` (VL-TTC-002).
+#[cfg(feature = "ai-protocol")]
+pub fn text_tool_parser_from_manifest(
+    tool_calling: Option<&serde_json::Value>,
+) -> ai_lib_rust::types::StandardTextToolParser {
+    text_parser::parser_from_manifest(tool_calling)
+}
+
+#[cfg(feature = "ai-protocol")]
+impl XmlToolDispatcher {
+    pub fn new(parser: ai_lib_rust::types::StandardTextToolParser) -> Self {
+        Self { parser }
+    }
+}
+
+#[cfg(feature = "ai-protocol")]
+impl Default for XmlToolDispatcher {
+    fn default() -> Self {
+        Self::new(text_parser::create_parser())
+    }
+}
+
 #[cfg(feature = "ai-protocol")]
 impl ToolDispatcher for XmlToolDispatcher {
     fn parse_response(&self, response: &ChatResponse) -> (String, Vec<ParsedToolCall>) {
         let text = response.text_or_empty();
-        let parser = text_parser::create_parser();
-        text_parser::parse_with_parser(&parser, text)
+        text_parser::parse_with_parser(&self.parser, text)
     }
 
     fn format_results(&self, results: &[ToolExecutionResult]) -> ConversationMessage {
-        let parser = text_parser::create_parser();
-        let content = text_parser::format_results_with_parser(&parser, results);
+        let content = text_parser::format_results_with_parser(&self.parser, results);
         ConversationMessage::Chat(ChatMessage::user(format!("[Tool results]\n{content}")))
     }
 
     fn prompt_instructions(&self, tools: &[Box<dyn Tool>]) -> String {
-        let parser = text_parser::create_parser();
-        text_parser::prompt_instructions_with_parser(&parser, tools)
+        text_parser::prompt_instructions_with_parser(&self.parser, tools)
     }
 
     fn to_provider_messages(&self, history: &[ConversationMessage]) -> Vec<ChatMessage> {
@@ -354,7 +385,34 @@ impl ToolDispatcher for XmlToolDispatcher {
     }
 }
 
+#[cfg(feature = "ai-protocol")]
+pub struct NativeToolDispatcher {
+    parser: ai_lib_rust::types::StandardTextToolParser,
+}
+
+#[cfg(not(feature = "ai-protocol"))]
 pub struct NativeToolDispatcher;
+
+#[cfg(feature = "ai-protocol")]
+impl NativeToolDispatcher {
+    pub fn new(parser: ai_lib_rust::types::StandardTextToolParser) -> Self {
+        Self { parser }
+    }
+}
+
+#[cfg(feature = "ai-protocol")]
+impl Default for NativeToolDispatcher {
+    fn default() -> Self {
+        Self::new(text_parser::create_parser())
+    }
+}
+
+#[cfg(not(feature = "ai-protocol"))]
+impl Default for NativeToolDispatcher {
+    fn default() -> Self {
+        Self
+    }
+}
 
 impl ToolDispatcher for NativeToolDispatcher {
     fn parse_response(&self, response: &ChatResponse) -> (String, Vec<ParsedToolCall>) {
@@ -382,8 +440,7 @@ impl ToolDispatcher for NativeToolDispatcher {
         if calls.is_empty() {
             #[cfg(feature = "ai-protocol")]
             {
-                let parser = text_parser::create_parser();
-                return text_parser::parse_hybrid_with_parser(&parser, &text, &calls);
+                return text_parser::parse_hybrid_with_parser(&self.parser, &text, &calls);
             }
         }
 
@@ -454,7 +511,7 @@ mod tests {
             ),
             tool_calls: vec![],
         };
-        let dispatcher = XmlToolDispatcher;
+        let dispatcher = XmlToolDispatcher::default();
         let (_, calls) = dispatcher.parse_response(&response);
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].name, "shell");
@@ -470,7 +527,7 @@ mod tests {
                 arguments: "{\"path\":\"a.txt\"}".into(),
             }],
         };
-        let dispatcher = NativeToolDispatcher;
+        let dispatcher = NativeToolDispatcher::default();
         let (_, calls) = dispatcher.parse_response(&response);
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].tool_call_id.as_deref(), Some("tc1"));
@@ -492,7 +549,7 @@ mod tests {
 
     #[test]
     fn xml_format_results_contains_tool_result_tags() {
-        let dispatcher = XmlToolDispatcher;
+        let dispatcher = XmlToolDispatcher::default();
         let msg = dispatcher.format_results(&[ToolExecutionResult {
             name: "shell".into(),
             output: "ok".into(),
@@ -509,7 +566,7 @@ mod tests {
 
     #[test]
     fn native_format_results_keeps_tool_call_id() {
-        let dispatcher = NativeToolDispatcher;
+        let dispatcher = NativeToolDispatcher::default();
         let msg = dispatcher.format_results(&[ToolExecutionResult {
             name: "shell".into(),
             output: "ok".into(),
@@ -570,7 +627,7 @@ mod tests {
             text: Some(text),
             tool_calls: vec![],
         };
-        let dispatcher = NativeToolDispatcher;
+        let dispatcher = NativeToolDispatcher::default();
         let (remaining, calls) = dispatcher.parse_response(&response);
         assert_eq!(remaining, "Checking server.");
         assert_eq!(calls.len(), 1);
@@ -593,7 +650,7 @@ mod tests {
             text: Some(text),
             tool_calls: vec![],
         };
-        let dispatcher = XmlToolDispatcher;
+        let dispatcher = XmlToolDispatcher::default();
         let (_, calls) = dispatcher.parse_response(&response);
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].name, "shell");

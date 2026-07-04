@@ -99,8 +99,7 @@ impl ExecutionHandle {
     pub fn native_tool_calling_is_reliable(&self) -> bool {
         match &self.backend {
             ExecutionBackend::Byok(client) => {
-                let tool_calling = client.manifest.extra.get("tool_calling");
-                if let Some(tc) = tool_calling {
+                if let Some(tc) = client.manifest.extra.get("tool_calling") {
                     if let Some(reliability) = tc
                         .get("native")
                         .and_then(|n| n.get("reliability"))
@@ -114,6 +113,15 @@ impl ExecutionHandle {
             }
             #[cfg(feature = "prism-router")]
             ExecutionBackend::Prism(_) => true,
+        }
+    }
+
+    /// Provider manifest `tool_calling` block (VL-TTC-002 parser wiring).
+    pub fn manifest_tool_calling(&self) -> Option<&serde_json::Value> {
+        match &self.backend {
+            ExecutionBackend::Byok(client) => client.manifest.extra.get("tool_calling"),
+            #[cfg(feature = "prism-router")]
+            ExecutionBackend::Prism(_) => None,
         }
     }
 

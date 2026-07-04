@@ -195,7 +195,7 @@ fn build_agent(provider: Box<dyn Provider>, tools: Vec<Box<dyn Tool>>) -> Agent 
         .tools(tools)
         .memory(make_memory())
         .observer(make_observer())
-        .tool_dispatcher(Box::new(NativeToolDispatcher))
+        .tool_dispatcher(Box::new(NativeToolDispatcher::default()))
         .workspace_dir(std::env::temp_dir())
         .build()
         .unwrap()

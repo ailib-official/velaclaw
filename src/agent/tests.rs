@@ -299,7 +299,7 @@ fn build_agent_with_memory(
         .tools(tools)
         .memory(mem)
         .observer(make_observer())
-        .tool_dispatcher(Box::new(NativeToolDispatcher))
+        .tool_dispatcher(Box::new(NativeToolDispatcher::default()))
         .workspace_dir(std::env::temp_dir())
         .auto_save(auto_save)
         .build()
@@ -316,7 +316,7 @@ fn build_agent_with_config(
         .tools(tools)
         .memory(make_memory())
         .observer(make_observer())
-        .tool_dispatcher(Box::new(NativeToolDispatcher))
+        .tool_dispatcher(Box::new(NativeToolDispatcher::default()))
         .workspace_dir(std::env::temp_dir())
         .config(config)
         .build()
@@ -359,7 +359,7 @@ async fn turn_returns_text_when_no_tools_called() {
     let mut agent = build_agent_with(
         provider,
         vec![Box::new(EchoTool)],
-        Box::new(NativeToolDispatcher),
+        Box::new(NativeToolDispatcher::default()),
     );
 
     let response = agent.turn("hi").await.unwrap();
@@ -387,7 +387,7 @@ async fn turn_executes_single_tool_then_returns() {
     let mut agent = build_agent_with(
         provider,
         vec![Box::new(EchoTool)],
-        Box::new(NativeToolDispatcher),
+        Box::new(NativeToolDispatcher::default()),
     );
 
     let response = agent.turn("run echo").await.unwrap();
@@ -427,7 +427,7 @@ async fn turn_handles_multi_step_tool_chain() {
     let mut agent = build_agent_with(
         provider,
         vec![Box::new(counting_tool)],
-        Box::new(NativeToolDispatcher),
+        Box::new(NativeToolDispatcher::default()),
     );
 
     let response = agent.turn("count 3 times").await.unwrap();
@@ -491,7 +491,7 @@ async fn turn_handles_unknown_tool_gracefully() {
     let mut agent = build_agent_with(
         provider,
         vec![Box::new(EchoTool)],
-        Box::new(NativeToolDispatcher),
+        Box::new(NativeToolDispatcher::default()),
     );
 
     let response = agent.turn("use nonexistent").await.unwrap();
@@ -531,7 +531,7 @@ async fn turn_recovers_from_tool_failure() {
     let mut agent = build_agent_with(
         provider,
         vec![Box::new(FailingTool)],
-        Box::new(NativeToolDispatcher),
+        Box::new(NativeToolDispatcher::default()),
     );
 
     let response = agent.turn("try failing tool").await.unwrap();
@@ -555,7 +555,7 @@ async fn turn_recovers_from_tool_error() {
     let mut agent = build_agent_with(
         provider,
         vec![Box::new(PanickingTool)],
-        Box::new(NativeToolDispatcher),
+        Box::new(NativeToolDispatcher::default()),
     );
 
     let response = agent.turn("try panicking").await.unwrap();
@@ -574,7 +574,7 @@ async fn turn_propagates_provider_error() {
     let mut agent = build_agent_with(
         Box::new(FailingProvider),
         vec![],
-        Box::new(NativeToolDispatcher),
+        Box::new(NativeToolDispatcher::default()),
     );
 
     let result = agent.turn("hello").await;
@@ -693,7 +693,7 @@ async fn xml_dispatcher_parses_and_loops() {
     let mut agent = build_agent_with(
         provider,
         vec![Box::new(EchoTool)],
-        Box::new(XmlToolDispatcher),
+        Box::new(XmlToolDispatcher::default()),
     );
 
     let response = agent.turn("test xml").await.unwrap();
@@ -709,7 +709,7 @@ async fn native_dispatcher_sends_tool_specs() {
     let mut agent = build_agent_with(
         provider,
         vec![Box::new(EchoTool)],
-        Box::new(NativeToolDispatcher),
+        Box::new(NativeToolDispatcher::default()),
     );
 
     let _ = agent.turn("hi").await.unwrap();
@@ -736,7 +736,7 @@ async fn turn_handles_empty_text_response() {
         tool_calls: vec![],
     }]));
 
-    let mut agent = build_agent_with(provider, vec![], Box::new(NativeToolDispatcher));
+    let mut agent = build_agent_with(provider, vec![], Box::new(NativeToolDispatcher::default()));
 
     let response = agent.turn("hi").await.unwrap();
     assert!(response.is_empty());
@@ -749,7 +749,7 @@ async fn turn_handles_none_text_response() {
         tool_calls: vec![],
     }]));
 
-    let mut agent = build_agent_with(provider, vec![], Box::new(NativeToolDispatcher));
+    let mut agent = build_agent_with(provider, vec![], Box::new(NativeToolDispatcher::default()));
 
     // Should not panic — falls back to empty string
     let response = agent.turn("hi").await.unwrap();
@@ -777,7 +777,7 @@ async fn turn_preserves_text_alongside_tool_calls() {
     let mut agent = build_agent_with(
         provider,
         vec![Box::new(EchoTool)],
-        Box::new(NativeToolDispatcher),
+        Box::new(NativeToolDispatcher::default()),
     );
 
     let response = agent.turn("check something").await.unwrap();
@@ -826,7 +826,7 @@ async fn turn_handles_multiple_tools_in_one_response() {
     let mut agent = build_agent_with(
         provider,
         vec![Box::new(counting_tool)],
-        Box::new(NativeToolDispatcher),
+        Box::new(NativeToolDispatcher::default()),
     );
 
     let response = agent.turn("batch").await.unwrap();
@@ -851,7 +851,7 @@ async fn system_prompt_injected_on_first_turn() {
     let mut agent = build_agent_with(
         provider,
         vec![Box::new(EchoTool)],
-        Box::new(NativeToolDispatcher),
+        Box::new(NativeToolDispatcher::default()),
     );
 
     assert!(agent.history().is_empty(), "History should start empty");
@@ -875,7 +875,7 @@ async fn system_prompt_not_duplicated_on_second_turn() {
     let mut agent = build_agent_with(
         provider,
         vec![Box::new(EchoTool)],
-        Box::new(NativeToolDispatcher),
+        Box::new(NativeToolDispatcher::default()),
     );
 
     let _ = agent.turn("hi").await.unwrap();
@@ -907,7 +907,7 @@ async fn history_contains_all_expected_entries_after_tool_loop() {
     let mut agent = build_agent_with(
         provider,
         vec![Box::new(EchoTool)],
-        Box::new(NativeToolDispatcher),
+        Box::new(NativeToolDispatcher::default()),
     );
 
     let _ = agent.turn("test").await.unwrap();
@@ -947,7 +947,7 @@ async fn builder_fails_without_provider() {
         .tools(vec![])
         .memory(make_memory())
         .observer(make_observer())
-        .tool_dispatcher(Box::new(NativeToolDispatcher))
+        .tool_dispatcher(Box::new(NativeToolDispatcher::default()))
         .workspace_dir(std::path::PathBuf::from("/tmp"))
         .build();
 
@@ -966,7 +966,7 @@ async fn multi_turn_maintains_growing_history() {
         text_response("response 3"),
     ]));
 
-    let mut agent = build_agent_with(provider, vec![], Box::new(NativeToolDispatcher));
+    let mut agent = build_agent_with(provider, vec![], Box::new(NativeToolDispatcher::default()));
 
     let r1 = agent.turn("msg 1").await.unwrap();
     let len_after_1 = agent.history().len();
@@ -1278,7 +1278,7 @@ async fn clear_history_resets_conversation() {
         text_response("second"),
     ]));
 
-    let mut agent = build_agent_with(provider, vec![], Box::new(NativeToolDispatcher));
+    let mut agent = build_agent_with(provider, vec![], Box::new(NativeToolDispatcher::default()));
 
     let _ = agent.turn("hi").await.unwrap();
     assert!(!agent.history().is_empty());
@@ -1301,7 +1301,7 @@ async fn clear_history_resets_conversation() {
 #[tokio::test]
 async fn run_single_delegates_to_turn() {
     let provider = Box::new(ScriptedProvider::new(vec![text_response("via run_single")]));
-    let mut agent = build_agent_with(provider, vec![], Box::new(NativeToolDispatcher));
+    let mut agent = build_agent_with(provider, vec![], Box::new(NativeToolDispatcher::default()));
 
     let response = agent.run_single("test").await.unwrap();
     assert!(

@@ -357,10 +357,10 @@ impl Agent {
         };
         #[cfg(not(feature = "ai-protocol"))]
         let tool_dispatcher: Box<dyn ToolDispatcher> = match dispatcher_choice {
-            "native" => Box::new(NativeToolDispatcher),
-            "xml" => Box::new(XmlToolDispatcher),
-            _ if provider.supports_native_tools() => Box::new(NativeToolDispatcher),
-            _ => Box::new(XmlToolDispatcher),
+            "native" => Box::new(NativeToolDispatcher::default()),
+            "xml" => Box::new(XmlToolDispatcher::default()),
+            _ if provider.supports_native_tools() => Box::new(NativeToolDispatcher::default()),
+            _ => Box::new(XmlToolDispatcher::default()),
         };
 
         let available_hints: Vec<String> =
@@ -800,7 +800,7 @@ mod tests {
             .tools(vec![Box::new(MockTool)])
             .memory(mem)
             .observer(observer)
-            .tool_dispatcher(Box::new(XmlToolDispatcher))
+            .tool_dispatcher(Box::new(XmlToolDispatcher::default()))
             .workspace_dir(std::path::PathBuf::from("/tmp"))
             .build()
             .expect("agent builder should succeed with valid config");
@@ -843,7 +843,7 @@ mod tests {
             .tools(vec![Box::new(MockTool)])
             .memory(mem)
             .observer(observer)
-            .tool_dispatcher(Box::new(NativeToolDispatcher))
+            .tool_dispatcher(Box::new(NativeToolDispatcher::default()))
             .workspace_dir(std::path::PathBuf::from("/tmp"))
             .build()
             .expect("agent builder should succeed with valid config");

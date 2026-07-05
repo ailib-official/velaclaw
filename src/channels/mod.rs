@@ -323,14 +323,10 @@ fn normalize_cached_channel_turns(turns: Vec<ChatMessage>) -> Vec<ChatMessage> {
 }
 
 fn supports_runtime_model_switch(channel_name: &str) -> bool {
-    matches!(channel_name, "telegram" | "discord")
+    matches!(channel_name, "telegram" | "discord" | "cli")
 }
 
-fn parse_runtime_command(channel_name: &str, content: &str) -> Option<ChannelRuntimeCommand> {
-    if !supports_runtime_model_switch(channel_name) {
-        return None;
-    }
-
+fn parse_runtime_slash_command(content: &str) -> Option<ChannelRuntimeCommand> {
     let trimmed = content.trim();
     if !trimmed.starts_with('/') {
         return None;
@@ -364,6 +360,54 @@ fn parse_runtime_command(channel_name: &str, content: &str) -> Option<ChannelRun
         }
         _ => None,
     }
+}
+
+fn parse_runtime_command(channel_name: &str, content: &str) -> Option<ChannelRuntimeCommand> {
+    if !supports_runtime_model_switch(channel_name) {
+        return None;
+    }
+    parse_runtime_slash_command(content)
+}
+
+/// Handle `/models` and `/model` in standalone CLI agent mode (no channel context).
+pub(crate) fn handle_cli_runtime_slash_command(
+    input: &str,
+    config: &crate::Config,
+    current_provider: &str,
+    current_model: &str,
+) -> Option<(String, Option<String>)> {
+    let command = parse_runtime_slash_command(input)?;
+    let current = ChannelRouteSelection {
+        provider: current_provider.to_string(),
+        model: current_model.to_string(),
+    };
+
+    let response = match command {
+        ChannelRuntimeCommand::ShowProviders => build_providers_help_response(&current),
+        ChannelRuntimeCommand::SetProvider(raw_provider) => {
+            match resolve_provider_alias(&raw_provider) {
+                Some(provider_name) => format!(
+                    "To switch provider to `{provider_name}`, restart with:\n  \
+                     velaclaw agent --provider {provider_name}\n\n\
+                     Current session: provider `{current_provider}`, model `{current_model}`."
+                ),
+                None => format!(
+                    "Unknown provider `{raw_provider}`. Use `/models` to list valid providers."
+                ),
+            }
+        }
+        ChannelRuntimeCommand::ShowModel => {
+            build_models_help_response(&current, &config.workspace_dir)
+        }
+        ChannelRuntimeCommand::SetModel(model) => {
+            return Some((
+                format!("Model switched to `{model}` for this CLI session."),
+                Some(model),
+            ));
+        }
+    };
+
+    Some((response, None))
 }
 
 fn resolve_provider_alias(name: &str) -> Option<String> {
@@ -1585,6 +1629,7 @@ async fn process_channel_message(
                         None
                     }
                 },
+                None,
             ),
         ) => LlmExecutionResult::Completed(result),
     };

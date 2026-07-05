@@ -1405,19 +1405,22 @@ async fn process_channel_message(
     };
 
     #[cfg(feature = "ai-protocol")]
-    let tool_dispatcher =
-        match get_or_create_tool_dispatcher(ctx.as_ref(), &route.provider, active_provider.as_ref())
-            .await
-        {
-            Ok(dispatcher) => Some(dispatcher),
-            Err(err) => {
-                tracing::warn!(
-                    provider = route.provider.as_str(),
-                    "Failed to build manifest tool dispatcher: {err}"
-                );
-                None
-            }
-        };
+    let tool_dispatcher = match get_or_create_tool_dispatcher(
+        ctx.as_ref(),
+        &route.provider,
+        active_provider.as_ref(),
+    )
+    .await
+    {
+        Ok(dispatcher) => Some(dispatcher),
+        Err(err) => {
+            tracing::warn!(
+                provider = route.provider.as_str(),
+                "Failed to build manifest tool dispatcher: {err}"
+            );
+            None
+        }
+    };
     if ctx.auto_save_memory && msg.content.chars().count() >= AUTOSAVE_MIN_MESSAGE_CHARS {
         let autosave_key = conversation_memory_key(&msg);
         let _ = ctx

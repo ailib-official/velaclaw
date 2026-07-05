@@ -1871,3 +1871,110 @@ mod stress {
         }
     }
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// §11 — Manifest auto dispatcher (VL-TTC-005: from_config + build_tool_dispatcher)
+// ═════════════════════════════════════════════════════════════════════════════
+
+#[cfg(feature = "ai-protocol")]
+mod manifest_auto_dispatcher {
+    use std::path::Path;
+    use velaclaw::agent::dispatcher::build_tool_dispatcher;
+    use velaclaw::config::Config;
+    use velaclaw::execution::ExecutionHandle;
+
+    fn ai_protocol_dir() -> Option<String> {
+        if let Ok(dir) = std::env::var("AI_PROTOCOL_DIR") {
+            if Path::new(&dir).join("v2/providers/deepseek.yaml").exists() {
+                return Some(dir);
+            }
+        }
+        for candidate in ["/home/alex/ai-protocol", r"d:\ai-protocol"] {
+            if Path::new(candidate)
+                .join("v2/providers/deepseek.yaml")
+                .exists()
+            {
+                return Some(candidate.to_string());
+            }
+        }
+        None
+    }
+
+    fn deepseek_config() -> Config {
+        Config {
+            default_provider: Some("deepseek/deepseek-chat".into()),
+            default_model: Some("deepseek-chat".into()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn from_config_auto_dispatcher_prefers_native_for_deepseek() {
+        let Some(protocol_dir) = ai_protocol_dir() else {
+            eprintln!("SKIP: AI_PROTOCOL_DIR not set or deepseek.yaml missing");
+            return;
+        };
+        std::env::set_var("AI_PROTOCOL_DIR", &protocol_dir);
+
+        let config = deepseek_config();
+        assert_eq!(config.agent.tool_dispatcher, "auto");
+
+        let handle = ExecutionHandle::from_config(&config).expect("from_config");
+        let provider = handle.provider_adapter().expect("provider_adapter");
+        let policy = handle.tool_calling_policy();
+
+        let dispatcher = build_tool_dispatcher(
+            config.agent.tool_dispatcher.as_str(),
+            provider.as_ref(),
+            policy,
+        );
+        assert!(
+            velaclaw::agent::dispatcher::ToolDispatcher::should_send_tool_specs(&*dispatcher),
+            "auto + deepseek hybrid should use native dispatcher"
+        );
+    }
+
+    #[test]
+    fn from_config_xml_override_disables_native_specs() {
+        let Some(protocol_dir) = ai_protocol_dir() else {
+            eprintln!("SKIP: AI_PROTOCOL_DIR not set or deepseek.yaml missing");
+            return;
+        };
+        std::env::set_var("AI_PROTOCOL_DIR", &protocol_dir);
+
+        let mut config = deepseek_config();
+        config.agent.tool_dispatcher = "xml".into();
+
+        let handle = ExecutionHandle::from_config(&config).expect("from_config");
+        let provider = handle.provider_adapter().expect("provider_adapter");
+        let policy = handle.tool_calling_policy();
+
+        let dispatcher = build_tool_dispatcher("xml", provider.as_ref(), policy);
+        assert!(
+            !velaclaw::agent::dispatcher::ToolDispatcher::should_send_tool_specs(&*dispatcher),
+            "xml override must force text dispatcher"
+        );
+    }
+
+    #[test]
+    fn from_config_native_override_enables_native_specs() {
+        let Some(protocol_dir) = ai_protocol_dir() else {
+            eprintln!("SKIP: AI_PROTOCOL_DIR not set or deepseek.yaml missing");
+            return;
+        };
+        std::env::set_var("AI_PROTOCOL_DIR", &protocol_dir);
+
+        let mut config = deepseek_config();
+        config.agent.tool_dispatcher = "native".into();
+
+        let handle = ExecutionHandle::from_config(&config).expect("from_config");
+        let provider = handle.provider_adapter().expect("provider_adapter");
+        let policy = handle.tool_calling_policy();
+
+        let dispatcher = build_tool_dispatcher("native", provider.as_ref(), policy);
+        assert!(
+            velaclaw::agent::dispatcher::ToolDispatcher::should_send_tool_specs(&*dispatcher),
+            "native override must send tool specs"
+        );
+    }
+}

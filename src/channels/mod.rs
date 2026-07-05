@@ -1402,23 +1402,6 @@ async fn process_channel_message(
         }
     };
 
-    #[cfg(feature = "ai-protocol")]
-    let tool_dispatcher = match get_or_create_tool_dispatcher(
-        ctx.as_ref(),
-        &route.provider,
-        active_provider.as_ref(),
-    )
-    .await
-    {
-        Ok(dispatcher) => Some(dispatcher),
-        Err(err) => {
-            tracing::warn!(
-                provider = route.provider.as_str(),
-                "Failed to build manifest tool dispatcher: {err}"
-            );
-            None
-        }
-    };
     if ctx.auto_save_memory && msg.content.chars().count() >= AUTOSAVE_MIN_MESSAGE_CHARS {
         let autosave_key = conversation_memory_key(&msg);
         let _ = ctx
@@ -1538,6 +1521,33 @@ async fn process_channel_message(
 
     // Record history length before tool loop so we can extract tool context after.
     let history_len_before_tools = history.len();
+
+    if cancellation_token.is_cancelled() {
+        return;
+    }
+
+    #[cfg(feature = "ai-protocol")]
+    let tool_dispatcher = tokio::select! {
+        () = cancellation_token.cancelled() => return,
+        result = get_or_create_tool_dispatcher(
+            ctx.as_ref(),
+            &route.provider,
+            active_provider.as_ref(),
+        ) => match result {
+            Ok(dispatcher) => Some(dispatcher),
+            Err(err) => {
+                tracing::warn!(
+                    provider = route.provider.as_str(),
+                    "Failed to build manifest tool dispatcher: {err}"
+                );
+                None
+            }
+        },
+    };
+
+    if cancellation_token.is_cancelled() {
+        return;
+    }
 
     enum LlmExecutionResult {
         Completed(Result<Result<String, anyhow::Error>, tokio::time::error::Elapsed>),

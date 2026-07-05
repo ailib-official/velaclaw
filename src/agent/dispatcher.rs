@@ -191,8 +191,7 @@ pub fn build_tool_dispatcher_for_logical_model(
     provider: &dyn crate::providers::Provider,
 ) -> anyhow::Result<Box<dyn ToolDispatcher>> {
     let client = crate::execution::init_ai_client_sync(logical_model_id)?;
-    let policy =
-        ai_lib_rust::ToolCallingPolicy::from_tool_calling(client.manifest.tool_calling());
+    let policy = ai_lib_rust::ToolCallingPolicy::from_tool_calling(client.manifest.tool_calling());
     Ok(build_tool_dispatcher(dispatcher_choice, provider, policy))
 }
 

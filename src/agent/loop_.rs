@@ -1797,8 +1797,7 @@ pub async fn run(
         {
             if let Some(ref dispatcher) = tool_dispatcher {
                 if !dispatcher.should_send_tool_specs() {
-                    system_prompt
-                        .push_str(&dispatcher.prompt_instructions(&tools_registry));
+                    system_prompt.push_str(&dispatcher.prompt_instructions(&tools_registry));
                 }
             } else {
                 system_prompt.push_str(&build_tool_instructions(&tools_registry));

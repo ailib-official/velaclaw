@@ -61,9 +61,9 @@ pub use whatsapp::WhatsAppChannel;
 #[cfg(feature = "whatsapp-web")]
 pub use whatsapp_web::WhatsAppWebChannel;
 
-use crate::agent::loop_::{build_tool_instructions, run_tool_call_loop};
 #[cfg(feature = "ai-protocol")]
 use crate::agent::dispatcher::ToolDispatcher;
+use crate::agent::loop_::{build_tool_instructions, run_tool_call_loop};
 use crate::config::{Config, DEFAULT_PROTOCOL_MODEL_ID};
 use crate::identity;
 use crate::memory::{self, Memory};
@@ -762,9 +762,7 @@ async fn get_or_create_tool_dispatcher(
     .context("tool dispatcher init task failed")??;
 
     let dispatcher = Arc::from(crate::agent::dispatcher::build_tool_dispatcher(
-        &choice,
-        provider,
-        policy,
+        &choice, provider, policy,
     ));
     ctx.tool_dispatcher_cache
         .lock()

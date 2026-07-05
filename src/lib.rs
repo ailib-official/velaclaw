@@ -84,7 +84,7 @@ pub mod tunnel;
 pub mod util;
 
 pub use config::Config;
-pub use config::DEFAULT_PROTOCOL_MODEL_ID;
+pub use config::{DEFAULT_PROTOCOL_MODEL_ID, DEFAULT_PROTOCOL_MODEL_LABEL};
 
 /// Service management subcommands
 #[derive(Subcommand, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -65,10 +65,7 @@ mod text_parser {
         text: &str,
     ) -> (String, Vec<ParsedToolCall>) {
         let (remaining, tool_calls) = parser.parse(text);
-        let calls = tool_calls
-            .into_iter()
-            .map(tool_call_to_parsed)
-            .collect();
+        let calls = tool_calls.into_iter().map(tool_call_to_parsed).collect();
         (remaining, calls)
     }
 
@@ -362,24 +359,26 @@ pub struct NativeToolDispatcher;
 impl ToolDispatcher for NativeToolDispatcher {
     fn parse_response(&self, response: &ChatResponse) -> (String, Vec<ParsedToolCall>) {
         let text = response.text.clone().unwrap_or_default();
-        let calls: Vec<ParsedToolCall> = response
-            .tool_calls
-            .iter()
-            .map(|tc| ParsedToolCall {
-                name: tc.name.clone(),
-                arguments: serde_json::from_str(&tc.arguments).unwrap_or_else(|e| {
+        let mut calls: Vec<ParsedToolCall> = Vec::with_capacity(response.tool_calls.len());
+
+        for tc in &response.tool_calls {
+            match serde_json::from_str::<Value>(&tc.arguments) {
+                Ok(arguments) => calls.push(ParsedToolCall {
+                    name: tc.name.clone(),
+                    arguments,
+                    tool_call_id: Some(tc.id.clone()),
+                }),
+                Err(e) => {
                     tracing::warn!(
                         tool = %tc.name,
                         error = %e,
-                        "Failed to parse native tool call arguments as JSON; defaulting to empty object"
+                        "Failed to parse native tool call arguments as JSON; skipping call"
                     );
-                    Value::Object(serde_json::Map::new())
-                }),
-                tool_call_id: Some(tc.id.clone()),
-            })
-            .collect();
+                }
+            }
+        }
 
-        // Native empty + text markup: delegate to ai-lib-core hybrid parser (ARCH-001).
+        // Native empty (or all invalid) + text markup: delegate to ai-lib hybrid parser (ARCH-001).
         if calls.is_empty() {
             #[cfg(feature = "ai-protocol")]
             {
@@ -525,6 +524,34 @@ mod tests {
             }
             _ => panic!("expected ToolResults variant"),
         }
+    }
+
+    #[test]
+    #[cfg(feature = "ai-protocol")]
+    fn native_dispatcher_falls_back_when_native_json_is_malformed() {
+        let tag = "\u{FF5C}\u{FF5C}DSML\u{FF5C}\u{FF5C}";
+        let text = format!(
+            "Checking server.\n\
+             <{tag}tool_calls>\n\
+             <{tag}invoke name=\"shell\">\n\
+             <{tag}parameter name=\"command\" string=\"true\">echo hi</{tag}parameter>\n\
+             </{tag}invoke>\n\
+             </{tag}tool_calls>"
+        );
+        let response = ChatResponse {
+            text: Some(text),
+            tool_calls: vec![crate::providers::ToolCall {
+                id: "broken".into(),
+                name: "shell".into(),
+                arguments: "not-json".into(),
+            }],
+        };
+        let dispatcher = NativeToolDispatcher;
+        let (remaining, calls) = dispatcher.parse_response(&response);
+        assert_eq!(remaining, "Checking server.");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "shell");
+        assert_eq!(calls[0].arguments["command"], "echo hi");
     }
 
     #[test]

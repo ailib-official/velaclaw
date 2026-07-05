@@ -35,6 +35,7 @@ pub use traits::{
     ToolCall, ToolResultMessage,
 };
 
+use crate::config::DEFAULT_PROTOCOL_MODEL_ID;
 use reliable::ReliableProvider;
 use std::path::PathBuf;
 
@@ -568,8 +569,8 @@ pub struct ProviderInfo {
 pub fn list_providers() -> Vec<ProviderInfo> {
     vec![
         ProviderInfo {
-            name: crate::config::DEFAULT_PROTOCOL_MODEL_ID,
-            display_name: "OpenAI via ai-protocol",
+            name: DEFAULT_PROTOCOL_MODEL_ID,
+            display_name: "NVIDIA Nemotron via ai-protocol (free tier default)",
             aliases: &[],
             local: false,
         },

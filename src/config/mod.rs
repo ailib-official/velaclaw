@@ -1,7 +1,7 @@
 pub mod defaults;
 pub mod schema;
 
-pub use defaults::DEFAULT_PROTOCOL_MODEL_ID;
+pub use defaults::{DEFAULT_PROTOCOL_MODEL_ID, DEFAULT_PROTOCOL_MODEL_LABEL};
 
 #[allow(unused_imports)]
 pub use schema::{

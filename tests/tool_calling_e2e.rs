@@ -1318,6 +1318,75 @@ mod agent_dispatch {
         assert!(!response.is_empty());
     }
 
+    /// DeepSeek-style DSML text tool calls must execute when native tool_calls are empty.
+    #[tokio::test]
+    #[cfg(feature = "ai-protocol")]
+    async fn agent_dispatches_deepseek_dsml_text_tool_calls() {
+        let tmp = TempDir::new().unwrap();
+        let (tool, count) = RecordTool::new("record");
+        let tag = "\u{FF5C}\u{FF5C}DSML\u{FF5C}\u{FF5C}";
+        let dsml = format!(
+            "Running check.\n\
+             <{tag}tool_calls>\n\
+             <{tag}invoke name=\"record\">\n\
+             <{tag}parameter name=\"note\" string=\"true\">via-dsml</{tag}parameter>\n\
+             </{tag}invoke>\n\
+             </{tag}tool_calls>"
+        );
+        let provider = Box::new(MockProvider::new(vec![
+            ChatResponse {
+                text: Some(dsml),
+                tool_calls: vec![],
+            },
+            text_response("done after dsml"),
+        ]));
+
+        let mut agent = build_agent(provider, vec![Box::new(tool)], &tmp);
+        let response = agent.turn("check dsml").await.unwrap();
+        assert_eq!(response, "done after dsml");
+        assert_eq!(
+            *count.lock().unwrap(),
+            1,
+            "DSML tool call should execute once"
+        );
+    }
+
+    /// Malformed native JSON should not block DSML text fallback.
+    #[tokio::test]
+    #[cfg(feature = "ai-protocol")]
+    async fn agent_falls_back_to_dsml_when_native_json_is_malformed() {
+        let tmp = TempDir::new().unwrap();
+        let (tool, count) = RecordTool::new("record");
+        let tag = "\u{FF5C}\u{FF5C}DSML\u{FF5C}\u{FF5C}";
+        let dsml = format!(
+            "<{tag}tool_calls>\n\
+             <{tag}invoke name=\"record\">\n\
+             <{tag}parameter name=\"note\" string=\"true\">fallback</{tag}parameter>\n\
+             </{tag}invoke>\n\
+             </{tag}tool_calls>"
+        );
+        let provider = Box::new(MockProvider::new(vec![
+            ChatResponse {
+                text: Some(dsml),
+                tool_calls: vec![ToolCall {
+                    id: "broken".into(),
+                    name: "record".into(),
+                    arguments: "not-json".into(),
+                }],
+            },
+            text_response("recovered via dsml"),
+        ]));
+
+        let mut agent = build_agent(provider, vec![Box::new(tool)], &tmp);
+        let response = agent.turn("fallback test").await.unwrap();
+        assert_eq!(response, "recovered via dsml");
+        assert_eq!(
+            *count.lock().unwrap(),
+            1,
+            "Malformed native JSON must not prevent DSML execution"
+        );
+    }
+
     /// When a tool panics (returns Err), the agent should catch it and continue.
     #[tokio::test]
     async fn agent_tool_panic_recovery() {

@@ -6,9 +6,21 @@ use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use rust_embed::Embed;
 
+#[cfg(chat_ui_dist)]
 #[derive(Embed)]
 #[folder = "ui-chat/dist/"]
-struct ChatUiAssets;
+struct ChatUiDistAssets;
+
+#[cfg(not(chat_ui_dist))]
+#[derive(Embed)]
+#[folder = "ui-chat/embed-stub/"]
+struct ChatUiStubAssets;
+
+#[cfg(chat_ui_dist)]
+type ChatUiAssets = ChatUiDistAssets;
+
+#[cfg(not(chat_ui_dist))]
+type ChatUiAssets = ChatUiStubAssets;
 
 fn resolve_embed_path(uri_path: &str) -> String {
     let trimmed = uri_path

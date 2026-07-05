@@ -1,50 +1,31 @@
-//! Build script: ensure `ui-chat/dist` exists for rust-embed (VL-UI-005).
-//! 构建脚本：为 rust-embed 准备 `ui-chat/dist`（VL-UI-005）。
+//! Build script: select embedded Web Chat assets folder (VL-UI-005).
+//! 构建脚本：选择内嵌 Web Chat 资源目录（VL-UI-005）。
+//!
+//! Never writes into the source tree — required for `cargo publish` verification.
 
-use std::fs;
 use std::path::Path;
 
-fn copy_recursive(src: &Path, dst: &Path) {
-    if !dst.exists() {
-        let _ = fs::create_dir_all(dst);
-    }
-    let Ok(entries) = fs::read_dir(src) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let target = dst.join(entry.file_name());
-        if path.is_dir() {
-            copy_recursive(&path, &target);
-        } else if fs::copy(&path, &target).is_ok() {
-            // copied
-        }
-    }
-}
-
 fn main() {
-    let dist = Path::new("ui-chat/dist");
-    let stub = Path::new("ui-chat/embed-stub");
-    let index = dist.join("index.html");
+    println!("cargo::rustc-check-cfg=cfg(chat_ui_dist)");
+
+    let dist_index = Path::new("ui-chat/dist/index.html");
+    let stub_index = Path::new("ui-chat/embed-stub/index.html");
 
     println!("cargo:rerun-if-changed=ui-chat/embed-stub");
     println!("cargo:rerun-if-changed=ui-chat/dist");
 
-    if index.exists() {
+    if dist_index.exists() {
+        println!("cargo:rustc-cfg=chat_ui_dist");
         return;
     }
 
-    if stub.join("index.html").exists() {
-        copy_recursive(stub, dist);
-        println!(
-            "cargo:warning=ui-chat/dist missing; using embed-stub. Run npm run build in ui-chat/ for full UI."
+    if !stub_index.exists() {
+        panic!(
+            "ui-chat/embed-stub/index.html missing; run `npm run build` in ui-chat/ or restore embed-stub"
         );
-        return;
     }
 
-    let _ = fs::create_dir_all(dist);
-    let _ = fs::write(
-        &index,
-        "<!doctype html><title>VelaClaw Chat</title><p>Build ui-chat dist</p>",
+    println!(
+        "cargo:warning=ui-chat/dist missing; embedding ui-chat/embed-stub. Run npm run build in ui-chat/ for full UI."
     );
 }

@@ -1054,6 +1054,7 @@ pub(crate) async fn agent_turn(
         max_tool_iterations,
         None,
         None,
+        None,
     )
     .await
 }
@@ -1227,6 +1228,7 @@ pub(crate) async fn run_tool_call_loop(
     max_tool_iterations: usize,
     cancellation_token: Option<CancellationToken>,
     on_delta: Option<tokio::sync::mpsc::Sender<String>>,
+    tool_dispatcher: Option<&dyn crate::agent::dispatcher::ToolDispatcher>,
 ) -> Result<String> {
     let max_iterations = if max_tool_iterations == 0 {
         DEFAULT_MAX_TOOL_ITERATIONS
@@ -1236,7 +1238,9 @@ pub(crate) async fn run_tool_call_loop(
 
     let tool_specs: Vec<crate::tools::ToolSpec> =
         tools_registry.iter().map(|tool| tool.spec()).collect();
-    let use_native_tools = provider.supports_native_tools() && !tool_specs.is_empty();
+    let use_native_tools = tool_dispatcher
+        .map(|d| d.should_send_tool_specs() && !tool_specs.is_empty())
+        .unwrap_or_else(|| provider.supports_native_tools() && !tool_specs.is_empty());
 
     for _iteration in 0..max_iterations {
         if cancellation_token
@@ -1306,38 +1310,62 @@ pub(crate) async fn run_tool_call_loop(
                         error_message: None,
                     });
 
-                    let response_text = resp.text_or_empty().to_string();
-                    // First try native structured tool calls (OpenAI-format).
-                    // Fall back to text-based parsing (XML tags, markdown blocks,
-                    // GLM format) only if the provider returned no native calls —
-                    // this ensures we support both native and prompt-guided models.
-                    let mut calls = parse_structured_tool_calls(&resp.tool_calls);
-                    let mut parsed_text = String::new();
-
-                    if calls.is_empty() {
-                        let (fallback_text, fallback_calls) = parse_tool_calls(&response_text);
-                        if !fallback_text.is_empty() {
-                            parsed_text = fallback_text;
-                        }
-                        calls = fallback_calls;
-                    }
-
-                    // Preserve native tool call IDs in assistant history so role=tool
-                    // follow-up messages can reference the exact call id.
-                    let assistant_history_content = if resp.tool_calls.is_empty() {
-                        response_text.clone()
+                    if let Some(dispatcher) = tool_dispatcher {
+                        let response_text = resp.text_or_empty().to_string();
+                        let (parsed_text, disp_calls) = dispatcher.parse_response(&resp);
+                        let calls = disp_calls
+                            .into_iter()
+                            .map(|c| ParsedToolCall {
+                                name: c.name,
+                                arguments: c.arguments,
+                            })
+                            .collect();
+                        let assistant_history_content = if resp.tool_calls.is_empty() {
+                            response_text.clone()
+                        } else {
+                            build_native_assistant_history(&response_text, &resp.tool_calls)
+                        };
+                        (
+                            response_text,
+                            parsed_text,
+                            calls,
+                            assistant_history_content,
+                            resp.tool_calls,
+                        )
                     } else {
-                        build_native_assistant_history(&response_text, &resp.tool_calls)
-                    };
+                        let response_text = resp.text_or_empty().to_string();
+                        // First try native structured tool calls (OpenAI-format).
+                        // Fall back to text-based parsing (XML tags, markdown blocks,
+                        // GLM format) only if the provider returned no native calls —
+                        // this ensures we support both native and prompt-guided models.
+                        let mut calls = parse_structured_tool_calls(&resp.tool_calls);
+                        let mut parsed_text = String::new();
 
-                    let native_calls = resp.tool_calls;
-                    (
-                        response_text,
-                        parsed_text,
-                        calls,
-                        assistant_history_content,
-                        native_calls,
-                    )
+                        if calls.is_empty() {
+                            let (fallback_text, fallback_calls) = parse_tool_calls(&response_text);
+                            if !fallback_text.is_empty() {
+                                parsed_text = fallback_text;
+                            }
+                            calls = fallback_calls;
+                        }
+
+                        // Preserve native tool call IDs in assistant history so role=tool
+                        // follow-up messages can reference the exact call id.
+                        let assistant_history_content = if resp.tool_calls.is_empty() {
+                            response_text.clone()
+                        } else {
+                            build_native_assistant_history(&response_text, &resp.tool_calls)
+                        };
+
+                        let native_calls = resp.tool_calls;
+                        (
+                            response_text,
+                            parsed_text,
+                            calls,
+                            assistant_history_content,
+                            native_calls,
+                        )
+                    }
                 }
                 Err(e) => {
                     observer.record_event(&ObserverEvent::LlmResponse {
@@ -1808,6 +1836,7 @@ pub async fn run(
             config.agent.max_tool_iterations,
             None,
             None,
+            None,
         )
         .await?;
         final_output = response.clone();
@@ -1925,6 +1954,7 @@ pub async fn run(
                 "cli",
                 &config.multimodal,
                 config.agent.max_tool_iterations,
+                None,
                 None,
                 None,
             )
@@ -2416,6 +2446,7 @@ mod tests {
             3,
             None,
             None,
+            None,
         )
         .await
         .expect_err("provider without vision support should fail");
@@ -2460,6 +2491,7 @@ mod tests {
             3,
             None,
             None,
+            None,
         )
         .await
         .expect_err("oversized payload must fail");
@@ -2496,6 +2528,7 @@ mod tests {
             "cli",
             &crate::config::MultimodalConfig::default(),
             3,
+            None,
             None,
             None,
         )
@@ -2616,6 +2649,7 @@ mod tests {
             "telegram",
             &crate::config::MultimodalConfig::default(),
             4,
+            None,
             None,
             None,
         )

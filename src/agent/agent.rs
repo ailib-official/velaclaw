@@ -1,6 +1,6 @@
-use crate::agent::dispatcher::{
-    NativeToolDispatcher, ParsedToolCall, ToolDispatcher, ToolExecutionResult, XmlToolDispatcher,
-};
+use crate::agent::dispatcher::{ParsedToolCall, ToolDispatcher, ToolExecutionResult};
+#[cfg(not(feature = "ai-protocol"))]
+use crate::agent::dispatcher::{NativeToolDispatcher, XmlToolDispatcher};
 use crate::agent::memory_loader::{DefaultMemoryLoader, MemoryLoader};
 use crate::agent::prompt::{PromptContext, SystemPromptBuilder};
 use crate::approval::{ApprovalHub, ApprovalManager, ApprovalRequest, ApprovalResponse};
@@ -341,18 +341,11 @@ impl Agent {
 
         let dispatcher_choice = config.agent.tool_dispatcher.as_str();
         #[cfg(feature = "ai-protocol")]
-        let policy = execution.tool_calling_policy();
-        #[cfg(feature = "ai-protocol")]
-        let text_parser = policy.parser.clone();
-        #[cfg(feature = "ai-protocol")]
-        let tool_dispatcher: Box<dyn ToolDispatcher> = match dispatcher_choice {
-            "native" => Box::new(NativeToolDispatcher::new(text_parser.clone())),
-            "xml" => Box::new(XmlToolDispatcher::new(text_parser)),
-            _ if provider.supports_native_tools() && policy.prefer_native_dispatcher() => {
-                Box::new(NativeToolDispatcher::new(text_parser.clone()))
-            }
-            _ => Box::new(XmlToolDispatcher::new(text_parser)),
-        };
+        let tool_dispatcher = crate::agent::dispatcher::build_tool_dispatcher(
+            dispatcher_choice,
+            provider.as_ref(),
+            execution.tool_calling_policy(),
+        );
         #[cfg(not(feature = "ai-protocol"))]
         let tool_dispatcher: Box<dyn ToolDispatcher> = match dispatcher_choice {
             "native" => Box::new(NativeToolDispatcher::default()),
@@ -713,6 +706,7 @@ pub async fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent::dispatcher::{NativeToolDispatcher, XmlToolDispatcher};
     use async_trait::async_trait;
     use parking_lot::Mutex;
 

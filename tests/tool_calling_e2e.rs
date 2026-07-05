@@ -1879,7 +1879,7 @@ mod stress {
 #[cfg(feature = "ai-protocol")]
 mod manifest_auto_dispatcher {
     use std::path::Path;
-    use velaclaw::agent::dispatcher::{build_tool_dispatcher, ToolDispatcher};
+    use velaclaw::agent::dispatcher::build_tool_dispatcher;
     use velaclaw::config::Config;
     use velaclaw::execution::ExecutionHandle;
 
@@ -1929,7 +1929,7 @@ mod manifest_auto_dispatcher {
             policy,
         );
         assert!(
-            dispatcher.should_send_tool_specs(),
+            velaclaw::agent::dispatcher::ToolDispatcher::should_send_tool_specs(&*dispatcher),
             "auto + deepseek hybrid should use native dispatcher"
         );
     }
@@ -1951,7 +1951,7 @@ mod manifest_auto_dispatcher {
 
         let dispatcher = build_tool_dispatcher("xml", provider.as_ref(), policy);
         assert!(
-            !dispatcher.should_send_tool_specs(),
+            !ToolDispatcher::should_send_tool_specs(&*dispatcher),
             "xml override must force text dispatcher"
         );
     }
@@ -1973,7 +1973,7 @@ mod manifest_auto_dispatcher {
 
         let dispatcher = build_tool_dispatcher("native", provider.as_ref(), policy);
         assert!(
-            dispatcher.should_send_tool_specs(),
+            ToolDispatcher::should_send_tool_specs(&*dispatcher),
             "native override must send tool specs"
         );
     }

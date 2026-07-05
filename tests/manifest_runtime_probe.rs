@@ -1,7 +1,7 @@
 //! Runtime assertions: manifest tool_calling wiring and dispatcher selection for DeepSeek.
 #![cfg(feature = "ai-protocol")]
 
-use ai_lib_rust::NativeStrategy;
+use ai_lib_rust::{NativeStrategy, TextToolParser};
 use std::path::Path;
 use velaclaw::agent::dispatcher::{build_tool_dispatcher, ToolDispatcher};
 use velaclaw::config::Config;
@@ -73,16 +73,21 @@ fn deepseek_runtime_manifest_and_dispatcher_probe() {
         "which opencode 2>/dev/null || echo \"not found\""
     );
 
-    let dispatcher = build_tool_dispatcher(
-        config.agent.tool_dispatcher.as_str(),
-        provider.as_ref(),
-        policy.clone(),
-    );
     assert!(
-        dispatcher.should_send_tool_specs(),
+        build_tool_dispatcher(
+            config.agent.tool_dispatcher.as_str(),
+            provider.as_ref(),
+            policy.clone(),
+        )
+        .should_send_tool_specs(),
         "auto mode should select NativeToolDispatcher for deepseek hybrid"
     );
 
+    let dispatcher = build_tool_dispatcher(
+        config.agent.tool_dispatcher.as_str(),
+        provider.as_ref(),
+        policy,
+    );
     let response = velaclaw::providers::ChatResponse {
         text: Some(sample.to_string()),
         tool_calls: vec![],

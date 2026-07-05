@@ -605,7 +605,7 @@ mod tests {
                 arguments: "not-json".into(),
             }],
         };
-        let dispatcher = NativeToolDispatcher;
+        let dispatcher = NativeToolDispatcher::default();
         let (remaining, calls) = dispatcher.parse_response(&response);
         assert_eq!(remaining, "Checking server.");
         assert_eq!(calls.len(), 1);

@@ -715,13 +715,13 @@ async fn native_dispatcher_sends_tool_specs() {
     let _ = agent.turn("hi").await.unwrap();
 
     // NativeToolDispatcher.should_send_tool_specs() returns true
-    let dispatcher = NativeToolDispatcher;
+    let dispatcher = NativeToolDispatcher::default();
     assert!(dispatcher.should_send_tool_specs());
 }
 
 #[tokio::test]
 async fn xml_dispatcher_does_not_send_tool_specs() {
-    let dispatcher = XmlToolDispatcher;
+    let dispatcher = XmlToolDispatcher::default();
     assert!(!dispatcher.should_send_tool_specs());
 }
 
@@ -998,7 +998,7 @@ async fn multi_turn_maintains_growing_history() {
 
 #[tokio::test]
 async fn native_dispatcher_handles_stringified_arguments() {
-    let dispatcher = NativeToolDispatcher;
+    let dispatcher = NativeToolDispatcher::default();
     let response = ChatResponse {
         text: Some(String::new()),
         tool_calls: vec![ToolCall {
@@ -1033,7 +1033,7 @@ fn xml_dispatcher_handles_nested_json() {
         tool_calls: vec![],
     };
 
-    let dispatcher = XmlToolDispatcher;
+    let dispatcher = XmlToolDispatcher::default();
     let (_, calls) = dispatcher.parse_response(&response);
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].name, "file_write");
@@ -1050,7 +1050,7 @@ fn xml_dispatcher_handles_empty_tool_call_tag() {
         tool_calls: vec![],
     };
 
-    let dispatcher = XmlToolDispatcher;
+    let dispatcher = XmlToolDispatcher::default();
     let (text, calls) = dispatcher.parse_response(&response);
     assert!(calls.is_empty());
     assert!(text.contains("Some text"));
@@ -1063,7 +1063,7 @@ fn xml_dispatcher_handles_unclosed_tool_call() {
         tool_calls: vec![],
     };
 
-    let dispatcher = XmlToolDispatcher;
+    let dispatcher = XmlToolDispatcher::default();
     let (text, calls) = dispatcher.parse_response(&response);
     // Should not panic — just treat as text
     assert!(calls.is_empty());
@@ -1131,7 +1131,7 @@ fn conversation_message_serialization_roundtrip() {
 
 #[test]
 fn xml_format_results_includes_status_and_output() {
-    let dispatcher = XmlToolDispatcher;
+    let dispatcher = XmlToolDispatcher::default();
     let results = vec![
         ToolExecutionResult {
             name: "shell".into(),
@@ -1161,7 +1161,7 @@ fn xml_format_results_includes_status_and_output() {
 
 #[test]
 fn native_format_results_maps_tool_call_ids() {
-    let dispatcher = NativeToolDispatcher;
+    let dispatcher = NativeToolDispatcher::default();
     let results = vec![
         ToolExecutionResult {
             name: "a".into(),
@@ -1196,7 +1196,7 @@ fn native_format_results_maps_tool_call_ids() {
 
 #[test]
 fn xml_dispatcher_converts_history_to_provider_messages() {
-    let dispatcher = XmlToolDispatcher;
+    let dispatcher = XmlToolDispatcher::default();
     let history = vec![
         ConversationMessage::Chat(ChatMessage::system("sys")),
         ConversationMessage::Chat(ChatMessage::user("hi")),
@@ -1225,7 +1225,7 @@ fn xml_dispatcher_converts_history_to_provider_messages() {
 
 #[test]
 fn native_dispatcher_converts_tool_results_to_tool_messages() {
-    let dispatcher = NativeToolDispatcher;
+    let dispatcher = NativeToolDispatcher::default();
     let history = vec![ConversationMessage::ToolResults(vec![
         ToolResultMessage {
             tool_call_id: "tc1".into(),
@@ -1250,7 +1250,7 @@ fn native_dispatcher_converts_tool_results_to_tool_messages() {
 #[test]
 fn xml_dispatcher_generates_tool_instructions() {
     let tools: Vec<Box<dyn Tool>> = vec![Box::new(EchoTool)];
-    let dispatcher = XmlToolDispatcher;
+    let dispatcher = XmlToolDispatcher::default();
     let instructions = dispatcher.prompt_instructions(&tools);
 
     assert!(instructions.contains("## Tool Use Protocol"));
@@ -1262,7 +1262,7 @@ fn xml_dispatcher_generates_tool_instructions() {
 #[test]
 fn native_dispatcher_returns_empty_instructions() {
     let tools: Vec<Box<dyn Tool>> = vec![Box::new(EchoTool)];
-    let dispatcher = NativeToolDispatcher;
+    let dispatcher = NativeToolDispatcher::default();
     let instructions = dispatcher.prompt_instructions(&tools);
     assert!(instructions.is_empty());
 }

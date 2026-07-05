@@ -794,7 +794,7 @@ async fn get_or_create_tool_dispatcher(
         return Ok(existing);
     }
 
-    let choice = ctx.tool_dispatcher_choice.as_str().to_string();
+    let config_choice = ctx.tool_dispatcher_choice.as_str().to_string();
     let model = logical_model_id.to_string();
     let policy = tokio::task::spawn_blocking(move || {
         let client = crate::execution::init_ai_client_sync(&model)?;
@@ -805,9 +805,8 @@ async fn get_or_create_tool_dispatcher(
     .await
     .context("tool dispatcher init task failed")??;
 
-    let dispatcher = Arc::from(crate::agent::dispatcher::build_tool_dispatcher(
-        &choice, provider, policy,
-    ));
+    let effective = crate::config::EffectivePolicy::resolve(config_choice.as_str(), None, policy);
+    let dispatcher = Arc::from(effective.build_dispatcher(provider));
     ctx.tool_dispatcher_cache
         .lock()
         .unwrap_or_else(|e| e.into_inner())

@@ -1,4 +1,6 @@
 pub mod defaults;
+#[cfg(feature = "ai-protocol")]
+pub mod effective_policy;
 pub mod schema;
 
 pub use defaults::{DEFAULT_PROTOCOL_MODEL_ID, DEFAULT_PROTOCOL_MODEL_LABEL};
@@ -20,6 +22,9 @@ pub use schema::{
     SlackConfig, StorageConfig, StorageProviderConfig, StorageProviderSection, StreamMode,
     TelegramConfig, TunnelConfig, WebSearchConfig, WebhookConfig,
 };
+
+#[cfg(feature = "ai-protocol")]
+pub use effective_policy::EffectivePolicy;
 
 #[cfg(test)]
 mod tests {

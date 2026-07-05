@@ -1673,11 +1673,12 @@ pub async fn run(
         let (exec_handle, provider) =
             crate::execution::bootstrap_routed_provider(&config, &provider_runtime_options)?;
         let model_name = exec_handle.logical_model_id().to_string();
-        let tool_dispatcher = Some(crate::agent::dispatcher::build_tool_dispatcher(
+        let effective = crate::config::EffectivePolicy::resolve(
             config.agent.tool_dispatcher.as_str(),
-            provider.as_ref(),
+            None,
             exec_handle.tool_calling_policy(),
-        ));
+        );
+        let tool_dispatcher = Some(effective.build_dispatcher(provider.as_ref()));
         (provider, model_name, tool_dispatcher)
     };
 

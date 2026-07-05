@@ -139,7 +139,7 @@ fn make_observer() -> Arc<dyn Observer> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn bench_xml_parsing(c: &mut Criterion) {
-    let dispatcher = XmlToolDispatcher;
+    let dispatcher = XmlToolDispatcher::default();
 
     let single_tool = ChatResponse {
         text: Some(
@@ -183,7 +183,7 @@ Let me know if you need more."#
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn bench_native_parsing(c: &mut Criterion) {
-    let dispatcher = NativeToolDispatcher;
+    let dispatcher = NativeToolDispatcher::default();
 
     let response = ChatResponse {
         text: Some("I'll help you.".into()),
@@ -277,7 +277,7 @@ fn bench_agent_turn(c: &mut Criterion) {
                     .tools(vec![Box::new(NoopTool) as Box<dyn Tool>])
                     .memory(make_memory())
                     .observer(make_observer())
-                    .tool_dispatcher(Box::new(NativeToolDispatcher))
+                    .tool_dispatcher(Box::new(NativeToolDispatcher::default()))
                     .workspace_dir(std::path::PathBuf::from("/tmp"))
                     .build()
                     .unwrap();
@@ -295,7 +295,7 @@ fn bench_agent_turn(c: &mut Criterion) {
                     .tools(vec![Box::new(NoopTool) as Box<dyn Tool>])
                     .memory(make_memory())
                     .observer(make_observer())
-                    .tool_dispatcher(Box::new(NativeToolDispatcher))
+                    .tool_dispatcher(Box::new(NativeToolDispatcher::default()))
                     .workspace_dir(std::path::PathBuf::from("/tmp"))
                     .build()
                     .unwrap();

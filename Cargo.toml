@@ -153,7 +153,7 @@ opentelemetry-otlp = { version = "0.31", default-features = false, features = ["
 tokio-serial = { version = "5", default-features = false, optional = true }
 
 # ai-lib-rust — Protocol-driven AI API client (git dep — VL-TTC-001 needs StandardTextToolParser from commit 1865f55)
-ai-lib-rust = { git = "https://github.com/ailib-official/ai-lib-rust", rev = "416b0c0", optional = true }
+ai-lib-rust = { git = "https://github.com/ailib-official/ai-lib-rust", rev = "345df48", optional = true }
 async-stream = { version = "0.3", optional = true }
 serde_yaml = { version = "0.9", optional = true }
 

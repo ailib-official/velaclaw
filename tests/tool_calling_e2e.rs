@@ -190,7 +190,7 @@ fn build_agent(provider: Box<dyn Provider>, tools: Vec<Box<dyn Tool>>, tmp: &Tem
         .tools(tools)
         .memory(make_memory(tmp))
         .observer(make_observer())
-        .tool_dispatcher(Box::new(NativeToolDispatcher))
+        .tool_dispatcher(Box::new(NativeToolDispatcher::default()))
         .workspace_dir(tmp.path().to_path_buf())
         .build()
         .unwrap()

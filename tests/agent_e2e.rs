@@ -251,7 +251,7 @@ fn build_agent(provider: Box<dyn Provider>, tools: Vec<Box<dyn Tool>>) -> Agent 
         .tools(tools)
         .memory(make_memory())
         .observer(make_observer())
-        .tool_dispatcher(Box::new(NativeToolDispatcher))
+        .tool_dispatcher(Box::new(NativeToolDispatcher::default()))
         .workspace_dir(std::env::temp_dir())
         .build()
         .unwrap()
@@ -263,7 +263,7 @@ fn build_agent_xml(provider: Box<dyn Provider>, tools: Vec<Box<dyn Tool>>) -> Ag
         .tools(tools)
         .memory(make_memory())
         .observer(make_observer())
-        .tool_dispatcher(Box::new(XmlToolDispatcher))
+        .tool_dispatcher(Box::new(XmlToolDispatcher::default()))
         .workspace_dir(std::env::temp_dir())
         .build()
         .unwrap()
@@ -279,7 +279,7 @@ fn build_recording_agent(
         .tools(tools)
         .memory(make_memory())
         .observer(make_observer())
-        .tool_dispatcher(Box::new(NativeToolDispatcher))
+        .tool_dispatcher(Box::new(NativeToolDispatcher::default()))
         .workspace_dir(std::env::temp_dir());
 
     if let Some(loader) = memory_loader {

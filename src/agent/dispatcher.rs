@@ -153,6 +153,48 @@ pub fn text_tool_parser_from_manifest(
     text_parser::parser_from_manifest(tool_calling)
 }
 
+/// Build a manifest-aware tool dispatcher (VL-TTC-003/004).
+pub fn build_tool_dispatcher(
+    dispatcher_choice: &str,
+    provider: &dyn crate::providers::Provider,
+    policy: ai_lib_rust::ToolCallingPolicy,
+) -> Box<dyn ToolDispatcher> {
+    #[cfg(feature = "ai-protocol")]
+    {
+        let text_parser = policy.parser.clone();
+        match dispatcher_choice {
+            "native" => Box::new(NativeToolDispatcher::new(text_parser.clone())),
+            "xml" => Box::new(XmlToolDispatcher::new(text_parser)),
+            _ if provider.supports_native_tools() && policy.prefer_native_dispatcher() => {
+                Box::new(NativeToolDispatcher::new(text_parser.clone()))
+            }
+            _ => Box::new(XmlToolDispatcher::new(text_parser)),
+        }
+    }
+    #[cfg(not(feature = "ai-protocol"))]
+    {
+        let _ = policy;
+        match dispatcher_choice {
+            "native" => Box::new(NativeToolDispatcher::default()),
+            "xml" => Box::new(XmlToolDispatcher::default()),
+            _ if provider.supports_native_tools() => Box::new(NativeToolDispatcher::default()),
+            _ => Box::new(XmlToolDispatcher::default()),
+        }
+    }
+}
+
+/// Resolve manifest `tool_calling` for a logical model and build dispatcher (channels/delegate).
+#[cfg(feature = "ai-protocol")]
+pub fn build_tool_dispatcher_for_logical_model(
+    dispatcher_choice: &str,
+    logical_model_id: &str,
+    provider: &dyn crate::providers::Provider,
+) -> anyhow::Result<Box<dyn ToolDispatcher>> {
+    let client = crate::execution::init_ai_client_sync(logical_model_id)?;
+    let policy = ai_lib_rust::ToolCallingPolicy::from_tool_calling(client.manifest.tool_calling());
+    Ok(build_tool_dispatcher(dispatcher_choice, provider, policy))
+}
+
 #[cfg(feature = "ai-protocol")]
 impl XmlToolDispatcher {
     pub fn new(parser: ai_lib_rust::types::StandardTextToolParser) -> Self {

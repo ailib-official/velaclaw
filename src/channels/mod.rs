@@ -61,6 +61,8 @@ pub use whatsapp::WhatsAppChannel;
 #[cfg(feature = "whatsapp-web")]
 pub use whatsapp_web::WhatsAppWebChannel;
 
+#[cfg(feature = "ai-protocol")]
+use crate::agent::dispatcher::ToolDispatcher;
 use crate::agent::loop_::{build_tool_instructions, run_tool_call_loop};
 use crate::config::{Config, DEFAULT_PROTOCOL_MODEL_ID};
 use crate::identity;
@@ -116,6 +118,8 @@ const CHANNEL_HISTORY_COMPACT_KEEP_MESSAGES: usize = 12;
 const CHANNEL_HISTORY_COMPACT_CONTENT_CHARS: usize = 600;
 
 type ProviderCacheMap = Arc<Mutex<HashMap<String, Arc<dyn Provider>>>>;
+#[cfg(feature = "ai-protocol")]
+type ToolDispatcherCacheMap = Arc<Mutex<HashMap<String, Arc<dyn ToolDispatcher>>>>;
 type RouteSelectionMap = Arc<Mutex<HashMap<String, ChannelRouteSelection>>>;
 
 fn effective_channel_message_timeout_secs(configured: u64) -> u64 {
@@ -213,6 +217,10 @@ struct ChannelRuntimeContext {
     message_timeout_secs: u64,
     interrupt_on_new_message: bool,
     multimodal: crate::config::MultimodalConfig,
+    #[cfg(feature = "ai-protocol")]
+    tool_dispatcher_choice: Arc<String>,
+    #[cfg(feature = "ai-protocol")]
+    tool_dispatcher_cache: ToolDispatcherCacheMap,
 }
 
 #[derive(Clone)]
@@ -315,14 +323,10 @@ fn normalize_cached_channel_turns(turns: Vec<ChatMessage>) -> Vec<ChatMessage> {
 }
 
 fn supports_runtime_model_switch(channel_name: &str) -> bool {
-    matches!(channel_name, "telegram" | "discord")
+    matches!(channel_name, "telegram" | "discord" | "cli")
 }
 
-fn parse_runtime_command(channel_name: &str, content: &str) -> Option<ChannelRuntimeCommand> {
-    if !supports_runtime_model_switch(channel_name) {
-        return None;
-    }
-
+fn parse_runtime_slash_command(content: &str) -> Option<ChannelRuntimeCommand> {
     let trimmed = content.trim();
     if !trimmed.starts_with('/') {
         return None;
@@ -356,6 +360,54 @@ fn parse_runtime_command(channel_name: &str, content: &str) -> Option<ChannelRun
         }
         _ => None,
     }
+}
+
+fn parse_runtime_command(channel_name: &str, content: &str) -> Option<ChannelRuntimeCommand> {
+    if !supports_runtime_model_switch(channel_name) {
+        return None;
+    }
+    parse_runtime_slash_command(content)
+}
+
+/// Handle `/models` and `/model` in standalone CLI agent mode (no channel context).
+pub(crate) fn handle_cli_runtime_slash_command(
+    input: &str,
+    config: &crate::Config,
+    current_provider: &str,
+    current_model: &str,
+) -> Option<(String, Option<String>)> {
+    let command = parse_runtime_slash_command(input)?;
+    let current = ChannelRouteSelection {
+        provider: current_provider.to_string(),
+        model: current_model.to_string(),
+    };
+
+    let response = match command {
+        ChannelRuntimeCommand::ShowProviders => build_providers_help_response(&current),
+        ChannelRuntimeCommand::SetProvider(raw_provider) => {
+            match resolve_provider_alias(&raw_provider) {
+                Some(provider_name) => format!(
+                    "To switch provider to `{provider_name}`, restart with:\n  \
+                     velaclaw agent --provider {provider_name}\n\n\
+                     Current session: provider `{current_provider}`, model `{current_model}`."
+                ),
+                None => format!(
+                    "Unknown provider `{raw_provider}`. Use `/models` to list valid providers."
+                ),
+            }
+        }
+        ChannelRuntimeCommand::ShowModel => {
+            build_models_help_response(&current, &config.workspace_dir)
+        }
+        ChannelRuntimeCommand::SetModel(model) => {
+            return Some((
+                format!("Model switched to `{model}` for this CLI session."),
+                Some(model),
+            ));
+        }
+    };
+
+    Some((response, None))
 }
 
 fn resolve_provider_alias(name: &str) -> Option<String> {
@@ -724,6 +776,43 @@ async fn get_or_create_provider(
         .entry(provider_name.to_string())
         .or_insert_with(|| Arc::clone(&provider));
     Ok(Arc::clone(cached))
+}
+
+#[cfg(feature = "ai-protocol")]
+async fn get_or_create_tool_dispatcher(
+    ctx: &ChannelRuntimeContext,
+    logical_model_id: &str,
+    provider: &dyn Provider,
+) -> anyhow::Result<Arc<dyn ToolDispatcher>> {
+    if let Some(existing) = ctx
+        .tool_dispatcher_cache
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(logical_model_id)
+        .cloned()
+    {
+        return Ok(existing);
+    }
+
+    let choice = ctx.tool_dispatcher_choice.as_str().to_string();
+    let model = logical_model_id.to_string();
+    let policy = tokio::task::spawn_blocking(move || {
+        let client = crate::execution::init_ai_client_sync(&model)?;
+        Ok::<_, anyhow::Error>(ai_lib_rust::ToolCallingPolicy::from_tool_calling(
+            client.manifest.tool_calling(),
+        ))
+    })
+    .await
+    .context("tool dispatcher init task failed")??;
+
+    let dispatcher = Arc::from(crate::agent::dispatcher::build_tool_dispatcher(
+        &choice, provider, policy,
+    ));
+    ctx.tool_dispatcher_cache
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(logical_model_id.to_string(), Arc::clone(&dispatcher));
+    Ok(dispatcher)
 }
 
 async fn create_resilient_provider_nonblocking(
@@ -1356,6 +1445,7 @@ async fn process_channel_message(
             return;
         }
     };
+
     if ctx.auto_save_memory && msg.content.chars().count() >= AUTOSAVE_MIN_MESSAGE_CHARS {
         let autosave_key = conversation_memory_key(&msg);
         let _ = ctx
@@ -1476,6 +1566,37 @@ async fn process_channel_message(
     // Record history length before tool loop so we can extract tool context after.
     let history_len_before_tools = history.len();
 
+    if cancellation_token.is_cancelled() {
+        return;
+    }
+
+    #[cfg(feature = "ai-protocol")]
+    let tool_dispatcher = if ctx.tools_registry.is_empty() {
+        None
+    } else {
+        tokio::select! {
+            () = cancellation_token.cancelled() => return,
+            result = get_or_create_tool_dispatcher(
+                ctx.as_ref(),
+                &route.provider,
+                active_provider.as_ref(),
+            ) => match result {
+                Ok(dispatcher) => Some(dispatcher),
+                Err(err) => {
+                    tracing::warn!(
+                        provider = route.provider.as_str(),
+                        "Failed to build manifest tool dispatcher: {err}"
+                    );
+                    None
+                }
+            },
+        }
+    };
+
+    if cancellation_token.is_cancelled() {
+        return;
+    }
+
     enum LlmExecutionResult {
         Completed(Result<Result<String, anyhow::Error>, tokio::time::error::Elapsed>),
         Cancelled,
@@ -1502,6 +1623,17 @@ async fn process_channel_message(
                 ctx.max_tool_iterations,
                 Some(cancellation_token.clone()),
                 delta_tx,
+                {
+                    #[cfg(feature = "ai-protocol")]
+                    {
+                        tool_dispatcher.as_deref()
+                    }
+                    #[cfg(not(feature = "ai-protocol"))]
+                    {
+                        None
+                    }
+                },
+                None,
             ),
         ) => LlmExecutionResult::Completed(result),
     };
@@ -1533,6 +1665,21 @@ async fn process_channel_message(
             }
         }
         LlmExecutionResult::Completed(Ok(Ok(response))) => {
+            if cancellation_token.is_cancelled() {
+                tracing::info!(
+                    channel = %msg.channel,
+                    sender = %msg.sender,
+                    "Discarding completed channel reply due to newer message interrupt"
+                );
+                if let (Some(channel), Some(draft_id)) =
+                    (target_channel.as_ref(), draft_message_id.as_deref())
+                {
+                    if let Err(err) = channel.cancel_draft(&msg.reply_target, draft_id).await {
+                        tracing::debug!("Failed to cancel draft on {}: {err}", channel.name());
+                    }
+                }
+                return;
+            }
             let sanitized_response =
                 sanitize_channel_response(&response, ctx.tools_registry.as_ref());
             let delivered_response = if sanitized_response.is_empty() && !response.trim().is_empty()
@@ -2679,7 +2826,27 @@ pub async fn start_channels(config: Config) -> Result<()> {
         config.skills.prompt_injection_mode,
     );
     if !native_tools {
-        system_prompt.push_str(&build_tool_instructions(tools_registry.as_ref()));
+        #[cfg(feature = "ai-protocol")]
+        {
+            if let Ok(dispatcher) =
+                crate::agent::dispatcher::build_tool_dispatcher_for_logical_model(
+                    config.agent.tool_dispatcher.as_str(),
+                    &provider_name,
+                    provider.as_ref(),
+                )
+            {
+                if !dispatcher.should_send_tool_specs() {
+                    system_prompt
+                        .push_str(&dispatcher.prompt_instructions(tools_registry.as_ref()));
+                }
+            } else {
+                system_prompt.push_str(&build_tool_instructions(tools_registry.as_ref()));
+            }
+        }
+        #[cfg(not(feature = "ai-protocol"))]
+        {
+            system_prompt.push_str(&build_tool_instructions(tools_registry.as_ref()));
+        }
     }
 
     if !skills.is_empty() {
@@ -2976,6 +3143,10 @@ pub async fn start_channels(config: Config) -> Result<()> {
         message_timeout_secs,
         interrupt_on_new_message,
         multimodal: config.multimodal.clone(),
+        #[cfg(feature = "ai-protocol")]
+        tool_dispatcher_choice: Arc::new(config.agent.tool_dispatcher.clone()),
+        #[cfg(feature = "ai-protocol")]
+        tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
     });
 
     run_message_dispatch_loop(rx, runtime_ctx, max_in_flight_messages).await;
@@ -3151,6 +3322,10 @@ mod tests {
             provider_runtime_options: providers::ProviderRuntimeOptions::default(),
             workspace_dir: Arc::new(std::env::temp_dir()),
             message_timeout_secs: CHANNEL_MESSAGE_TIMEOUT_SECS,
+            #[cfg(feature = "ai-protocol")]
+            tool_dispatcher_choice: Arc::new("auto".to_string()),
+            #[cfg(feature = "ai-protocol")]
+            tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
         };
 
         assert!(compact_sender_history(&ctx, &sender));
@@ -3598,6 +3773,10 @@ BTC is currently around $65,000 based on latest tool output."#
             message_timeout_secs: CHANNEL_MESSAGE_TIMEOUT_SECS,
             interrupt_on_new_message: false,
             multimodal: crate::config::MultimodalConfig::default(),
+            #[cfg(feature = "ai-protocol")]
+            tool_dispatcher_choice: Arc::new("auto".to_string()),
+            #[cfg(feature = "ai-protocol")]
+            tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
         });
 
         process_channel_message(
@@ -3655,6 +3834,10 @@ BTC is currently around $65,000 based on latest tool output."#
             message_timeout_secs: CHANNEL_MESSAGE_TIMEOUT_SECS,
             interrupt_on_new_message: false,
             multimodal: crate::config::MultimodalConfig::default(),
+            #[cfg(feature = "ai-protocol")]
+            tool_dispatcher_choice: Arc::new("auto".to_string()),
+            #[cfg(feature = "ai-protocol")]
+            tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
         });
 
         process_channel_message(
@@ -3712,6 +3895,10 @@ BTC is currently around $65,000 based on latest tool output."#
             message_timeout_secs: CHANNEL_MESSAGE_TIMEOUT_SECS,
             interrupt_on_new_message: false,
             multimodal: crate::config::MultimodalConfig::default(),
+            #[cfg(feature = "ai-protocol")]
+            tool_dispatcher_choice: Arc::new("auto".to_string()),
+            #[cfg(feature = "ai-protocol")]
+            tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
         });
 
         process_channel_message(
@@ -3778,6 +3965,10 @@ BTC is currently around $65,000 based on latest tool output."#
             message_timeout_secs: CHANNEL_MESSAGE_TIMEOUT_SECS,
             interrupt_on_new_message: false,
             multimodal: crate::config::MultimodalConfig::default(),
+            #[cfg(feature = "ai-protocol")]
+            tool_dispatcher_choice: Arc::new("auto".to_string()),
+            #[cfg(feature = "ai-protocol")]
+            tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
         });
 
         process_channel_message(
@@ -3867,6 +4058,10 @@ BTC is currently around $65,000 based on latest tool output."#
             message_timeout_secs: CHANNEL_MESSAGE_TIMEOUT_SECS,
             interrupt_on_new_message: false,
             multimodal: crate::config::MultimodalConfig::default(),
+            #[cfg(feature = "ai-protocol")]
+            tool_dispatcher_choice: Arc::new("auto".to_string()),
+            #[cfg(feature = "ai-protocol")]
+            tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
         });
 
         process_channel_message(
@@ -3936,6 +4131,10 @@ BTC is currently around $65,000 based on latest tool output."#
             message_timeout_secs: CHANNEL_MESSAGE_TIMEOUT_SECS,
             interrupt_on_new_message: false,
             multimodal: crate::config::MultimodalConfig::default(),
+            #[cfg(feature = "ai-protocol")]
+            tool_dispatcher_choice: Arc::new("auto".to_string()),
+            #[cfg(feature = "ai-protocol")]
+            tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
         });
 
         process_channel_message(
@@ -4020,6 +4219,10 @@ BTC is currently around $65,000 based on latest tool output."#
             message_timeout_secs: CHANNEL_MESSAGE_TIMEOUT_SECS,
             interrupt_on_new_message: false,
             multimodal: crate::config::MultimodalConfig::default(),
+            #[cfg(feature = "ai-protocol")]
+            tool_dispatcher_choice: Arc::new("auto".to_string()),
+            #[cfg(feature = "ai-protocol")]
+            tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
         });
 
         process_channel_message(
@@ -4089,6 +4292,10 @@ BTC is currently around $65,000 based on latest tool output."#
             message_timeout_secs: CHANNEL_MESSAGE_TIMEOUT_SECS,
             interrupt_on_new_message: false,
             multimodal: crate::config::MultimodalConfig::default(),
+            #[cfg(feature = "ai-protocol")]
+            tool_dispatcher_choice: Arc::new("auto".to_string()),
+            #[cfg(feature = "ai-protocol")]
+            tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
         });
 
         process_channel_message(
@@ -4147,6 +4354,10 @@ BTC is currently around $65,000 based on latest tool output."#
             message_timeout_secs: CHANNEL_MESSAGE_TIMEOUT_SECS,
             interrupt_on_new_message: false,
             multimodal: crate::config::MultimodalConfig::default(),
+            #[cfg(feature = "ai-protocol")]
+            tool_dispatcher_choice: Arc::new("auto".to_string()),
+            #[cfg(feature = "ai-protocol")]
+            tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
         });
 
         process_channel_message(
@@ -4316,6 +4527,10 @@ BTC is currently around $65,000 based on latest tool output."#
             message_timeout_secs: CHANNEL_MESSAGE_TIMEOUT_SECS,
             interrupt_on_new_message: false,
             multimodal: crate::config::MultimodalConfig::default(),
+            #[cfg(feature = "ai-protocol")]
+            tool_dispatcher_choice: Arc::new("auto".to_string()),
+            #[cfg(feature = "ai-protocol")]
+            tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
         });
 
         let (tx, rx) = tokio::sync::mpsc::channel::<traits::ChannelMessage>(4);
@@ -4394,6 +4609,10 @@ BTC is currently around $65,000 based on latest tool output."#
             message_timeout_secs: CHANNEL_MESSAGE_TIMEOUT_SECS,
             interrupt_on_new_message: true,
             multimodal: crate::config::MultimodalConfig::default(),
+            #[cfg(feature = "ai-protocol")]
+            tool_dispatcher_choice: Arc::new("auto".to_string()),
+            #[cfg(feature = "ai-protocol")]
+            tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
         });
 
         let (tx, rx) = tokio::sync::mpsc::channel::<traits::ChannelMessage>(8);
@@ -4484,6 +4703,10 @@ BTC is currently around $65,000 based on latest tool output."#
             message_timeout_secs: CHANNEL_MESSAGE_TIMEOUT_SECS,
             interrupt_on_new_message: true,
             multimodal: crate::config::MultimodalConfig::default(),
+            #[cfg(feature = "ai-protocol")]
+            tool_dispatcher_choice: Arc::new("auto".to_string()),
+            #[cfg(feature = "ai-protocol")]
+            tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
         });
 
         let (tx, rx) = tokio::sync::mpsc::channel::<traits::ChannelMessage>(8);
@@ -4556,6 +4779,10 @@ BTC is currently around $65,000 based on latest tool output."#
             message_timeout_secs: CHANNEL_MESSAGE_TIMEOUT_SECS,
             interrupt_on_new_message: false,
             multimodal: crate::config::MultimodalConfig::default(),
+            #[cfg(feature = "ai-protocol")]
+            tool_dispatcher_choice: Arc::new("auto".to_string()),
+            #[cfg(feature = "ai-protocol")]
+            tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
         });
 
         process_channel_message(
@@ -5065,6 +5292,10 @@ BTC is currently around $65,000 based on latest tool output."#
             message_timeout_secs: CHANNEL_MESSAGE_TIMEOUT_SECS,
             interrupt_on_new_message: false,
             multimodal: crate::config::MultimodalConfig::default(),
+            #[cfg(feature = "ai-protocol")]
+            tool_dispatcher_choice: Arc::new("auto".to_string()),
+            #[cfg(feature = "ai-protocol")]
+            tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
         });
 
         process_channel_message(
@@ -5148,6 +5379,10 @@ BTC is currently around $65,000 based on latest tool output."#
             message_timeout_secs: CHANNEL_MESSAGE_TIMEOUT_SECS,
             interrupt_on_new_message: false,
             multimodal: crate::config::MultimodalConfig::default(),
+            #[cfg(feature = "ai-protocol")]
+            tool_dispatcher_choice: Arc::new("auto".to_string()),
+            #[cfg(feature = "ai-protocol")]
+            tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
         });
 
         process_channel_message(
@@ -5231,6 +5466,10 @@ BTC is currently around $65,000 based on latest tool output."#
             message_timeout_secs: CHANNEL_MESSAGE_TIMEOUT_SECS,
             interrupt_on_new_message: false,
             multimodal: crate::config::MultimodalConfig::default(),
+            #[cfg(feature = "ai-protocol")]
+            tool_dispatcher_choice: Arc::new("auto".to_string()),
+            #[cfg(feature = "ai-protocol")]
+            tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
         });
 
         process_channel_message(

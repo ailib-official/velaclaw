@@ -15,7 +15,7 @@ use crate::util::truncate_with_ellipsis;
 use anyhow::Result;
 use regex::{Regex, RegexSet};
 use std::fmt::Write;
-use std::io::Write as _;
+use std::io::{BufRead, Write as _};
 use std::sync::{Arc, LazyLock};
 use std::time::Instant;
 use tokio_util::sync::CancellationToken;
@@ -1054,8 +1054,51 @@ pub(crate) async fn agent_turn(
         max_tool_iterations,
         None,
         None,
+        None,
+        None,
     )
     .await
+}
+
+/// Map common DSML / model parameter aliases to tool schema keys.
+fn normalize_tool_arguments(tool_name: &str, mut args: serde_json::Value) -> serde_json::Value {
+    let Some(obj) = args.as_object_mut() else {
+        return args;
+    };
+    match tool_name {
+        "file_read" | "file_write" if !obj.contains_key("path") => {
+            if let Some(path) = obj.remove("file_path") {
+                obj.insert("path".to_string(), path);
+            }
+        }
+        "shell" if !obj.contains_key("command") => {
+            if let Some(cmd) = obj.remove("cmd") {
+                obj.insert("command".to_string(), cmd);
+            }
+        }
+        _ => {}
+    }
+    args
+}
+
+/// CLI prompt when security policy requires explicit shell approval.
+fn prompt_shell_security_approval(command: &str) -> bool {
+    eprintln!();
+    eprintln!("🔒 Security policy requires approval for shell command:");
+    eprintln!("   {command}");
+    eprint!("   Approve this command? [Y/n/a=always for shell this session]: ");
+    let _ = std::io::stderr().flush();
+
+    let stdin = std::io::stdin();
+    let mut line = String::new();
+    if stdin.lock().read_line(&mut line).is_err() {
+        return false;
+    }
+
+    matches!(
+        line.trim().to_ascii_lowercase().as_str(),
+        "y" | "yes" | "" | "a" | "always"
+    )
 }
 
 async fn execute_one_tool(
@@ -1065,6 +1108,7 @@ async fn execute_one_tool(
     observer: &dyn Observer,
     cancellation_token: Option<&CancellationToken>,
 ) -> Result<String> {
+    let call_arguments = normalize_tool_arguments(call_name, call_arguments);
     let Some(tool) = find_tool(tools_registry, call_name) else {
         return Ok(format!("Unknown tool: {call_name}"));
     };
@@ -1155,12 +1199,40 @@ async fn execute_tools_sequential(
     tools_registry: &[Box<dyn Tool>],
     observer: &dyn Observer,
     approval: Option<&ApprovalManager>,
+    security: Option<&SecurityPolicy>,
     channel_name: &str,
     cancellation_token: Option<&CancellationToken>,
 ) -> Result<Vec<String>> {
     let mut individual_results: Vec<String> = Vec::with_capacity(tool_calls.len());
 
     for call in tool_calls {
+        let mut args = normalize_tool_arguments(&call.name, call.arguments.clone());
+
+        if channel_name == "cli" {
+            if let Some(sec) = security {
+                if call.name == "shell" {
+                    if let Some(cmd) = args.get("command").and_then(|v| v.as_str()) {
+                        let approved = args
+                            .get("approved")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+                        if let Err(reason) = sec.validate_command_execution(cmd, approved) {
+                            if reason.contains("requires explicit approval") {
+                                if prompt_shell_security_approval(cmd) {
+                                    if let Some(obj) = args.as_object_mut() {
+                                        obj.insert("approved".to_string(), serde_json::json!(true));
+                                    }
+                                } else {
+                                    individual_results.push("Denied by user.".to_string());
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         if let Some(mgr) = approval {
             if mgr.needs_approval(&call.name) {
                 let request = ApprovalRequest {
@@ -1185,7 +1257,7 @@ async fn execute_tools_sequential(
 
         let result = execute_one_tool(
             &call.name,
-            call.arguments.clone(),
+            args,
             tools_registry,
             observer,
             cancellation_token,
@@ -1227,6 +1299,8 @@ pub(crate) async fn run_tool_call_loop(
     max_tool_iterations: usize,
     cancellation_token: Option<CancellationToken>,
     on_delta: Option<tokio::sync::mpsc::Sender<String>>,
+    tool_dispatcher: Option<&dyn crate::agent::dispatcher::ToolDispatcher>,
+    security: Option<&SecurityPolicy>,
 ) -> Result<String> {
     let max_iterations = if max_tool_iterations == 0 {
         DEFAULT_MAX_TOOL_ITERATIONS
@@ -1236,7 +1310,9 @@ pub(crate) async fn run_tool_call_loop(
 
     let tool_specs: Vec<crate::tools::ToolSpec> =
         tools_registry.iter().map(|tool| tool.spec()).collect();
-    let use_native_tools = provider.supports_native_tools() && !tool_specs.is_empty();
+    let use_native_tools = tool_dispatcher
+        .map(|d| d.should_send_tool_specs() && !tool_specs.is_empty())
+        .unwrap_or_else(|| provider.supports_native_tools() && !tool_specs.is_empty());
 
     for _iteration in 0..max_iterations {
         if cancellation_token
@@ -1306,38 +1382,62 @@ pub(crate) async fn run_tool_call_loop(
                         error_message: None,
                     });
 
-                    let response_text = resp.text_or_empty().to_string();
-                    // First try native structured tool calls (OpenAI-format).
-                    // Fall back to text-based parsing (XML tags, markdown blocks,
-                    // GLM format) only if the provider returned no native calls —
-                    // this ensures we support both native and prompt-guided models.
-                    let mut calls = parse_structured_tool_calls(&resp.tool_calls);
-                    let mut parsed_text = String::new();
-
-                    if calls.is_empty() {
-                        let (fallback_text, fallback_calls) = parse_tool_calls(&response_text);
-                        if !fallback_text.is_empty() {
-                            parsed_text = fallback_text;
-                        }
-                        calls = fallback_calls;
-                    }
-
-                    // Preserve native tool call IDs in assistant history so role=tool
-                    // follow-up messages can reference the exact call id.
-                    let assistant_history_content = if resp.tool_calls.is_empty() {
-                        response_text.clone()
+                    if let Some(dispatcher) = tool_dispatcher {
+                        let response_text = resp.text_or_empty().to_string();
+                        let (parsed_text, disp_calls) = dispatcher.parse_response(&resp);
+                        let calls = disp_calls
+                            .into_iter()
+                            .map(|c| ParsedToolCall {
+                                name: c.name,
+                                arguments: c.arguments,
+                            })
+                            .collect();
+                        let assistant_history_content = if resp.tool_calls.is_empty() {
+                            response_text.clone()
+                        } else {
+                            build_native_assistant_history(&response_text, &resp.tool_calls)
+                        };
+                        (
+                            response_text,
+                            parsed_text,
+                            calls,
+                            assistant_history_content,
+                            resp.tool_calls,
+                        )
                     } else {
-                        build_native_assistant_history(&response_text, &resp.tool_calls)
-                    };
+                        let response_text = resp.text_or_empty().to_string();
+                        // First try native structured tool calls (OpenAI-format).
+                        // Fall back to text-based parsing (XML tags, markdown blocks,
+                        // GLM format) only if the provider returned no native calls —
+                        // this ensures we support both native and prompt-guided models.
+                        let mut calls = parse_structured_tool_calls(&resp.tool_calls);
+                        let mut parsed_text = String::new();
 
-                    let native_calls = resp.tool_calls;
-                    (
-                        response_text,
-                        parsed_text,
-                        calls,
-                        assistant_history_content,
-                        native_calls,
-                    )
+                        if calls.is_empty() {
+                            let (fallback_text, fallback_calls) = parse_tool_calls(&response_text);
+                            if !fallback_text.is_empty() {
+                                parsed_text = fallback_text;
+                            }
+                            calls = fallback_calls;
+                        }
+
+                        // Preserve native tool call IDs in assistant history so role=tool
+                        // follow-up messages can reference the exact call id.
+                        let assistant_history_content = if resp.tool_calls.is_empty() {
+                            response_text.clone()
+                        } else {
+                            build_native_assistant_history(&response_text, &resp.tool_calls)
+                        };
+
+                        let native_calls = resp.tool_calls;
+                        (
+                            response_text,
+                            parsed_text,
+                            calls,
+                            assistant_history_content,
+                            native_calls,
+                        )
+                    }
                 }
                 Err(e) => {
                     observer.record_event(&ObserverEvent::LlmResponse {
@@ -1414,6 +1514,7 @@ pub(crate) async fn run_tool_call_loop(
                 tools_registry,
                 observer,
                 approval,
+                security,
                 channel_name,
                 cancellation_token.as_ref(),
             )
@@ -1564,15 +1665,28 @@ pub async fn run(
     };
 
     #[cfg(feature = "ai-protocol")]
-    let (provider, model_name) = {
+    let (provider, model_name, tool_dispatcher): (
+        Box<dyn Provider>,
+        String,
+        Option<Box<dyn crate::agent::dispatcher::ToolDispatcher>>,
+    ) = {
         let (exec_handle, provider) =
             crate::execution::bootstrap_routed_provider(&config, &provider_runtime_options)?;
         let model_name = exec_handle.logical_model_id().to_string();
-        (provider, model_name)
+        let tool_dispatcher = Some(crate::agent::dispatcher::build_tool_dispatcher(
+            config.agent.tool_dispatcher.as_str(),
+            provider.as_ref(),
+            exec_handle.tool_calling_policy(),
+        ));
+        (provider, model_name, tool_dispatcher)
     };
 
     #[cfg(not(feature = "ai-protocol"))]
-    let (provider, model_name) = {
+    let (provider, model_name, tool_dispatcher): (
+        Box<dyn Provider>,
+        String,
+        Option<Box<dyn crate::agent::dispatcher::ToolDispatcher>>,
+    ) = {
         let provider_name = provider_override
             .as_deref()
             .or(config.default_provider.as_deref())
@@ -1592,10 +1706,9 @@ pub async fn run(
             &provider_runtime_options,
             None,
         )?;
-        (provider, model_name)
+        (provider, model_name, None)
     };
 
-    let provider: Box<dyn Provider> = provider;
     let provider_name = model_name
         .split_once('/')
         .map_or(model_name.as_str(), |(provider, _)| provider);
@@ -1753,8 +1866,23 @@ pub async fn run(
 
     // Append structured tool-use instructions with schemas (only for non-native providers)
     if !native_tools {
-        system_prompt.push_str(&build_tool_instructions(&tools_registry));
+        #[cfg(feature = "ai-protocol")]
+        {
+            if let Some(ref dispatcher) = tool_dispatcher {
+                if !dispatcher.should_send_tool_specs() {
+                    system_prompt.push_str(&dispatcher.prompt_instructions(&tools_registry));
+                }
+            } else {
+                system_prompt.push_str(&build_tool_instructions(&tools_registry));
+            }
+        }
+        #[cfg(not(feature = "ai-protocol"))]
+        {
+            system_prompt.push_str(&build_tool_instructions(&tools_registry));
+        }
     }
+
+    let tool_dispatcher_ref = tool_dispatcher.as_deref();
 
     // ── Approval manager (supervised mode) ───────────────────────
     let approval_manager = ApprovalManager::from_config(&config.autonomy);
@@ -1808,6 +1936,8 @@ pub async fn run(
             config.agent.max_tool_iterations,
             None,
             None,
+            tool_dispatcher_ref,
+            Some(security.as_ref()),
         )
         .await?;
         final_output = response.clone();
@@ -1820,6 +1950,8 @@ pub async fn run(
 
         // Persistent conversation history across turns
         let mut history = vec![ChatMessage::system(&system_prompt)];
+        let mut session_model = model_name.clone();
+        let session_provider = provider_name.to_string();
 
         loop {
             print!("> ");
@@ -1844,6 +1976,8 @@ pub async fn run(
                 "/help" => {
                     println!("Available commands:");
                     println!("  /help        Show this help message");
+                    println!("  /models      List providers (or `/models <provider>`)");
+                    println!("  /model       Show/set model for this session");
                     println!("  /clear /new  Clear conversation history");
                     println!("  /quit /exit  Exit interactive mode\n");
                     continue;
@@ -1887,6 +2021,19 @@ pub async fn run(
                 _ => {}
             }
 
+            if let Some((response, new_model)) = crate::channels::handle_cli_runtime_slash_command(
+                &user_input,
+                &config,
+                &session_provider,
+                &session_model,
+            ) {
+                println!("{response}\n");
+                if let Some(model) = new_model {
+                    session_model = model;
+                }
+                continue;
+            }
+
             // Auto-save conversation turns (skip short/trivial messages)
             if config.memory.auto_save && user_input.chars().count() >= AUTOSAVE_MIN_MESSAGE_CHARS {
                 let user_key = autosave_memory_key("user_msg");
@@ -1918,7 +2065,7 @@ pub async fn run(
                 &tools_registry,
                 observer.as_ref(),
                 provider_name,
-                &model_name,
+                &session_model,
                 temperature,
                 false,
                 Some(&approval_manager),
@@ -1927,6 +2074,8 @@ pub async fn run(
                 config.agent.max_tool_iterations,
                 None,
                 None,
+                tool_dispatcher_ref,
+                Some(security.as_ref()),
             )
             .await
             {
@@ -2416,6 +2565,8 @@ mod tests {
             3,
             None,
             None,
+            None,
+            None,
         )
         .await
         .expect_err("provider without vision support should fail");
@@ -2460,6 +2611,8 @@ mod tests {
             3,
             None,
             None,
+            None,
+            None,
         )
         .await
         .expect_err("oversized payload must fail");
@@ -2496,6 +2649,8 @@ mod tests {
             "cli",
             &crate::config::MultimodalConfig::default(),
             3,
+            None,
+            None,
             None,
             None,
         )
@@ -2616,6 +2771,8 @@ mod tests {
             "telegram",
             &crate::config::MultimodalConfig::default(),
             4,
+            None,
+            None,
             None,
             None,
         )

@@ -279,6 +279,9 @@ Notes:
 
 Notes:
 
+- **Recommended default for new installs**: keep `level = "supervised"` and `workspace_only = true`. Use `full` only when operators accept broader shell/filesystem scope.
+- **Two approval layers**: `[autonomy]` enforces path/command guardrails (`allowed_commands`, `forbidden_paths`, `workspace_only`); tool-level `ApprovalManager` gates medium/high-risk operations when `level = "supervised"`. A command can fail on guardrails even when `level = "full"`.
+- **Shell allowlist**: commands not listed in `allowed_commands` are rejected before execution; CLI sessions cannot override the allowlist interactively—add the executable name to config instead.
 - `level = "full"` skips medium-risk approval gating for shell execution, while still enforcing configured guardrails.
 - Shell separator/operator parsing is quote-aware. Characters like `;` inside quoted arguments are treated as literals, not command separators.
 - Unquoted shell chaining/operators are still enforced by policy checks (`;`, `|`, `&&`, `||`, background chaining, and redirects).

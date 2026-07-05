@@ -1661,6 +1661,21 @@ async fn process_channel_message(
             }
         }
         LlmExecutionResult::Completed(Ok(Ok(response))) => {
+            if cancellation_token.is_cancelled() {
+                tracing::info!(
+                    channel = %msg.channel,
+                    sender = %msg.sender,
+                    "Discarding completed channel reply due to newer message interrupt"
+                );
+                if let (Some(channel), Some(draft_id)) =
+                    (target_channel.as_ref(), draft_message_id.as_deref())
+                {
+                    if let Err(err) = channel.cancel_draft(&msg.reply_target, draft_id).await {
+                        tracing::debug!("Failed to cancel draft on {}: {err}", channel.name());
+                    }
+                }
+                return;
+            }
             let sanitized_response =
                 sanitize_channel_response(&response, ctx.tools_registry.as_ref());
             let delivered_response = if sanitized_response.is_empty() && !response.trim().is_empty()

@@ -3,7 +3,7 @@
 
 use ai_lib_rust::{NativeStrategy, TextToolParser};
 use std::path::Path;
-use velaclaw::agent::dispatcher::{build_tool_dispatcher, ToolDispatcher};
+use velaclaw::agent::dispatcher::{build_tool_dispatcher, ToolDispatcher as _};
 use velaclaw::config::Config;
 use velaclaw::execution::ExecutionHandle;
 

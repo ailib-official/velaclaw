@@ -1875,13 +1875,24 @@ async fn run_message_dispatch_loop(
                 };
 
                 if let Some(previous) = previous {
-                    tracing::info!(
-                        channel = %msg.channel,
-                        sender = %msg.sender,
-                        "Interrupting previous in-flight request for sender"
-                    );
-                    previous.cancellation.cancel();
-                    previous.completion.wait().await;
+                    if previous.task_id > task_id {
+                        tracing::info!(
+                            channel = %msg.channel,
+                            sender = %msg.sender,
+                            "Skipping stale in-flight request superseded by newer message"
+                        );
+                        completion.mark_done();
+                        return;
+                    }
+                    if previous.task_id < task_id {
+                        tracing::info!(
+                            channel = %msg.channel,
+                            sender = %msg.sender,
+                            "Interrupting previous in-flight request for sender"
+                        );
+                        previous.cancellation.cancel();
+                        previous.completion.wait().await;
+                    }
                 }
             }
 
@@ -4585,6 +4596,17 @@ BTC is currently around $65,000 based on latest tool output."#
             calls: std::sync::Mutex::new(Vec::new()),
         });
 
+        #[cfg(feature = "ai-protocol")]
+        let tool_dispatcher_cache = {
+            let mut cache = HashMap::new();
+            cache.insert(
+                "test-provider".to_string(),
+                Arc::from(crate::agent::dispatcher::XmlToolDispatcher::default())
+                    as Arc<dyn ToolDispatcher>,
+            );
+            Arc::new(Mutex::new(cache))
+        };
+
         let runtime_ctx = Arc::new(ChannelRuntimeContext {
             channels_by_name: Arc::new(channels_by_name),
             provider: provider_impl.clone(),
@@ -4612,7 +4634,7 @@ BTC is currently around $65,000 based on latest tool output."#
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_choice: Arc::new("auto".to_string()),
             #[cfg(feature = "ai-protocol")]
-            tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
+            tool_dispatcher_cache,
         });
 
         let (tx, rx) = tokio::sync::mpsc::channel::<traits::ChannelMessage>(8);

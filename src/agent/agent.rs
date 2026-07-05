@@ -341,16 +341,14 @@ impl Agent {
 
         let dispatcher_choice = config.agent.tool_dispatcher.as_str();
         #[cfg(feature = "ai-protocol")]
-        let text_parser = crate::agent::dispatcher::text_tool_parser_from_manifest(
-            execution.manifest_tool_calling(),
-        );
+        let policy = execution.tool_calling_policy();
+        #[cfg(feature = "ai-protocol")]
+        let text_parser = policy.parser.clone();
         #[cfg(feature = "ai-protocol")]
         let tool_dispatcher: Box<dyn ToolDispatcher> = match dispatcher_choice {
             "native" => Box::new(NativeToolDispatcher::new(text_parser.clone())),
             "xml" => Box::new(XmlToolDispatcher::new(text_parser)),
-            _ if provider.supports_native_tools()
-                && execution.native_tool_calling_is_reliable() =>
-            {
+            _ if provider.supports_native_tools() && policy.prefer_native_dispatcher() => {
                 Box::new(NativeToolDispatcher::new(text_parser.clone()))
             }
             _ => Box::new(XmlToolDispatcher::new(text_parser)),

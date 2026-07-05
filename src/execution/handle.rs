@@ -95,31 +95,29 @@ impl ExecutionHandle {
     }
 
     /// Whether native tool calling is fully reliable for the current provider/model
-    /// (VL-TTC-001: dispatcher selection based on manifest tool_calling.native.reliability).
+    /// (VL-TTC-001: `native.reliability == full` from manifest `tool_calling`).
     pub fn native_tool_calling_is_reliable(&self) -> bool {
+        matches!(
+            self.tool_calling_policy().native_strategy,
+            ai_lib_rust::NativeStrategy::Full
+        )
+    }
+
+    /// Manifest-driven tool calling policy (parser + native strategy).
+    pub fn tool_calling_policy(&self) -> ai_lib_rust::ToolCallingPolicy {
         match &self.backend {
             ExecutionBackend::Byok(client) => {
-                if let Some(tc) = client.manifest.extra.get("tool_calling") {
-                    if let Some(reliability) = tc
-                        .get("native")
-                        .and_then(|n| n.get("reliability"))
-                        .and_then(|v| v.as_str())
-                    {
-                        return reliability == "full";
-                    }
-                }
-                !self.logical_model_id.starts_with("deepseek")
-                    && !self.logical_model_id.starts_with("ollama")
+                ai_lib_rust::ToolCallingPolicy::from_tool_calling(client.manifest.tool_calling())
             }
             #[cfg(feature = "prism-router")]
-            ExecutionBackend::Prism(_) => true,
+            ExecutionBackend::Prism(_) => ai_lib_rust::ToolCallingPolicy::from_tool_calling(None),
         }
     }
 
-    /// Provider manifest `tool_calling` block (VL-TTC-002 parser wiring).
+    /// Provider manifest `tool_calling` block (VL-TTC-002/003 parser wiring).
     pub fn manifest_tool_calling(&self) -> Option<&serde_json::Value> {
         match &self.backend {
-            ExecutionBackend::Byok(client) => client.manifest.extra.get("tool_calling"),
+            ExecutionBackend::Byok(client) => client.manifest.tool_calling(),
             #[cfg(feature = "prism-router")]
             ExecutionBackend::Prism(_) => None,
         }

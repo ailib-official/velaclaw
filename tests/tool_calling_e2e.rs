@@ -1951,7 +1951,7 @@ mod manifest_auto_dispatcher {
 
         let dispatcher = build_tool_dispatcher("xml", provider.as_ref(), policy);
         assert!(
-            !ToolDispatcher::should_send_tool_specs(&*dispatcher),
+            !velaclaw::agent::dispatcher::ToolDispatcher::should_send_tool_specs(&*dispatcher),
             "xml override must force text dispatcher"
         );
     }
@@ -1973,7 +1973,7 @@ mod manifest_auto_dispatcher {
 
         let dispatcher = build_tool_dispatcher("native", provider.as_ref(), policy);
         assert!(
-            ToolDispatcher::should_send_tool_specs(&*dispatcher),
+            velaclaw::agent::dispatcher::ToolDispatcher::should_send_tool_specs(&*dispatcher),
             "native override must send tool specs"
         );
     }

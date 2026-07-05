@@ -31,10 +31,11 @@ fn deepseek_runtime_manifest_and_dispatcher_probe() {
     };
     std::env::set_var("AI_PROTOCOL_DIR", &protocol_dir);
 
-    let mut config = Config::default();
-    config.default_provider = Some("deepseek/deepseek-chat".into());
-    config.default_model = Some("deepseek-chat".into());
-    config.agent.tool_dispatcher = "auto".into();
+    let config = Config {
+        default_provider: Some("deepseek/deepseek-chat".into()),
+        default_model: Some("deepseek-chat".into()),
+        ..Default::default()
+    };
 
     let handle = ExecutionHandle::from_config(&config).expect("ExecutionHandle::from_config");
     let manifest_tc = handle.manifest_tool_calling();

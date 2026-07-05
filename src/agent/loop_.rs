@@ -2025,14 +2025,12 @@ pub async fn run(
                 _ => {}
             }
 
-            if let Some((response, new_model)) =
-                crate::channels::handle_cli_runtime_slash_command(
-                    &user_input,
-                    &config,
-                    &session_provider,
-                    &session_model,
-                )
-            {
+            if let Some((response, new_model)) = crate::channels::handle_cli_runtime_slash_command(
+                &user_input,
+                &config,
+                &session_provider,
+                &session_model,
+            ) {
                 println!("{response}\n");
                 if let Some(model) = new_model {
                     session_model = model;

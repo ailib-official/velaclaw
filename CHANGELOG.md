@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-07-05
+
+### Added
+
+- **TTC runtime chain (VL-TTC-003, #91)**: manifest `tool_calling` → `ToolCallingPolicy` → `ToolDispatcher` wired through `Agent::turn` and CLI `ExecutionHandle`.
+- **Unified tool loop (VL-TTC-004, #92)**: channels, delegate, and `velaclaw agent` CLI share `build_tool_dispatcher()` / manifest-aware `ToolDispatcher`; CLI handles `/models` and `/model` slash commands locally.
+- **DSML parameter aliases**: map common model variants (`file_path` → `path`, `cmd` → `command`) before tool execution.
+- **CLI shell approval prompt**: interactive `approved=true` when security policy requires explicit consent in terminal sessions.
+
+### Fixed
+
+- **Telegram interrupt race**: newer in-flight task wins when message dispatch interrupts an active request under `ai-protocol`.
+- **DeepSeek DSML**: multi-block DSML stripping via ai-lib-rust 1.0.1 dependency.
+
+### Dependencies
+
+- Bumped `ai-lib-rust` git pin to **1.0.1** (`4794d3c`).
+
 ### Changed
 
 - **Breaking / ZS-ML-015:** removed the `legacy-providers` Cargo feature and built-in HTTP provider factory. Use `provider/model` ids backed by ai-protocol manifests; `custom:` / `anthropic-custom:` URL syntaxes now return migration errors.

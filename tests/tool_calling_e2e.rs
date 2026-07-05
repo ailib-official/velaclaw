@@ -1879,7 +1879,7 @@ mod stress {
 #[cfg(feature = "ai-protocol")]
 mod manifest_auto_dispatcher {
     use std::path::Path;
-    use velaclaw::agent::dispatcher::{build_tool_dispatcher, ToolDispatcher as _};
+    use velaclaw::agent::dispatcher::{build_tool_dispatcher, ToolDispatcher};
     use velaclaw::config::Config;
     use velaclaw::execution::ExecutionHandle;
 

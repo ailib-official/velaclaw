@@ -3,7 +3,7 @@
 
 use ai_lib_rust::{NativeStrategy, TextToolParser};
 use std::path::Path;
-use velaclaw::agent::dispatcher::{build_tool_dispatcher, ToolDispatcher as _};
+use velaclaw::agent::dispatcher::{build_tool_dispatcher, ToolDispatcher};
 use velaclaw::config::Config;
 use velaclaw::execution::ExecutionHandle;
 
@@ -74,12 +74,11 @@ fn deepseek_runtime_manifest_and_dispatcher_probe() {
     );
 
     assert!(
-        build_tool_dispatcher(
+        ToolDispatcher::should_send_tool_specs(&*build_tool_dispatcher(
             config.agent.tool_dispatcher.as_str(),
             provider.as_ref(),
             policy.clone(),
-        )
-        .should_send_tool_specs(),
+        )),
         "auto mode should select NativeToolDispatcher for deepseek hybrid"
     );
 
@@ -92,7 +91,7 @@ fn deepseek_runtime_manifest_and_dispatcher_probe() {
         text: Some(sample.to_string()),
         tool_calls: vec![],
     };
-    let (_, native_calls) = dispatcher.parse_response(&response);
+    let (_, native_calls) = ToolDispatcher::parse_response(&*dispatcher, &response);
     assert_eq!(
         native_calls.len(),
         1,
@@ -117,7 +116,7 @@ fn deepseek_xml_dispatcher_override_from_config() {
 
     let dispatcher = build_tool_dispatcher("xml", provider.as_ref(), policy);
     assert!(
-        !dispatcher.should_send_tool_specs(),
+        !ToolDispatcher::should_send_tool_specs(&*dispatcher),
         "xml override must not send native tool specs even for hybrid manifest"
     );
 }

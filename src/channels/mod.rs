@@ -1571,22 +1571,26 @@ async fn process_channel_message(
     }
 
     #[cfg(feature = "ai-protocol")]
-    let tool_dispatcher = tokio::select! {
-        () = cancellation_token.cancelled() => return,
-        result = get_or_create_tool_dispatcher(
-            ctx.as_ref(),
-            &route.provider,
-            active_provider.as_ref(),
-        ) => match result {
-            Ok(dispatcher) => Some(dispatcher),
-            Err(err) => {
-                tracing::warn!(
-                    provider = route.provider.as_str(),
-                    "Failed to build manifest tool dispatcher: {err}"
-                );
-                None
-            }
-        },
+    let tool_dispatcher = if ctx.tools_registry.is_empty() {
+        None
+    } else {
+        tokio::select! {
+            () = cancellation_token.cancelled() => return,
+            result = get_or_create_tool_dispatcher(
+                ctx.as_ref(),
+                &route.provider,
+                active_provider.as_ref(),
+            ) => match result {
+                Ok(dispatcher) => Some(dispatcher),
+                Err(err) => {
+                    tracing::warn!(
+                        provider = route.provider.as_str(),
+                        "Failed to build manifest tool dispatcher: {err}"
+                    );
+                    None
+                }
+            },
+        }
     };
 
     if cancellation_token.is_cancelled() {

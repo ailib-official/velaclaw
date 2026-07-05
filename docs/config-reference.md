@@ -71,6 +71,12 @@ Operational note for container users:
 | `parallel_tools` | `false` | Enable parallel tool execution within a single iteration |
 | `tool_dispatcher` | `auto` | Tool dispatch strategy |
 
+`tool_dispatcher` values:
+
+- `auto` (default): resolve via provider manifest `tool_calling` and `ExecutionHandle::tool_calling_policy()`. When the provider supports native tools and the manifest strategy prefers native (e.g. DeepSeek hybrid), `NativeToolDispatcher` is used; otherwise `XmlToolDispatcher`.
+- `native`: always use `NativeToolDispatcher` (manifest-driven text parser, native `tool_calls` when reliable).
+- `xml`: always use `XmlToolDispatcher` (text/XML tool calls only; no native tool specs on the wire).
+
 Notes:
 
 - Setting `max_tool_iterations = 0` falls back to safe default `10`.

@@ -60,6 +60,17 @@ jobs:
       - name: cargo test (ai-protocol feature)
         run: cargo test --workspace --features ai-protocol --locked
 
+      - name: Checkout ai-protocol (manifest runtime gate)
+        uses: actions/checkout@v4
+        with:
+          repository: ailib-official/ai-protocol
+          path: ai-protocol
+
+      - name: cargo test manifest runtime probe (VL-TTC-005)
+        env:
+          AI_PROTOCOL_DIR: ${{ github.workspace }}/ai-protocol
+        run: cargo test -p velaclaw --features ai-protocol manifest_runtime_probe --locked -- --nocapture
+
       - name: cargo check (protocol-only, no default features)
         run: cargo check -p velaclaw --no-default-features --features ai-protocol --lib --locked
 

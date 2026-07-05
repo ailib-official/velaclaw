@@ -1592,15 +1592,28 @@ pub async fn run(
     };
 
     #[cfg(feature = "ai-protocol")]
-    let (provider, model_name) = {
+    let (provider, model_name, tool_dispatcher): (
+        Box<dyn Provider>,
+        String,
+        Option<Box<dyn crate::agent::dispatcher::ToolDispatcher>>,
+    ) = {
         let (exec_handle, provider) =
             crate::execution::bootstrap_routed_provider(&config, &provider_runtime_options)?;
         let model_name = exec_handle.logical_model_id().to_string();
-        (provider, model_name)
+        let tool_dispatcher = Some(crate::agent::dispatcher::build_tool_dispatcher(
+            config.agent.tool_dispatcher.as_str(),
+            provider.as_ref(),
+            exec_handle.tool_calling_policy(),
+        ));
+        (provider, model_name, tool_dispatcher)
     };
 
     #[cfg(not(feature = "ai-protocol"))]
-    let (provider, model_name) = {
+    let (provider, model_name, tool_dispatcher): (
+        Box<dyn Provider>,
+        String,
+        Option<Box<dyn crate::agent::dispatcher::ToolDispatcher>>,
+    ) = {
         let provider_name = provider_override
             .as_deref()
             .or(config.default_provider.as_deref())
@@ -1620,10 +1633,9 @@ pub async fn run(
             &provider_runtime_options,
             None,
         )?;
-        (provider, model_name)
+        (provider, model_name, None)
     };
 
-    let provider: Box<dyn Provider> = provider;
     let provider_name = model_name
         .split_once('/')
         .map_or(model_name.as_str(), |(provider, _)| provider);
@@ -1781,8 +1793,24 @@ pub async fn run(
 
     // Append structured tool-use instructions with schemas (only for non-native providers)
     if !native_tools {
-        system_prompt.push_str(&build_tool_instructions(&tools_registry));
+        #[cfg(feature = "ai-protocol")]
+        {
+            if let Some(ref dispatcher) = tool_dispatcher {
+                if !dispatcher.should_send_tool_specs() {
+                    system_prompt
+                        .push_str(&dispatcher.prompt_instructions(&tools_registry));
+                }
+            } else {
+                system_prompt.push_str(&build_tool_instructions(&tools_registry));
+            }
+        }
+        #[cfg(not(feature = "ai-protocol"))]
+        {
+            system_prompt.push_str(&build_tool_instructions(&tools_registry));
+        }
     }
+
+    let tool_dispatcher_ref = tool_dispatcher.as_deref();
 
     // ── Approval manager (supervised mode) ───────────────────────
     let approval_manager = ApprovalManager::from_config(&config.autonomy);
@@ -1836,7 +1864,7 @@ pub async fn run(
             config.agent.max_tool_iterations,
             None,
             None,
-            None,
+            tool_dispatcher_ref,
         )
         .await?;
         final_output = response.clone();
@@ -1956,7 +1984,7 @@ pub async fn run(
                 config.agent.max_tool_iterations,
                 None,
                 None,
-                None,
+                tool_dispatcher_ref,
             )
             .await
             {

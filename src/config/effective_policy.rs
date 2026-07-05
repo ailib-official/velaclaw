@@ -37,11 +37,7 @@ impl EffectivePolicy {
 
     /// Build the manifest-aware dispatcher for the resolved policy.
     pub fn build_dispatcher(&self, provider: &dyn Provider) -> Box<dyn ToolDispatcher> {
-        build_tool_dispatcher(
-            &self.tool_dispatcher,
-            provider,
-            self.tool_calling.clone(),
-        )
+        build_tool_dispatcher(&self.tool_dispatcher, provider, self.tool_calling.clone())
     }
 }
 

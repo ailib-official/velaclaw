@@ -805,8 +805,7 @@ async fn get_or_create_tool_dispatcher(
     .await
     .context("tool dispatcher init task failed")??;
 
-    let effective =
-        crate::config::EffectivePolicy::resolve(config_choice.as_str(), None, policy);
+    let effective = crate::config::EffectivePolicy::resolve(config_choice.as_str(), None, policy);
     let dispatcher = Arc::from(effective.build_dispatcher(provider));
     ctx.tool_dispatcher_cache
         .lock()

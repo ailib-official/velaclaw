@@ -1066,18 +1066,14 @@ fn normalize_tool_arguments(tool_name: &str, mut args: serde_json::Value) -> ser
         return args;
     };
     match tool_name {
-        "file_read" | "file_write" => {
-            if !obj.contains_key("path") {
-                if let Some(path) = obj.remove("file_path") {
-                    obj.insert("path".to_string(), path);
-                }
+        "file_read" | "file_write" if !obj.contains_key("path") => {
+            if let Some(path) = obj.remove("file_path") {
+                obj.insert("path".to_string(), path);
             }
         }
-        "shell" => {
-            if !obj.contains_key("command") {
-                if let Some(cmd) = obj.remove("cmd") {
-                    obj.insert("command".to_string(), cmd);
-                }
+        "shell" if !obj.contains_key("command") => {
+            if let Some(cmd) = obj.remove("cmd") {
+                obj.insert("command".to_string(), cmd);
             }
         }
         _ => {}

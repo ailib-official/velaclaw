@@ -507,8 +507,16 @@ impl ToolDispatcher for NativeToolDispatcher {
         ConversationMessage::ToolResults(messages)
     }
 
-    fn prompt_instructions(&self, _tools: &[Box<dyn Tool>]) -> String {
-        String::new()
+    fn prompt_instructions(&self, tools: &[Box<dyn Tool>]) -> String {
+        #[cfg(feature = "ai-protocol")]
+        {
+            text_parser::prompt_instructions_with_parser(&self.parser, tools)
+        }
+        #[cfg(not(feature = "ai-protocol"))]
+        {
+            let _ = tools;
+            String::new()
+        }
     }
 
     fn to_provider_messages(&self, history: &[ConversationMessage]) -> Vec<ChatMessage> {

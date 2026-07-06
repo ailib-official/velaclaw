@@ -63,7 +63,7 @@ pub use whatsapp_web::WhatsAppWebChannel;
 
 #[cfg(feature = "ai-protocol")]
 use crate::agent::dispatcher::ToolDispatcher;
-use crate::agent::loop_::{build_tool_instructions, run_tool_call_loop};
+use crate::agent::loop_::{append_text_tool_prompt, build_tool_instructions, run_tool_call_loop};
 use crate::config::{Config, DEFAULT_PROTOCOL_MODEL_ID};
 use crate::identity;
 use crate::memory::{self, Memory};
@@ -119,7 +119,14 @@ const CHANNEL_HISTORY_COMPACT_CONTENT_CHARS: usize = 600;
 
 type ProviderCacheMap = Arc<Mutex<HashMap<String, Arc<dyn Provider>>>>;
 #[cfg(feature = "ai-protocol")]
-type ToolDispatcherCacheMap = Arc<Mutex<HashMap<String, Arc<dyn ToolDispatcher>>>>;
+#[derive(Clone)]
+struct CachedToolDispatch {
+    dispatcher: Arc<dyn ToolDispatcher>,
+    text_tool_result_history: bool,
+}
+
+#[cfg(feature = "ai-protocol")]
+type ToolDispatcherCacheMap = Arc<Mutex<HashMap<String, CachedToolDispatch>>>;
 type RouteSelectionMap = Arc<Mutex<HashMap<String, ChannelRouteSelection>>>;
 
 fn effective_channel_message_timeout_secs(configured: u64) -> u64 {
@@ -785,7 +792,7 @@ async fn get_or_create_tool_dispatcher(
     ctx: &ChannelRuntimeContext,
     logical_model_id: &str,
     provider: &dyn Provider,
-) -> anyhow::Result<Arc<dyn ToolDispatcher>> {
+) -> anyhow::Result<(Arc<dyn ToolDispatcher>, bool)> {
     if let Some(existing) = ctx
         .tool_dispatcher_cache
         .lock()
@@ -793,7 +800,10 @@ async fn get_or_create_tool_dispatcher(
         .get(logical_model_id)
         .cloned()
     {
-        return Ok(existing);
+        return Ok((
+            Arc::clone(&existing.dispatcher),
+            existing.text_tool_result_history,
+        ));
     }
 
     let config_choice = ctx.tool_dispatcher_choice.as_str().to_string();
@@ -807,6 +817,7 @@ async fn get_or_create_tool_dispatcher(
     .await
     .context("tool dispatcher init task failed")??;
 
+    let text_tool_result_history = policy.native_strategy == ai_lib_rust::NativeStrategy::Hybrid;
     let effective = crate::config::EffectivePolicy::resolve(
         config_choice.as_str(),
         ctx.workspace_tool_dispatcher.as_ref().as_deref(),
@@ -817,8 +828,14 @@ async fn get_or_create_tool_dispatcher(
     ctx.tool_dispatcher_cache
         .lock()
         .unwrap_or_else(|e| e.into_inner())
-        .insert(logical_model_id.to_string(), Arc::clone(&dispatcher));
-    Ok(dispatcher)
+        .insert(
+            logical_model_id.to_string(),
+            CachedToolDispatch {
+                dispatcher: Arc::clone(&dispatcher),
+                text_tool_result_history,
+            },
+        );
+    Ok((dispatcher, text_tool_result_history))
 }
 
 async fn create_resilient_provider_nonblocking(
@@ -1577,8 +1594,8 @@ async fn process_channel_message(
     }
 
     #[cfg(feature = "ai-protocol")]
-    let tool_dispatcher = if ctx.tools_registry.is_empty() {
-        None
+    let (tool_dispatcher, text_tool_result_history) = if ctx.tools_registry.is_empty() {
+        (None, false)
     } else {
         tokio::select! {
             () = cancellation_token.cancelled() => return,
@@ -1587,17 +1604,20 @@ async fn process_channel_message(
                 &route.provider,
                 active_provider.as_ref(),
             ) => match result {
-                Ok(dispatcher) => Some(dispatcher),
+                Ok((dispatcher, hybrid_history)) => (Some(dispatcher), hybrid_history),
                 Err(err) => {
                     tracing::warn!(
                         provider = route.provider.as_str(),
                         "Failed to build manifest tool dispatcher: {err}"
                     );
-                    None
+                    (None, false)
                 }
             },
         }
     };
+
+    #[cfg(not(feature = "ai-protocol"))]
+    let (tool_dispatcher, text_tool_result_history) = (None, false);
 
     if cancellation_token.is_cancelled() {
         return;
@@ -1640,6 +1660,7 @@ async fn process_channel_message(
                     }
                 },
                 None,
+                text_tool_result_history,
             ),
         ) => LlmExecutionResult::Completed(result),
     };
@@ -2831,26 +2852,38 @@ pub async fn start_channels(config: Config) -> Result<()> {
         native_tools,
         config.skills.prompt_injection_mode,
     );
-    if !native_tools {
-        #[cfg(feature = "ai-protocol")]
-        {
-            if let Ok(dispatcher) =
-                crate::agent::dispatcher::build_tool_dispatcher_for_logical_model(
-                    config.agent.tool_dispatcher.as_str(),
-                    &provider_name,
-                    provider.as_ref(),
-                )
-            {
-                if !dispatcher.should_send_tool_specs() {
-                    system_prompt
-                        .push_str(&dispatcher.prompt_instructions(tools_registry.as_ref()));
-                }
+    #[cfg(feature = "ai-protocol")]
+    {
+        let hybrid_manifest = crate::execution::ExecutionHandle::from_config(&config)
+            .ok()
+            .is_some_and(|h| {
+                h.tool_calling_policy().native_strategy == ai_lib_rust::NativeStrategy::Hybrid
+            });
+        if let Ok(dispatcher) = crate::agent::dispatcher::build_tool_dispatcher_for_logical_model(
+            config.agent.tool_dispatcher.as_str(),
+            &provider_name,
+            provider.as_ref(),
+        ) {
+            let strategy = if hybrid_manifest {
+                ai_lib_rust::NativeStrategy::Hybrid
+            } else if dispatcher.should_send_tool_specs() {
+                ai_lib_rust::NativeStrategy::Full
             } else {
-                system_prompt.push_str(&build_tool_instructions(tools_registry.as_ref()));
-            }
+                ai_lib_rust::NativeStrategy::TextOnly
+            };
+            append_text_tool_prompt(
+                &mut system_prompt,
+                dispatcher.as_ref(),
+                tools_registry.as_ref(),
+                strategy,
+            );
+        } else if !native_tools {
+            system_prompt.push_str(&build_tool_instructions(tools_registry.as_ref()));
         }
-        #[cfg(not(feature = "ai-protocol"))]
-        {
+    }
+    #[cfg(not(feature = "ai-protocol"))]
+    {
+        if !native_tools {
             system_prompt.push_str(&build_tool_instructions(tools_registry.as_ref()));
         }
     }

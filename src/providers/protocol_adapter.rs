@@ -82,6 +82,19 @@ impl ProtocolBackedProvider {
                 "tool" => {
                     if let Some(ref id) = m.tool_call_id {
                         ai_lib_rust::Message::tool(id.as_str(), &m.content)
+                    } else if let Ok(json) = serde_json::from_str::<serde_json::Value>(&m.content) {
+                        if let Some(id) = json.get("tool_call_id").and_then(|v| v.as_str()) {
+                            let content = json
+                                .get("content")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or(&m.content);
+                            ai_lib_rust::Message::tool(id, content)
+                        } else {
+                            ai_lib_rust::Message::user(format!(
+                                "[tool role without tool_call_id] {}",
+                                m.content
+                            ))
+                        }
                     } else {
                         ai_lib_rust::Message::user(format!(
                             "[tool role without tool_call_id] {}",

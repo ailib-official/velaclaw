@@ -160,6 +160,23 @@ pub fn logical_model_id_from_config(config: &Config) -> String {
     format!("{provider}/{model}")
 }
 
+/// Whether tool-loop history should use `[Tool results]` text (Hybrid manifest strategy).
+#[cfg(feature = "ai-protocol")]
+pub fn hybrid_text_tool_result_history(logical_model_id: &str) -> bool {
+    super::init_ai_client_sync(logical_model_id)
+        .ok()
+        .is_some_and(|client| {
+            ai_lib_rust::ToolCallingPolicy::from_tool_calling(client.manifest.tool_calling())
+                .native_strategy
+                == ai_lib_rust::NativeStrategy::Hybrid
+        })
+}
+
+#[cfg(not(feature = "ai-protocol"))]
+pub fn hybrid_text_tool_result_history(_logical_model_id: &str) -> bool {
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

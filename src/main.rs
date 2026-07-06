@@ -67,7 +67,7 @@ use velaclaw::{
 #[derive(Parser, Debug)]
 #[command(name = "velaclaw")]
 #[command(author = "Luqiang Wang")]
-#[command(version = "0.5.0")]
+#[command(version = env!("CARGO_PKG_VERSION"))]
 #[command(about = "Protocol-driven autonomous AI agent runtime with intelligent model selection.", long_about = None)]
 struct Cli {
     #[arg(long, global = true)]

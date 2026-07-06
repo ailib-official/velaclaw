@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/robot-kit", "crates/velaclaw-config"]
+members = [".", "crates/robot-kit", "crates/velaclaw-config", "crates/velaclaw-agent-runtime"]
 resolver = "2"
 
 [package]
@@ -43,6 +43,7 @@ serde_json = { version = "1.0", default-features = false, features = ["std"] }
 
 # Config
 velaclaw-config = { path = "crates/velaclaw-config" }
+velaclaw-agent-runtime = { path = "crates/velaclaw-agent-runtime" }
 directories = "6.0"
 toml = "1.0"
 shellexpand = "3.1"
@@ -214,7 +215,7 @@ rag-pdf = ["dep:pdf-extract"]
 # whatsapp-web = Native WhatsApp Web client with custom rusqlite storage backend
 whatsapp-web = ["dep:wa-rs", "dep:wa-rs-core", "dep:wa-rs-binary", "dep:wa-rs-proto", "dep:wa-rs-ureq-http", "dep:wa-rs-tokio-transport", "dep:serde-big-array", "dep:prost"]
 # ai-protocol = Protocol-driven providers via ai-lib-rust (requires AI_PROTOCOL_DIR)
-ai-protocol = ["dep:ai-lib-rust", "dep:async-stream", "dep:serde_yaml", "velaclaw-config/ai-protocol", "prism-router"]
+ai-protocol = ["dep:ai-lib-rust", "dep:async-stream", "dep:serde_yaml", "velaclaw-config/ai-protocol", "velaclaw-agent-runtime/ai-protocol", "prism-router"]
 # prism-router = in-process prism-core fallback routing (VL-EVO-002)
 prism-router = ["dep:prism-core-routing"]
 # routing_mvp = ai-lib-rust experimental multi-endpoint routing (opt-in; ZS-ML-004 / migration Phase 4)

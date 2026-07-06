@@ -7837,6 +7837,7 @@ dependencies = [
  "tracing-subscriber",
  "urlencoding",
  "uuid",
+ "velaclaw-agent-runtime",
  "velaclaw-config",
  "wa-rs",
  "wa-rs-binary",
@@ -7846,6 +7847,20 @@ dependencies = [
  "wa-rs-ureq-http",
  "webpki-roots 1.0.8",
  "which",
+]
+
+[[package]]
+name = "velaclaw-agent-runtime"
+version = "0.1.0"
+dependencies = [
+ "ai-lib-rust",
+ "anyhow",
+ "async-trait",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "velaclaw-config",
 ]
 
 [[package]]

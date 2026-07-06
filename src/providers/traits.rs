@@ -1,70 +1,11 @@
 use crate::tools::ToolSpec;
 use async_trait::async_trait;
 use futures_util::{stream, StreamExt};
-use serde::{Deserialize, Serialize};
 use std::fmt::Write;
 
-/// A single message in a conversation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChatMessage {
-    pub role: String,
-    pub content: String,
-    /// OpenAI-style tool result linkage (`role: tool`). Required for correct ai-lib mapping.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_call_id: Option<String>,
-}
-
-impl ChatMessage {
-    pub fn system(content: impl Into<String>) -> Self {
-        Self {
-            role: "system".into(),
-            content: content.into(),
-            tool_call_id: None,
-        }
-    }
-
-    pub fn user(content: impl Into<String>) -> Self {
-        Self {
-            role: "user".into(),
-            content: content.into(),
-            tool_call_id: None,
-        }
-    }
-
-    pub fn assistant(content: impl Into<String>) -> Self {
-        Self {
-            role: "assistant".into(),
-            content: content.into(),
-            tool_call_id: None,
-        }
-    }
-
-    /// Tool result without `tool_call_id` (legacy). Prefer [`Self::tool_with_call_id`].
-    pub fn tool(content: impl Into<String>) -> Self {
-        Self {
-            role: "tool".into(),
-            content: content.into(),
-            tool_call_id: None,
-        }
-    }
-
-    /// Tool result message for multi-turn tool calling (ARCH-003 / ai-lib `Message::tool`).
-    pub fn tool_with_call_id(tool_call_id: impl Into<String>, content: impl Into<String>) -> Self {
-        Self {
-            role: "tool".into(),
-            content: content.into(),
-            tool_call_id: Some(tool_call_id.into()),
-        }
-    }
-}
-
-/// A tool call requested by the LLM.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolCall {
-    pub id: String,
-    pub name: String,
-    pub arguments: String,
-}
+pub use velaclaw_agent_runtime::{
+    ChatMessage, ChatRequest, ChatResponse, ConversationMessage, ToolCall, ToolResultMessage,
+};
 
 /// A tool-call delta emitted by a streaming response.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,56 +25,6 @@ pub enum StreamToolCallDelta {
         id: String,
         index: Option<u32>,
     },
-}
-
-/// An LLM response that may contain text, tool calls, or both.
-#[derive(Debug, Clone)]
-pub struct ChatResponse {
-    /// Text content of the response (may be empty if only tool calls).
-    pub text: Option<String>,
-    /// Tool calls requested by the LLM.
-    pub tool_calls: Vec<ToolCall>,
-}
-
-impl ChatResponse {
-    /// True when the LLM wants to invoke at least one tool.
-    pub fn has_tool_calls(&self) -> bool {
-        !self.tool_calls.is_empty()
-    }
-
-    /// Convenience: return text content or empty string.
-    pub fn text_or_empty(&self) -> &str {
-        self.text.as_deref().unwrap_or("")
-    }
-}
-
-/// Request payload for provider chat calls.
-#[derive(Debug, Clone, Copy)]
-pub struct ChatRequest<'a> {
-    pub messages: &'a [ChatMessage],
-    pub tools: Option<&'a [ToolSpec]>,
-}
-
-/// A tool result to feed back to the LLM.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolResultMessage {
-    pub tool_call_id: String,
-    pub content: String,
-}
-
-/// A message in a multi-turn conversation, including tool interactions.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", content = "data")]
-pub enum ConversationMessage {
-    /// Regular chat message (system, user, assistant).
-    Chat(ChatMessage),
-    /// Tool calls from the assistant (stored for history fidelity).
-    AssistantToolCalls {
-        text: Option<String>,
-        tool_calls: Vec<ToolCall>,
-    },
-    /// Results of tool executions, fed back to the LLM.
-    ToolResults(Vec<ToolResultMessage>),
 }
 
 /// A chunk of content from a streaming response.

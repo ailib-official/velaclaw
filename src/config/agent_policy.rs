@@ -44,8 +44,10 @@ impl AgentPolicyLayer {
         let Some(path) = discover_agent_policy_path(config)? else {
             return Ok(None);
         };
-        Self::load_from_path(&path)
-            .with_context(|| format!("failed to load workspace agent policy: {}", path.display()))
+        let policy = Self::load_from_path(&path).with_context(|| {
+            format!("failed to load workspace agent policy: {}", path.display())
+        })?;
+        Ok(Some(policy))
     }
 
     pub fn load_from_path(path: &Path) -> Result<Self> {
@@ -149,7 +151,7 @@ fn collect_forbidden_keys(value: &serde_yaml::Value, prefix: &str, out: &mut Vec
             for (key, child) in map {
                 let segment = mapping_key(key);
                 let path = if prefix.is_empty() {
-                    segment
+                    segment.clone()
                 } else {
                     format!("{prefix}.{segment}")
                 };
@@ -157,7 +159,7 @@ fn collect_forbidden_keys(value: &serde_yaml::Value, prefix: &str, out: &mut Vec
                     .iter()
                     .any(|forbidden| segment.eq_ignore_ascii_case(forbidden))
                 {
-                    out.push(path);
+                    out.push(path.clone());
                 }
                 collect_forbidden_keys(child, &path, out);
             }

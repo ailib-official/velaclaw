@@ -12,7 +12,7 @@ use crate::runtime;
 use crate::security::SecurityPolicy;
 use crate::tools::{self, Tool};
 use crate::util::truncate_with_ellipsis;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use regex::{Regex, RegexSet};
 use std::fmt::Write;
 use std::io::{BufRead, Write as _};

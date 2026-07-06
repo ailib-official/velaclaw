@@ -809,7 +809,7 @@ async fn get_or_create_tool_dispatcher(
 
     let effective = crate::config::EffectivePolicy::resolve(
         config_choice.as_str(),
-        ctx.workspace_tool_dispatcher.as_deref().map(str::as_str),
+        ctx.workspace_tool_dispatcher.as_ref().as_deref(),
         None,
         policy,
     );

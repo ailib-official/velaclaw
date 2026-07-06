@@ -1,7 +1,6 @@
 use crate::tools::ToolSpec;
 use async_trait::async_trait;
 use futures_util::{stream, StreamExt};
-use serde::{Deserialize, Serialize};
 use std::fmt::Write;
 
 pub use velaclaw_agent_runtime::{
@@ -412,12 +411,6 @@ pub trait Provider: Send + Sync {
         // Create a single empty chunk to indicate not supported
         let chunk = StreamChunk::error(format!("{} does not support streaming", provider_name));
         stream::once(async move { Ok(chunk) }).boxed()
-    }
-}
-
-impl<T: Provider + ?Sized> velaclaw_agent_runtime::provider::NativeToolCapable for T {
-    fn supports_native_tools(&self) -> bool {
-        Provider::supports_native_tools(self)
     }
 }
 

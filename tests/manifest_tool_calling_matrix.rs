@@ -5,7 +5,8 @@
 //! `EffectivePolicy::resolve`, and optional text-fallback parse smoke.
 #![cfg(feature = "ai-protocol")]
 
-use serde_yaml::Value;
+use serde_json::Value as JsonValue;
+use serde_yaml::Value as YamlValue;
 use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
@@ -40,11 +41,11 @@ fn fallback_model(provider_id: &str) -> Option<&'static str> {
         .find_map(|(id, model)| (*id == provider_id).then_some(*model))
 }
 
-fn deprecated_models(manifest: &Value) -> HashSet<String> {
+fn deprecated_models(manifest: &YamlValue) -> HashSet<String> {
     manifest
         .get("metadata")
         .and_then(|m| m.get("deprecated"))
-        .and_then(Value::as_mapping)
+        .and_then(YamlValue::as_mapping)
         .map(|map| {
             map.keys()
                 .filter_map(|k| k.as_str().map(str::to_string))
@@ -53,7 +54,7 @@ fn deprecated_models(manifest: &Value) -> HashSet<String> {
         .unwrap_or_default()
 }
 
-fn probe_model_id(provider_id: &str, manifest: &Value) -> Option<String> {
+fn probe_model_id(provider_id: &str, manifest: &YamlValue) -> Option<String> {
     if let Some(model) = fallback_model(provider_id) {
         return Some(model.to_string());
     }
@@ -62,7 +63,7 @@ fn probe_model_id(provider_id: &str, manifest: &Value) -> Option<String> {
     let models = manifest
         .get("metadata")
         .and_then(|m| m.get("models"))
-        .and_then(Value::as_mapping)?;
+        .and_then(YamlValue::as_mapping)?;
 
     for key in models.keys() {
         if let Some(name) = key.as_str() {
@@ -74,11 +75,11 @@ fn probe_model_id(provider_id: &str, manifest: &Value) -> Option<String> {
     None
 }
 
-fn shell_parse_sample(manifest_tc: &Value) -> Option<String> {
+fn shell_parse_sample(manifest_tc: &JsonValue) -> Option<String> {
     let tag = manifest_tc
         .get("text_fallback")
         .and_then(|tf| tf.get("known_dialects"))
-        .and_then(Value::as_sequence)?
+        .and_then(JsonValue::as_array)?
         .iter()
         .find_map(|d| {
             let tag = d.get("tag")?.as_str()?;
@@ -101,7 +102,7 @@ fn config_for_provider(logical_model_id: &str) -> Config {
     }
 }
 
-fn assert_provider_tool_chain(provider_id: &str, model_id: &str, manifest: &Value) {
+fn assert_provider_tool_chain(provider_id: &str, model_id: &str) {
     let logical_model_id = format!("{provider_id}/{model_id}");
     let config = config_for_provider(&logical_model_id);
 
@@ -129,7 +130,7 @@ fn assert_provider_tool_chain(provider_id: &str, model_id: &str, manifest: &Valu
     let native_supported = manifest_tc
         .get("native")
         .and_then(|n| n.get("supported"))
-        .and_then(Value::as_bool)
+        .and_then(JsonValue::as_bool)
         .unwrap_or(false);
     if native_supported {
         assert!(
@@ -198,7 +199,7 @@ fn all_manifest_tool_calling_providers_identify_call_and_run() {
         }
 
         let raw = fs::read_to_string(&path).expect("read provider yaml");
-        let manifest: Value = serde_yaml::from_str(&raw).expect("parse provider yaml");
+        let manifest: YamlValue = serde_yaml::from_str(&raw).expect("parse provider yaml");
 
         if manifest
             .get("capabilities")
@@ -210,7 +211,7 @@ fn all_manifest_tool_calling_providers_identify_call_and_run() {
 
         let provider_id = manifest
             .get("id")
-            .and_then(Value::as_str)
+            .and_then(YamlValue::as_str)
             .unwrap_or_else(|| {
                 path.file_stem()
                     .and_then(|s| s.to_str())
@@ -221,7 +222,7 @@ fn all_manifest_tool_calling_providers_identify_call_and_run() {
             panic!("{provider_id}: no probe model (add metadata.models or FALLBACK_PROBE_MODELS)");
         });
 
-        assert_provider_tool_chain(provider_id, &model_id, &manifest);
+        assert_provider_tool_chain(provider_id, &model_id);
         probed += 1;
     }
 

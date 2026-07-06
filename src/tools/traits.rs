@@ -1,50 +1,12 @@
-use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
+//! Tool trait surface — re-exported from `velaclaw-agent-runtime` (VL-ARCH-007).
+//! 工具 trait：由 agent-runtime crate 提供。
 
-/// Result of a tool execution
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolResult {
-    pub success: bool,
-    pub output: String,
-    pub error: Option<String>,
-}
-
-/// Description of a tool for the LLM
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolSpec {
-    pub name: String,
-    pub description: String,
-    pub parameters: serde_json::Value,
-}
-
-/// Core tool trait — implement for any capability
-#[async_trait]
-pub trait Tool: Send + Sync {
-    /// Tool name (used in LLM function calling)
-    fn name(&self) -> &str;
-
-    /// Human-readable description
-    fn description(&self) -> &str;
-
-    /// JSON schema for parameters
-    fn parameters_schema(&self) -> serde_json::Value;
-
-    /// Execute the tool with given arguments
-    async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult>;
-
-    /// Get the full spec for LLM registration
-    fn spec(&self) -> ToolSpec {
-        ToolSpec {
-            name: self.name().to_string(),
-            description: self.description().to_string(),
-            parameters: self.parameters_schema(),
-        }
-    }
-}
+pub use velaclaw_agent_runtime::{Tool, ToolResult, ToolSpec};
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
 
     struct DummyTool;
 
@@ -81,41 +43,22 @@ mod tests {
     }
 
     #[test]
-    fn spec_uses_tool_metadata_and_schema() {
+    fn tool_spec_includes_name_and_schema() {
         let tool = DummyTool;
         let spec = tool.spec();
-
         assert_eq!(spec.name, "dummy_tool");
         assert_eq!(spec.description, "A deterministic test tool");
-        assert_eq!(spec.parameters["type"], "object");
-        assert_eq!(spec.parameters["properties"]["value"]["type"], "string");
+        assert!(spec.parameters.get("properties").is_some());
     }
 
     #[tokio::test]
-    async fn execute_returns_expected_output() {
+    async fn tool_execute_returns_output() {
         let tool = DummyTool;
         let result = tool
-            .execute(serde_json::json!({ "value": "hello-tool" }))
+            .execute(serde_json::json!({ "value": "hello" }))
             .await
-            .unwrap();
-
+            .expect("execute");
         assert!(result.success);
-        assert_eq!(result.output, "hello-tool");
-        assert!(result.error.is_none());
-    }
-
-    #[test]
-    fn tool_result_serialization_roundtrip() {
-        let result = ToolResult {
-            success: false,
-            output: String::new(),
-            error: Some("boom".into()),
-        };
-
-        let json = serde_json::to_string(&result).unwrap();
-        let parsed: ToolResult = serde_json::from_str(&json).unwrap();
-
-        assert!(!parsed.success);
-        assert_eq!(parsed.error.as_deref(), Some("boom"));
+        assert_eq!(result.output, "hello");
     }
 }

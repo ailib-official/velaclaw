@@ -15,10 +15,8 @@ use velaclaw::execution::ExecutionHandle;
 use velaclaw::providers::ChatResponse;
 
 /// Providers whose manifests declare `tool_calling` but lack `metadata.models` chat entries.
-const FALLBACK_PROBE_MODELS: &[(&str, &str)] = &[
-    ("cohere", "command-r-plus"),
-    ("doubao", "doubao-pro-32k"),
-];
+const FALLBACK_PROBE_MODELS: &[(&str, &str)] =
+    &[("cohere", "command-r-plus"), ("doubao", "doubao-pro-32k")];
 
 fn ai_protocol_dir() -> Option<PathBuf> {
     if let Ok(dir) = std::env::var("AI_PROTOCOL_DIR") {
@@ -47,7 +45,11 @@ fn deprecated_models(manifest: &Value) -> HashSet<String> {
         .get("metadata")
         .and_then(|m| m.get("deprecated"))
         .and_then(Value::as_mapping)
-        .map(|map| map.keys().filter_map(|k| k.as_str().map(str::to_string)).collect())
+        .map(|map| {
+            map.keys()
+                .filter_map(|k| k.as_str().map(str::to_string))
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -88,9 +90,7 @@ fn shell_parse_sample(manifest_tc: &Value) -> Option<String> {
             }
         })?;
 
-    Some(format!(
-        "probe\n<{tag}>\necho tool-matrix-ok\n</{tag}>\n"
-    ))
+    Some(format!("probe\n<{tag}>\necho tool-matrix-ok\n</{tag}>\n"))
 }
 
 fn config_for_provider(logical_model_id: &str) -> Config {
@@ -149,8 +149,7 @@ fn assert_provider_tool_chain(provider_id: &str, model_id: &str, manifest: &Valu
     let dispatcher = effective.build_dispatcher(provider.as_ref());
     let auto_dispatcher = build_tool_dispatcher("auto", provider.as_ref(), policy.clone());
 
-    let expect_native_specs =
-        provider.supports_native_tools() && policy.prefer_native_dispatcher();
+    let expect_native_specs = provider.supports_native_tools() && policy.prefer_native_dispatcher();
     assert_eq!(
         ToolDispatcher::should_send_tool_specs(&*dispatcher),
         expect_native_specs,
@@ -201,7 +200,11 @@ fn all_manifest_tool_calling_providers_identify_call_and_run() {
         let raw = fs::read_to_string(&path).expect("read provider yaml");
         let manifest: Value = serde_yaml::from_str(&raw).expect("parse provider yaml");
 
-        if manifest.get("capabilities").and_then(|c| c.get("tool_calling")).is_none() {
+        if manifest
+            .get("capabilities")
+            .and_then(|c| c.get("tool_calling"))
+            .is_none()
+        {
             continue;
         }
 
@@ -215,9 +218,7 @@ fn all_manifest_tool_calling_providers_identify_call_and_run() {
             });
 
         let model_id = probe_model_id(provider_id, &manifest).unwrap_or_else(|| {
-            panic!(
-                "{provider_id}: no probe model (add metadata.models or FALLBACK_PROBE_MODELS)"
-            );
+            panic!("{provider_id}: no probe model (add metadata.models or FALLBACK_PROBE_MODELS)");
         });
 
         assert_provider_tool_chain(provider_id, &model_id, &manifest);

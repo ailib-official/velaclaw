@@ -1673,7 +1673,7 @@ pub async fn run(
         let (exec_handle, provider) =
             crate::execution::bootstrap_routed_provider(&config, &provider_runtime_options)?;
         let model_name = exec_handle.logical_model_id().to_string();
-        let workspace_policy = crate::config::AgentPolicyLayer::discover_and_load(&config)
+        let workspace_policy = crate::config::discover_and_load(&config)
             .with_context(|| "load workspace agent-policy.yaml")?;
         let workspace_dispatcher = workspace_policy.as_ref().and_then(|p| p.tool_dispatcher());
         let effective = crate::config::EffectivePolicy::resolve(

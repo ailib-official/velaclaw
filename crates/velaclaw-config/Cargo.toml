@@ -1,0 +1,23 @@
+[package]
+name = "velaclaw-config"
+version = "0.1.0"
+edition = "2021"
+authors = ["Luqiang Wang"]
+license = "MIT OR Apache-2.0"
+description = "VelaClaw configuration types, defaults, and layered policy (VL-ARCH-004)"
+repository = "https://github.com/ailib-official/velaclaw"
+rust-version = "1.87"
+
+[features]
+default = []
+ai-protocol = ["dep:ai-lib-rust", "dep:serde_yaml"]
+
+[dependencies]
+serde = { version = "1.0", default-features = false, features = ["derive"] }
+anyhow = "1.0"
+toml = "1.0"
+ai-lib-rust = { version = "1.0.1", git = "https://github.com/ailib-official/ai-lib-rust", rev = "fcd5a7b", optional = true }
+serde_yaml = { version = "0.9", optional = true }
+
+[dev-dependencies]
+tempfile = "3.27"

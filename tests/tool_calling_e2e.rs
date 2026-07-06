@@ -1902,8 +1902,8 @@ mod manifest_auto_dispatcher {
 
     fn deepseek_config() -> Config {
         Config {
-            default_provider: Some("deepseek/deepseek-chat".into()),
-            default_model: Some("deepseek-chat".into()),
+            default_provider: Some("deepseek/deepseek-v4-flash".into()),
+            default_model: Some("deepseek-v4-flash".into()),
             ..Default::default()
         }
     }

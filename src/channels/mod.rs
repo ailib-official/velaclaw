@@ -3127,7 +3127,7 @@ pub async fn start_channels(config: Config) -> Result<()> {
 
     #[cfg(feature = "ai-protocol")]
     let workspace_tool_dispatcher = {
-        let policy = crate::config::AgentPolicyLayer::discover_and_load(&config)
+        let policy = crate::config::discover_and_load(&config)
             .with_context(|| "load workspace agent-policy.yaml")?;
         Arc::new(policy.and_then(|p| p.tool_dispatcher().map(str::to_string)))
     };

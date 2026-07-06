@@ -176,10 +176,10 @@ mod tests {
     #[test]
     fn logical_model_uses_slashed_default_model() {
         let mut config = Config::default();
-        config.default_model = Some("deepseek/deepseek-chat".into());
+        config.default_model = Some("deepseek/deepseek-v4-flash".into());
         assert_eq!(
             logical_model_id_from_config(&config),
-            "deepseek/deepseek-chat"
+            "deepseek/deepseek-v4-flash"
         );
     }
 

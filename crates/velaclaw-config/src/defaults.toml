@@ -1,0 +1,7 @@
+# Default config — embedded at build time for first-install config.toml generation.
+# Keep default_provider/default_model in sync with DEFAULT_PROTOCOL_MODEL_ID in defaults.rs.
+# Autonomy/security defaults use AutonomyConfig::default() in Rust (stricter path denylist).
+
+default_provider = "nvidia/nemotron-4-340b-instruct"
+default_model = "nvidia/nemotron-4-340b-instruct"
+default_temperature = 0.7

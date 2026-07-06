@@ -1,14 +1,13 @@
 #[cfg(feature = "ai-protocol")]
 pub mod agent_policy;
-pub mod defaults;
 #[cfg(feature = "ai-protocol")]
 pub mod effective_policy;
 pub mod schema;
 
 #[cfg(feature = "ai-protocol")]
-pub use agent_policy::AgentPolicyLayer;
+pub use agent_policy::{discover_and_load, AgentPolicyLayer};
 
-pub use defaults::{DEFAULT_PROTOCOL_MODEL_ID, DEFAULT_PROTOCOL_MODEL_LABEL};
+pub use velaclaw_config::defaults::{DEFAULT_PROTOCOL_MODEL_ID, DEFAULT_PROTOCOL_MODEL_LABEL};
 
 #[allow(unused_imports)]
 pub use schema::{
@@ -29,7 +28,7 @@ pub use schema::{
 };
 
 #[cfg(feature = "ai-protocol")]
-pub use effective_policy::EffectivePolicy;
+pub use effective_policy::{merge_tool_dispatcher, EffectivePolicy};
 
 #[cfg(test)]
 mod tests {

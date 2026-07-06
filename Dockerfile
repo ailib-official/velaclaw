@@ -15,16 +15,18 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # 1. Copy manifests and toolchain pin to cache dependencies with the same compiler
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY crates/robot-kit/Cargo.toml crates/robot-kit/Cargo.toml
+COPY crates/velaclaw-config/Cargo.toml crates/velaclaw-config/Cargo.toml
 # Create dummy targets declared in Cargo.toml so manifest parsing succeeds.
-RUN mkdir -p src benches crates/robot-kit/src \
+RUN mkdir -p src benches crates/robot-kit/src crates/velaclaw-config/src \
     && echo "fn main() {}" > src/main.rs \
     && echo "fn main() {}" > benches/agent_benchmarks.rs \
-    && echo "pub fn placeholder() {}" > crates/robot-kit/src/lib.rs
+    && echo "pub fn placeholder() {}" > crates/robot-kit/src/lib.rs \
+    && echo "pub fn placeholder() {}" > crates/velaclaw-config/src/lib.rs
 RUN --mount=type=cache,id=velaclaw-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=velaclaw-cargo-git,target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,id=velaclaw-target,target=/app/target,sharing=locked \
     cargo build --release --locked
-RUN rm -rf src benches crates/robot-kit/src
+RUN rm -rf src benches crates/robot-kit/src crates/velaclaw-config/src
 
 # 2. Copy only build-relevant source paths (avoid cache-busting on docs/tests/scripts)
 COPY src/ src/

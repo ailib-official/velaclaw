@@ -7837,6 +7837,7 @@ dependencies = [
  "tracing-subscriber",
  "urlencoding",
  "uuid",
+ "velaclaw-config",
  "wa-rs",
  "wa-rs-binary",
  "wa-rs-core",
@@ -7845,6 +7846,18 @@ dependencies = [
  "wa-rs-ureq-http",
  "webpki-roots 1.0.8",
  "which",
+]
+
+[[package]]
+name = "velaclaw-config"
+version = "0.1.0"
+dependencies = [
+ "ai-lib-rust",
+ "anyhow",
+ "serde",
+ "serde_yaml",
+ "tempfile",
+ "toml 1.1.2+spec-1.1.0",
 ]
 
 [[package]]

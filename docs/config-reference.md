@@ -77,6 +77,28 @@ Operational note for container users:
 - `native`: always use `NativeToolDispatcher` (manifest-driven text parser, native `tool_calls` when reliable).
 - `xml`: always use `XmlToolDispatcher` (text/XML tool calls only; no native tool specs on the wire).
 
+### L2 — `agent-policy.yaml` (workspace)
+
+Place `agent-policy.yaml` at the project root (or `workspace/agent-policy.yaml`). Discovery walks up from the current working directory and honors `VELACLAW_WORKSPACE`. Missing file means no L2 layer.
+
+Merge priority for `tool_calling.dispatcher`: **session override** > `[agent].tool_dispatcher` (L1 `config.toml`) > L2 `agent-policy.yaml` > `auto`.
+
+Example:
+
+```yaml
+version: 1
+tool_calling:
+  dispatcher: auto
+self_adjust:
+  allowed_writes:
+    - memory.preferences.tone
+  denied_writes:
+    - security.*
+    - channels.*.credentials
+```
+
+Secret fields (`api_key`, `token`, `credentials`, etc.) are rejected at load time.
+
 Notes:
 
 - Setting `max_tool_iterations = 0` falls back to safe default `10`.

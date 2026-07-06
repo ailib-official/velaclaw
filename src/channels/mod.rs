@@ -220,6 +220,8 @@ struct ChannelRuntimeContext {
     #[cfg(feature = "ai-protocol")]
     tool_dispatcher_choice: Arc<String>,
     #[cfg(feature = "ai-protocol")]
+    workspace_tool_dispatcher: Arc<Option<String>>,
+    #[cfg(feature = "ai-protocol")]
     tool_dispatcher_cache: ToolDispatcherCacheMap,
 }
 
@@ -805,7 +807,12 @@ async fn get_or_create_tool_dispatcher(
     .await
     .context("tool dispatcher init task failed")??;
 
-    let effective = crate::config::EffectivePolicy::resolve(config_choice.as_str(), None, policy);
+    let effective = crate::config::EffectivePolicy::resolve(
+        config_choice.as_str(),
+        ctx.workspace_tool_dispatcher.as_ref().as_deref(),
+        None,
+        policy,
+    );
     let dispatcher = Arc::from(effective.build_dispatcher(provider));
     ctx.tool_dispatcher_cache
         .lock()
@@ -3118,6 +3125,13 @@ pub async fn start_channels(config: Config) -> Result<()> {
         .as_ref()
         .is_some_and(|tg| tg.interrupt_on_new_message);
 
+    #[cfg(feature = "ai-protocol")]
+    let workspace_tool_dispatcher = {
+        let policy = crate::config::AgentPolicyLayer::discover_and_load(&config)
+            .with_context(|| "load workspace agent-policy.yaml")?;
+        Arc::new(policy.and_then(|p| p.tool_dispatcher().map(str::to_string)))
+    };
+
     let runtime_ctx = Arc::new(ChannelRuntimeContext {
         channels_by_name,
         provider: Arc::clone(&provider),
@@ -3144,6 +3158,8 @@ pub async fn start_channels(config: Config) -> Result<()> {
         multimodal: config.multimodal.clone(),
         #[cfg(feature = "ai-protocol")]
         tool_dispatcher_choice: Arc::new(config.agent.tool_dispatcher.clone()),
+        #[cfg(feature = "ai-protocol")]
+        workspace_tool_dispatcher,
         #[cfg(feature = "ai-protocol")]
         tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
     });
@@ -3323,6 +3339,8 @@ mod tests {
             message_timeout_secs: CHANNEL_MESSAGE_TIMEOUT_SECS,
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_choice: Arc::new("auto".to_string()),
+            #[cfg(feature = "ai-protocol")]
+            workspace_tool_dispatcher: Arc::new(None),
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
         };
@@ -3775,6 +3793,8 @@ BTC is currently around $65,000 based on latest tool output."#
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_choice: Arc::new("auto".to_string()),
             #[cfg(feature = "ai-protocol")]
+            workspace_tool_dispatcher: Arc::new(None),
+            #[cfg(feature = "ai-protocol")]
             tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
         });
 
@@ -3836,6 +3856,8 @@ BTC is currently around $65,000 based on latest tool output."#
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_choice: Arc::new("auto".to_string()),
             #[cfg(feature = "ai-protocol")]
+            workspace_tool_dispatcher: Arc::new(None),
+            #[cfg(feature = "ai-protocol")]
             tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
         });
 
@@ -3896,6 +3918,8 @@ BTC is currently around $65,000 based on latest tool output."#
             multimodal: crate::config::MultimodalConfig::default(),
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_choice: Arc::new("auto".to_string()),
+            #[cfg(feature = "ai-protocol")]
+            workspace_tool_dispatcher: Arc::new(None),
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
         });
@@ -3966,6 +3990,8 @@ BTC is currently around $65,000 based on latest tool output."#
             multimodal: crate::config::MultimodalConfig::default(),
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_choice: Arc::new("auto".to_string()),
+            #[cfg(feature = "ai-protocol")]
+            workspace_tool_dispatcher: Arc::new(None),
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
         });
@@ -4060,6 +4086,8 @@ BTC is currently around $65,000 based on latest tool output."#
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_choice: Arc::new("auto".to_string()),
             #[cfg(feature = "ai-protocol")]
+            workspace_tool_dispatcher: Arc::new(None),
+            #[cfg(feature = "ai-protocol")]
             tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
         });
 
@@ -4132,6 +4160,8 @@ BTC is currently around $65,000 based on latest tool output."#
             multimodal: crate::config::MultimodalConfig::default(),
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_choice: Arc::new("auto".to_string()),
+            #[cfg(feature = "ai-protocol")]
+            workspace_tool_dispatcher: Arc::new(None),
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
         });
@@ -4221,6 +4251,8 @@ BTC is currently around $65,000 based on latest tool output."#
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_choice: Arc::new("auto".to_string()),
             #[cfg(feature = "ai-protocol")]
+            workspace_tool_dispatcher: Arc::new(None),
+            #[cfg(feature = "ai-protocol")]
             tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
         });
 
@@ -4294,6 +4326,8 @@ BTC is currently around $65,000 based on latest tool output."#
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_choice: Arc::new("auto".to_string()),
             #[cfg(feature = "ai-protocol")]
+            workspace_tool_dispatcher: Arc::new(None),
+            #[cfg(feature = "ai-protocol")]
             tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
         });
 
@@ -4355,6 +4389,8 @@ BTC is currently around $65,000 based on latest tool output."#
             multimodal: crate::config::MultimodalConfig::default(),
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_choice: Arc::new("auto".to_string()),
+            #[cfg(feature = "ai-protocol")]
+            workspace_tool_dispatcher: Arc::new(None),
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
         });
@@ -4529,6 +4565,8 @@ BTC is currently around $65,000 based on latest tool output."#
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_choice: Arc::new("auto".to_string()),
             #[cfg(feature = "ai-protocol")]
+            workspace_tool_dispatcher: Arc::new(None),
+            #[cfg(feature = "ai-protocol")]
             tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
         });
 
@@ -4610,6 +4648,8 @@ BTC is currently around $65,000 based on latest tool output."#
             multimodal: crate::config::MultimodalConfig::default(),
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_choice: Arc::new("auto".to_string()),
+            #[cfg(feature = "ai-protocol")]
+            workspace_tool_dispatcher: Arc::new(None),
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
         });
@@ -4705,6 +4745,8 @@ BTC is currently around $65,000 based on latest tool output."#
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_choice: Arc::new("auto".to_string()),
             #[cfg(feature = "ai-protocol")]
+            workspace_tool_dispatcher: Arc::new(None),
+            #[cfg(feature = "ai-protocol")]
             tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
         });
 
@@ -4780,6 +4822,8 @@ BTC is currently around $65,000 based on latest tool output."#
             multimodal: crate::config::MultimodalConfig::default(),
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_choice: Arc::new("auto".to_string()),
+            #[cfg(feature = "ai-protocol")]
+            workspace_tool_dispatcher: Arc::new(None),
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
         });
@@ -5294,6 +5338,8 @@ BTC is currently around $65,000 based on latest tool output."#
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_choice: Arc::new("auto".to_string()),
             #[cfg(feature = "ai-protocol")]
+            workspace_tool_dispatcher: Arc::new(None),
+            #[cfg(feature = "ai-protocol")]
             tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
         });
 
@@ -5381,6 +5427,8 @@ BTC is currently around $65,000 based on latest tool output."#
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_choice: Arc::new("auto".to_string()),
             #[cfg(feature = "ai-protocol")]
+            workspace_tool_dispatcher: Arc::new(None),
+            #[cfg(feature = "ai-protocol")]
             tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
         });
 
@@ -5467,6 +5515,8 @@ BTC is currently around $65,000 based on latest tool output."#
             multimodal: crate::config::MultimodalConfig::default(),
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_choice: Arc::new("auto".to_string()),
+            #[cfg(feature = "ai-protocol")]
+            workspace_tool_dispatcher: Arc::new(None),
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
         });

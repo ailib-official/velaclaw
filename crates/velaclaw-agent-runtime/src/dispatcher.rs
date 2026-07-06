@@ -1,5 +1,5 @@
 use crate::provider::{
-    ChatMessage, ChatResponse, ConversationMessage, NativeToolCapable, ToolCall, ToolResultMessage,
+    ChatMessage, ChatResponse, ConversationMessage, NativeToolCapable, ToolResultMessage,
 };
 use crate::tools::{Tool, ToolSpec};
 use serde_json::Value;
@@ -547,6 +547,7 @@ impl ToolDispatcher for NativeToolDispatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::provider::ToolCall;
 
     #[test]
     fn xml_dispatcher_parses_tool_calls() {

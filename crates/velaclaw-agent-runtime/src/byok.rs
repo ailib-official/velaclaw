@@ -1,7 +1,7 @@
 //! BYOK execution helpers — AiClient init, transport retry, telemetry (VL-ARCH-007).
 //! BYOK 执行辅助：客户端初始化、传输层重试与遥测。
 
-use crate::telemetry::{ByokTelemetryHook, UsageSnapshot};
+use crate::telemetry::ByokTelemetryHook;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -124,10 +124,6 @@ fn maybe_emit_telemetry(
     latency: Duration,
 ) {
     if let Some(telemetry) = telemetry {
-        let usage = response.usage.as_ref().map(|u| UsageSnapshot {
-            input_tokens: u.input_tokens.unwrap_or(0),
-            output_tokens: u.output_tokens.unwrap_or(0),
-        });
-        telemetry.record_success(provider_id, model_id, usage, latency);
+        telemetry.record_success(provider_id, model_id, response.usage.as_ref(), latency);
     }
 }

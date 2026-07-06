@@ -4,8 +4,9 @@
 pub use velaclaw_agent_runtime::{init_ai_client_sync, resolve_ai_client, split_logical_model_id};
 
 use crate::telemetry::ByokTelemetryReporter;
+use serde_json::Value;
 use std::time::Duration;
-use velaclaw_agent_runtime::telemetry::{ByokTelemetryHook, UsageSnapshot};
+use velaclaw_agent_runtime::telemetry::ByokTelemetryHook;
 
 struct ReporterHook<'a>(&'a ByokTelemetryReporter);
 
@@ -14,17 +15,11 @@ impl ByokTelemetryHook for ReporterHook<'_> {
         &self,
         provider_id: &str,
         model_id: &str,
-        usage: Option<UsageSnapshot>,
+        usage: Option<&Value>,
         latency: Duration,
     ) {
-        let usage_json = usage.map(|u| {
-            serde_json::json!({
-                "prompt_tokens": u.input_tokens,
-                "completion_tokens": u.output_tokens,
-            })
-        });
         self.0
-            .emit_byok_success(provider_id, model_id, usage_json.as_ref(), latency);
+            .emit_byok_success(provider_id, model_id, usage, latency);
     }
 }
 

@@ -20,15 +20,18 @@ pub struct EffectivePolicy {
 
 #[cfg(feature = "ai-protocol")]
 impl EffectivePolicy {
-    /// Merge config (L1) and optional session override over manifest policy (L0).
+    /// Merge L2 workspace → L1 config → session override over manifest policy (L0).
     pub fn resolve(
         config_tool_dispatcher: &str,
+        workspace_tool_dispatcher: Option<&str>,
         session_tool_dispatcher: Option<&str>,
         tool_calling: ToolCallingPolicy,
     ) -> Self {
-        let tool_dispatcher = session_tool_dispatcher
-            .map(str::to_string)
-            .unwrap_or_else(|| config_tool_dispatcher.to_string());
+        let tool_dispatcher = merge_tool_dispatcher(
+            config_tool_dispatcher,
+            workspace_tool_dispatcher,
+            session_tool_dispatcher,
+        );
         Self {
             tool_dispatcher,
             tool_calling,
@@ -39,6 +42,24 @@ impl EffectivePolicy {
     pub fn build_dispatcher(&self, provider: &dyn Provider) -> Box<dyn ToolDispatcher> {
         build_tool_dispatcher(&self.tool_dispatcher, provider, self.tool_calling.clone())
     }
+}
+
+/// Priority: session > L1 config > L2 workspace > `auto`.
+#[cfg(feature = "ai-protocol")]
+pub fn merge_tool_dispatcher(
+    config_tool_dispatcher: &str,
+    workspace_tool_dispatcher: Option<&str>,
+    session_tool_dispatcher: Option<&str>,
+) -> String {
+    if let Some(session) = session_tool_dispatcher {
+        return session.to_string();
+    }
+    if !config_tool_dispatcher.is_empty() {
+        return config_tool_dispatcher.to_string();
+    }
+    workspace_tool_dispatcher
+        .map(str::to_string)
+        .unwrap_or_else(|| "auto".to_string())
 }
 
 #[cfg(all(test, feature = "ai-protocol"))]
@@ -101,34 +122,53 @@ mod tests {
     }
 
     #[test]
+    fn merge_l1_overrides_l2() {
+        assert_eq!(merge_tool_dispatcher("native", Some("xml"), None), "native");
+    }
+
+    #[test]
+    fn merge_session_overrides_l1_and_l2() {
+        assert_eq!(
+            merge_tool_dispatcher("native", Some("xml"), Some("auto")),
+            "auto"
+        );
+    }
+
+    #[test]
     fn resolve_uses_config_when_no_session_override() {
-        let policy = EffectivePolicy::resolve("auto", None, sample_policy());
+        let policy = EffectivePolicy::resolve("auto", None, None, sample_policy());
         assert_eq!(policy.tool_dispatcher, "auto");
     }
 
     #[test]
     fn resolve_session_override_wins_over_config() {
-        let policy = EffectivePolicy::resolve("auto", Some("xml"), sample_policy());
+        let policy = EffectivePolicy::resolve("auto", Some("xml"), Some("xml"), sample_policy());
         assert_eq!(policy.tool_dispatcher, "xml");
     }
 
     #[test]
+    fn resolve_l1_overrides_l2_workspace_baseline() {
+        let policy = EffectivePolicy::resolve("native", Some("xml"), None, sample_policy());
+        assert_eq!(policy.tool_dispatcher, "native");
+    }
+
+    #[test]
     fn build_dispatcher_auto_prefers_native_when_capable() {
-        let effective = EffectivePolicy::resolve("auto", None, sample_policy());
+        let effective = EffectivePolicy::resolve("auto", None, None, sample_policy());
         let dispatcher = effective.build_dispatcher(&NativeCapableProvider);
         assert!(dispatcher.should_send_tool_specs());
     }
 
     #[test]
     fn build_dispatcher_xml_never_sends_native_specs() {
-        let effective = EffectivePolicy::resolve("xml", None, sample_policy());
+        let effective = EffectivePolicy::resolve("xml", None, None, sample_policy());
         let dispatcher = effective.build_dispatcher(&NativeCapableProvider);
         assert!(!dispatcher.should_send_tool_specs());
     }
 
     #[test]
     fn build_dispatcher_auto_falls_back_to_xml_without_native() {
-        let effective = EffectivePolicy::resolve("auto", None, sample_policy());
+        let effective = EffectivePolicy::resolve("auto", None, None, sample_policy());
         let dispatcher = effective.build_dispatcher(&NoNativeProvider);
         assert!(!dispatcher.should_send_tool_specs());
     }

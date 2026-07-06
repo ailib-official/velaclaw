@@ -1260,11 +1260,12 @@ fn xml_dispatcher_generates_tool_instructions() {
 }
 
 #[test]
-fn native_dispatcher_returns_empty_instructions() {
+fn native_dispatcher_includes_text_fallback_instructions() {
     let tools: Vec<Box<dyn Tool>> = vec![Box::new(EchoTool)];
     let dispatcher = NativeToolDispatcher::default();
     let instructions = dispatcher.prompt_instructions(&tools);
-    assert!(instructions.is_empty());
+    assert!(instructions.contains("<tool_call>"));
+    assert!(instructions.contains("Tool Use Protocol") || instructions.contains("工具调用协议"));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

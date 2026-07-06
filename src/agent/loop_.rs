@@ -903,6 +903,39 @@ fn parse_tool_calls(response: &str) -> (String, Vec<ParsedToolCall>) {
         }
     }
 
+    // Markdown ```shell / ```bash fences (common when native tools fail or model narrates commands).
+    if calls.is_empty() {
+        static MD_SHELL_RE: LazyLock<Regex> =
+            LazyLock::new(|| Regex::new(r"(?s)```(?:shell|bash|sh)\s*\n(.*?)```").unwrap());
+        let mut md_text_parts: Vec<String> = Vec::new();
+        let mut last_end = 0;
+
+        for cap in MD_SHELL_RE.captures_iter(response) {
+            let full_match = cap.get(0).unwrap();
+            let before = &response[last_end..full_match.start()];
+            if !before.trim().is_empty() {
+                md_text_parts.push(before.trim().to_string());
+            }
+            let command = cap[1].trim();
+            if !command.is_empty() {
+                calls.push(ParsedToolCall {
+                    name: "shell".to_string(),
+                    arguments: serde_json::json!({ "command": command }),
+                });
+            }
+            last_end = full_match.end();
+        }
+
+        if !calls.is_empty() {
+            let after = &response[last_end..];
+            if !after.trim().is_empty() {
+                md_text_parts.push(after.trim().to_string());
+            }
+            text_parts = md_text_parts;
+            remaining = "";
+        }
+    }
+
     // GLM-style tool calls (browser_open/url>https://..., shell/command>ls, etc.)
     if calls.is_empty() {
         let glm_calls = parse_glm_style_tool_calls(remaining);
@@ -1056,6 +1089,7 @@ pub(crate) async fn agent_turn(
         None,
         None,
         None,
+        false,
     )
     .await
 }
@@ -1281,6 +1315,25 @@ async fn execute_tools_sequential(
 //   • max_iterations is reached (runaway safety), or
 //   • the cancellation token fires (external abort).
 
+/// Append manifest-backed text tool instructions when the model may emit markup
+/// instead of (or alongside) native API tool calls.
+#[cfg(feature = "ai-protocol")]
+pub(crate) fn append_text_tool_prompt(
+    system_prompt: &mut String,
+    dispatcher: &dyn crate::agent::dispatcher::ToolDispatcher,
+    tools_registry: &[Box<dyn Tool>],
+    native_strategy: ai_lib_rust::NativeStrategy,
+) {
+    let append = !dispatcher.should_send_tool_specs()
+        || native_strategy == ai_lib_rust::NativeStrategy::Hybrid;
+    if append {
+        let instr = dispatcher.prompt_instructions(tools_registry);
+        if !instr.is_empty() {
+            system_prompt.push_str(&instr);
+        }
+    }
+}
+
 /// Execute a single turn of the agent loop: send messages, parse tool calls,
 /// execute tools, and loop until the LLM produces a final text response.
 #[allow(clippy::too_many_arguments)]
@@ -1301,6 +1354,8 @@ pub(crate) async fn run_tool_call_loop(
     on_delta: Option<tokio::sync::mpsc::Sender<String>>,
     tool_dispatcher: Option<&dyn crate::agent::dispatcher::ToolDispatcher>,
     security: Option<&SecurityPolicy>,
+    // When true, tool results use `[Tool results]` user text (Hybrid manifests).
+    text_tool_result_history: bool,
 ) -> Result<String> {
     let max_iterations = if max_tool_iterations == 0 {
         DEFAULT_MAX_TOOL_ITERATIONS
@@ -1384,18 +1439,52 @@ pub(crate) async fn run_tool_call_loop(
 
                     if let Some(dispatcher) = tool_dispatcher {
                         let response_text = resp.text_or_empty().to_string();
-                        let (parsed_text, disp_calls) = dispatcher.parse_response(&resp);
-                        let calls = disp_calls
+                        let (mut parsed_text, mut disp_calls) = dispatcher.parse_response(&resp);
+                        if disp_calls.is_empty() {
+                            let (fallback_text, fallback_calls) = parse_tool_calls(&response_text);
+                            if !fallback_calls.is_empty() {
+                                if !fallback_text.is_empty() {
+                                    parsed_text = fallback_text;
+                                }
+                                disp_calls = fallback_calls
+                                    .into_iter()
+                                    .map(|c| crate::agent::dispatcher::ParsedToolCall {
+                                        name: c.name,
+                                        arguments: c.arguments,
+                                        tool_call_id: None,
+                                    })
+                                    .collect();
+                            }
+                        }
+                        let calls: Vec<ParsedToolCall> = disp_calls
                             .into_iter()
                             .map(|c| ParsedToolCall {
                                 name: c.name,
                                 arguments: c.arguments,
                             })
                             .collect();
-                        let assistant_history_content = if resp.tool_calls.is_empty() {
-                            response_text.clone()
-                        } else {
+                        let assistant_history_content = if !resp.tool_calls.is_empty() {
                             build_native_assistant_history(&response_text, &resp.tool_calls)
+                        } else if !calls.is_empty() {
+                            let synthetic: Vec<ToolCall> = calls
+                                .iter()
+                                .enumerate()
+                                .map(|(i, c)| ToolCall {
+                                    id: format!("text_tool_{i}"),
+                                    name: c.name.clone(),
+                                    arguments: c.arguments.to_string(),
+                                })
+                                .collect();
+                            build_assistant_history_with_tool_calls(
+                                if parsed_text.is_empty() {
+                                    response_text.as_str()
+                                } else {
+                                    parsed_text.as_str()
+                                },
+                                &synthetic,
+                            )
+                        } else {
+                            response_text.clone()
                         };
                         (
                             response_text,
@@ -1534,15 +1623,11 @@ pub(crate) async fn run_tool_call_loop(
         // reconstruct proper OpenAI-format tool_calls and tool result messages.
         // Prompt mode: use XML-based text format as before.
         history.push(ChatMessage::assistant(assistant_history_content));
-        if native_tool_calls.is_empty() {
+        if native_tool_calls.is_empty() || text_tool_result_history {
             history.push(ChatMessage::user(format!("[Tool results]\n{tool_results}")));
         } else {
             for (native_call, result) in native_tool_calls.iter().zip(individual_results.iter()) {
-                let tool_msg = serde_json::json!({
-                    "tool_call_id": native_call.id,
-                    "content": result,
-                });
-                history.push(ChatMessage::tool(tool_msg.to_string()));
+                history.push(ChatMessage::tool_with_call_id(&native_call.id, result));
             }
         }
     }
@@ -1665,14 +1750,13 @@ pub async fn run(
     };
 
     #[cfg(feature = "ai-protocol")]
-    let (provider, model_name, tool_dispatcher): (
-        Box<dyn Provider>,
-        String,
-        Option<Box<dyn crate::agent::dispatcher::ToolDispatcher>>,
-    ) = {
+    let (provider, model_name, tool_dispatcher, text_tool_result_history) = {
         let (exec_handle, provider) =
             crate::execution::bootstrap_routed_provider(&config, &provider_runtime_options)?;
         let model_name = exec_handle.logical_model_id().to_string();
+        let tool_calling_policy = exec_handle.tool_calling_policy();
+        let text_tool_result_history =
+            tool_calling_policy.native_strategy == ai_lib_rust::NativeStrategy::Hybrid;
         let workspace_policy = crate::config::discover_and_load(&config)
             .with_context(|| "load workspace agent-policy.yaml")?;
         let workspace_dispatcher = workspace_policy.as_ref().and_then(|p| p.tool_dispatcher());
@@ -1680,18 +1764,19 @@ pub async fn run(
             config.agent.tool_dispatcher.as_str(),
             workspace_dispatcher,
             None,
-            exec_handle.tool_calling_policy(),
+            tool_calling_policy,
         );
         let tool_dispatcher = Some(effective.build_dispatcher(provider.as_ref()));
-        (provider, model_name, tool_dispatcher)
+        (
+            provider,
+            model_name,
+            tool_dispatcher,
+            text_tool_result_history,
+        )
     };
 
     #[cfg(not(feature = "ai-protocol"))]
-    let (provider, model_name, tool_dispatcher): (
-        Box<dyn Provider>,
-        String,
-        Option<Box<dyn crate::agent::dispatcher::ToolDispatcher>>,
-    ) = {
+    let (provider, model_name, tool_dispatcher, text_tool_result_history) = {
         let provider_name = provider_override
             .as_deref()
             .or(config.default_provider.as_deref())
@@ -1711,7 +1796,7 @@ pub async fn run(
             &provider_runtime_options,
             None,
         )?;
-        (provider, model_name, None)
+        (provider, model_name, None, false)
     };
 
     let provider_name = model_name
@@ -1869,20 +1954,30 @@ pub async fn run(
         config.skills.prompt_injection_mode,
     );
 
-    // Append structured tool-use instructions with schemas (only for non-native providers)
-    if !native_tools {
-        #[cfg(feature = "ai-protocol")]
-        {
-            if let Some(ref dispatcher) = tool_dispatcher {
-                if !dispatcher.should_send_tool_specs() {
-                    system_prompt.push_str(&dispatcher.prompt_instructions(&tools_registry));
-                }
+    // Append structured tool-use instructions (Hybrid / xml mode; native-only Full skips).
+    #[cfg(feature = "ai-protocol")]
+    {
+        if let Some(ref dispatcher) = tool_dispatcher {
+            let strategy = if text_tool_result_history {
+                ai_lib_rust::NativeStrategy::Hybrid
+            } else if dispatcher.should_send_tool_specs() {
+                ai_lib_rust::NativeStrategy::Full
             } else {
-                system_prompt.push_str(&build_tool_instructions(&tools_registry));
-            }
+                ai_lib_rust::NativeStrategy::TextOnly
+            };
+            append_text_tool_prompt(
+                &mut system_prompt,
+                dispatcher.as_ref(),
+                &tools_registry,
+                strategy,
+            );
+        } else if !native_tools {
+            system_prompt.push_str(&build_tool_instructions(&tools_registry));
         }
-        #[cfg(not(feature = "ai-protocol"))]
-        {
+    }
+    #[cfg(not(feature = "ai-protocol"))]
+    {
+        if !native_tools {
             system_prompt.push_str(&build_tool_instructions(&tools_registry));
         }
     }
@@ -1943,6 +2038,7 @@ pub async fn run(
             None,
             tool_dispatcher_ref,
             Some(security.as_ref()),
+            text_tool_result_history,
         )
         .await?;
         final_output = response.clone();
@@ -1981,10 +2077,20 @@ pub async fn run(
                 "/help" => {
                     println!("Available commands:");
                     println!("  /help        Show this help message");
+                    println!("  /version     Show VelaClaw version");
                     println!("  /models      List providers (or `/models <provider>`)");
                     println!("  /model       Show/set model for this session");
                     println!("  /clear /new  Clear conversation history");
                     println!("  /quit /exit  Exit interactive mode\n");
+                    continue;
+                }
+                "/version" => {
+                    println!(
+                        "VelaClaw {} (provider: {}, model: {})\n",
+                        env!("CARGO_PKG_VERSION"),
+                        session_provider,
+                        session_model
+                    );
                     continue;
                 }
                 "/clear" | "/new" => {
@@ -2081,6 +2187,7 @@ pub async fn run(
                 None,
                 tool_dispatcher_ref,
                 Some(security.as_ref()),
+                text_tool_result_history,
             )
             .await
             {
@@ -2572,6 +2679,7 @@ mod tests {
             None,
             None,
             None,
+            false,
         )
         .await
         .expect_err("provider without vision support should fail");
@@ -2618,6 +2726,7 @@ mod tests {
             None,
             None,
             None,
+            false,
         )
         .await
         .expect_err("oversized payload must fail");
@@ -2658,6 +2767,7 @@ mod tests {
             None,
             None,
             None,
+            false,
         )
         .await
         .expect("valid multimodal payload should pass");
@@ -2780,6 +2890,7 @@ mod tests {
             None,
             None,
             None,
+            false,
         )
         .await
         .expect("parallel execution should complete");
@@ -3041,6 +3152,25 @@ Tail"#;
         assert!(text.contains("Preface"));
         assert!(text.contains("Tail"));
         assert!(!text.contains("```tool-call"));
+    }
+
+    #[test]
+    fn parse_tool_calls_handles_markdown_shell_fence() {
+        let response = r#"I'll run that.
+```shell
+echo hello
+```
+Done."#;
+
+        let (text, calls) = parse_tool_calls(response);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "shell");
+        assert_eq!(
+            calls[0].arguments.get("command").unwrap().as_str().unwrap(),
+            "echo hello"
+        );
+        assert!(text.contains("I'll run that."));
+        assert!(text.contains("Done."));
     }
 
     #[test]

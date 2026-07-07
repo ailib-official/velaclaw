@@ -770,7 +770,11 @@ mod tests {
             serde_json::json!({"type": "object"})
         }
 
-        async fn execute(&self, _args: serde_json::Value, _ctx: &ToolExecutionContext) -> Result<crate::tools::ToolResult> {
+        async fn execute(
+            &self,
+            _args: serde_json::Value,
+            _ctx: &ToolExecutionContext,
+        ) -> Result<crate::tools::ToolResult> {
             Ok(crate::tools::ToolResult {
                 success: true,
                 output: "tool-out".into(),

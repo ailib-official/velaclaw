@@ -1123,7 +1123,11 @@ mod agent_dispatch {
         fn parameters_schema(&self) -> serde_json::Value {
             json!({"type": "object", "properties": {}})
         }
-        async fn execute(&self, _args: serde_json::Value, _ctx: &ToolExecutionContext) -> Result<ToolResult> {
+        async fn execute(
+            &self,
+            _args: serde_json::Value,
+            _ctx: &ToolExecutionContext,
+        ) -> Result<ToolResult> {
             let mut c = self.count.lock().unwrap();
             *c += 1;
             Ok(ToolResult {
@@ -1298,7 +1302,11 @@ mod agent_dispatch {
             fn parameters_schema(&self) -> serde_json::Value {
                 json!({"type": "object", "properties": {}})
             }
-            async fn execute(&self, _args: serde_json::Value, _ctx: &ToolExecutionContext) -> Result<ToolResult> {
+            async fn execute(
+                &self,
+                _args: serde_json::Value,
+                _ctx: &ToolExecutionContext,
+            ) -> Result<ToolResult> {
                 Ok(ToolResult {
                     success: false,
                     output: String::new(),
@@ -1407,7 +1415,11 @@ mod agent_dispatch {
             fn parameters_schema(&self) -> serde_json::Value {
                 json!({"type": "object", "properties": {}})
             }
-            async fn execute(&self, _args: serde_json::Value, _ctx: &ToolExecutionContext) -> Result<ToolResult> {
+            async fn execute(
+                &self,
+                _args: serde_json::Value,
+                _ctx: &ToolExecutionContext,
+            ) -> Result<ToolResult> {
                 anyhow::bail!("deliberate tool panic")
             }
         }

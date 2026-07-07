@@ -315,10 +315,13 @@ mod tests {
     async fn emote_happy() {
         let tool = EmoteTool::new(RobotConfig::default());
         let result = tool
-            .execute(json!({
-                "expression": "happy",
-                "duration": 0
-            }), &ToolExecutionContext::default())
+            .execute(
+                json!({
+                    "expression": "happy",
+                    "duration": 0
+                }),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(result.success);

@@ -160,10 +160,7 @@ fn is_shell_policy_tool(tool_name: &str) -> bool {
     )
 }
 
-fn shell_command_from_args<'a>(
-    tool_name: &str,
-    args: &'a serde_json::Value,
-) -> Option<&'a str> {
+fn shell_command_from_args<'a>(tool_name: &str, args: &'a serde_json::Value) -> Option<&'a str> {
     match tool_name {
         "shell" | "cron_add" | "cron_update" | "cron_run" | "schedule" => {
             args.get("command").and_then(|v| v.as_str())

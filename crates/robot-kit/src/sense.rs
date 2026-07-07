@@ -438,7 +438,10 @@ mod tests {
     async fn sense_scan_mock() {
         let tool = SenseTool::new(RobotConfig::default());
         let result = tool
-            .execute(json!({"action": "scan", "direction": "all"}), &ToolExecutionContext::default())
+            .execute(
+                json!({"action": "scan", "direction": "all"}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(result.success);
@@ -449,7 +452,10 @@ mod tests {
     async fn sense_clear_ahead() {
         let tool = SenseTool::new(RobotConfig::default());
         let result = tool
-            .execute(json!({"action": "clear_ahead"}), &ToolExecutionContext::default())
+            .execute(
+                json!({"action": "clear_ahead"}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(result.success);

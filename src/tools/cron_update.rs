@@ -68,7 +68,11 @@ impl Tool for CronUpdateTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value, ctx: &ToolExecutionContext) -> anyhow::Result<ToolResult> {
+    async fn execute(
+        &self,
+        args: serde_json::Value,
+        ctx: &ToolExecutionContext,
+    ) -> anyhow::Result<ToolResult> {
         if !self.config.cron.enabled {
             return Ok(ToolResult {
                 success: false,
@@ -177,10 +181,13 @@ mod tests {
         let tool = CronUpdateTool::new(cfg.clone(), test_security(&cfg));
 
         let result = tool
-            .execute(json!({
-                "job_id": job.id,
-                "patch": { "enabled": false }
-            }), &ToolExecutionContext::default())
+            .execute(
+                json!({
+                    "job_id": job.id,
+                    "patch": { "enabled": false }
+                }),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
 
@@ -205,10 +212,13 @@ mod tests {
         let tool = CronUpdateTool::new(cfg.clone(), test_security(&cfg));
 
         let result = tool
-            .execute(json!({
-                "job_id": job.id,
-                "patch": { "command": "curl https://example.com" }
-            }), &ToolExecutionContext::default())
+            .execute(
+                json!({
+                    "job_id": job.id,
+                    "patch": { "command": "curl https://example.com" }
+                }),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(!result.success);
@@ -230,10 +240,13 @@ mod tests {
         let tool = CronUpdateTool::new(cfg.clone(), test_security(&cfg));
 
         let result = tool
-            .execute(json!({
-                "job_id": job.id,
-                "patch": { "enabled": false }
-            }), &ToolExecutionContext::default())
+            .execute(
+                json!({
+                    "job_id": job.id,
+                    "patch": { "enabled": false }
+                }),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(!result.success);
@@ -256,10 +269,13 @@ mod tests {
         let tool = CronUpdateTool::new(cfg.clone(), test_security(&cfg));
 
         let denied = tool
-            .execute(json!({
-                "job_id": job.id,
-                "patch": { "command": "touch cron-update-approval-test" }
-            }), &ToolExecutionContext::default())
+            .execute(
+                json!({
+                    "job_id": job.id,
+                    "patch": { "command": "touch cron-update-approval-test" }
+                }),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(!denied.success);
@@ -268,11 +284,16 @@ mod tests {
             .unwrap_or_default()
             .contains("explicit approval"));
 
-        let approved = tool.execute(json!({
-                "job_id": job.id,
-                "patch": { "command": "touch cron-update-approval-test" }
-            }), &ToolExecutionContext::with_shell_human_approved(true)).await
-        .unwrap();
+        let approved = tool
+            .execute(
+                json!({
+                    "job_id": job.id,
+                    "patch": { "command": "touch cron-update-approval-test" }
+                }),
+                &ToolExecutionContext::with_shell_human_approved(true),
+            )
+            .await
+            .unwrap();
         assert!(approved.success, "{:?}", approved.error);
     }
 }

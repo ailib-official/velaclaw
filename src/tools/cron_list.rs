@@ -33,7 +33,11 @@ impl Tool for CronListTool {
         })
     }
 
-    async fn execute(&self, _args: serde_json::Value, __ctx: &ToolExecutionContext) -> anyhow::Result<ToolResult> {
+    async fn execute(
+        &self,
+        _args: serde_json::Value,
+        __ctx: &ToolExecutionContext,
+    ) -> anyhow::Result<ToolResult> {
         if !self.config.cron.enabled {
             return Ok(ToolResult {
                 success: false,
@@ -81,7 +85,10 @@ mod tests {
         let cfg = test_config(&tmp).await;
         let tool = CronListTool::new(cfg);
 
-        let result = tool.execute(json!({}), &ToolExecutionContext::default()).await.unwrap();
+        let result = tool
+            .execute(json!({}), &ToolExecutionContext::default())
+            .await
+            .unwrap();
         assert!(result.success);
         assert_eq!(result.output.trim(), "[]");
     }
@@ -93,7 +100,10 @@ mod tests {
         cfg.cron.enabled = false;
         let tool = CronListTool::new(Arc::new(cfg));
 
-        let result = tool.execute(json!({}), &ToolExecutionContext::default()).await.unwrap();
+        let result = tool
+            .execute(json!({}), &ToolExecutionContext::default())
+            .await
+            .unwrap();
         assert!(!result.success);
         assert!(result
             .error

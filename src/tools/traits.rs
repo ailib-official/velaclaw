@@ -29,7 +29,11 @@ mod tests {
             })
         }
 
-        async fn execute(&self, args: serde_json::Value, _ctx: &ToolExecutionContext) -> anyhow::Result<ToolResult> {
+        async fn execute(
+            &self,
+            args: serde_json::Value,
+            _ctx: &ToolExecutionContext,
+        ) -> anyhow::Result<ToolResult> {
             Ok(ToolResult {
                 success: true,
                 output: args
@@ -55,7 +59,10 @@ mod tests {
     async fn tool_execute_returns_output() {
         let tool = DummyTool;
         let result = tool
-            .execute(serde_json::json!({ "value": "hello" }), &ToolExecutionContext::default())
+            .execute(
+                serde_json::json!({ "value": "hello" }),
+                &ToolExecutionContext::default(),
+            )
             .await
             .expect("execute");
         assert!(result.success);

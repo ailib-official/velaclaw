@@ -86,7 +86,11 @@ impl Tool for HardwareBoardInfoTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value, _ctx: &ToolExecutionContext) -> anyhow::Result<ToolResult> {
+    async fn execute(
+        &self,
+        args: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> anyhow::Result<ToolResult> {
         let board = args
             .get("board")
             .and_then(|v| v.as_str())

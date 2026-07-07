@@ -1,4 +1,4 @@
-use super::traits::{Tool, ToolResult};
+use super::traits::{Tool, ToolExecutionContext, ToolResult};
 use crate::security::SecurityPolicy;
 use async_trait::async_trait;
 use serde_json::json;
@@ -42,7 +42,7 @@ impl Tool for FileWriteTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
+    async fn execute(&self, args: serde_json::Value, _ctx: &ToolExecutionContext) -> anyhow::Result<ToolResult> {
         let path = args
             .get("path")
             .and_then(|v| v.as_str())
@@ -212,7 +212,7 @@ mod tests {
 
         let tool = FileWriteTool::new(test_security(dir.clone()));
         let result = tool
-            .execute(json!({"path": "out.txt", "content": "written!"}))
+            .execute(json!({"path": "out.txt", "content": "written!"}), &ToolExecutionContext::default())
             .await
             .unwrap();
         assert!(result.success);
@@ -234,7 +234,7 @@ mod tests {
 
         let tool = FileWriteTool::new(test_security(dir.clone()));
         let result = tool
-            .execute(json!({"path": "a/b/c/deep.txt", "content": "deep"}))
+            .execute(json!({"path": "a/b/c/deep.txt", "content": "deep"}), &ToolExecutionContext::default())
             .await
             .unwrap();
         assert!(result.success);
@@ -258,7 +258,7 @@ mod tests {
 
         let tool = FileWriteTool::new(test_security(dir.clone()));
         let result = tool
-            .execute(json!({"path": "exist.txt", "content": "new"}))
+            .execute(json!({"path": "exist.txt", "content": "new"}), &ToolExecutionContext::default())
             .await
             .unwrap();
         assert!(result.success);
@@ -279,7 +279,7 @@ mod tests {
 
         let tool = FileWriteTool::new(test_security(dir.clone()));
         let result = tool
-            .execute(json!({"path": "../../etc/evil", "content": "bad"}))
+            .execute(json!({"path": "../../etc/evil", "content": "bad"}), &ToolExecutionContext::default())
             .await
             .unwrap();
         assert!(!result.success);
@@ -292,7 +292,7 @@ mod tests {
     async fn file_write_blocks_absolute_path() {
         let tool = FileWriteTool::new(test_security(std::env::temp_dir()));
         let result = tool
-            .execute(json!({"path": "/etc/evil", "content": "bad"}))
+            .execute(json!({"path": "/etc/evil", "content": "bad"}), &ToolExecutionContext::default())
             .await
             .unwrap();
         assert!(!result.success);
@@ -302,14 +302,14 @@ mod tests {
     #[tokio::test]
     async fn file_write_missing_path_param() {
         let tool = FileWriteTool::new(test_security(std::env::temp_dir()));
-        let result = tool.execute(json!({"content": "data"})).await;
+        let result = tool.execute(json!({"content": "data"}), &ToolExecutionContext::default()).await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn file_write_missing_content_param() {
         let tool = FileWriteTool::new(test_security(std::env::temp_dir()));
-        let result = tool.execute(json!({"path": "file.txt"})).await;
+        let result = tool.execute(json!({"path": "file.txt"}), &ToolExecutionContext::default()).await;
         assert!(result.is_err());
     }
 
@@ -321,7 +321,7 @@ mod tests {
 
         let tool = FileWriteTool::new(test_security(dir.clone()));
         let result = tool
-            .execute(json!({"path": "empty.txt", "content": ""}))
+            .execute(json!({"path": "empty.txt", "content": ""}), &ToolExecutionContext::default())
             .await
             .unwrap();
         assert!(result.success);
@@ -347,7 +347,7 @@ mod tests {
 
         let tool = FileWriteTool::new(test_security(workspace.clone()));
         let result = tool
-            .execute(json!({"path": "escape_dir/hijack.txt", "content": "bad"}))
+            .execute(json!({"path": "escape_dir/hijack.txt", "content": "bad"}), &ToolExecutionContext::default())
             .await
             .unwrap();
 
@@ -370,7 +370,7 @@ mod tests {
 
         let tool = FileWriteTool::new(test_security_with(dir.clone(), AutonomyLevel::ReadOnly, 20));
         let result = tool
-            .execute(json!({"path": "out.txt", "content": "should-block"}))
+            .execute(json!({"path": "out.txt", "content": "should-block"}), &ToolExecutionContext::default())
             .await
             .unwrap();
 
@@ -393,7 +393,7 @@ mod tests {
             0,
         ));
         let result = tool
-            .execute(json!({"path": "out.txt", "content": "should-block"}))
+            .execute(json!({"path": "out.txt", "content": "should-block"}), &ToolExecutionContext::default())
             .await
             .unwrap();
 
@@ -431,7 +431,7 @@ mod tests {
 
         let tool = FileWriteTool::new(test_security(workspace.clone()));
         let result = tool
-            .execute(json!({"path": "linked.txt", "content": "overwritten"}))
+            .execute(json!({"path": "linked.txt", "content": "overwritten"}), &ToolExecutionContext::default())
             .await
             .unwrap();
 
@@ -458,7 +458,7 @@ mod tests {
 
         let tool = FileWriteTool::new(test_security(dir.clone()));
         let result = tool
-            .execute(json!({"path": "file\u{0000}.txt", "content": "bad"}))
+            .execute(json!({"path": "file\u{0000}.txt", "content": "bad"}), &ToolExecutionContext::default())
             .await
             .unwrap();
         assert!(!result.success, "paths with null bytes must be blocked");

@@ -1,4 +1,4 @@
-use super::traits::{Tool, ToolResult};
+use super::traits::{Tool, ToolExecutionContext, ToolResult};
 use crate::config::Config;
 use crate::cron;
 use async_trait::async_trait;
@@ -50,7 +50,7 @@ impl Tool for CronRunsTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
+    async fn execute(&self, args: serde_json::Value, _ctx: &ToolExecutionContext) -> anyhow::Result<ToolResult> {
         if !self.config.cron.enabled {
             return Ok(ToolResult {
                 success: false,
@@ -154,7 +154,7 @@ mod tests {
 
         let tool = CronRunsTool::new(cfg.clone());
         let result = tool
-            .execute(json!({ "job_id": job.id, "limit": 5 }))
+            .execute(json!({ "job_id": job.id, "limit": 5 }), &ToolExecutionContext::default())
             .await
             .unwrap();
 
@@ -167,7 +167,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cfg = test_config(&tmp).await;
         let tool = CronRunsTool::new(cfg);
-        let result = tool.execute(json!({})).await.unwrap();
+        let result = tool.execute(json!({}), &ToolExecutionContext::default()).await.unwrap();
         assert!(!result.success);
         assert!(result
             .error

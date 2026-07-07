@@ -3,8 +3,10 @@
 //! Provides a pre-execution hook that prompts the user before tool calls,
 //! with session-scoped "Always" allowlists and audit logging.
 
+mod gate;
 mod hub;
 
+pub use gate::{ApprovalGate, GateDecision};
 pub use hub::ApprovalHub;
 
 use crate::config::AutonomyConfig;

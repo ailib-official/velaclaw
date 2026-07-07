@@ -5,7 +5,7 @@
 
 use crate::config::PeripheralBoardConfig;
 use crate::peripherals::traits::Peripheral;
-use crate::tools::{Tool, ToolResult};
+use crate::tools::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
@@ -86,7 +86,7 @@ impl Tool for RpiGpioReadTool {
         })
     }
 
-    async fn execute(&self, args: Value) -> anyhow::Result<ToolResult> {
+    async fn execute(&self, args: Value, _ctx: &ToolExecutionContext) -> anyhow::Result<ToolResult> {
         let pin = args
             .get("pin")
             .and_then(|v| v.as_u64())
@@ -141,7 +141,7 @@ impl Tool for RpiGpioWriteTool {
         })
     }
 
-    async fn execute(&self, args: Value) -> anyhow::Result<ToolResult> {
+    async fn execute(&self, args: Value, _ctx: &ToolExecutionContext) -> anyhow::Result<ToolResult> {
         let pin = args
             .get("pin")
             .and_then(|v| v.as_u64())

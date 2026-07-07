@@ -18,7 +18,8 @@ use velaclaw::memory;
 use velaclaw::memory::Memory;
 use velaclaw::observability::{NoopObserver, Observer};
 use velaclaw::providers::{ChatRequest, ChatResponse, Provider, ToolCall};
-use velaclaw::tools::{Tool, ToolResult};
+use velaclaw::security::SecurityPolicy;
+use velaclaw::tools::{Tool, ToolExecutionContext, ToolResult};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Mock infrastructure
@@ -83,7 +84,7 @@ impl Tool for EchoTool {
             }
         })
     }
-    async fn execute(&self, args: serde_json::Value) -> Result<ToolResult> {
+    async fn execute(&self, args: serde_json::Value, ctx: &ToolExecutionContext) -> Result<ToolResult> {
         let msg = args
             .get("message")
             .and_then(|v| v.as_str())
@@ -111,7 +112,7 @@ impl Tool for FailingTool {
     fn parameters_schema(&self) -> serde_json::Value {
         json!({"type": "object"})
     }
-    async fn execute(&self, _args: serde_json::Value) -> Result<ToolResult> {
+    async fn execute(&self, _args: serde_json::Value, _ctx: &ToolExecutionContext) -> Result<ToolResult> {
         Ok(ToolResult {
             success: false,
             output: String::new(),
@@ -148,7 +149,7 @@ impl Tool for CountingTool {
     fn parameters_schema(&self) -> serde_json::Value {
         json!({"type": "object"})
     }
-    async fn execute(&self, _args: serde_json::Value) -> Result<ToolResult> {
+    async fn execute(&self, _args: serde_json::Value, _ctx: &ToolExecutionContext) -> Result<ToolResult> {
         let mut c = self.count.lock().unwrap();
         *c += 1;
         Ok(ToolResult {
@@ -189,6 +190,13 @@ fn tool_response(calls: Vec<ToolCall>) -> ChatResponse {
     }
 }
 
+fn test_security() -> Arc<SecurityPolicy> {
+    Arc::new(SecurityPolicy::from_config(
+        &velaclaw::config::AutonomyConfig::default(),
+        &std::env::temp_dir(),
+    ))
+}
+
 fn build_agent(provider: Box<dyn Provider>, tools: Vec<Box<dyn Tool>>) -> Agent {
     Agent::builder()
         .provider(provider)
@@ -197,6 +205,7 @@ fn build_agent(provider: Box<dyn Provider>, tools: Vec<Box<dyn Tool>>) -> Agent 
         .observer(make_observer())
         .tool_dispatcher(Box::new(NativeToolDispatcher::default()))
         .workspace_dir(std::env::temp_dir())
+        .security(test_security())
         .build()
         .unwrap()
 }

@@ -4,7 +4,7 @@
 //! sketch code and calls this tool. VelaClaw compiles and uploads it — no
 //! manual IDE or file editing.
 
-use crate::tools::traits::{Tool, ToolResult};
+use crate::tools::traits::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::process::Command;
@@ -44,7 +44,7 @@ impl Tool for ArduinoUploadTool {
         })
     }
 
-    async fn execute(&self, args: Value) -> anyhow::Result<ToolResult> {
+    async fn execute(&self, args: Value, _ctx: &ToolExecutionContext) -> anyhow::Result<ToolResult> {
         let code = args
             .get("code")
             .and_then(|v| v.as_str())

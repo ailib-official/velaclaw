@@ -1,4 +1,4 @@
-use super::traits::{Tool, ToolResult};
+use super::traits::{Tool, ToolExecutionContext, ToolResult};
 use crate::config::Config;
 use crate::cron::{self, JobType};
 use crate::security::SecurityPolicy;
@@ -32,18 +32,13 @@ impl Tool for CronRunTool {
         json!({
             "type": "object",
             "properties": {
-                "job_id": { "type": "string" },
-                "approved": {
-                    "type": "boolean",
-                    "description": "Set true to explicitly approve medium/high-risk shell commands in supervised mode",
-                    "default": false
-                }
+                "job_id": { "type": "string" }
             },
             "required": ["job_id"]
         })
     }
 
-    async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
+    async fn execute(&self, args: serde_json::Value, ctx: &ToolExecutionContext) -> anyhow::Result<ToolResult> {
         if !self.config.cron.enabled {
             return Ok(ToolResult {
                 success: false,
@@ -62,10 +57,7 @@ impl Tool for CronRunTool {
                 });
             }
         };
-        let approved = args
-            .get("approved")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false);
+        let human_approved = ctx.human_shell_approved;
 
         if !self.security.can_act() {
             return Ok(ToolResult {
@@ -97,7 +89,7 @@ impl Tool for CronRunTool {
         if matches!(job.job_type, JobType::Shell) {
             if let Err(reason) = self
                 .security
-                .validate_command_execution(&job.command, approved)
+                .validate_command_execution(&job.command, human_approved)
             {
                 return Ok(ToolResult {
                     success: false,
@@ -183,7 +175,7 @@ mod tests {
         let job = cron::add_job(&cfg, "*/5 * * * *", "echo run-now").unwrap();
         let tool = CronRunTool::new(cfg.clone(), test_security(&cfg));
 
-        let result = tool.execute(json!({ "job_id": job.id })).await.unwrap();
+        let result = tool.execute(json!({ "job_id": job.id }), &ToolExecutionContext::default()).await.unwrap();
         assert!(result.success, "{:?}", result.error);
 
         let runs = cron::list_runs(&cfg, &job.id, 10).unwrap();
@@ -197,7 +189,7 @@ mod tests {
         let tool = CronRunTool::new(cfg.clone(), test_security(&cfg));
 
         let result = tool
-            .execute(json!({ "job_id": "missing-job-id" }))
+            .execute(json!({ "job_id": "missing-job-id" }), &ToolExecutionContext::default())
             .await
             .unwrap();
         assert!(!result.success);
@@ -218,7 +210,7 @@ mod tests {
         let job = cron::add_job(&cfg, "*/5 * * * *", "echo run-now").unwrap();
         let tool = CronRunTool::new(cfg.clone(), test_security(&cfg));
 
-        let result = tool.execute(json!({ "job_id": job.id })).await.unwrap();
+        let result = tool.execute(json!({ "job_id": job.id }), &ToolExecutionContext::default()).await.unwrap();
         assert!(!result.success);
         assert!(result.error.unwrap_or_default().contains("read-only"));
     }
@@ -239,17 +231,15 @@ mod tests {
         let job = cron::add_job(&cfg, "*/5 * * * *", "touch cron-run-approval").unwrap();
         let tool = CronRunTool::new(cfg.clone(), test_security(&cfg));
 
-        let denied = tool.execute(json!({ "job_id": job.id })).await.unwrap();
+        let denied = tool.execute(json!({ "job_id": job.id }), &ToolExecutionContext::default()).await.unwrap();
         assert!(!denied.success);
         assert!(denied
             .error
             .unwrap_or_default()
             .contains("explicit approval"));
 
-        let approved = tool
-            .execute(json!({ "job_id": job.id, "approved": true }))
-            .await
-            .unwrap();
+        let approved = tool.execute(json!({ "job_id": job.id }), &ToolExecutionContext::with_shell_human_approved(true)).await
+        .unwrap();
         assert!(approved.success, "{:?}", approved.error);
     }
 }

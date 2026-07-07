@@ -265,6 +265,7 @@ mod tests {
         async fn execute(
             &self,
             _args: serde_json::Value,
+            _ctx: &crate::tools::ToolExecutionContext,
         ) -> anyhow::Result<crate::tools::ToolResult> {
             Ok(crate::tools::ToolResult {
                 success: true,

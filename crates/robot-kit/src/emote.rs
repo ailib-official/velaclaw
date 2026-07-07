@@ -251,7 +251,7 @@ impl Tool for EmoteTool {
         })
     }
 
-    async fn execute(&self, args: Value) -> Result<ToolResult> {
+    async fn execute(&self, args: Value, _ctx: &ToolExecutionContext) -> Result<ToolResult> {
         let expression_str = args["expression"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Missing 'expression' parameter"))?;
@@ -318,7 +318,7 @@ mod tests {
             .execute(json!({
                 "expression": "happy",
                 "duration": 0
-            }))
+            }), &ToolExecutionContext::default())
             .await
             .unwrap();
         assert!(result.success);

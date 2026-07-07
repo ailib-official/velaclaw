@@ -1,4 +1,4 @@
-use super::traits::{Tool, ToolResult};
+use super::traits::{Tool, ToolExecutionContext, ToolResult};
 use crate::security::{AutonomyLevel, SecurityPolicy};
 use async_trait::async_trait;
 use serde_json::json;
@@ -480,7 +480,7 @@ impl Tool for GitOperationsTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
+    async fn execute(&self, args: serde_json::Value, _ctx: &ToolExecutionContext) -> anyhow::Result<ToolResult> {
         let operation = match args.get("operation").and_then(|v| v.as_str()) {
             Some(op) => op,
             None => {
@@ -707,7 +707,7 @@ mod tests {
         let tool = GitOperationsTool::new(security, tmp.path().to_path_buf());
 
         let result = tool
-            .execute(json!({"operation": "commit", "message": "test"}))
+            .execute(json!({"operation": "commit", "message": "test"}), &ToolExecutionContext::default())
             .await
             .unwrap();
         assert!(!result.success);
@@ -735,7 +735,7 @@ mod tests {
         });
         let tool = GitOperationsTool::new(security, tmp.path().to_path_buf());
 
-        let result = tool.execute(json!({"operation": "branch"})).await.unwrap();
+        let result = tool.execute(json!({"operation": "branch"}), &ToolExecutionContext::default()).await.unwrap();
         // Branch listing must not be blocked by read-only autonomy
         let error_msg = result.error.as_deref().unwrap_or("");
         assert!(
@@ -754,7 +754,7 @@ mod tests {
         let tool = GitOperationsTool::new(security, tmp.path().to_path_buf());
 
         // This will fail because there's no git repo, but it shouldn't be blocked by autonomy
-        let result = tool.execute(json!({"operation": "status"})).await.unwrap();
+        let result = tool.execute(json!({"operation": "status"}), &ToolExecutionContext::default()).await.unwrap();
         // The error should be about git (not about autonomy/read-only mode)
         assert!(!result.success, "Expected failure due to missing git repo");
         let error_msg = result.error.as_deref().unwrap_or("");
@@ -773,7 +773,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let tool = test_tool(tmp.path());
 
-        let result = tool.execute(json!({})).await.unwrap();
+        let result = tool.execute(json!({}), &ToolExecutionContext::default()).await.unwrap();
         assert!(!result.success);
         assert!(result
             .error
@@ -794,7 +794,7 @@ mod tests {
 
         let tool = test_tool(tmp.path());
 
-        let result = tool.execute(json!({"operation": "push"})).await.unwrap();
+        let result = tool.execute(json!({"operation": "push"}), &ToolExecutionContext::default()).await.unwrap();
         assert!(!result.success);
         assert!(result
             .error

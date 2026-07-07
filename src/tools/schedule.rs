@@ -1,4 +1,4 @@
-use super::traits::{Tool, ToolResult};
+use super::traits::{Tool, ToolExecutionContext, ToolResult};
 use crate::config::Config;
 use crate::cron;
 use crate::security::SecurityPolicy;
@@ -55,11 +55,6 @@ impl Tool for ScheduleTool {
                     "type": "string",
                     "description": "Shell command to execute. Required for create/add/once."
                 },
-                "approved": {
-                    "type": "boolean",
-                    "description": "Set true to explicitly approve medium/high-risk shell commands in supervised mode",
-                    "default": false
-                },
                 "id": {
                     "type": "string",
                     "description": "Task ID. Required for get/cancel/remove/pause/resume."
@@ -69,7 +64,7 @@ impl Tool for ScheduleTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value) -> Result<ToolResult> {
+    async fn execute(&self, args: serde_json::Value, ctx: &ToolExecutionContext) -> Result<ToolResult> {
         let action = args
             .get("action")
             .and_then(|value| value.as_str())
@@ -88,11 +83,7 @@ impl Tool for ScheduleTool {
                 if let Some(blocked) = self.enforce_mutation_allowed(action) {
                     return Ok(blocked);
                 }
-                let approved = args
-                    .get("approved")
-                    .and_then(serde_json::Value::as_bool)
-                    .unwrap_or(false);
-                self.handle_create_like(action, &args, approved)
+                self.handle_create_like(action, &args, ctx.human_shell_approved)
             }
             "cancel" | "remove" => {
                 if let Some(blocked) = self.enforce_mutation_allowed(action) {
@@ -242,7 +233,7 @@ impl ScheduleTool {
         &self,
         action: &str,
         args: &serde_json::Value,
-        approved: bool,
+        human_approved: bool,
     ) -> Result<ToolResult> {
         let command = args
             .get("command")
@@ -250,7 +241,10 @@ impl ScheduleTool {
             .filter(|value| !value.trim().is_empty())
             .ok_or_else(|| anyhow::anyhow!("Missing or empty 'command' parameter"))?;
 
-        if let Err(reason) = self.security.validate_command_execution(command, approved) {
+        if let Err(reason) = self
+            .security
+            .validate_command_execution(command, human_approved)
+        {
             return Ok(ToolResult {
                 success: false,
                 output: String::new(),
@@ -431,7 +425,7 @@ mod tests {
         let (_tmp, config, security) = test_setup().await;
         let tool = ScheduleTool::new(security, config);
 
-        let result = tool.execute(json!({"action": "list"})).await.unwrap();
+        let result = tool.execute(json!({"action": "list"}), &ToolExecutionContext::default()).await.unwrap();
         assert!(result.success);
         assert!(result.output.contains("No scheduled jobs"));
     }
@@ -446,27 +440,27 @@ mod tests {
                 "action": "create",
                 "expression": "*/5 * * * *",
                 "command": "echo hello"
-            }))
+            }), &ToolExecutionContext::default())
             .await
             .unwrap();
         assert!(create.success);
         assert!(create.output.contains("Created recurring job"));
 
-        let list = tool.execute(json!({"action": "list"})).await.unwrap();
+        let list = tool.execute(json!({"action": "list"}), &ToolExecutionContext::default()).await.unwrap();
         assert!(list.success);
         assert!(list.output.contains("echo hello"));
 
         let id = create.output.split_whitespace().nth(3).unwrap();
 
         let get = tool
-            .execute(json!({"action": "get", "id": id}))
+            .execute(json!({"action": "get", "id": id}), &ToolExecutionContext::default())
             .await
             .unwrap();
         assert!(get.success);
         assert!(get.output.contains("echo hello"));
 
         let cancel = tool
-            .execute(json!({"action": "cancel", "id": id}))
+            .execute(json!({"action": "cancel", "id": id}), &ToolExecutionContext::default())
             .await
             .unwrap();
         assert!(cancel.success);
@@ -482,7 +476,7 @@ mod tests {
                 "action": "once",
                 "delay": "30m",
                 "command": "echo delayed"
-            }))
+            }), &ToolExecutionContext::default())
             .await
             .unwrap();
         assert!(once.success);
@@ -492,20 +486,20 @@ mod tests {
                 "action": "add",
                 "expression": "*/10 * * * *",
                 "command": "echo recurring"
-            }))
+            }), &ToolExecutionContext::default())
             .await
             .unwrap();
         assert!(add.success);
 
         let id = add.output.split_whitespace().nth(3).unwrap();
         let pause = tool
-            .execute(json!({"action": "pause", "id": id}))
+            .execute(json!({"action": "pause", "id": id}), &ToolExecutionContext::default())
             .await
             .unwrap();
         assert!(pause.success);
 
         let resume = tool
-            .execute(json!({"action": "resume", "id": id}))
+            .execute(json!({"action": "resume", "id": id}), &ToolExecutionContext::default())
             .await
             .unwrap();
         assert!(resume.success);
@@ -538,13 +532,13 @@ mod tests {
                 "action": "create",
                 "expression": "* * * * *",
                 "command": "echo blocked"
-            }))
+            }), &ToolExecutionContext::default())
             .await
             .unwrap();
         assert!(!blocked.success);
         assert!(blocked.error.as_deref().unwrap().contains("read-only"));
 
-        let list = tool.execute(json!({"action": "list"})).await.unwrap();
+        let list = tool.execute(json!({"action": "list"}), &ToolExecutionContext::default()).await.unwrap();
         assert!(list.success);
     }
 
@@ -553,7 +547,7 @@ mod tests {
         let (_tmp, config, security) = test_setup().await;
         let tool = ScheduleTool::new(security, config);
 
-        let result = tool.execute(json!({"action": "explode"})).await.unwrap();
+        let result = tool.execute(json!({"action": "explode"}), &ToolExecutionContext::default()).await.unwrap();
         assert!(!result.success);
         assert!(result.error.as_deref().unwrap().contains("Unknown action"));
     }
@@ -579,7 +573,7 @@ mod tests {
                 "action": "create",
                 "expression": "*/5 * * * *",
                 "command": "echo hello"
-            }))
+            }), &ToolExecutionContext::default())
             .await
             .unwrap();
 
@@ -613,7 +607,7 @@ mod tests {
                 "action": "create",
                 "expression": "*/5 * * * *",
                 "command": "curl https://example.com"
-            }))
+            }), &ToolExecutionContext::default())
             .await
             .unwrap();
 
@@ -647,7 +641,7 @@ mod tests {
                 "action": "create",
                 "expression": "*/5 * * * *",
                 "command": "touch schedule-policy-test"
-            }))
+            }), &ToolExecutionContext::default())
             .await
             .unwrap();
         assert!(!denied.success);
@@ -657,15 +651,12 @@ mod tests {
             .unwrap_or_default()
             .contains("explicit approval"));
 
-        let approved = tool
-            .execute(json!({
+        let approved = tool.execute(json!({
                 "action": "create",
                 "expression": "*/5 * * * *",
-                "command": "touch schedule-policy-test",
-                "approved": true
-            }))
-            .await
-            .unwrap();
+                "command": "touch schedule-policy-test"
+            }), &ToolExecutionContext::with_shell_human_approved(true)).await
+        .unwrap();
         assert!(approved.success, "{:?}", approved.error);
     }
 }

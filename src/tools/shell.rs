@@ -1,4 +1,4 @@
-use super::traits::{Tool, ToolResult};
+use super::traits::{Tool, ToolExecutionContext, ToolResult};
 use crate::runtime::RuntimeAdapter;
 use crate::security::SecurityPolicy;
 use async_trait::async_trait;
@@ -45,26 +45,18 @@ impl Tool for ShellTool {
                 "command": {
                     "type": "string",
                     "description": "The shell command to execute"
-                },
-                "approved": {
-                    "type": "boolean",
-                    "description": "Set true to explicitly approve medium/high-risk commands in supervised mode",
-                    "default": false
                 }
             },
             "required": ["command"]
         })
     }
 
-    async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
+    async fn execute(&self, args: serde_json::Value, ctx: &ToolExecutionContext) -> anyhow::Result<ToolResult> {
         let command = args
             .get("command")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("Missing 'command' parameter"))?;
-        let approved = args
-            .get("approved")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
+        let human_approved = ctx.human_shell_approved;
 
         if self.security.is_rate_limited() {
             return Ok(ToolResult {
@@ -74,7 +66,10 @@ impl Tool for ShellTool {
             });
         }
 
-        match self.security.validate_command_execution(command, approved) {
+        match self
+            .security
+            .validate_command_execution(command, human_approved)
+        {
             Ok(_) => {}
             Err(reason) => {
                 return Ok(ToolResult {
@@ -202,7 +197,7 @@ mod tests {
             .as_array()
             .expect("schema required field should be an array")
             .contains(&json!("command")));
-        assert!(schema["properties"]["approved"].is_object());
+        assert!(schema["properties"].get("approved").is_none());
     }
 
     #[tokio::test]
@@ -210,7 +205,7 @@ mod tests {
     async fn shell_executes_allowed_command() {
         let tool = ShellTool::new(test_security(AutonomyLevel::Supervised), test_runtime());
         let result = tool
-            .execute(json!({"command": "echo hello"}))
+            .execute(json!({"command": "echo hello"}), &ToolExecutionContext::default())
             .await
             .expect("echo command execution should succeed");
         assert!(result.success);
@@ -223,7 +218,7 @@ mod tests {
     async fn shell_blocks_disallowed_command() {
         let tool = ShellTool::new(test_security(AutonomyLevel::Supervised), test_runtime());
         let result = tool
-            .execute(json!({"command": "rm -rf /"}))
+            .execute(json!({"command": "rm -rf /"}), &ToolExecutionContext::default())
             .await
             .expect("disallowed command execution should return a result");
         assert!(!result.success);
@@ -236,7 +231,7 @@ mod tests {
     async fn shell_blocks_readonly() {
         let tool = ShellTool::new(test_security(AutonomyLevel::ReadOnly), test_runtime());
         let result = tool
-            .execute(json!({"command": "ls"}))
+            .execute(json!({"command": "ls"}), &ToolExecutionContext::default())
             .await
             .expect("readonly command execution should return a result");
         assert!(!result.success);
@@ -250,7 +245,7 @@ mod tests {
     #[tokio::test]
     async fn shell_missing_command_param() {
         let tool = ShellTool::new(test_security(AutonomyLevel::Supervised), test_runtime());
-        let result = tool.execute(json!({})).await;
+        let result = tool.execute(json!({}), &ToolExecutionContext::default()).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("command"));
     }
@@ -258,7 +253,7 @@ mod tests {
     #[tokio::test]
     async fn shell_wrong_type_param() {
         let tool = ShellTool::new(test_security(AutonomyLevel::Supervised), test_runtime());
-        let result = tool.execute(json!({"command": 123})).await;
+        let result = tool.execute(json!({"command": 123}), &ToolExecutionContext::default()).await;
         assert!(result.is_err());
     }
 
@@ -267,7 +262,7 @@ mod tests {
     async fn shell_captures_exit_code() {
         let tool = ShellTool::new(test_security(AutonomyLevel::Supervised), test_runtime());
         let result = tool
-            .execute(json!({"command": "ls /nonexistent_dir_xyz"}))
+            .execute(json!({"command": "ls /nonexistent_dir_xyz"}), &ToolExecutionContext::default())
             .await
             .expect("command with nonexistent path should return a result");
         assert!(!result.success);
@@ -314,7 +309,7 @@ mod tests {
 
         let tool = ShellTool::new(test_security_with_env_cmd(), test_runtime());
         let result = tool
-            .execute(json!({"command": "env"}))
+            .execute(json!({"command": "env"}), &ToolExecutionContext::default())
             .await
             .expect("env command execution should succeed");
         assert!(result.success);
@@ -334,7 +329,7 @@ mod tests {
         let tool = ShellTool::new(test_security_with_env_cmd(), test_runtime());
 
         let result = tool
-            .execute(json!({"command": "echo $HOME"}))
+            .execute(json!({"command": "echo $HOME"}), &ToolExecutionContext::default())
             .await
             .expect("echo HOME command should succeed");
         assert!(result.success);
@@ -344,7 +339,7 @@ mod tests {
         );
 
         let result = tool
-            .execute(json!({"command": "echo $PATH"}))
+            .execute(json!({"command": "echo $PATH"}), &ToolExecutionContext::default())
             .await
             .expect("echo PATH command should succeed");
         assert!(result.success);
@@ -366,7 +361,7 @@ mod tests {
 
         let tool = ShellTool::new(security.clone(), test_runtime());
         let denied = tool
-            .execute(json!({"command": "touch velaclaw_shell_approval_test"}))
+            .execute(json!({"command": "touch velaclaw_shell_approval_test"}), &ToolExecutionContext::default())
             .await
             .expect("unapproved command should return a result");
         assert!(!denied.success);
@@ -376,13 +371,8 @@ mod tests {
             .unwrap_or("")
             .contains("explicit approval"));
 
-        let allowed = tool
-            .execute(json!({
-                "command": "touch velaclaw_shell_approval_test",
-                "approved": true
-            }))
-            .await
-            .expect("approved command execution should succeed");
+        let allowed = tool.execute(json!({"command": "touch velaclaw_shell_approval_test"}), &ToolExecutionContext::with_shell_human_approved(true)).await
+        .expect("approved command execution should succeed");
         assert!(allowed.success);
 
         let _ =
@@ -444,7 +434,7 @@ mod tests {
         });
         let tool = ShellTool::new(security, test_runtime());
         let result = tool
-            .execute(json!({"command": "echo test"}))
+            .execute(json!({"command": "echo test"}), &ToolExecutionContext::default())
             .await
             .expect("rate-limited command should return a result");
         assert!(!result.success);

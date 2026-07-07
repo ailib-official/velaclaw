@@ -143,7 +143,7 @@ impl Tool for ListenTool {
         })
     }
 
-    async fn execute(&self, args: Value) -> Result<ToolResult> {
+    async fn execute(&self, args: Value, _ctx: &ToolExecutionContext) -> Result<ToolResult> {
         let duration = args["duration"].as_u64().unwrap_or(5).clamp(1, 30);
 
         // Record audio

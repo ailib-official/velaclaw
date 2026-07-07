@@ -47,6 +47,20 @@ impl ToolResult {
     }
 }
 
+/// Per-invocation execution context (mirrors velaclaw-agent-runtime VL-UR-001).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolExecutionContext {
+    pub human_shell_approved: bool,
+}
+
+impl ToolExecutionContext {
+    pub fn with_shell_human_approved(approved: bool) -> Self {
+        Self {
+            human_shell_approved: approved,
+        }
+    }
+}
+
 /// Description of a tool for LLM function calling
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolSpec {
@@ -87,7 +101,7 @@ pub struct ToolSpec {
 ///         })
 ///     }
 ///
-///     async fn execute(&self, args: Value) -> anyhow::Result<ToolResult> {
+///     async fn execute(&self, args: Value, _ctx: &ToolExecutionContext) -> anyhow::Result<ToolResult> {
 ///         let freq = args["frequency"].as_f64().unwrap_or(440.0);
 ///         // Play beep...
 ///         Ok(ToolResult::success(format!("Beeped at {}Hz", freq)))
@@ -110,7 +124,7 @@ pub trait Tool: Send + Sync {
     /// Execute the tool with the given arguments
     ///
     /// Arguments are passed as JSON matching the parameters_schema.
-    async fn execute(&self, args: Value) -> anyhow::Result<ToolResult>;
+    async fn execute(&self, args: Value, _ctx: &ToolExecutionContext) -> anyhow::Result<ToolResult>;
 
     /// Get the full specification for LLM registration
     fn spec(&self) -> ToolSpec {

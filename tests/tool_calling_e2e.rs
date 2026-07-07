@@ -33,7 +33,7 @@ use velaclaw::memory::Memory;
 use velaclaw::observability::{NoopObserver, Observer};
 use velaclaw::providers::{ChatRequest, ChatResponse, Provider, ToolCall};
 use velaclaw::security::{AutonomyLevel, SecurityPolicy};
-use velaclaw::tools::{self, Tool, ToolResult, ToolSpec};
+use velaclaw::tools::{self, Tool, ToolExecutionContext, ToolResult, ToolSpec};
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Helpers
@@ -185,13 +185,18 @@ fn tool_response(calls: Vec<ToolCall>) -> ChatResponse {
 }
 
 fn build_agent(provider: Box<dyn Provider>, tools: Vec<Box<dyn Tool>>, tmp: &TempDir) -> Agent {
+    let workspace = tmp.path().to_path_buf();
     Agent::builder()
         .provider(provider)
         .tools(tools)
         .memory(make_memory(tmp))
         .observer(make_observer())
         .tool_dispatcher(Box::new(NativeToolDispatcher::default()))
-        .workspace_dir(tmp.path().to_path_buf())
+        .workspace_dir(workspace.clone())
+        .security(Arc::new(SecurityPolicy::from_config(
+            &velaclaw::config::AutonomyConfig::default(),
+            &workspace,
+        )))
         .build()
         .unwrap()
 }
@@ -1118,7 +1123,7 @@ mod agent_dispatch {
         fn parameters_schema(&self) -> serde_json::Value {
             json!({"type": "object", "properties": {}})
         }
-        async fn execute(&self, _args: serde_json::Value) -> Result<ToolResult> {
+        async fn execute(&self, _args: serde_json::Value, _ctx: &ToolExecutionContext) -> Result<ToolResult> {
             let mut c = self.count.lock().unwrap();
             *c += 1;
             Ok(ToolResult {
@@ -1293,7 +1298,7 @@ mod agent_dispatch {
             fn parameters_schema(&self) -> serde_json::Value {
                 json!({"type": "object", "properties": {}})
             }
-            async fn execute(&self, _args: serde_json::Value) -> Result<ToolResult> {
+            async fn execute(&self, _args: serde_json::Value, _ctx: &ToolExecutionContext) -> Result<ToolResult> {
                 Ok(ToolResult {
                     success: false,
                     output: String::new(),
@@ -1402,7 +1407,7 @@ mod agent_dispatch {
             fn parameters_schema(&self) -> serde_json::Value {
                 json!({"type": "object", "properties": {}})
             }
-            async fn execute(&self, _args: serde_json::Value) -> Result<ToolResult> {
+            async fn execute(&self, _args: serde_json::Value, _ctx: &ToolExecutionContext) -> Result<ToolResult> {
                 anyhow::bail!("deliberate tool panic")
             }
         }

@@ -83,7 +83,7 @@ pub use screenshot::ScreenshotTool;
 pub use shell::ShellTool;
 pub use traits::Tool;
 #[allow(unused_imports)]
-pub use traits::{ToolResult, ToolSpec};
+pub use traits::{ToolExecutionContext, ToolResult, ToolSpec};
 pub use web_search_tool::WebSearchTool;
 
 use crate::config::{Config, DelegateAgentConfig};
@@ -119,8 +119,12 @@ impl Tool for ArcDelegatingTool {
         self.inner.parameters_schema()
     }
 
-    async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
-        self.inner.execute(args).await
+    async fn execute(
+        &self,
+        args: serde_json::Value,
+        ctx: &ToolExecutionContext,
+    ) -> anyhow::Result<ToolResult> {
+        self.inner.execute(args, ctx).await
     }
 }
 

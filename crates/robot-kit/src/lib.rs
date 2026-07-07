@@ -66,7 +66,7 @@
 //!     let result = safe_drive.execute(serde_json::json!({
 //!         "action": "forward",
 //!         "distance": 1.0
-//!     })).await;
+//!     }), &ToolExecutionContext::default()).await;
 //! }
 //! ```
 //!
@@ -105,7 +105,7 @@ mod tests;
 
 // Re-exports for convenience
 pub use config::RobotConfig;
-pub use traits::{Tool, ToolResult, ToolSpec};
+pub use traits::{Tool, ToolExecutionContext, ToolResult, ToolSpec};
 
 pub use drive::DriveTool;
 pub use emote::EmoteTool;

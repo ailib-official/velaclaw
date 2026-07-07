@@ -3,6 +3,7 @@
 
 pub mod byok;
 pub mod dispatcher;
+pub mod execution_context;
 pub mod provider;
 pub mod telemetry;
 pub mod tools;
@@ -18,4 +19,5 @@ pub use provider::{
     ChatMessage, ChatRequest, ChatResponse, ConversationMessage, NativeToolCapable, ToolCall,
     ToolResultMessage,
 };
+pub use execution_context::ToolExecutionContext;
 pub use tools::{Tool, ToolResult, ToolSpec};

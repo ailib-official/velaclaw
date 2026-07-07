@@ -119,24 +119,41 @@ impl Tool for GlobSearchTool {
                 Err(_) => continue, // skip unreadable entries
             };
 
-            // Canonicalize to resolve symlinks, then verify still inside workspace
-            let resolved = match std::fs::canonicalize(&path) {
-                Ok(p) => p,
-                Err(_) => continue, // skip broken symlinks / unresolvable paths
-            };
+            // Workspace-anchored globs may traverse symlinks (e.g. ai-lib-plans → ~/ai-lib-plans).
+            // List logical workspace-relative paths; file_read still canonicalizes before read.
+            let under_workspace = path.starts_with(workspace) || path.starts_with(&workspace_canon);
+            if under_workspace {
+                let base = if path.starts_with(&workspace_canon) {
+                    workspace_canon.as_path()
+                } else {
+                    workspace
+                };
+                if path.is_dir() {
+                    continue;
+                }
+                if let Ok(rel) = path.strip_prefix(base) {
+                    let rel_str = rel
+                        .to_string_lossy()
+                        .trim_start_matches(std::path::MAIN_SEPARATOR)
+                        .to_string();
+                    if !rel_str.is_empty() {
+                        results.push(rel_str);
+                    }
+                }
+            } else {
+                // Defensive: non-workspace hits still require resolved-path policy.
+                let resolved = match std::fs::canonicalize(&path) {
+                    Ok(p) => p,
+                    Err(_) => continue,
+                };
 
-            if !self.security.is_resolved_path_allowed(&resolved) {
-                continue; // silently filter symlink escapes
-            }
+                if !self.security.is_resolved_path_allowed(&resolved) || resolved.is_dir() {
+                    continue;
+                }
 
-            // Only include files, not directories
-            if resolved.is_dir() {
-                continue;
-            }
-
-            // Convert to workspace-relative path
-            if let Ok(rel) = resolved.strip_prefix(&workspace_canon) {
-                results.push(rel.to_string_lossy().to_string());
+                if let Ok(rel) = resolved.strip_prefix(&workspace_canon) {
+                    results.push(rel.to_string_lossy().to_string());
+                }
             }
 
             if results.len() >= MAX_RESULTS {
@@ -330,8 +347,32 @@ mod tests {
 
         assert!(result.success);
         assert!(result.output.contains("legit.txt"));
-        assert!(!result.output.contains("escape.txt"));
+        // Symlink names inside the workspace may appear; actual reads still canonicalize.
+        assert!(result.output.contains("escape.txt"));
         assert!(!result.output.contains("secret.txt"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn glob_search_includes_workspace_symlink_directory() {
+        use std::os::unix::fs::symlink;
+
+        let root = TempDir::new().unwrap();
+        let workspace = root.path().join("workspace");
+        let external = root.path().join("external_repo");
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::create_dir_all(external.join("tools")).unwrap();
+        std::fs::write(external.join("tools/hk_vps_ssh.sh"), "#!/bin/sh").unwrap();
+        symlink(&external, workspace.join("ai-lib-plans")).unwrap();
+
+        let tool = GlobSearchTool::new(test_security(workspace));
+        let result = tool
+            .execute(json!({"pattern": "ai-lib-plans/tools/hk_vps*.sh"}))
+            .await
+            .unwrap();
+
+        assert!(result.success);
+        assert!(result.output.contains("ai-lib-plans/tools/hk_vps_ssh.sh"));
     }
 
     #[tokio::test]

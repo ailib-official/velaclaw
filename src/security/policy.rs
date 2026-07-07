@@ -25,6 +25,48 @@ pub enum CommandRiskLevel {
     High,
 }
 
+/// Extra shell commands merged into `[autonomy].allowed_commands` when `level = full`.
+/// Operators can still override by omitting names from their explicit allowlist only if they
+/// replace the entire default list; merged entries are additive for home-lab usability.
+pub const FULL_AUTONOMY_EXTRA_COMMANDS: &[&str] = &[
+    "awk", "bash", "chmod", "cp", "curl", "dig", "docker", "host", "make", "mkdir", "mv", "nc",
+    "node", "ping", "python", "python3", "rm", "rsync", "scp", "sed", "sh", "sort", "ssh", "tar",
+    "touch", "tr", "uniq", "unzip", "wget", "zip",
+];
+
+/// Path prefixes dropped from `forbidden_paths` when `level = full` (too broad for owned machines).
+const FULL_AUTONOMY_RELAXED_FORBIDDEN_PREFIXES: &[&str] = &["/home", "/tmp"];
+
+/// Apply level-aware defaults so `full` autonomy is usable on home-lab installs without
+/// hand-editing dozens of config keys.
+pub fn normalize_autonomy_config(
+    autonomy_config: &crate::config::AutonomyConfig,
+) -> crate::config::AutonomyConfig {
+    if autonomy_config.level != AutonomyLevel::Full {
+        return autonomy_config.clone();
+    }
+
+    let mut effective = autonomy_config.clone();
+    for cmd in FULL_AUTONOMY_EXTRA_COMMANDS {
+        let name = (*cmd).to_string();
+        if !effective.allowed_commands.iter().any(|c| c == &name) {
+            effective.allowed_commands.push(name);
+        }
+    }
+    effective
+        .forbidden_paths
+        .retain(|p| !FULL_AUTONOMY_RELAXED_FORBIDDEN_PREFIXES.contains(&p.as_str()));
+    effective
+}
+
+/// Optional runtime surfaces shown in the execution-policy system prompt.
+#[derive(Debug, Clone, Default)]
+pub struct PolicyPromptExtras {
+    pub http_request_enabled: bool,
+    pub proxy_enabled: bool,
+    pub proxy_http: Option<String>,
+}
+
 /// Classifies whether a tool operation is read-only or side-effecting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolOperation {
@@ -507,7 +549,10 @@ impl SecurityPolicy {
         approved: bool,
     ) -> Result<CommandRiskLevel, String> {
         if !self.is_command_allowed(command) {
-            return Err(format!("Command not allowed by security policy: {command}"));
+            return Err(format!(
+                "Command not allowed by security policy: {command}. Allowed shell commands: {}. To enable, add the executable name to [autonomy].allowed_commands in config.toml.",
+                self.allowed_commands.join(", ")
+            ));
         }
 
         let risk = self.command_risk_level(command);
@@ -775,21 +820,86 @@ impl SecurityPolicy {
         self.tracker.count() >= self.max_actions_per_hour as usize
     }
 
+    /// Append configured execution boundaries to the system prompt so the model does not
+    /// invent restrictions. Operators still tune policy via config — this only surfaces it.
+    pub fn append_execution_policy_prompt(&self, prompt: &mut String, extras: &PolicyPromptExtras) {
+        use std::fmt::Write;
+
+        prompt.push_str("## Execution Policy (configured — do not guess)\n\n");
+        let _ = writeln!(
+            prompt,
+            "- Autonomy level: `{}`",
+            serde_json::to_string(&self.autonomy)
+                .unwrap_or_else(|_| "\"unknown\"".into())
+                .trim_matches('"')
+        );
+        let _ = writeln!(prompt, "- Workspace: `{}`", self.workspace_dir.display());
+        let _ = writeln!(
+            prompt,
+            "- `workspace_only`: {} — file tools (`file_read`, `glob_search`, etc.) only accept paths relative to the workspace unless you use the `shell` tool.",
+            self.workspace_only
+        );
+        let _ = writeln!(
+            prompt,
+            "- Allowed shell commands: {}",
+            self.allowed_commands.join(", ")
+        );
+        if self.forbidden_paths.is_empty() {
+            prompt.push_str("- Forbidden path prefixes: (none)\n");
+        } else {
+            let _ = writeln!(
+                prompt,
+                "- Forbidden path prefixes: {}",
+                self.forbidden_paths.join(", ")
+            );
+        }
+        let _ = writeln!(
+            prompt,
+            "- HTTP request tool: {}",
+            if extras.http_request_enabled {
+                "enabled"
+            } else {
+                "disabled — use `shell` with `curl` when allowed, or enable [http_request] in config.toml"
+            }
+        );
+        if extras.proxy_enabled {
+            if let Some(ref proxy) = extras.proxy_http {
+                let _ = writeln!(
+                    prompt,
+                    "- Proxy: enabled (`{proxy}`). Use the `proxy_config` tool to inspect or adjust proxy env."
+                );
+            } else {
+                prompt.push_str("- Proxy: enabled (see config [proxy] section).\n");
+            }
+        } else {
+            prompt.push_str("- Proxy: disabled.\n");
+        }
+        prompt.push_str(
+            "\n**CRITICAL tool-use rules:**\n\
+             - When the user asks you to run a command, read a file, or check connectivity, ALWAYS invoke the matching tool first.\n\
+             - NEVER claim a command or path is blocked without a real `<tool_result>` error from an attempted tool call.\n\
+             - If a tool fails, quote the exact error to the user in plain language and say what to change in `config.toml` — do not ask the user to edit source code.\n\
+             - For files outside the workspace, use `shell` with `find`, `ls`, or `cat` when those commands are allowed.\n\
+             - Known local tool catalog: workspace `ai-lib-plans/tools/` when the symlink is present.\n\n",
+        );
+    }
+
     /// Build from config sections
     pub fn from_config(
         autonomy_config: &crate::config::AutonomyConfig,
         workspace_dir: &Path,
     ) -> Self {
+        let effective = normalize_autonomy_config(autonomy_config);
         Self {
-            autonomy: autonomy_config.level,
+            autonomy: effective.level,
             workspace_dir: workspace_dir.to_path_buf(),
-            workspace_only: autonomy_config.workspace_only,
-            allowed_commands: autonomy_config.allowed_commands.clone(),
-            forbidden_paths: autonomy_config.forbidden_paths.clone(),
-            max_actions_per_hour: autonomy_config.max_actions_per_hour,
-            max_cost_per_day_cents: autonomy_config.max_cost_per_day_cents,
-            require_approval_for_medium_risk: autonomy_config.require_approval_for_medium_risk,
-            block_high_risk_commands: autonomy_config.block_high_risk_commands,
+            workspace_only: effective.workspace_only,
+            allowed_commands: effective.allowed_commands,
+            forbidden_paths: effective.forbidden_paths,
+            max_actions_per_hour: effective.max_actions_per_hour,
+            max_cost_per_day_cents: effective.max_cost_per_day_cents,
+            require_approval_for_medium_risk: effective.require_approval_for_medium_risk,
+            block_high_risk_commands: effective.block_high_risk_commands,
             tracker: ActionTracker::new(),
         }
     }
@@ -1030,6 +1140,53 @@ mod tests {
     }
 
     #[test]
+    fn normalize_autonomy_config_full_merges_extra_commands() {
+        use crate::config::AutonomyConfig;
+        use crate::security::AutonomyLevel;
+
+        let input = AutonomyConfig {
+            level: AutonomyLevel::Full,
+            allowed_commands: vec!["echo".into()],
+            forbidden_paths: vec!["/home".into(), "/etc".into()],
+            ..AutonomyConfig::default()
+        };
+        let effective = normalize_autonomy_config(&input);
+        assert!(effective.allowed_commands.contains(&"curl".into()));
+        assert!(effective.allowed_commands.contains(&"ssh".into()));
+        assert!(effective.allowed_commands.contains(&"echo".into()));
+        assert!(!effective.forbidden_paths.contains(&"/home".into()));
+        assert!(effective.forbidden_paths.contains(&"/etc".into()));
+    }
+
+    #[test]
+    fn normalize_autonomy_config_supervised_is_unchanged() {
+        use crate::config::AutonomyConfig;
+        use crate::security::AutonomyLevel;
+
+        let input = AutonomyConfig {
+            level: AutonomyLevel::Supervised,
+            allowed_commands: vec!["echo".into()],
+            forbidden_paths: vec!["/home".into()],
+            ..AutonomyConfig::default()
+        };
+        let effective = normalize_autonomy_config(&input);
+        assert_eq!(effective.allowed_commands, vec!["echo".to_string()]);
+        assert!(effective.forbidden_paths.contains(&"/home".into()));
+    }
+
+    #[test]
+    fn append_execution_policy_prompt_lists_allowed_commands() {
+        let policy = SecurityPolicy {
+            allowed_commands: vec!["echo".into(), "curl".into()],
+            ..SecurityPolicy::default()
+        };
+        let mut prompt = String::new();
+        policy.append_execution_policy_prompt(&mut prompt, &PolicyPromptExtras::default());
+        assert!(prompt.contains("Allowed shell commands: echo, curl"));
+        assert!(prompt.contains("NEVER claim a command or path is blocked"));
+    }
+
+    #[test]
     fn validate_command_full_mode_skips_medium_risk_approval_gate() {
         let p = SecurityPolicy {
             autonomy: AutonomyLevel::Full,
@@ -1132,7 +1289,8 @@ mod tests {
 
         assert_eq!(policy.autonomy, AutonomyLevel::Full);
         assert!(!policy.workspace_only);
-        assert_eq!(policy.allowed_commands, vec!["docker"]);
+        assert!(policy.allowed_commands.contains(&"docker".to_string()));
+        assert!(policy.allowed_commands.contains(&"curl".to_string()));
         assert_eq!(policy.forbidden_paths, vec!["/secret"]);
         assert_eq!(policy.max_actions_per_hour, 100);
         assert_eq!(policy.max_cost_per_day_cents, 1000);

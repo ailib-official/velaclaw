@@ -2887,6 +2887,11 @@ pub async fn start_channels(config: Config) -> Result<()> {
             system_prompt.push_str(&build_tool_instructions(tools_registry.as_ref()));
         }
     }
+    crate::agent::loop_::append_execution_policy_to_prompt(
+        &mut system_prompt,
+        security.as_ref(),
+        &config,
+    );
 
     if !skills.is_empty() {
         println!(

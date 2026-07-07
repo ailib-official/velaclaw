@@ -1618,6 +1618,13 @@ pub(crate) async fn run_tool_call_loop(
             );
         }
 
+        if !silent {
+            for (call, result) in tool_calls.iter().zip(individual_results.iter()) {
+                println!("\n── tool:{} ──\n{}\n", call.name, result);
+            }
+            let _ = std::io::stdout().flush();
+        }
+
         // Add assistant message with tool calls + tool results to history.
         // Native mode: use JSON-structured messages so convert_messages() can
         // reconstruct proper OpenAI-format tool_calls and tool result messages.
@@ -1663,6 +1670,24 @@ pub(crate) fn build_tool_instructions(tools_registry: &[Box<dyn Tool>]) -> Strin
     }
 
     instructions
+}
+
+/// Surface configured autonomy/shell/path policy in the system prompt.
+pub(crate) fn append_execution_policy_to_prompt(
+    system_prompt: &mut String,
+    security: &SecurityPolicy,
+    config: &Config,
+) {
+    let extras = crate::security::PolicyPromptExtras {
+        http_request_enabled: config.http_request.enabled,
+        proxy_enabled: config.proxy.enabled,
+        proxy_http: if config.proxy.enabled {
+            config.proxy.http_proxy.clone()
+        } else {
+            None
+        },
+    };
+    security.append_execution_policy_prompt(system_prompt, &extras);
 }
 
 // ── CLI Entrypoint ───────────────────────────────────────────────────────
@@ -1981,6 +2006,7 @@ pub async fn run(
             system_prompt.push_str(&build_tool_instructions(&tools_registry));
         }
     }
+    append_execution_policy_to_prompt(&mut system_prompt, security.as_ref(), &config);
 
     let tool_dispatcher_ref = tool_dispatcher.as_deref();
 
@@ -2401,6 +2427,7 @@ pub async fn process_message(config: Config, message: &str) -> Result<String> {
     if !native_tools {
         system_prompt.push_str(&build_tool_instructions(&tools_registry));
     }
+    append_execution_policy_to_prompt(&mut system_prompt, security.as_ref(), &config);
 
     let mem_context = build_context(mem.as_ref(), message, config.memory.min_relevance_score).await;
     let rag_limit = if config.agent.compact_context { 2 } else { 5 };

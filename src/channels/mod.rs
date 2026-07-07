@@ -2742,10 +2742,7 @@ pub async fn start_channels(config: Config) -> Result<()> {
         Arc::from(observability::create_observer(&config.observability));
     let runtime: Arc<dyn runtime::RuntimeAdapter> =
         Arc::from(runtime::create_runtime(&config.runtime)?);
-    let security = Arc::new(SecurityPolicy::from_config(
-        &config.autonomy,
-        &config.workspace_dir,
-    ));
+    let security = Arc::new(SecurityPolicy::from_workspace_config(&config)?);
     let model = resolved_default_model(&config);
     let temperature = config.default_temperature;
     let mem: Arc<dyn Memory> = Arc::from(memory::create_memory_with_storage(
@@ -3218,7 +3215,7 @@ mod tests {
     use crate::memory::{Memory, MemoryCategory, SqliteMemory};
     use crate::observability::NoopObserver;
     use crate::providers::{ChatMessage, Provider};
-    use crate::tools::{Tool, ToolResult};
+    use crate::tools::{Tool, ToolExecutionContext, ToolResult};
     use std::collections::{HashMap, HashSet};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
@@ -3778,7 +3775,7 @@ BTC is currently around $65,000 based on latest tool output."#
             })
         }
 
-        async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
+        async fn execute(&self, args: serde_json::Value, ctx: &ToolExecutionContext) -> anyhow::Result<ToolResult> {
             let symbol = args.get("symbol").and_then(serde_json::Value::as_str);
             if symbol != Some("BTC") {
                 return Ok(ToolResult {

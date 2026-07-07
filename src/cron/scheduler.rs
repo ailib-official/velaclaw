@@ -23,10 +23,7 @@ pub async fn run(config: Config) -> Result<()> {
     let poll_secs = config.reliability.scheduler_poll_secs.max(MIN_POLL_SECONDS);
     let mut interval = time::interval(Duration::from_secs(poll_secs));
     interval.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
-    let security = Arc::new(SecurityPolicy::from_config(
-        &config.autonomy,
-        &config.workspace_dir,
-    ));
+    let security = Arc::new(SecurityPolicy::from_workspace_config(&config)?);
 
     crate::health::mark_component_ok(SCHEDULER_COMPONENT);
 
@@ -49,7 +46,10 @@ pub async fn run(config: Config) -> Result<()> {
 }
 
 pub async fn execute_job_now(config: &Config, job: &CronJob) -> (bool, String) {
-    let security = SecurityPolicy::from_config(&config.autonomy, &config.workspace_dir);
+    let security = match SecurityPolicy::from_workspace_config(config) {
+        Ok(s) => s,
+        Err(e) => return (false, format!("Security policy error: {e}")),
+    };
     execute_job_with_retry(config, &security, job).await
 }
 

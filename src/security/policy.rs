@@ -985,12 +985,29 @@ impl SecurityPolicy {
         workspace_dir: &Path,
     ) -> Self {
         let effective = normalize_autonomy_config(autonomy_config);
+        Self::from_normalized(&effective, workspace_dir)
+    }
+
+    /// Build from L1 `config.toml` merged with L2 `agent-policy.yaml` when present.
+    pub fn from_workspace_config(config: &crate::config::Config) -> anyhow::Result<Self> {
+        #[cfg(feature = "ai-protocol")]
+        {
+            let autonomy = crate::config::resolve_effective_autonomy(config)?;
+            Ok(Self::from_config(&autonomy, &config.workspace_dir))
+        }
+        #[cfg(not(feature = "ai-protocol"))]
+        {
+            Ok(Self::from_config(&config.autonomy, &config.workspace_dir))
+        }
+    }
+
+    fn from_normalized(effective: &crate::config::AutonomyConfig, workspace_dir: &Path) -> Self {
         Self {
             autonomy: effective.level,
             workspace_dir: workspace_dir.to_path_buf(),
             workspace_only: effective.workspace_only,
-            allowed_commands: effective.allowed_commands,
-            forbidden_paths: effective.forbidden_paths,
+            allowed_commands: effective.allowed_commands.clone(),
+            forbidden_paths: effective.forbidden_paths.clone(),
             max_actions_per_hour: effective.max_actions_per_hour,
             max_cost_per_day_cents: effective.max_cost_per_day_cents,
             require_approval_for_medium_risk: effective.require_approval_for_medium_risk,

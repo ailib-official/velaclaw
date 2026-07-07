@@ -216,7 +216,11 @@ impl Tool for GpioReadTool {
         })
     }
 
-    async fn execute(&self, args: Value, _ctx: &ToolExecutionContext) -> anyhow::Result<ToolResult> {
+    async fn execute(
+        &self,
+        args: Value,
+        _ctx: &ToolExecutionContext,
+    ) -> anyhow::Result<ToolResult> {
         let pin = args
             .get("pin")
             .and_then(|v| v.as_u64())
@@ -259,7 +263,11 @@ impl Tool for GpioWriteTool {
         })
     }
 
-    async fn execute(&self, args: Value, _ctx: &ToolExecutionContext) -> anyhow::Result<ToolResult> {
+    async fn execute(
+        &self,
+        args: Value,
+        _ctx: &ToolExecutionContext,
+    ) -> anyhow::Result<ToolResult> {
         let pin = args
             .get("pin")
             .and_then(|v| v.as_u64())

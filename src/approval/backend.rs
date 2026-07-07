@@ -51,11 +51,7 @@ impl HumanApprovalBackend for ManagerApprovalBackend<'_> {
         decision != ApprovalResponse::No
     }
 
-    async fn approve_tool_async(
-        &self,
-        tool_name: &str,
-        arguments: &serde_json::Value,
-    ) -> bool {
+    async fn approve_tool_async(&self, tool_name: &str, arguments: &serde_json::Value) -> bool {
         let request = ApprovalRequest {
             tool_name: tool_name.to_string(),
             arguments: arguments.clone(),

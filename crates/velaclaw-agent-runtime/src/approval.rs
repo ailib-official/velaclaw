@@ -118,10 +118,7 @@ impl<'a, B: HumanApprovalBackend + ?Sized> ApprovalGate<'a, B> {
                 shell_human_approved: false,
             };
         };
-        if hook
-            .validate_shell_command(tool_name, args, false)
-            .is_ok()
-        {
+        if hook.validate_shell_command(tool_name, args, false).is_ok() {
             return GateDecision::Proceed {
                 shell_human_approved: false,
             };
@@ -224,9 +221,6 @@ mod tests {
     #[test]
     fn shell_command_extracted_from_args() {
         let args = json!({"command": "echo hi"});
-        assert_eq!(
-            shell_command_from_args("shell", &args),
-            Some("echo hi")
-        );
+        assert_eq!(shell_command_from_args("shell", &args), Some("echo hi"));
     }
 }

@@ -90,7 +90,11 @@ impl Tool for EchoTool {
             }
         })
     }
-    async fn execute(&self, args: serde_json::Value, ctx: &ToolExecutionContext) -> Result<ToolResult> {
+    async fn execute(
+        &self,
+        args: serde_json::Value,
+        ctx: &ToolExecutionContext,
+    ) -> Result<ToolResult> {
         let msg = args
             .get("message")
             .and_then(|v| v.as_str())
@@ -132,7 +136,11 @@ impl Tool for CountingTool {
     fn parameters_schema(&self) -> serde_json::Value {
         json!({"type": "object"})
     }
-    async fn execute(&self, _args: serde_json::Value, _ctx: &ToolExecutionContext) -> Result<ToolResult> {
+    async fn execute(
+        &self,
+        _args: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> Result<ToolResult> {
         let mut c = self.count.lock().unwrap();
         *c += 1;
         Ok(ToolResult {

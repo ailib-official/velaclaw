@@ -367,7 +367,11 @@ impl crate::traits::Tool for SafeDrive {
         self.inner_drive.parameters_schema()
     }
 
-    async fn execute(&self, args: serde_json::Value, ctx: &ToolExecutionContext) -> Result<ToolResult> {
+    async fn execute(
+        &self,
+        args: serde_json::Value,
+        ctx: &ToolExecutionContext,
+    ) -> Result<ToolResult> {
         // ToolResult imported at top of file
 
         let action = args["action"].as_str().unwrap_or("unknown");

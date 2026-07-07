@@ -41,7 +41,11 @@ impl Tool for MemoryForgetTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value, _ctx: &ToolExecutionContext) -> anyhow::Result<ToolResult> {
+    async fn execute(
+        &self,
+        args: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> anyhow::Result<ToolResult> {
         let key = args
             .get("key")
             .and_then(|v| v.as_str())
@@ -111,7 +115,10 @@ mod tests {
             .unwrap();
 
         let tool = MemoryForgetTool::new(mem.clone(), test_security());
-        let result = tool.execute(json!({"key": "temp"}), &ToolExecutionContext::default()).await.unwrap();
+        let result = tool
+            .execute(json!({"key": "temp"}), &ToolExecutionContext::default())
+            .await
+            .unwrap();
         assert!(result.success);
         assert!(result.output.contains("Forgot"));
 
@@ -122,7 +129,10 @@ mod tests {
     async fn forget_nonexistent() {
         let (_tmp, mem) = test_mem();
         let tool = MemoryForgetTool::new(mem, test_security());
-        let result = tool.execute(json!({"key": "nope"}), &ToolExecutionContext::default()).await.unwrap();
+        let result = tool
+            .execute(json!({"key": "nope"}), &ToolExecutionContext::default())
+            .await
+            .unwrap();
         assert!(result.success);
         assert!(result.output.contains("No memory found"));
     }
@@ -131,7 +141,9 @@ mod tests {
     async fn forget_missing_key() {
         let (_tmp, mem) = test_mem();
         let tool = MemoryForgetTool::new(mem, test_security());
-        let result = tool.execute(json!({}), &ToolExecutionContext::default()).await;
+        let result = tool
+            .execute(json!({}), &ToolExecutionContext::default())
+            .await;
         assert!(result.is_err());
     }
 
@@ -146,7 +158,10 @@ mod tests {
             ..SecurityPolicy::default()
         });
         let tool = MemoryForgetTool::new(mem.clone(), readonly);
-        let result = tool.execute(json!({"key": "temp"}), &ToolExecutionContext::default()).await.unwrap();
+        let result = tool
+            .execute(json!({"key": "temp"}), &ToolExecutionContext::default())
+            .await
+            .unwrap();
         assert!(!result.success);
         assert!(result
             .error
@@ -167,7 +182,10 @@ mod tests {
             ..SecurityPolicy::default()
         });
         let tool = MemoryForgetTool::new(mem.clone(), limited);
-        let result = tool.execute(json!({"key": "temp"}), &ToolExecutionContext::default()).await.unwrap();
+        let result = tool
+            .execute(json!({"key": "temp"}), &ToolExecutionContext::default())
+            .await
+            .unwrap();
         assert!(!result.success);
         assert!(result
             .error

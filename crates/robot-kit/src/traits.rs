@@ -124,7 +124,8 @@ pub trait Tool: Send + Sync {
     /// Execute the tool with the given arguments
     ///
     /// Arguments are passed as JSON matching the parameters_schema.
-    async fn execute(&self, args: Value, _ctx: &ToolExecutionContext) -> anyhow::Result<ToolResult>;
+    async fn execute(&self, args: Value, _ctx: &ToolExecutionContext)
+        -> anyhow::Result<ToolResult>;
 
     /// Get the full specification for LLM registration
     fn spec(&self) -> ToolSpec {

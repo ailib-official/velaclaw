@@ -1,6 +1,7 @@
 //! VelaClaw agent runtime — tool dispatcher + BYOK execution (VL-ARCH-007 P2).
 //! Agent 运行时：工具分发与 BYOK 执行；loop/channels 仍在主 crate。
 
+pub mod approval;
 pub mod byok;
 pub mod dispatcher;
 pub mod execution_context;
@@ -8,6 +9,10 @@ pub mod provider;
 pub mod telemetry;
 pub mod tools;
 
+pub use approval::{
+    shell_command_from_args, ApprovalGate, GateDecision, HumanApprovalBackend, ShellPolicyHook,
+    is_shell_policy_tool,
+};
 pub use byok::{
     execute_chat_with_retry, init_ai_client_sync, resolve_ai_client, split_logical_model_id,
 };

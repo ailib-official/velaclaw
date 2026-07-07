@@ -1743,9 +1743,9 @@ pub struct AutonomyConfig {
     pub allowed_commands: Vec<String>,
     /// Explicit path denylist. Default includes system-critical paths.
     pub forbidden_paths: Vec<String>,
-    /// Maximum actions allowed per hour per policy. Default: `100`.
+    /// Maximum actions allowed per hour per policy. Default: `20`.
     pub max_actions_per_hour: u32,
-    /// Maximum cost per day in cents per policy. Default: `1000`.
+    /// Maximum cost per day in cents per policy. Default: `500` (enforcement planned).
     pub max_cost_per_day_cents: u32,
 
     /// Require explicit approval for medium-risk shell commands.
@@ -1770,7 +1770,7 @@ fn default_auto_approve() -> Vec<String> {
 }
 
 fn default_always_ask() -> Vec<String> {
-    vec![]
+    vec!["shell".into()]
 }
 
 impl Default for AutonomyConfig {

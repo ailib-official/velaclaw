@@ -1,4 +1,4 @@
-use crate::approval::{ApprovalManager, ApprovalRequest, ApprovalResponse};
+use crate::approval::{ApprovalGate, ApprovalManager, GateDecision};
 use crate::config::Config;
 #[cfg(not(feature = "ai-protocol"))]
 use crate::config::DEFAULT_PROTOCOL_MODEL_ID;
@@ -10,12 +10,12 @@ use crate::providers::{
 };
 use crate::runtime;
 use crate::security::SecurityPolicy;
-use crate::tools::{self, Tool};
+use crate::tools::{self, Tool, ToolExecutionContext};
 use crate::util::truncate_with_ellipsis;
 use anyhow::{Context, Result};
 use regex::{Regex, RegexSet};
 use std::fmt::Write;
-use std::io::{BufRead, Write as _};
+use std::io::Write as _;
 use std::sync::{Arc, LazyLock};
 use std::time::Instant;
 use tokio_util::sync::CancellationToken;
@@ -1115,32 +1115,13 @@ fn normalize_tool_arguments(tool_name: &str, mut args: serde_json::Value) -> ser
     args
 }
 
-/// CLI prompt when security policy requires explicit shell approval.
-fn prompt_shell_security_approval(command: &str) -> bool {
-    eprintln!();
-    eprintln!("🔒 Security policy requires approval for shell command:");
-    eprintln!("   {command}");
-    eprint!("   Approve this command? [Y/n/a=always for shell this session]: ");
-    let _ = std::io::stderr().flush();
-
-    let stdin = std::io::stdin();
-    let mut line = String::new();
-    if stdin.lock().read_line(&mut line).is_err() {
-        return false;
-    }
-
-    matches!(
-        line.trim().to_ascii_lowercase().as_str(),
-        "y" | "yes" | "" | "a" | "always"
-    )
-}
-
 async fn execute_one_tool(
     call_name: &str,
     call_arguments: serde_json::Value,
     tools_registry: &[Box<dyn Tool>],
     observer: &dyn Observer,
     cancellation_token: Option<&CancellationToken>,
+    ctx: &ToolExecutionContext,
 ) -> Result<String> {
     let call_arguments = normalize_tool_arguments(call_name, call_arguments);
     let Some(tool) = find_tool(tools_registry, call_name) else {
@@ -1152,7 +1133,7 @@ async fn execute_one_tool(
     });
     let start = Instant::now();
 
-    let tool_future = tool.execute(call_arguments);
+    let tool_future = tool.execute(call_arguments, ctx);
     let tool_result = if let Some(token) = cancellation_token {
         tokio::select! {
             () = token.cancelled() => return Err(ToolLoopCancelled.into()),
@@ -1211,6 +1192,7 @@ async fn execute_tools_parallel(
     observer: &dyn Observer,
     cancellation_token: Option<&CancellationToken>,
 ) -> Result<Vec<String>> {
+    let ctx_default = ToolExecutionContext::default();
     let futures: Vec<_> = tool_calls
         .iter()
         .map(|call| {
@@ -1220,6 +1202,7 @@ async fn execute_tools_parallel(
                 tools_registry,
                 observer,
                 cancellation_token,
+                &ctx_default,
             )
         })
         .collect();
@@ -1238,63 +1221,42 @@ async fn execute_tools_sequential(
     cancellation_token: Option<&CancellationToken>,
 ) -> Result<Vec<String>> {
     let mut individual_results: Vec<String> = Vec::with_capacity(tool_calls.len());
+    let gate = approval.map(|mgr| ApprovalGate::new(mgr, channel_name, security));
 
     for call in tool_calls {
-        let mut args = normalize_tool_arguments(&call.name, call.arguments.clone());
+        let args = normalize_tool_arguments(&call.name, call.arguments.clone());
 
-        if channel_name == "cli" {
-            if let Some(sec) = security {
-                if call.name == "shell" {
-                    if let Some(cmd) = args.get("command").and_then(|v| v.as_str()) {
-                        let approved = args
-                            .get("approved")
-                            .and_then(|v| v.as_bool())
-                            .unwrap_or(false);
-                        if let Err(reason) = sec.validate_command_execution(cmd, approved) {
-                            if reason.contains("requires explicit approval") {
-                                if prompt_shell_security_approval(cmd) {
-                                    if let Some(obj) = args.as_object_mut() {
-                                        obj.insert("approved".to_string(), serde_json::json!(true));
-                                    }
-                                } else {
-                                    individual_results.push("Denied by user.".to_string());
-                                    continue;
-                                }
-                            }
-                        }
-                    }
+        let (shell_human_approved, proceed) = if let Some(gate) = &gate {
+            let gate_call = crate::agent::dispatcher::ParsedToolCall {
+                name: call.name.clone(),
+                arguments: call.arguments.clone(),
+                tool_call_id: None,
+            };
+            match gate.decide_sync(&gate_call) {
+                GateDecision::Denied { message } => {
+                    individual_results.push(message);
+                    (false, false)
                 }
+                GateDecision::Proceed {
+                    shell_human_approved,
+                } => (shell_human_approved, true),
             }
+        } else {
+            (false, true)
+        };
+
+        if !proceed {
+            continue;
         }
 
-        if let Some(mgr) = approval {
-            if mgr.needs_approval(&call.name) {
-                let request = ApprovalRequest {
-                    tool_name: call.name.clone(),
-                    arguments: call.arguments.clone(),
-                };
-
-                let decision = if channel_name == "cli" {
-                    mgr.prompt_cli(&request)
-                } else {
-                    ApprovalResponse::No
-                };
-
-                mgr.record_decision(&call.name, &call.arguments, decision, channel_name);
-
-                if decision == ApprovalResponse::No {
-                    individual_results.push("Denied by user.".to_string());
-                    continue;
-                }
-            }
-        }
-
+        let ctx = ToolExecutionContext::with_shell_human_approved(shell_human_approved);
         let result = execute_one_tool(
             &call.name,
             args,
             tools_registry,
             observer,
             cancellation_token,
+            &ctx,
         )
         .await?;
         individual_results.push(result);
@@ -1722,10 +1684,7 @@ pub async fn run(
     let observer: Arc<dyn Observer> = Arc::from(base_observer);
     let runtime: Arc<dyn runtime::RuntimeAdapter> =
         Arc::from(runtime::create_runtime(&config.runtime)?);
-    let security = Arc::new(SecurityPolicy::from_config(
-        &config.autonomy,
-        &config.workspace_dir,
-    ));
+    let security = Arc::new(SecurityPolicy::from_workspace_config(&config)?);
 
     // ── Memory (the brain) ────────────────────────────────────────
     let mem: Arc<dyn Memory> = Arc::from(memory::create_memory_with_storage(
@@ -2020,7 +1979,8 @@ pub async fn run(
     let tool_dispatcher_ref = tool_dispatcher.as_deref();
 
     // ── Approval manager (supervised mode) ───────────────────────
-    let approval_manager = ApprovalManager::from_config(&config.autonomy);
+    let effective_autonomy = crate::config::resolve_effective_autonomy(&config)?;
+    let approval_manager = ApprovalManager::from_config(&effective_autonomy);
 
     // ── Execute ──────────────────────────────────────────────────
     let start = Instant::now();
@@ -2285,10 +2245,7 @@ pub async fn process_message(config: Config, message: &str) -> Result<String> {
         Arc::from(observability::create_observer(&config.observability));
     let runtime: Arc<dyn runtime::RuntimeAdapter> =
         Arc::from(runtime::create_runtime(&config.runtime)?);
-    let security = Arc::new(SecurityPolicy::from_config(
-        &config.autonomy,
-        &config.workspace_dir,
-    ));
+    let security = Arc::new(SecurityPolicy::from_workspace_config(&config)?);
     let mem: Arc<dyn Memory> = Arc::from(memory::create_memory_with_storage(
         &config.memory,
         Some(&config.storage.provider.config),
@@ -2667,6 +2624,7 @@ mod tests {
         async fn execute(
             &self,
             args: serde_json::Value,
+            _ctx: &crate::tools::ToolExecutionContext,
         ) -> anyhow::Result<crate::tools::ToolResult> {
             let now_active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
             self.max_active.fetch_max(now_active, Ordering::SeqCst);

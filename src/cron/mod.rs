@@ -129,7 +129,7 @@ pub fn handle_command(command: crate::CronCommands, config: &Config) -> Result<(
             };
 
             if let Some(ref cmd) = command {
-                let security = SecurityPolicy::from_config(&config.autonomy, &config.workspace_dir);
+                let security = SecurityPolicy::from_workspace_config(config)?;
                 if !security.is_command_allowed(cmd) {
                     bail!("Command blocked by security policy: {cmd}");
                 }

@@ -25,6 +25,48 @@ pub enum CommandRiskLevel {
     High,
 }
 
+/// Extra shell commands merged into `[autonomy].allowed_commands` when `level = full`.
+/// Operators can still override by omitting names from their explicit allowlist only if they
+/// replace the entire default list; merged entries are additive for home-lab usability.
+pub const FULL_AUTONOMY_EXTRA_COMMANDS: &[&str] = &[
+    "awk", "bash", "chmod", "cp", "curl", "dig", "docker", "host", "make", "mkdir", "mv", "nc",
+    "node", "ping", "python", "python3", "rm", "rsync", "scp", "sed", "sh", "sort", "ssh", "tar",
+    "touch", "tr", "uniq", "unzip", "wget", "zip",
+];
+
+/// Path prefixes dropped from `forbidden_paths` when `level = full` (too broad for owned machines).
+const FULL_AUTONOMY_RELAXED_FORBIDDEN_PREFIXES: &[&str] = &["/home", "/tmp"];
+
+/// Apply level-aware defaults so `full` autonomy is usable on home-lab installs without
+/// hand-editing dozens of config keys.
+pub fn normalize_autonomy_config(
+    autonomy_config: &crate::config::AutonomyConfig,
+) -> crate::config::AutonomyConfig {
+    if autonomy_config.level != AutonomyLevel::Full {
+        return autonomy_config.clone();
+    }
+
+    let mut effective = autonomy_config.clone();
+    for cmd in FULL_AUTONOMY_EXTRA_COMMANDS {
+        let name = (*cmd).to_string();
+        if !effective.allowed_commands.iter().any(|c| c == &name) {
+            effective.allowed_commands.push(name);
+        }
+    }
+    effective
+        .forbidden_paths
+        .retain(|p| !FULL_AUTONOMY_RELAXED_FORBIDDEN_PREFIXES.contains(&p.as_str()));
+    effective
+}
+
+/// Optional runtime surfaces shown in the execution-policy system prompt.
+#[derive(Debug, Clone, Default)]
+pub struct PolicyPromptExtras {
+    pub http_request_enabled: bool,
+    pub proxy_enabled: bool,
+    pub proxy_http: Option<String>,
+}
+
 /// Classifies whether a tool operation is read-only or side-effecting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolOperation {
@@ -286,6 +328,7 @@ fn contains_unquoted_single_ampersand(command: &str) -> bool {
     let mut quote = QuoteState::None;
     let mut escaped = false;
     let mut chars = command.chars().peekable();
+    let mut prev_significant = None;
 
     while let Some(ch) = chars.next() {
         match quote {
@@ -319,9 +362,23 @@ fn contains_unquoted_single_ampersand(command: &str) -> bool {
                 match ch {
                     '\'' => quote = QuoteState::Single,
                     '"' => quote = QuoteState::Double,
-                    '&' if chars.next_if_eq(&'&').is_none() => {
+                    '&' => {
+                        if chars.next_if_eq(&'&').is_some() {
+                            prev_significant = Some('&');
+                            continue;
+                        }
+                        if prev_significant == Some('>') {
+                            if let Some(next) = chars.peek() {
+                                if next.is_ascii_digit() || *next == '-' {
+                                    chars.next();
+                                }
+                            }
+                            prev_significant = Some('&');
+                            continue;
+                        }
                         return true;
                     }
+                    ch if !ch.is_whitespace() => prev_significant = Some(ch),
                     _ => {}
                 }
             }
@@ -373,6 +430,78 @@ fn contains_unquoted_char(command: &str, target: char) -> bool {
                 }
             }
         }
+    }
+
+    false
+}
+
+/// Detect output redirects that can write to arbitrary paths.
+/// Permits `2>/dev/null`, `1>/dev/null`, and `2>&1` style fd duplication.
+fn contains_unquoted_unsafe_redirect(command: &str) -> bool {
+    let mut quote = QuoteState::None;
+    let mut escaped = false;
+    let bytes = command.as_bytes();
+    let mut i = 0usize;
+
+    while i < bytes.len() {
+        let ch = command[i..].chars().next().unwrap();
+        let ch_len = ch.len_utf8();
+
+        match quote {
+            QuoteState::Single => {
+                if ch == '\'' {
+                    quote = QuoteState::None;
+                }
+            }
+            QuoteState::Double => {
+                if escaped {
+                    escaped = false;
+                } else if ch == '\\' {
+                    escaped = true;
+                } else if ch == '"' {
+                    quote = QuoteState::None;
+                }
+            }
+            QuoteState::None => {
+                if escaped {
+                    escaped = false;
+                } else if ch == '\\' {
+                    escaped = true;
+                } else if ch == '\'' {
+                    quote = QuoteState::Single;
+                } else if ch == '"' {
+                    quote = QuoteState::Double;
+                } else if ch == '>' {
+                    if i + 1 < bytes.len() && bytes[i + 1] == b'>' {
+                        return true;
+                    }
+
+                    let mut k = i + 1;
+                    while k < bytes.len() && bytes[k].is_ascii_whitespace() {
+                        k += 1;
+                    }
+
+                    if k < bytes.len() && bytes[k] == b'&' {
+                        k += 1;
+                        if k < bytes.len() && (bytes[k].is_ascii_digit() || bytes[k] == b'-') {
+                            i = k + 1;
+                            continue;
+                        }
+                        return true;
+                    }
+
+                    let tail = &command[k..];
+                    if tail.starts_with("/dev/null") {
+                        i = k + "/dev/null".len();
+                        continue;
+                    }
+
+                    return true;
+                }
+            }
+        }
+
+        i += ch_len;
     }
 
     false
@@ -507,7 +636,10 @@ impl SecurityPolicy {
         approved: bool,
     ) -> Result<CommandRiskLevel, String> {
         if !self.is_command_allowed(command) {
-            return Err(format!("Command not allowed by security policy: {command}"));
+            return Err(format!(
+                "Command not allowed by security policy: {command}. Allowed shell commands: {}. To enable, add the executable name to [autonomy].allowed_commands in config.toml.",
+                self.allowed_commands.join(", ")
+            ));
         }
 
         let risk = self.command_risk_level(command);
@@ -567,9 +699,9 @@ impl SecurityPolicy {
             return false;
         }
 
-        // Block output redirections (`>`, `>>`) — they can write to arbitrary paths.
-        // Ignore quoted literals, e.g. `echo "a>b"`.
-        if contains_unquoted_char(command, '>') {
+        // Block output redirections to files (`>`, `>>`). Allow safe stderr sinks
+        // (`2>/dev/null`, `2>&1`) so routine diagnostics work for non-programmers.
+        if contains_unquoted_unsafe_redirect(command) {
             return false;
         }
 
@@ -726,6 +858,14 @@ impl SecurityPolicy {
         resolved.starts_with(workspace_root)
     }
 
+    /// Allow reads via workspace-relative paths that traverse symlinked trees (home-lab).
+    pub fn allows_workspace_symlink_read(&self, logical_full: &Path, resolved: &Path) -> bool {
+        if self.is_resolved_path_allowed(resolved) {
+            return true;
+        }
+        self.autonomy == AutonomyLevel::Full && logical_full.starts_with(&self.workspace_dir)
+    }
+
     /// Check if autonomy level permits any action at all
     pub fn can_act(&self) -> bool {
         self.autonomy != AutonomyLevel::ReadOnly
@@ -775,21 +915,103 @@ impl SecurityPolicy {
         self.tracker.count() >= self.max_actions_per_hour as usize
     }
 
+    /// Append configured execution boundaries to the system prompt so the model does not
+    /// invent restrictions. Operators still tune policy via config — this only surfaces it.
+    pub fn append_execution_policy_prompt(&self, prompt: &mut String, extras: &PolicyPromptExtras) {
+        use std::fmt::Write;
+
+        prompt.push_str("## Execution Policy (configured — do not guess)\n\n");
+        let _ = writeln!(
+            prompt,
+            "- Autonomy level: `{}`",
+            serde_json::to_string(&self.autonomy)
+                .unwrap_or_else(|_| "\"unknown\"".into())
+                .trim_matches('"')
+        );
+        let _ = writeln!(prompt, "- Workspace: `{}`", self.workspace_dir.display());
+        let _ = writeln!(
+            prompt,
+            "- `workspace_only`: {} — file tools (`file_read`, `glob_search`, etc.) only accept paths relative to the workspace unless you use the `shell` tool.",
+            self.workspace_only
+        );
+        let _ = writeln!(
+            prompt,
+            "- Allowed shell commands: {}",
+            self.allowed_commands.join(", ")
+        );
+        if self.forbidden_paths.is_empty() {
+            prompt.push_str("- Forbidden path prefixes: (none)\n");
+        } else {
+            let _ = writeln!(
+                prompt,
+                "- Forbidden path prefixes: {}",
+                self.forbidden_paths.join(", ")
+            );
+        }
+        let _ = writeln!(
+            prompt,
+            "- HTTP request tool: {}",
+            if extras.http_request_enabled {
+                "enabled"
+            } else {
+                "disabled — use `shell` with `curl` when allowed, or enable [http_request] in config.toml"
+            }
+        );
+        if extras.proxy_enabled {
+            if let Some(ref proxy) = extras.proxy_http {
+                let _ = writeln!(
+                    prompt,
+                    "- Proxy: enabled (`{proxy}`). Use the `proxy_config` tool to inspect or adjust proxy env."
+                );
+            } else {
+                prompt.push_str("- Proxy: enabled (see config [proxy] section).\n");
+            }
+        } else {
+            prompt.push_str("- Proxy: disabled.\n");
+        }
+        prompt.push_str(
+            "\n**CRITICAL tool-use rules:**\n\
+             - When the user asks you to run a command, read a file, or check connectivity, ALWAYS invoke the matching tool first.\n\
+             - NEVER claim a command or path is blocked without a real `<tool_result>` error from an attempted tool call.\n\
+             - If a tool fails, quote the exact error to the user in plain language and say what to change in `config.toml` — do not ask the user to edit source code.\n\
+             - For files outside the workspace, use `shell` with `find`, `ls`, or `cat` when those commands are allowed.\n\
+             - Known local tool catalog: workspace `ai-lib-plans/tools/` when the symlink is present.\n\n",
+        );
+    }
+
     /// Build from config sections
     pub fn from_config(
         autonomy_config: &crate::config::AutonomyConfig,
         workspace_dir: &Path,
     ) -> Self {
+        let effective = normalize_autonomy_config(autonomy_config);
+        Self::from_normalized(&effective, workspace_dir)
+    }
+
+    /// Build from L1 `config.toml` merged with L2 `agent-policy.yaml` when present.
+    pub fn from_workspace_config(config: &crate::config::Config) -> anyhow::Result<Self> {
+        #[cfg(feature = "ai-protocol")]
+        {
+            let autonomy = crate::config::resolve_effective_autonomy(config)?;
+            Ok(Self::from_config(&autonomy, &config.workspace_dir))
+        }
+        #[cfg(not(feature = "ai-protocol"))]
+        {
+            Ok(Self::from_config(&config.autonomy, &config.workspace_dir))
+        }
+    }
+
+    fn from_normalized(effective: &crate::config::AutonomyConfig, workspace_dir: &Path) -> Self {
         Self {
-            autonomy: autonomy_config.level,
+            autonomy: effective.level,
             workspace_dir: workspace_dir.to_path_buf(),
-            workspace_only: autonomy_config.workspace_only,
-            allowed_commands: autonomy_config.allowed_commands.clone(),
-            forbidden_paths: autonomy_config.forbidden_paths.clone(),
-            max_actions_per_hour: autonomy_config.max_actions_per_hour,
-            max_cost_per_day_cents: autonomy_config.max_cost_per_day_cents,
-            require_approval_for_medium_risk: autonomy_config.require_approval_for_medium_risk,
-            block_high_risk_commands: autonomy_config.block_high_risk_commands,
+            workspace_only: effective.workspace_only,
+            allowed_commands: effective.allowed_commands.clone(),
+            forbidden_paths: effective.forbidden_paths.clone(),
+            max_actions_per_hour: effective.max_actions_per_hour,
+            max_cost_per_day_cents: effective.max_cost_per_day_cents,
+            require_approval_for_medium_risk: effective.require_approval_for_medium_risk,
+            block_high_risk_commands: effective.block_high_risk_commands,
             tracker: ActionTracker::new(),
         }
     }
@@ -1030,6 +1252,53 @@ mod tests {
     }
 
     #[test]
+    fn normalize_autonomy_config_full_merges_extra_commands() {
+        use crate::config::AutonomyConfig;
+        use crate::security::AutonomyLevel;
+
+        let input = AutonomyConfig {
+            level: AutonomyLevel::Full,
+            allowed_commands: vec!["echo".into()],
+            forbidden_paths: vec!["/home".into(), "/etc".into()],
+            ..AutonomyConfig::default()
+        };
+        let effective = normalize_autonomy_config(&input);
+        assert!(effective.allowed_commands.contains(&"curl".into()));
+        assert!(effective.allowed_commands.contains(&"ssh".into()));
+        assert!(effective.allowed_commands.contains(&"echo".into()));
+        assert!(!effective.forbidden_paths.contains(&"/home".into()));
+        assert!(effective.forbidden_paths.contains(&"/etc".into()));
+    }
+
+    #[test]
+    fn normalize_autonomy_config_supervised_is_unchanged() {
+        use crate::config::AutonomyConfig;
+        use crate::security::AutonomyLevel;
+
+        let input = AutonomyConfig {
+            level: AutonomyLevel::Supervised,
+            allowed_commands: vec!["echo".into()],
+            forbidden_paths: vec!["/home".into()],
+            ..AutonomyConfig::default()
+        };
+        let effective = normalize_autonomy_config(&input);
+        assert_eq!(effective.allowed_commands, vec!["echo".to_string()]);
+        assert!(effective.forbidden_paths.contains(&"/home".into()));
+    }
+
+    #[test]
+    fn append_execution_policy_prompt_lists_allowed_commands() {
+        let policy = SecurityPolicy {
+            allowed_commands: vec!["echo".into(), "curl".into()],
+            ..SecurityPolicy::default()
+        };
+        let mut prompt = String::new();
+        policy.append_execution_policy_prompt(&mut prompt, &PolicyPromptExtras::default());
+        assert!(prompt.contains("Allowed shell commands: echo, curl"));
+        assert!(prompt.contains("NEVER claim a command or path is blocked"));
+    }
+
+    #[test]
     fn validate_command_full_mode_skips_medium_risk_approval_gate() {
         let p = SecurityPolicy {
             autonomy: AutonomyLevel::Full,
@@ -1132,7 +1401,8 @@ mod tests {
 
         assert_eq!(policy.autonomy, AutonomyLevel::Full);
         assert!(!policy.workspace_only);
-        assert_eq!(policy.allowed_commands, vec!["docker"]);
+        assert!(policy.allowed_commands.contains(&"docker".to_string()));
+        assert!(policy.allowed_commands.contains(&"curl".to_string()));
         assert_eq!(policy.forbidden_paths, vec!["/secret"]);
         assert_eq!(policy.max_actions_per_hour, 100);
         assert_eq!(policy.max_cost_per_day_cents, 1000);
@@ -1323,6 +1593,20 @@ mod tests {
         let p = default_policy();
         assert!(!p.is_command_allowed("echo secret > /etc/crontab"));
         assert!(!p.is_command_allowed("ls >> /tmp/exfil.txt"));
+    }
+
+    #[test]
+    fn safe_stderr_redirects_are_allowed() {
+        let p = default_policy();
+        assert!(p.is_command_allowed("ls -la 2>/dev/null"));
+        assert!(p.is_command_allowed("ls 2>&1"));
+        assert!(p.is_command_allowed("ls -la ai-lib-plans/tools/ 2>/dev/null || echo missing"));
+    }
+
+    #[test]
+    fn unsafe_fd_redirects_remain_blocked() {
+        let p = default_policy();
+        assert!(!p.is_command_allowed("ls 2> /tmp/out.txt"));
     }
 
     #[test]

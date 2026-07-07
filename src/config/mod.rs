@@ -1,6 +1,8 @@
 #[cfg(feature = "ai-protocol")]
 pub mod agent_policy;
 #[cfg(feature = "ai-protocol")]
+pub mod effective_execution_policy;
+#[cfg(feature = "ai-protocol")]
 pub mod effective_policy;
 pub mod schema;
 
@@ -27,6 +29,8 @@ pub use schema::{
     TelegramConfig, TunnelConfig, WebSearchConfig, WebhookConfig,
 };
 
+#[cfg(feature = "ai-protocol")]
+pub use effective_execution_policy::resolve_effective_autonomy;
 #[cfg(feature = "ai-protocol")]
 pub use effective_policy::{merge_tool_dispatcher, EffectivePolicy};
 

@@ -1573,12 +1573,13 @@ pub(crate) async fn run_tool_call_loop(
                 }
             }
             history.push(ChatMessage::assistant(response_text.clone()));
-            return Ok(display_text);
+            return Ok(crate::util::strip_tool_call_markup(&display_text));
         }
 
         // Print any text the LLM produced alongside tool calls (unless silent)
-        if !silent && !display_text.is_empty() {
-            print!("{display_text}");
+        let visible_text = crate::util::strip_tool_call_markup(&display_text);
+        if !silent && !visible_text.is_empty() {
+            print!("{visible_text}");
             let _ = std::io::stdout().flush();
         }
 
@@ -1616,6 +1617,13 @@ pub(crate) async fn run_tool_call_loop(
                 "<tool_result name=\"{}\">\n{}\n</tool_result>",
                 call.name, result
             );
+        }
+
+        if !silent {
+            for (call, result) in tool_calls.iter().zip(individual_results.iter()) {
+                println!("\n── tool:{} ──\n{}\n", call.name, result);
+            }
+            let _ = std::io::stdout().flush();
         }
 
         // Add assistant message with tool calls + tool results to history.
@@ -1663,6 +1671,32 @@ pub(crate) fn build_tool_instructions(tools_registry: &[Box<dyn Tool>]) -> Strin
     }
 
     instructions
+}
+
+/// Surface configured autonomy/shell/path policy in the system prompt.
+pub(crate) fn append_execution_policy_to_prompt(
+    system_prompt: &mut String,
+    security: &SecurityPolicy,
+    config: &Config,
+) {
+    let http = config
+        .http_request
+        .effective_for_autonomy(security.autonomy);
+    let extras = crate::security::PolicyPromptExtras {
+        http_request_enabled: http.enabled,
+        proxy_enabled: config.proxy.enabled,
+        proxy_http: if config.proxy.enabled {
+            config.proxy.http_proxy.clone()
+        } else {
+            None
+        },
+    };
+    security.append_execution_policy_prompt(system_prompt, &extras);
+    if http.enabled && http.allow_private_hosts {
+        system_prompt.push_str(
+            "- HTTP LAN access: enabled for private/local hosts when `autonomy.level = full`.\n\n",
+        );
+    }
 }
 
 // ── CLI Entrypoint ───────────────────────────────────────────────────────
@@ -1981,6 +2015,7 @@ pub async fn run(
             system_prompt.push_str(&build_tool_instructions(&tools_registry));
         }
     }
+    append_execution_policy_to_prompt(&mut system_prompt, security.as_ref(), &config);
 
     let tool_dispatcher_ref = tool_dispatcher.as_deref();
 
@@ -2198,9 +2233,13 @@ pub async fn run(
                 }
             };
             final_output = response.clone();
+            let visible_response = crate::util::strip_tool_call_markup(&response);
             if let Err(e) = crate::channels::Channel::send(
                 &cli,
-                &crate::channels::traits::SendMessage::new(format!("\n{response}\n"), "user"),
+                &crate::channels::traits::SendMessage::new(
+                    format!("\n{visible_response}\n"),
+                    "user",
+                ),
             )
             .await
             {
@@ -2401,6 +2440,7 @@ pub async fn process_message(config: Config, message: &str) -> Result<String> {
     if !native_tools {
         system_prompt.push_str(&build_tool_instructions(&tools_registry));
     }
+    append_execution_policy_to_prompt(&mut system_prompt, security.as_ref(), &config);
 
     let mem_context = build_context(mem.as_ref(), message, config.memory.min_relevance_score).await;
     let rag_limit = if config.agent.compact_context { 2 } else { 5 };

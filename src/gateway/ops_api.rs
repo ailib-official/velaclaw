@@ -206,10 +206,12 @@ pub async fn handle_list_tools(
         return e.into_response();
     }
     let config = state.config.lock().clone();
-    let security = Arc::new(SecurityPolicy::from_config(
-        &config.autonomy,
-        &config.workspace_dir,
-    ));
+    let security = match SecurityPolicy::from_workspace_config(&config) {
+        Ok(policy) => Arc::new(policy),
+        Err(e) => {
+            return api_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response();
+        }
+    };
     let runtime: Arc<dyn runtime::RuntimeAdapter> = match runtime::create_runtime(&config.runtime) {
         Ok(r) => Arc::from(r),
         Err(e) => {

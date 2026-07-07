@@ -1,5 +1,5 @@
-//! L2 workspace `agent-policy.yaml` loading and validation (VL-ARCH-006 / VL-ARCH-004).
-//! 工作区策略文件：tool_calling、self_adjust 等；禁止 secret 字段。
+//! L2 workspace `agent-policy.yaml` loading and validation (VL-ARCH-006 / VL-SEC-001).
+//! 工作区策略文件：tool_calling、autonomy、approval、self_adjust；禁止 secret 字段。
 
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
@@ -15,6 +15,12 @@ pub struct AgentPolicyLayer {
     pub version: Option<u32>,
     #[serde(default)]
     pub tool_calling: Option<ToolCallingPolicySection>,
+    /// L2 overrides for `[autonomy]` (agent-policy.yaml v2).
+    #[serde(default)]
+    pub autonomy: Option<AutonomyPolicySection>,
+    /// L2 overrides for tool approval lists (agent-policy.yaml v2).
+    #[serde(default)]
+    pub approval: Option<ApprovalPolicySection>,
     #[serde(default)]
     pub self_adjust: Option<SelfAdjustSection>,
 }
@@ -22,6 +28,34 @@ pub struct AgentPolicyLayer {
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct ToolCallingPolicySection {
     pub dispatcher: Option<String>,
+}
+
+/// Optional L2 overrides for autonomy / shell guardrails (`agent-policy.yaml` v2).
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct AutonomyPolicySection {
+    pub level: Option<String>,
+    pub workspace_only: Option<bool>,
+    #[serde(default)]
+    pub allowed_commands: Option<Vec<String>>,
+    #[serde(default)]
+    pub forbidden_paths: Option<Vec<String>>,
+    pub max_actions_per_hour: Option<u32>,
+    pub max_cost_per_day_cents: Option<u32>,
+    pub require_approval_for_medium_risk: Option<bool>,
+    pub block_high_risk_commands: Option<bool>,
+    #[serde(default)]
+    pub auto_approve: Option<Vec<String>>,
+    #[serde(default)]
+    pub always_ask: Option<Vec<String>>,
+}
+
+/// Optional L2 overrides for interactive tool approval lists.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct ApprovalPolicySection {
+    #[serde(default)]
+    pub auto_approve: Option<Vec<String>>,
+    #[serde(default)]
+    pub always_ask: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
@@ -57,8 +91,8 @@ impl AgentPolicyLayer {
         let policy: AgentPolicyLayer =
             serde_yaml::from_str(&raw).context("parse agent-policy.yaml")?;
         if let Some(version) = policy.version {
-            if version != 1 {
-                bail!("unsupported agent-policy.yaml version: {version} (expected 1)");
+            if version != 1 && version != 2 {
+                bail!("unsupported agent-policy.yaml version: {version} (expected 1 or 2)");
             }
         }
         Ok(policy)
@@ -222,6 +256,37 @@ channels:
 
         let err = AgentPolicyLayer::load_from_path(&path).unwrap_err();
         assert!(err.to_string().contains("secret fields"));
+    }
+
+    #[test]
+    fn parse_v2_autonomy_and_approval_sections() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join(AGENT_POLICY_FILE);
+        fs::write(
+            &path,
+            r#"
+version: 2
+autonomy:
+  allowed_commands: ["echo", "pwd"]
+  max_actions_per_hour: 40
+approval:
+  always_ask: ["shell"]
+"#,
+        )
+        .unwrap();
+
+        let policy = AgentPolicyLayer::load_from_path(&path).unwrap();
+        assert_eq!(policy.version, Some(2));
+        let autonomy = policy.autonomy.as_ref().unwrap();
+        assert_eq!(
+            autonomy.allowed_commands.as_deref(),
+            Some(vec!["echo".to_string(), "pwd".to_string()].as_slice())
+        );
+        assert_eq!(autonomy.max_actions_per_hour, Some(40));
+        assert_eq!(
+            policy.approval.as_ref().unwrap().always_ask.as_deref(),
+            Some(vec!["shell".to_string()].as_slice())
+        );
     }
 
     #[test]

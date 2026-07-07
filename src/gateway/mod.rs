@@ -364,10 +364,7 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
     )?);
     let runtime: Arc<dyn runtime::RuntimeAdapter> =
         Arc::from(runtime::create_runtime(&config.runtime)?);
-    let security = Arc::new(SecurityPolicy::from_config(
-        &config.autonomy,
-        &config.workspace_dir,
-    ));
+    let security = Arc::new(SecurityPolicy::from_workspace_config(&config)?);
 
     let (composio_key, composio_entity_id) = if config.composio.enabled {
         (

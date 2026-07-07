@@ -64,7 +64,11 @@ impl Tool for ScheduleTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value, ctx: &ToolExecutionContext) -> Result<ToolResult> {
+    async fn execute(
+        &self,
+        args: serde_json::Value,
+        ctx: &ToolExecutionContext,
+    ) -> Result<ToolResult> {
         let action = args
             .get("action")
             .and_then(|value| value.as_str())
@@ -425,7 +429,10 @@ mod tests {
         let (_tmp, config, security) = test_setup().await;
         let tool = ScheduleTool::new(security, config);
 
-        let result = tool.execute(json!({"action": "list"}), &ToolExecutionContext::default()).await.unwrap();
+        let result = tool
+            .execute(json!({"action": "list"}), &ToolExecutionContext::default())
+            .await
+            .unwrap();
         assert!(result.success);
         assert!(result.output.contains("No scheduled jobs"));
     }
@@ -436,31 +443,43 @@ mod tests {
         let tool = ScheduleTool::new(security, config);
 
         let create = tool
-            .execute(json!({
-                "action": "create",
-                "expression": "*/5 * * * *",
-                "command": "echo hello"
-            }), &ToolExecutionContext::default())
+            .execute(
+                json!({
+                    "action": "create",
+                    "expression": "*/5 * * * *",
+                    "command": "echo hello"
+                }),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(create.success);
         assert!(create.output.contains("Created recurring job"));
 
-        let list = tool.execute(json!({"action": "list"}), &ToolExecutionContext::default()).await.unwrap();
+        let list = tool
+            .execute(json!({"action": "list"}), &ToolExecutionContext::default())
+            .await
+            .unwrap();
         assert!(list.success);
         assert!(list.output.contains("echo hello"));
 
         let id = create.output.split_whitespace().nth(3).unwrap();
 
         let get = tool
-            .execute(json!({"action": "get", "id": id}), &ToolExecutionContext::default())
+            .execute(
+                json!({"action": "get", "id": id}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(get.success);
         assert!(get.output.contains("echo hello"));
 
         let cancel = tool
-            .execute(json!({"action": "cancel", "id": id}), &ToolExecutionContext::default())
+            .execute(
+                json!({"action": "cancel", "id": id}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(cancel.success);
@@ -472,34 +491,46 @@ mod tests {
         let tool = ScheduleTool::new(security, config);
 
         let once = tool
-            .execute(json!({
-                "action": "once",
-                "delay": "30m",
-                "command": "echo delayed"
-            }), &ToolExecutionContext::default())
+            .execute(
+                json!({
+                    "action": "once",
+                    "delay": "30m",
+                    "command": "echo delayed"
+                }),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(once.success);
 
         let add = tool
-            .execute(json!({
-                "action": "add",
-                "expression": "*/10 * * * *",
-                "command": "echo recurring"
-            }), &ToolExecutionContext::default())
+            .execute(
+                json!({
+                    "action": "add",
+                    "expression": "*/10 * * * *",
+                    "command": "echo recurring"
+                }),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(add.success);
 
         let id = add.output.split_whitespace().nth(3).unwrap();
         let pause = tool
-            .execute(json!({"action": "pause", "id": id}), &ToolExecutionContext::default())
+            .execute(
+                json!({"action": "pause", "id": id}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(pause.success);
 
         let resume = tool
-            .execute(json!({"action": "resume", "id": id}), &ToolExecutionContext::default())
+            .execute(
+                json!({"action": "resume", "id": id}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(resume.success);
@@ -528,17 +559,23 @@ mod tests {
         let tool = ScheduleTool::new(security, config);
 
         let blocked = tool
-            .execute(json!({
-                "action": "create",
-                "expression": "* * * * *",
-                "command": "echo blocked"
-            }), &ToolExecutionContext::default())
+            .execute(
+                json!({
+                    "action": "create",
+                    "expression": "* * * * *",
+                    "command": "echo blocked"
+                }),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(!blocked.success);
         assert!(blocked.error.as_deref().unwrap().contains("read-only"));
 
-        let list = tool.execute(json!({"action": "list"}), &ToolExecutionContext::default()).await.unwrap();
+        let list = tool
+            .execute(json!({"action": "list"}), &ToolExecutionContext::default())
+            .await
+            .unwrap();
         assert!(list.success);
     }
 
@@ -547,7 +584,13 @@ mod tests {
         let (_tmp, config, security) = test_setup().await;
         let tool = ScheduleTool::new(security, config);
 
-        let result = tool.execute(json!({"action": "explode"}), &ToolExecutionContext::default()).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"action": "explode"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
         assert!(!result.success);
         assert!(result.error.as_deref().unwrap().contains("Unknown action"));
     }
@@ -569,11 +612,14 @@ mod tests {
         let tool = ScheduleTool::new(security, config);
 
         let create = tool
-            .execute(json!({
-                "action": "create",
-                "expression": "*/5 * * * *",
-                "command": "echo hello"
-            }), &ToolExecutionContext::default())
+            .execute(
+                json!({
+                    "action": "create",
+                    "expression": "*/5 * * * *",
+                    "command": "echo hello"
+                }),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
 
@@ -603,11 +649,14 @@ mod tests {
         let tool = ScheduleTool::new(security, config);
 
         let result = tool
-            .execute(json!({
-                "action": "create",
-                "expression": "*/5 * * * *",
-                "command": "curl https://example.com"
-            }), &ToolExecutionContext::default())
+            .execute(
+                json!({
+                    "action": "create",
+                    "expression": "*/5 * * * *",
+                    "command": "curl https://example.com"
+                }),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
 
@@ -637,11 +686,14 @@ mod tests {
         let tool = ScheduleTool::new(security, config);
 
         let denied = tool
-            .execute(json!({
-                "action": "create",
-                "expression": "*/5 * * * *",
-                "command": "touch schedule-policy-test"
-            }), &ToolExecutionContext::default())
+            .execute(
+                json!({
+                    "action": "create",
+                    "expression": "*/5 * * * *",
+                    "command": "touch schedule-policy-test"
+                }),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(!denied.success);
@@ -651,12 +703,17 @@ mod tests {
             .unwrap_or_default()
             .contains("explicit approval"));
 
-        let approved = tool.execute(json!({
-                "action": "create",
-                "expression": "*/5 * * * *",
-                "command": "touch schedule-policy-test"
-            }), &ToolExecutionContext::with_shell_human_approved(true)).await
-        .unwrap();
+        let approved = tool
+            .execute(
+                json!({
+                    "action": "create",
+                    "expression": "*/5 * * * *",
+                    "command": "touch schedule-policy-test"
+                }),
+                &ToolExecutionContext::with_shell_human_approved(true),
+            )
+            .await
+            .unwrap();
         assert!(approved.success, "{:?}", approved.error);
     }
 }

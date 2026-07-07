@@ -238,7 +238,11 @@ impl Tool for ScreenshotTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value, _ctx: &ToolExecutionContext) -> anyhow::Result<ToolResult> {
+    async fn execute(
+        &self,
+        args: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> anyhow::Result<ToolResult> {
         if !self.security.can_act() {
             return Ok(ToolResult {
                 success: false,
@@ -305,7 +309,10 @@ mod tests {
     async fn screenshot_rejects_shell_injection_filename() {
         let tool = ScreenshotTool::new(test_security());
         let result = tool
-            .execute(json!({"filename": "test'injection.png"}), &ToolExecutionContext::default())
+            .execute(
+                json!({"filename": "test'injection.png"}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(!result.success);

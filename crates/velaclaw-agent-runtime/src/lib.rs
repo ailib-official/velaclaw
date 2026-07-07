@@ -10,8 +10,8 @@ pub mod telemetry;
 pub mod tools;
 
 pub use approval::{
-    shell_command_from_args, ApprovalGate, GateDecision, HumanApprovalBackend, ShellPolicyHook,
-    is_shell_policy_tool,
+    is_shell_policy_tool, shell_command_from_args, ApprovalGate, GateDecision,
+    HumanApprovalBackend, ShellPolicyHook,
 };
 pub use byok::{
     execute_chat_with_retry, init_ai_client_sync, resolve_ai_client, split_logical_model_id,
@@ -20,9 +20,9 @@ pub use dispatcher::{
     build_tool_dispatcher, build_tool_dispatcher_for_logical_model, text_tool_parser_from_manifest,
     NativeToolDispatcher, ParsedToolCall, ToolDispatcher, ToolExecutionResult, XmlToolDispatcher,
 };
+pub use execution_context::ToolExecutionContext;
 pub use provider::{
     ChatMessage, ChatRequest, ChatResponse, ConversationMessage, NativeToolCapable, ToolCall,
     ToolResultMessage,
 };
-pub use execution_context::ToolExecutionContext;
 pub use tools::{Tool, ToolResult, ToolSpec};

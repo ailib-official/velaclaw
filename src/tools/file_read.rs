@@ -48,7 +48,11 @@ impl Tool for FileReadTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value, _ctx: &ToolExecutionContext) -> anyhow::Result<ToolResult> {
+    async fn execute(
+        &self,
+        args: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> anyhow::Result<ToolResult> {
         let path = args
             .get("path")
             .and_then(|v| v.as_str())
@@ -262,7 +266,13 @@ mod tests {
             .unwrap();
 
         let tool = FileReadTool::new(test_security(dir.clone()));
-        let result = tool.execute(json!({"path": "test.txt"}), &ToolExecutionContext::default()).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"path": "test.txt"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
         assert!(result.success);
         assert!(result.output.contains("1: hello world"));
         assert!(result.output.contains("[1 lines total]"));
@@ -278,7 +288,13 @@ mod tests {
         tokio::fs::create_dir_all(&dir).await.unwrap();
 
         let tool = FileReadTool::new(test_security(dir.clone()));
-        let result = tool.execute(json!({"path": "nope.txt"}), &ToolExecutionContext::default()).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"path": "nope.txt"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
         assert!(!result.success);
         assert!(result.error.as_ref().unwrap().contains("Failed to resolve"));
 
@@ -293,7 +309,10 @@ mod tests {
 
         let tool = FileReadTool::new(test_security(dir.clone()));
         let result = tool
-            .execute(json!({"path": "../../../etc/passwd"}), &ToolExecutionContext::default())
+            .execute(
+                json!({"path": "../../../etc/passwd"}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(!result.success);
@@ -305,7 +324,13 @@ mod tests {
     #[tokio::test]
     async fn file_read_blocks_absolute_path() {
         let tool = FileReadTool::new(test_security(std::env::temp_dir()));
-        let result = tool.execute(json!({"path": "/etc/passwd"}), &ToolExecutionContext::default()).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"path": "/etc/passwd"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
         assert!(!result.success);
         assert!(result.error.as_ref().unwrap().contains("not allowed"));
     }
@@ -324,7 +349,13 @@ mod tests {
             AutonomyLevel::Supervised,
             0,
         ));
-        let result = tool.execute(json!({"path": "test.txt"}), &ToolExecutionContext::default()).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"path": "test.txt"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
 
         assert!(!result.success);
         assert!(result
@@ -346,7 +377,13 @@ mod tests {
             .unwrap();
 
         let tool = FileReadTool::new(test_security_with(dir.clone(), AutonomyLevel::ReadOnly, 20));
-        let result = tool.execute(json!({"path": "test.txt"}), &ToolExecutionContext::default()).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"path": "test.txt"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
 
         assert!(result.success);
         assert!(result.output.contains("1: readonly ok"));
@@ -357,7 +394,9 @@ mod tests {
     #[tokio::test]
     async fn file_read_missing_path_param() {
         let tool = FileReadTool::new(test_security(std::env::temp_dir()));
-        let result = tool.execute(json!({}), &ToolExecutionContext::default()).await;
+        let result = tool
+            .execute(json!({}), &ToolExecutionContext::default())
+            .await;
         assert!(result.is_err());
     }
 
@@ -369,7 +408,13 @@ mod tests {
         tokio::fs::write(dir.join("empty.txt"), "").await.unwrap();
 
         let tool = FileReadTool::new(test_security(dir.clone()));
-        let result = tool.execute(json!({"path": "empty.txt"}), &ToolExecutionContext::default()).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"path": "empty.txt"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
         assert!(result.success);
         assert_eq!(result.output, "");
 
@@ -389,7 +434,10 @@ mod tests {
 
         let tool = FileReadTool::new(test_security(dir.clone()));
         let result = tool
-            .execute(json!({"path": "sub/dir/deep.txt"}), &ToolExecutionContext::default())
+            .execute(
+                json!({"path": "sub/dir/deep.txt"}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(result.success);
@@ -418,7 +466,13 @@ mod tests {
         symlink(outside.join("secret.txt"), workspace.join("escape.txt")).unwrap();
 
         let tool = FileReadTool::new(test_security(workspace.clone()));
-        let result = tool.execute(json!({"path": "escape.txt"}), &ToolExecutionContext::default()).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"path": "escape.txt"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
 
         assert!(!result.success);
         assert!(result
@@ -444,16 +498,34 @@ mod tests {
         ));
 
         // Both reads fail (file doesn't exist) but should consume budget
-        let r1 = tool.execute(json!({"path": "nope1.txt"}), &ToolExecutionContext::default()).await.unwrap();
+        let r1 = tool
+            .execute(
+                json!({"path": "nope1.txt"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
         assert!(!r1.success);
         assert!(r1.error.as_ref().unwrap().contains("Failed to resolve"));
 
-        let r2 = tool.execute(json!({"path": "nope2.txt"}), &ToolExecutionContext::default()).await.unwrap();
+        let r2 = tool
+            .execute(
+                json!({"path": "nope2.txt"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
         assert!(!r2.success);
         assert!(r2.error.as_ref().unwrap().contains("Failed to resolve"));
 
         // Third attempt should be rate limited even though file doesn't exist
-        let r3 = tool.execute(json!({"path": "nope3.txt"}), &ToolExecutionContext::default()).await.unwrap();
+        let r3 = tool
+            .execute(
+                json!({"path": "nope3.txt"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
         assert!(!r3.success);
         assert!(
             r3.error.as_ref().unwrap().contains("Rate limit"),
@@ -477,7 +549,10 @@ mod tests {
 
         // Read lines 2-3
         let result = tool
-            .execute(json!({"path": "lines.txt", "offset": 2, "limit": 2}), &ToolExecutionContext::default())
+            .execute(
+                json!({"path": "lines.txt", "offset": 2, "limit": 2}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(result.success);
@@ -489,7 +564,10 @@ mod tests {
 
         // Read from offset 4 to end
         let result = tool
-            .execute(json!({"path": "lines.txt", "offset": 4}), &ToolExecutionContext::default())
+            .execute(
+                json!({"path": "lines.txt", "offset": 4}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(result.success);
@@ -499,7 +577,10 @@ mod tests {
 
         // Limit only (first 2 lines)
         let result = tool
-            .execute(json!({"path": "lines.txt", "limit": 2}), &ToolExecutionContext::default())
+            .execute(
+                json!({"path": "lines.txt", "limit": 2}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(result.success);
@@ -509,7 +590,13 @@ mod tests {
         assert!(result.output.contains("[Lines 1-2 of 5]"));
 
         // Full read (no offset/limit) shows all lines
-        let result = tool.execute(json!({"path": "lines.txt"}), &ToolExecutionContext::default()).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"path": "lines.txt"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
         assert!(result.success);
         assert!(result.output.contains("1: aaa"));
         assert!(result.output.contains("5: eee"));
@@ -529,7 +616,10 @@ mod tests {
 
         let tool = FileReadTool::new(test_security(dir.clone()));
         let result = tool
-            .execute(json!({"path": "short.txt", "offset": 100}), &ToolExecutionContext::default())
+            .execute(
+                json!({"path": "short.txt", "offset": 100}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(result.success);
@@ -551,7 +641,13 @@ mod tests {
         tokio::fs::write(dir.join("huge.bin"), &big).await.unwrap();
 
         let tool = FileReadTool::new(test_security(dir.clone()));
-        let result = tool.execute(json!({"path": "huge.bin"}), &ToolExecutionContext::default()).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"path": "huge.bin"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
         assert!(!result.success);
         assert!(result.error.as_ref().unwrap().contains("File too large"));
 
@@ -578,7 +674,10 @@ mod tests {
 
         let tool = FileReadTool::new(test_security_with(workspace, AutonomyLevel::Full, 20));
         let result = tool
-            .execute(json!({"path": "ai-lib-plans/tools/INDEX.md"}), &ToolExecutionContext::default())
+            .execute(
+                json!({"path": "ai-lib-plans/tools/INDEX.md"}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(result.success, "expected success, got {:?}", result.error);

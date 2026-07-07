@@ -44,7 +44,11 @@ impl Tool for ArduinoUploadTool {
         })
     }
 
-    async fn execute(&self, args: Value, _ctx: &ToolExecutionContext) -> anyhow::Result<ToolResult> {
+    async fn execute(
+        &self,
+        args: Value,
+        _ctx: &ToolExecutionContext,
+    ) -> anyhow::Result<ToolResult> {
         let code = args
             .get("code")
             .and_then(|v| v.as_str())

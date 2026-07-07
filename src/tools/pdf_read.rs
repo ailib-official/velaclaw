@@ -59,7 +59,11 @@ impl Tool for PdfReadTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value, _ctx: &ToolExecutionContext) -> anyhow::Result<ToolResult> {
+    async fn execute(
+        &self,
+        args: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> anyhow::Result<ToolResult> {
         let path = args
             .get("path")
             .and_then(|v| v.as_str())
@@ -290,7 +294,9 @@ mod tests {
     #[tokio::test]
     async fn missing_path_param_returns_error() {
         let tool = PdfReadTool::new(test_security(std::env::temp_dir()));
-        let result = tool.execute(json!({}), &ToolExecutionContext::default()).await;
+        let result = tool
+            .execute(json!({}), &ToolExecutionContext::default())
+            .await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("path"));
     }
@@ -298,7 +304,13 @@ mod tests {
     #[tokio::test]
     async fn absolute_path_is_blocked() {
         let tool = PdfReadTool::new(test_security(std::env::temp_dir()));
-        let result = tool.execute(json!({"path": "/etc/passwd"}), &ToolExecutionContext::default()).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"path": "/etc/passwd"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
         assert!(!result.success);
         assert!(result
             .error
@@ -312,7 +324,10 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let tool = PdfReadTool::new(test_security(tmp.path().to_path_buf()));
         let result = tool
-            .execute(json!({"path": "../../../etc/passwd"}), &ToolExecutionContext::default())
+            .execute(
+                json!({"path": "../../../etc/passwd"}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(!result.success);
@@ -328,7 +343,10 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let tool = PdfReadTool::new(test_security(tmp.path().to_path_buf()));
         let result = tool
-            .execute(json!({"path": "does_not_exist.pdf"}), &ToolExecutionContext::default())
+            .execute(
+                json!({"path": "does_not_exist.pdf"}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(!result.success);
@@ -343,7 +361,10 @@ mod tests {
     async fn rate_limit_blocks_request() {
         let tmp = TempDir::new().unwrap();
         let tool = PdfReadTool::new(test_security_with_limit(tmp.path().to_path_buf(), 0));
-        let result = tool.execute(json!({"path": "any.pdf"}), &ToolExecutionContext::default()).await.unwrap();
+        let result = tool
+            .execute(json!({"path": "any.pdf"}), &ToolExecutionContext::default())
+            .await
+            .unwrap();
         assert!(!result.success);
         assert!(result.error.as_deref().unwrap_or("").contains("Rate limit"));
     }
@@ -354,7 +375,10 @@ mod tests {
         // Allow 2 actions; both will fail on missing file but must consume budget.
         let tool = PdfReadTool::new(test_security_with_limit(tmp.path().to_path_buf(), 2));
 
-        let r1 = tool.execute(json!({"path": "a.pdf"}), &ToolExecutionContext::default()).await.unwrap();
+        let r1 = tool
+            .execute(json!({"path": "a.pdf"}), &ToolExecutionContext::default())
+            .await
+            .unwrap();
         assert!(!r1.success);
         assert!(r1
             .error
@@ -362,7 +386,10 @@ mod tests {
             .unwrap_or("")
             .contains("Failed to resolve"));
 
-        let r2 = tool.execute(json!({"path": "b.pdf"}), &ToolExecutionContext::default()).await.unwrap();
+        let r2 = tool
+            .execute(json!({"path": "b.pdf"}), &ToolExecutionContext::default())
+            .await
+            .unwrap();
         assert!(!r2.success);
         assert!(r2
             .error
@@ -371,7 +398,10 @@ mod tests {
             .contains("Failed to resolve"));
 
         // Third attempt must hit rate limit.
-        let r3 = tool.execute(json!({"path": "c.pdf"}), &ToolExecutionContext::default()).await.unwrap();
+        let r3 = tool
+            .execute(json!({"path": "c.pdf"}), &ToolExecutionContext::default())
+            .await
+            .unwrap();
         assert!(!r3.success);
         assert!(
             r3.error.as_deref().unwrap_or("").contains("Rate limit"),
@@ -396,7 +426,13 @@ mod tests {
         symlink(outside.join("secret.pdf"), workspace.join("link.pdf")).unwrap();
 
         let tool = PdfReadTool::new(test_security(workspace));
-        let result = tool.execute(json!({"path": "link.pdf"}), &ToolExecutionContext::default()).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"path": "link.pdf"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
         assert!(!result.success);
         assert!(result
             .error
@@ -452,7 +488,13 @@ mod tests {
                 .unwrap();
 
             let tool = PdfReadTool::new(test_security(tmp.path().to_path_buf()));
-            let result = tool.execute(json!({"path": "test.pdf"}), &ToolExecutionContext::default()).await.unwrap();
+            let result = tool
+                .execute(
+                    json!({"path": "test.pdf"}),
+                    &ToolExecutionContext::default(),
+                )
+                .await
+                .unwrap();
 
             // Either successfully extracts text, or reports no extractable text
             // (acceptable: minimal hand-crafted PDFs may not parse perfectly).
@@ -478,7 +520,10 @@ mod tests {
 
             let tool = PdfReadTool::new(test_security(tmp.path().to_path_buf()));
             let result = tool
-                .execute(json!({"path": "trunc.pdf", "max_chars": 5}), &ToolExecutionContext::default())
+                .execute(
+                    json!({"path": "trunc.pdf", "max_chars": 5}),
+                    &ToolExecutionContext::default(),
+                )
                 .await
                 .unwrap();
 
@@ -517,7 +562,13 @@ mod tests {
                 .unwrap();
 
             let tool = PdfReadTool::new(test_security(tmp.path().to_path_buf()));
-            let result = tool.execute(json!({"path": "empty.pdf"}), &ToolExecutionContext::default()).await.unwrap();
+            let result = tool
+                .execute(
+                    json!({"path": "empty.pdf"}),
+                    &ToolExecutionContext::default(),
+                )
+                .await
+                .unwrap();
 
             // Acceptable outcomes: empty text warning, or extraction error for
             // malformed hand-crafted PDF.
@@ -543,7 +594,10 @@ mod tests {
         tokio::fs::write(&pdf_path, b"%PDF-1.4 fake").await.unwrap();
 
         let tool = PdfReadTool::new(test_security(tmp.path().to_path_buf()));
-        let result = tool.execute(json!({"path": "doc.pdf"}), &ToolExecutionContext::default()).await.unwrap();
+        let result = tool
+            .execute(json!({"path": "doc.pdf"}), &ToolExecutionContext::default())
+            .await
+            .unwrap();
         assert!(!result.success);
         assert!(
             result.error.as_deref().unwrap_or("").contains("rag-pdf"),

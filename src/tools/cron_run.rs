@@ -38,7 +38,11 @@ impl Tool for CronRunTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value, ctx: &ToolExecutionContext) -> anyhow::Result<ToolResult> {
+    async fn execute(
+        &self,
+        args: serde_json::Value,
+        ctx: &ToolExecutionContext,
+    ) -> anyhow::Result<ToolResult> {
         if !self.config.cron.enabled {
             return Ok(ToolResult {
                 success: false,
@@ -175,7 +179,13 @@ mod tests {
         let job = cron::add_job(&cfg, "*/5 * * * *", "echo run-now").unwrap();
         let tool = CronRunTool::new(cfg.clone(), test_security(&cfg));
 
-        let result = tool.execute(json!({ "job_id": job.id }), &ToolExecutionContext::default()).await.unwrap();
+        let result = tool
+            .execute(
+                json!({ "job_id": job.id }),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
         assert!(result.success, "{:?}", result.error);
 
         let runs = cron::list_runs(&cfg, &job.id, 10).unwrap();
@@ -189,7 +199,10 @@ mod tests {
         let tool = CronRunTool::new(cfg.clone(), test_security(&cfg));
 
         let result = tool
-            .execute(json!({ "job_id": "missing-job-id" }), &ToolExecutionContext::default())
+            .execute(
+                json!({ "job_id": "missing-job-id" }),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(!result.success);
@@ -210,7 +223,13 @@ mod tests {
         let job = cron::add_job(&cfg, "*/5 * * * *", "echo run-now").unwrap();
         let tool = CronRunTool::new(cfg.clone(), test_security(&cfg));
 
-        let result = tool.execute(json!({ "job_id": job.id }), &ToolExecutionContext::default()).await.unwrap();
+        let result = tool
+            .execute(
+                json!({ "job_id": job.id }),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
         assert!(!result.success);
         assert!(result.error.unwrap_or_default().contains("read-only"));
     }
@@ -231,15 +250,26 @@ mod tests {
         let job = cron::add_job(&cfg, "*/5 * * * *", "touch cron-run-approval").unwrap();
         let tool = CronRunTool::new(cfg.clone(), test_security(&cfg));
 
-        let denied = tool.execute(json!({ "job_id": job.id }), &ToolExecutionContext::default()).await.unwrap();
+        let denied = tool
+            .execute(
+                json!({ "job_id": job.id }),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
         assert!(!denied.success);
         assert!(denied
             .error
             .unwrap_or_default()
             .contains("explicit approval"));
 
-        let approved = tool.execute(json!({ "job_id": job.id }), &ToolExecutionContext::with_shell_human_approved(true)).await
-        .unwrap();
+        let approved = tool
+            .execute(
+                json!({ "job_id": job.id }),
+                &ToolExecutionContext::with_shell_human_approved(true),
+            )
+            .await
+            .unwrap();
         assert!(approved.success, "{:?}", approved.error);
     }
 }

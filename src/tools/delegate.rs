@@ -159,7 +159,11 @@ impl Tool for DelegateTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value, _ctx: &ToolExecutionContext) -> anyhow::Result<ToolResult> {
+    async fn execute(
+        &self,
+        args: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> anyhow::Result<ToolResult> {
         let agent_name = args
             .get("agent")
             .and_then(|v| v.as_str())
@@ -567,7 +571,11 @@ mod tests {
             })
         }
 
-        async fn execute(&self, args: serde_json::Value, ctx: &ToolExecutionContext) -> anyhow::Result<ToolResult> {
+        async fn execute(
+            &self,
+            args: serde_json::Value,
+            ctx: &ToolExecutionContext,
+        ) -> anyhow::Result<ToolResult> {
             let value = args
                 .get("value")
                 .and_then(serde_json::Value::as_str)
@@ -725,14 +733,21 @@ mod tests {
     #[tokio::test]
     async fn missing_agent_param() {
         let tool = DelegateTool::new(sample_agents(), None, test_security());
-        let result = tool.execute(json!({"prompt": "test"}), &ToolExecutionContext::default()).await;
+        let result = tool
+            .execute(json!({"prompt": "test"}), &ToolExecutionContext::default())
+            .await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn missing_prompt_param() {
         let tool = DelegateTool::new(sample_agents(), None, test_security());
-        let result = tool.execute(json!({"agent": "researcher"}), &ToolExecutionContext::default()).await;
+        let result = tool
+            .execute(
+                json!({"agent": "researcher"}),
+                &ToolExecutionContext::default(),
+            )
+            .await;
         assert!(result.is_err());
     }
 
@@ -740,7 +755,10 @@ mod tests {
     async fn unknown_agent_returns_error() {
         let tool = DelegateTool::new(sample_agents(), None, test_security());
         let result = tool
-            .execute(json!({"agent": "nonexistent", "prompt": "test"}), &ToolExecutionContext::default())
+            .execute(
+                json!({"agent": "nonexistent", "prompt": "test"}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(!result.success);
@@ -751,7 +769,10 @@ mod tests {
     async fn depth_limit_enforced() {
         let tool = DelegateTool::with_depth(sample_agents(), None, test_security(), 3);
         let result = tool
-            .execute(json!({"agent": "researcher", "prompt": "test"}), &ToolExecutionContext::default())
+            .execute(
+                json!({"agent": "researcher", "prompt": "test"}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(!result.success);
@@ -763,7 +784,10 @@ mod tests {
         // coder has max_depth=2, so depth=2 should be blocked
         let tool = DelegateTool::with_depth(sample_agents(), None, test_security(), 2);
         let result = tool
-            .execute(json!({"agent": "coder", "prompt": "test"}), &ToolExecutionContext::default())
+            .execute(
+                json!({"agent": "coder", "prompt": "test"}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(!result.success);
@@ -799,7 +823,10 @@ mod tests {
         );
         let tool = DelegateTool::new(agents, None, test_security());
         let result = tool
-            .execute(json!({"agent": "broken", "prompt": "test"}), &ToolExecutionContext::default())
+            .execute(
+                json!({"agent": "broken", "prompt": "test"}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(!result.success);
@@ -810,7 +837,10 @@ mod tests {
     async fn blank_agent_rejected() {
         let tool = DelegateTool::new(sample_agents(), None, test_security());
         let result = tool
-            .execute(json!({"agent": "  ", "prompt": "test"}), &ToolExecutionContext::default())
+            .execute(
+                json!({"agent": "  ", "prompt": "test"}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(!result.success);
@@ -821,7 +851,10 @@ mod tests {
     async fn blank_prompt_rejected() {
         let tool = DelegateTool::new(sample_agents(), None, test_security());
         let result = tool
-            .execute(json!({"agent": "researcher", "prompt": "  \t  "}), &ToolExecutionContext::default())
+            .execute(
+                json!({"agent": "researcher", "prompt": "  \t  "}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(!result.success);
@@ -833,7 +866,10 @@ mod tests {
         let tool = DelegateTool::new(sample_agents(), None, test_security());
         // " researcher " with surrounding whitespace — after trim becomes "researcher"
         let result = tool
-            .execute(json!({"agent": " researcher ", "prompt": "test"}), &ToolExecutionContext::default())
+            .execute(
+                json!({"agent": " researcher ", "prompt": "test"}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         // Should find "researcher" after trim — will fail at provider level
@@ -856,7 +892,10 @@ mod tests {
         });
         let tool = DelegateTool::new(sample_agents(), None, readonly);
         let result = tool
-            .execute(json!({"agent": "researcher", "prompt": "test"}), &ToolExecutionContext::default())
+            .execute(
+                json!({"agent": "researcher", "prompt": "test"}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(!result.success);
@@ -875,7 +914,10 @@ mod tests {
         });
         let tool = DelegateTool::new(sample_agents(), None, limited);
         let result = tool
-            .execute(json!({"agent": "researcher", "prompt": "test"}), &ToolExecutionContext::default())
+            .execute(
+                json!({"agent": "researcher", "prompt": "test"}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(!result.success);
@@ -905,11 +947,14 @@ mod tests {
         );
         let tool = DelegateTool::new(agents, None, test_security());
         let result = tool
-            .execute(json!({
-                "agent": "tester",
-                "prompt": "do something",
-                "context": "some context data"
-            }), &ToolExecutionContext::default())
+            .execute(
+                json!({
+                    "agent": "tester",
+                    "prompt": "do something",
+                    "context": "some context data"
+                }),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
 
@@ -940,11 +985,14 @@ mod tests {
         );
         let tool = DelegateTool::new(agents, None, test_security());
         let result = tool
-            .execute(json!({
-                "agent": "tester",
-                "prompt": "do something",
-                "context": ""
-            }), &ToolExecutionContext::default())
+            .execute(
+                json!({
+                    "agent": "tester",
+                    "prompt": "do something",
+                    "context": ""
+                }),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
 
@@ -966,7 +1014,10 @@ mod tests {
     async fn delegate_no_agents_configured() {
         let tool = DelegateTool::new(HashMap::new(), None, test_security());
         let result = tool
-            .execute(json!({"agent": "any", "prompt": "test"}), &ToolExecutionContext::default())
+            .execute(
+                json!({"agent": "any", "prompt": "test"}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(!result.success);
@@ -980,7 +1031,10 @@ mod tests {
 
         let tool = DelegateTool::new(agents, None, test_security());
         let result = tool
-            .execute(json!({"agent": "agentic", "prompt": "test"}), &ToolExecutionContext::default())
+            .execute(
+                json!({"agent": "agentic", "prompt": "test"}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
 
@@ -1003,7 +1057,10 @@ mod tests {
         let tool = DelegateTool::new(agents, None, test_security())
             .with_parent_tools(Arc::new(vec![Arc::new(EchoTool)]));
         let result = tool
-            .execute(json!({"agent": "agentic", "prompt": "test"}), &ToolExecutionContext::default())
+            .execute(
+                json!({"agent": "agentic", "prompt": "test"}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
 

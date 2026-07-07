@@ -105,7 +105,11 @@ impl Tool for NoopTool {
     fn parameters_schema(&self) -> serde_json::Value {
         serde_json::json!({"type": "object"})
     }
-    async fn execute(&self, _args: serde_json::Value, _ctx: &ToolExecutionContext) -> Result<ToolResult> {
+    async fn execute(
+        &self,
+        _args: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> Result<ToolResult> {
         Ok(ToolResult {
             success: true,
             output: String::new(),

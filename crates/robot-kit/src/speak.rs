@@ -155,7 +155,7 @@ impl Tool for SpeakTool {
         })
     }
 
-    async fn execute(&self, args: Value) -> Result<ToolResult> {
+    async fn execute(&self, args: Value, _ctx: &ToolExecutionContext) -> Result<ToolResult> {
         // Check if playing a sound effect
         if let Some(sound) = args["sound"].as_str() {
             return match self.play_sound(sound).await {

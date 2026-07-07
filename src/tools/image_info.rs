@@ -1,4 +1,4 @@
-use super::traits::{Tool, ToolResult};
+use super::traits::{Tool, ToolExecutionContext, ToolResult};
 use crate::security::SecurityPolicy;
 use async_trait::async_trait;
 use serde_json::json;
@@ -145,7 +145,7 @@ impl Tool for ImageInfoTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
+    async fn execute(&self, args: serde_json::Value, _ctx: &ToolExecutionContext) -> anyhow::Result<ToolResult> {
         let path_str = args
             .get("path")
             .and_then(|v| v.as_str())
@@ -409,7 +409,7 @@ mod tests {
     #[tokio::test]
     async fn execute_missing_path() {
         let tool = ImageInfoTool::new(test_security());
-        let result = tool.execute(json!({})).await;
+        let result = tool.execute(json!({}), &ToolExecutionContext::default()).await;
         assert!(result.is_err());
     }
 
@@ -417,7 +417,7 @@ mod tests {
     async fn execute_nonexistent_file() {
         let tool = ImageInfoTool::new(test_security());
         let result = tool
-            .execute(json!({"path": "/tmp/nonexistent_image_xyz.png"}))
+            .execute(json!({"path": "/tmp/nonexistent_image_xyz.png"}), &ToolExecutionContext::default())
             .await
             .unwrap();
         assert!(!result.success);
@@ -452,7 +452,7 @@ mod tests {
 
         let tool = ImageInfoTool::new(test_security());
         let result = tool
-            .execute(json!({"path": png_path.to_string_lossy()}))
+            .execute(json!({"path": png_path.to_string_lossy()}), &ToolExecutionContext::default())
             .await
             .unwrap();
         assert!(result.success);
@@ -482,7 +482,7 @@ mod tests {
 
         let tool = ImageInfoTool::new(test_security());
         let result = tool
-            .execute(json!({"path": png_path.to_string_lossy(), "include_base64": true}))
+            .execute(json!({"path": png_path.to_string_lossy(), "include_base64": true}), &ToolExecutionContext::default())
             .await
             .unwrap();
         assert!(result.success);

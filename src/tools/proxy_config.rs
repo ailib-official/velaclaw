@@ -1,4 +1,4 @@
-use super::traits::{Tool, ToolResult};
+use super::traits::{Tool, ToolExecutionContext, ToolResult};
 use crate::config::{
     runtime_proxy_config, set_runtime_proxy_config, Config, ProxyConfig, ProxyScope,
 };
@@ -396,7 +396,7 @@ impl Tool for ProxyConfigTool {
         })
     }
 
-    async fn execute(&self, args: Value) -> anyhow::Result<ToolResult> {
+    async fn execute(&self, args: Value, _ctx: &ToolExecutionContext) -> anyhow::Result<ToolResult> {
         let action = args
             .get("action")
             .and_then(Value::as_str)
@@ -465,7 +465,7 @@ mod tests {
         let tool = ProxyConfigTool::new(test_config(&tmp).await, test_security());
 
         let result = tool
-            .execute(json!({"action": "list_services"}))
+            .execute(json!({"action": "list_services"}), &ToolExecutionContext::default())
             .await
             .unwrap();
         assert!(result.success);
@@ -485,7 +485,7 @@ mod tests {
                 "scope": "services",
                 "http_proxy": "http://127.0.0.1:7890",
                 "services": []
-            }))
+            }), &ToolExecutionContext::default())
             .await
             .unwrap();
 
@@ -507,12 +507,12 @@ mod tests {
                 "scope": "services",
                 "http_proxy": "http://127.0.0.1:7890",
                 "services": ["provider.openai", "tool.http_request"]
-            }))
+            }), &ToolExecutionContext::default())
             .await
             .unwrap();
         assert!(set_result.success, "{:?}", set_result.error);
 
-        let get_result = tool.execute(json!({"action": "get"})).await.unwrap();
+        let get_result = tool.execute(json!({"action": "get"}), &ToolExecutionContext::default()).await.unwrap();
         assert!(get_result.success);
         assert!(get_result.output.contains("provider.openai"));
         assert!(get_result.output.contains("services"));
@@ -527,7 +527,7 @@ mod tests {
             .execute(json!({
                 "action": "set",
                 "http_proxy": "http://127.0.0.1:7890"
-            }))
+            }), &ToolExecutionContext::default())
             .await
             .unwrap();
         assert!(set_result.success, "{:?}", set_result.error);
@@ -536,12 +536,12 @@ mod tests {
             .execute(json!({
                 "action": "set",
                 "http_proxy": null
-            }))
+            }), &ToolExecutionContext::default())
             .await
             .unwrap();
         assert!(clear_result.success, "{:?}", clear_result.error);
 
-        let get_result = tool.execute(json!({"action": "get"})).await.unwrap();
+        let get_result = tool.execute(json!({"action": "get"}), &ToolExecutionContext::default()).await.unwrap();
         assert!(get_result.success);
         let parsed: Value = serde_json::from_str(&get_result.output).unwrap();
         assert!(parsed["proxy"]["http_proxy"].is_null());

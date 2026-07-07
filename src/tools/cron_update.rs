@@ -1,4 +1,4 @@
-use super::traits::{Tool, ToolResult};
+use super::traits::{Tool, ToolExecutionContext, ToolResult};
 use crate::config::Config;
 use crate::cron::{self, CronJobPatch};
 use crate::security::SecurityPolicy;
@@ -62,18 +62,13 @@ impl Tool for CronUpdateTool {
             "type": "object",
             "properties": {
                 "job_id": { "type": "string" },
-                "patch": { "type": "object" },
-                "approved": {
-                    "type": "boolean",
-                    "description": "Set true to explicitly approve medium/high-risk shell commands in supervised mode",
-                    "default": false
-                }
+                "patch": { "type": "object" }
             },
             "required": ["job_id", "patch"]
         })
     }
 
-    async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
+    async fn execute(&self, args: serde_json::Value, ctx: &ToolExecutionContext) -> anyhow::Result<ToolResult> {
         if !self.config.cron.enabled {
             return Ok(ToolResult {
                 success: false,
@@ -114,13 +109,13 @@ impl Tool for CronUpdateTool {
                 });
             }
         };
-        let approved = args
-            .get("approved")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false);
+        let human_approved = ctx.human_shell_approved;
 
         if let Some(command) = &patch.command {
-            if let Err(reason) = self.security.validate_command_execution(command, approved) {
+            if let Err(reason) = self
+                .security
+                .validate_command_execution(command, human_approved)
+            {
                 return Ok(ToolResult {
                     success: false,
                     output: String::new(),
@@ -185,7 +180,7 @@ mod tests {
             .execute(json!({
                 "job_id": job.id,
                 "patch": { "enabled": false }
-            }))
+            }), &ToolExecutionContext::default())
             .await
             .unwrap();
 
@@ -213,7 +208,7 @@ mod tests {
             .execute(json!({
                 "job_id": job.id,
                 "patch": { "command": "curl https://example.com" }
-            }))
+            }), &ToolExecutionContext::default())
             .await
             .unwrap();
         assert!(!result.success);
@@ -238,7 +233,7 @@ mod tests {
             .execute(json!({
                 "job_id": job.id,
                 "patch": { "enabled": false }
-            }))
+            }), &ToolExecutionContext::default())
             .await
             .unwrap();
         assert!(!result.success);
@@ -264,7 +259,7 @@ mod tests {
             .execute(json!({
                 "job_id": job.id,
                 "patch": { "command": "touch cron-update-approval-test" }
-            }))
+            }), &ToolExecutionContext::default())
             .await
             .unwrap();
         assert!(!denied.success);
@@ -273,14 +268,11 @@ mod tests {
             .unwrap_or_default()
             .contains("explicit approval"));
 
-        let approved = tool
-            .execute(json!({
+        let approved = tool.execute(json!({
                 "job_id": job.id,
-                "patch": { "command": "touch cron-update-approval-test" },
-                "approved": true
-            }))
-            .await
-            .unwrap();
+                "patch": { "command": "touch cron-update-approval-test" }
+            }), &ToolExecutionContext::with_shell_human_approved(true)).await
+        .unwrap();
         assert!(approved.success, "{:?}", approved.error);
     }
 }

@@ -1,4 +1,4 @@
-use super::traits::{Tool, ToolResult};
+use super::traits::{Tool, ToolExecutionContext, ToolResult};
 use crate::config::Config;
 use crate::cron::{self, DeliveryConfig, JobType, Schedule, SessionTarget};
 use crate::security::SecurityPolicy;
@@ -72,18 +72,13 @@ impl Tool for CronAddTool {
                 "session_target": { "type": "string", "enum": ["isolated", "main"] },
                 "model": { "type": "string" },
                 "delivery": { "type": "object" },
-                "delete_after_run": { "type": "boolean" },
-                "approved": {
-                    "type": "boolean",
-                    "description": "Set true to explicitly approve medium/high-risk shell commands in supervised mode",
-                    "default": false
-                }
+                "delete_after_run": { "type": "boolean" }
             },
             "required": ["schedule"]
         })
     }
 
-    async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
+    async fn execute(&self, args: serde_json::Value, ctx: &ToolExecutionContext) -> anyhow::Result<ToolResult> {
         if !self.config.cron.enabled {
             return Ok(ToolResult {
                 success: false,
@@ -141,10 +136,7 @@ impl Tool for CronAddTool {
             .get("delete_after_run")
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(default_delete_after_run);
-        let approved = args
-            .get("approved")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false);
+        let human_approved = ctx.human_shell_approved;
 
         let result = match job_type {
             JobType::Shell => {
@@ -159,7 +151,10 @@ impl Tool for CronAddTool {
                     }
                 };
 
-                if let Err(reason) = self.security.validate_command_execution(command, approved) {
+                if let Err(reason) = self
+                    .security
+                    .validate_command_execution(command, human_approved)
+                {
                     return Ok(ToolResult {
                         success: false,
                         output: String::new(),
@@ -293,7 +288,7 @@ mod tests {
                 "schedule": { "kind": "cron", "expr": "*/5 * * * *" },
                 "job_type": "shell",
                 "command": "echo ok"
-            }))
+            }), &ToolExecutionContext::default())
             .await
             .unwrap();
 
@@ -322,7 +317,7 @@ mod tests {
                 "schedule": { "kind": "cron", "expr": "*/5 * * * *" },
                 "job_type": "shell",
                 "command": "curl https://example.com"
-            }))
+            }), &ToolExecutionContext::default())
             .await
             .unwrap();
 
@@ -348,7 +343,7 @@ mod tests {
                 "schedule": { "kind": "cron", "expr": "*/5 * * * *" },
                 "job_type": "shell",
                 "command": "echo ok"
-            }))
+            }), &ToolExecutionContext::default())
             .await
             .unwrap();
 
@@ -376,7 +371,7 @@ mod tests {
                 "schedule": { "kind": "cron", "expr": "*/5 * * * *" },
                 "job_type": "shell",
                 "command": "touch cron-approval-test"
-            }))
+            }), &ToolExecutionContext::default())
             .await
             .unwrap();
         assert!(!denied.success);
@@ -385,15 +380,12 @@ mod tests {
             .unwrap_or_default()
             .contains("explicit approval"));
 
-        let approved = tool
-            .execute(json!({
+        let approved = tool.execute(json!({
                 "schedule": { "kind": "cron", "expr": "*/5 * * * *" },
                 "job_type": "shell",
-                "command": "touch cron-approval-test",
-                "approved": true
-            }))
-            .await
-            .unwrap();
+                "command": "touch cron-approval-test"
+            }), &ToolExecutionContext::with_shell_human_approved(true)).await
+        .unwrap();
         assert!(approved.success, "{:?}", approved.error);
     }
 
@@ -408,7 +400,7 @@ mod tests {
                 "schedule": { "kind": "every", "every_ms": 0 },
                 "job_type": "shell",
                 "command": "echo nope"
-            }))
+            }), &ToolExecutionContext::default())
             .await
             .unwrap();
 
@@ -429,7 +421,7 @@ mod tests {
             .execute(json!({
                 "schedule": { "kind": "cron", "expr": "*/5 * * * *" },
                 "job_type": "agent"
-            }))
+            }), &ToolExecutionContext::default())
             .await
             .unwrap();
         assert!(!result.success);

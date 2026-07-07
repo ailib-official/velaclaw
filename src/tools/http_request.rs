@@ -1,4 +1,4 @@
-use super::traits::{Tool, ToolResult};
+use super::traits::{Tool, ToolExecutionContext, ToolResult};
 use crate::security::SecurityPolicy;
 use async_trait::async_trait;
 use serde_json::json;
@@ -189,7 +189,7 @@ impl Tool for HttpRequestTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
+    async fn execute(&self, args: serde_json::Value, _ctx: &ToolExecutionContext) -> anyhow::Result<ToolResult> {
         let url = args
             .get("url")
             .and_then(|v| v.as_str())
@@ -665,7 +665,7 @@ mod tests {
         });
         let tool = HttpRequestTool::new(security, vec!["example.com".into()], false, 1_000_000, 30);
         let result = tool
-            .execute(json!({"url": "https://example.com"}))
+            .execute(json!({"url": "https://example.com"}), &ToolExecutionContext::default())
             .await
             .unwrap();
         assert!(!result.success);
@@ -680,7 +680,7 @@ mod tests {
         });
         let tool = HttpRequestTool::new(security, vec!["example.com".into()], false, 1_000_000, 30);
         let result = tool
-            .execute(json!({"url": "https://example.com"}))
+            .execute(json!({"url": "https://example.com"}), &ToolExecutionContext::default())
             .await
             .unwrap();
         assert!(!result.success);

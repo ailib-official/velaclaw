@@ -153,7 +153,7 @@ impl Tool for LookTool {
         })
     }
 
-    async fn execute(&self, args: Value) -> Result<ToolResult> {
+    async fn execute(&self, args: Value, _ctx: &ToolExecutionContext) -> Result<ToolResult> {
         let action = args["action"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Missing 'action' parameter"))?;

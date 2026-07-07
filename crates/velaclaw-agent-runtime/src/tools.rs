@@ -1,5 +1,6 @@
 //! Tool trait surface for dispatcher prompt/spec generation (VL-ARCH-007).
 
+use crate::execution_context::ToolExecutionContext;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
@@ -23,7 +24,11 @@ pub trait Tool: Send + Sync {
     fn description(&self) -> &str;
     fn parameters_schema(&self) -> serde_json::Value;
 
-    async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult>;
+    async fn execute(
+        &self,
+        args: serde_json::Value,
+        ctx: &ToolExecutionContext,
+    ) -> anyhow::Result<ToolResult>;
 
     fn spec(&self) -> ToolSpec {
         ToolSpec {

@@ -1,4 +1,4 @@
-use super::traits::{Tool, ToolResult};
+use super::traits::{Tool, ToolExecutionContext, ToolResult};
 use crate::memory::{Memory, MemoryCategory};
 use crate::security::policy::ToolOperation;
 use crate::security::SecurityPolicy;
@@ -49,7 +49,7 @@ impl Tool for MemoryStoreTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
+    async fn execute(&self, args: serde_json::Value, _ctx: &ToolExecutionContext) -> anyhow::Result<ToolResult> {
         let key = args
             .get("key")
             .and_then(|v| v.as_str())
@@ -125,7 +125,7 @@ mod tests {
         let (_tmp, mem) = test_mem();
         let tool = MemoryStoreTool::new(mem.clone(), test_security());
         let result = tool
-            .execute(json!({"key": "lang", "content": "Prefers Rust"}))
+            .execute(json!({"key": "lang", "content": "Prefers Rust"}), &ToolExecutionContext::default())
             .await
             .unwrap();
         assert!(result.success);
@@ -141,7 +141,7 @@ mod tests {
         let (_tmp, mem) = test_mem();
         let tool = MemoryStoreTool::new(mem.clone(), test_security());
         let result = tool
-            .execute(json!({"key": "note", "content": "Fixed bug", "category": "daily"}))
+            .execute(json!({"key": "note", "content": "Fixed bug", "category": "daily"}), &ToolExecutionContext::default())
             .await
             .unwrap();
         assert!(result.success);
@@ -154,6 +154,7 @@ mod tests {
         let result = tool
             .execute(
                 json!({"key": "proj_note", "content": "Uses async runtime", "category": "project"}),
+                &ToolExecutionContext::default(),
             )
             .await
             .unwrap();
@@ -168,7 +169,7 @@ mod tests {
     async fn store_missing_key() {
         let (_tmp, mem) = test_mem();
         let tool = MemoryStoreTool::new(mem, test_security());
-        let result = tool.execute(json!({"content": "no key"})).await;
+        let result = tool.execute(json!({"content": "no key"}), &ToolExecutionContext::default()).await;
         assert!(result.is_err());
     }
 
@@ -176,7 +177,7 @@ mod tests {
     async fn store_missing_content() {
         let (_tmp, mem) = test_mem();
         let tool = MemoryStoreTool::new(mem, test_security());
-        let result = tool.execute(json!({"key": "no_content"})).await;
+        let result = tool.execute(json!({"key": "no_content"}), &ToolExecutionContext::default()).await;
         assert!(result.is_err());
     }
 
@@ -189,7 +190,7 @@ mod tests {
         });
         let tool = MemoryStoreTool::new(mem.clone(), readonly);
         let result = tool
-            .execute(json!({"key": "lang", "content": "Prefers Rust"}))
+            .execute(json!({"key": "lang", "content": "Prefers Rust"}), &ToolExecutionContext::default())
             .await
             .unwrap();
         assert!(!result.success);
@@ -210,7 +211,7 @@ mod tests {
         });
         let tool = MemoryStoreTool::new(mem.clone(), limited);
         let result = tool
-            .execute(json!({"key": "lang", "content": "Prefers Rust"}))
+            .execute(json!({"key": "lang", "content": "Prefers Rust"}), &ToolExecutionContext::default())
             .await
             .unwrap();
         assert!(!result.success);

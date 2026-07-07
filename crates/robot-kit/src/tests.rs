@@ -96,7 +96,7 @@ mod unit_tests {
         let tool = DriveTool::new(config);
 
         let result = tool
-            .execute(json!({"action": "forward", "distance": 1.0}))
+            .execute(json!({"action": "forward", "distance": 1.0}), &ToolExecutionContext::default())
             .await
             .unwrap();
 
@@ -109,7 +109,7 @@ mod unit_tests {
         let config = RobotConfig::default();
         let tool = DriveTool::new(config);
 
-        let result = tool.execute(json!({"action": "stop"})).await.unwrap();
+        let result = tool.execute(json!({"action": "stop"}), &ToolExecutionContext::default()).await.unwrap();
 
         assert!(result.success);
         assert!(result.output.to_lowercase().contains("stop"));
@@ -121,7 +121,7 @@ mod unit_tests {
         let tool = DriveTool::new(config);
 
         let result = tool
-            .execute(json!({"action": "left", "distance": 0.5}))
+            .execute(json!({"action": "left", "distance": 0.5}), &ToolExecutionContext::default())
             .await
             .unwrap();
 
@@ -134,7 +134,7 @@ mod unit_tests {
         let tool = DriveTool::new(config);
 
         let result = tool
-            .execute(json!({"action": "rotate_left", "distance": 90.0}))
+            .execute(json!({"action": "rotate_left", "distance": 90.0}), &ToolExecutionContext::default())
             .await
             .unwrap();
 
@@ -146,7 +146,7 @@ mod unit_tests {
         let config = RobotConfig::default();
         let tool = DriveTool::new(config);
 
-        let result = tool.execute(json!({"action": "fly"})).await.unwrap();
+        let result = tool.execute(json!({"action": "fly"}), &ToolExecutionContext::default()).await.unwrap();
 
         assert!(!result.success);
         assert!(result.error.is_some());
@@ -157,7 +157,7 @@ mod unit_tests {
         let config = RobotConfig::default();
         let tool = DriveTool::new(config);
 
-        let result = tool.execute(json!({})).await;
+        let result = tool.execute(json!({}), &ToolExecutionContext::default()).await;
 
         assert!(result.is_err());
     }
@@ -169,7 +169,7 @@ mod unit_tests {
 
         // Speed > 1.0 should be clamped
         let result = tool
-            .execute(json!({"action": "forward", "speed": 5.0}))
+            .execute(json!({"action": "forward", "speed": 5.0}), &ToolExecutionContext::default())
             .await
             .unwrap();
 
@@ -186,7 +186,7 @@ mod unit_tests {
         let tool = SenseTool::new(config);
 
         let result = tool
-            .execute(json!({"action": "scan", "direction": "all"}))
+            .execute(json!({"action": "scan", "direction": "all"}), &ToolExecutionContext::default())
             .await
             .unwrap();
 
@@ -202,7 +202,7 @@ mod unit_tests {
         let tool = SenseTool::new(config);
 
         let result = tool
-            .execute(json!({"action": "clear_ahead"}))
+            .execute(json!({"action": "clear_ahead"}), &ToolExecutionContext::default())
             .await
             .unwrap();
 
@@ -216,7 +216,7 @@ mod unit_tests {
         let config = RobotConfig::default();
         let tool = SenseTool::new(config);
 
-        let result = tool.execute(json!({"action": "motion"})).await.unwrap();
+        let result = tool.execute(json!({"action": "motion"}), &ToolExecutionContext::default()).await.unwrap();
 
         assert!(result.success);
     }
@@ -231,7 +231,7 @@ mod unit_tests {
         let tool = EmoteTool::new(config);
 
         let result = tool
-            .execute(json!({"expression": "happy", "duration": 0}))
+            .execute(json!({"expression": "happy", "duration": 0}), &ToolExecutionContext::default())
             .await
             .unwrap();
 
@@ -258,7 +258,7 @@ mod unit_tests {
 
         for expr in expressions {
             let result = tool
-                .execute(json!({"expression": expr, "duration": 0}))
+                .execute(json!({"expression": expr, "duration": 0}), &ToolExecutionContext::default())
                 .await
                 .unwrap();
 
@@ -271,7 +271,7 @@ mod unit_tests {
         let config = RobotConfig::default();
         let tool = EmoteTool::new(config);
 
-        let result = tool.execute(json!({"expression": "nonexistent"})).await;
+        let result = tool.execute(json!({"expression": "nonexistent"}), &ToolExecutionContext::default()).await;
 
         assert!(result.is_err());
     }
@@ -474,7 +474,7 @@ mod integration_tests {
 
         // Check ahead
         let scan = sense
-            .execute(json!({"action": "clear_ahead"}))
+            .execute(json!({"action": "clear_ahead"}), &ToolExecutionContext::default())
             .await
             .unwrap();
         assert!(scan.success);
@@ -482,7 +482,7 @@ mod integration_tests {
         // Move if clear
         if scan.output.contains("CLEAR") {
             let drive_result = drive
-                .execute(json!({"action": "forward", "distance": 0.5}))
+                .execute(json!({"action": "forward", "distance": 0.5}), &ToolExecutionContext::default())
                 .await
                 .unwrap();
             assert!(drive_result.success);
@@ -492,7 +492,7 @@ mod integration_tests {
         }
 
         // Stop
-        let stop = drive.execute(json!({"action": "stop"})).await.unwrap();
+        let stop = drive.execute(json!({"action": "stop"}), &ToolExecutionContext::default()).await.unwrap();
         assert!(stop.success);
     }
 
@@ -530,7 +530,7 @@ mod integration_tests {
         let safe_drive = SafeDrive::new(drive, safety);
 
         let result = safe_drive
-            .execute(json!({"action": "forward", "distance": 1.0}))
+            .execute(json!({"action": "forward", "distance": 1.0}), &ToolExecutionContext::default())
             .await
             .unwrap();
 

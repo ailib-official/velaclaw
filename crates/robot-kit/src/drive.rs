@@ -250,7 +250,7 @@ impl Tool for DriveTool {
         })
     }
 
-    async fn execute(&self, args: Value) -> Result<ToolResult> {
+    async fn execute(&self, args: Value, _ctx: &ToolExecutionContext) -> Result<ToolResult> {
         let action = args["action"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Missing 'action' parameter"))?;
@@ -404,7 +404,7 @@ mod tests {
     async fn drive_forward_mock() {
         let tool = DriveTool::new(RobotConfig::default());
         let result = tool
-            .execute(json!({"action": "forward", "distance": 1.0}))
+            .execute(json!({"action": "forward", "distance": 1.0}), &ToolExecutionContext::default())
             .await
             .unwrap();
         assert!(result.success);
@@ -414,7 +414,7 @@ mod tests {
     #[tokio::test]
     async fn drive_stop() {
         let tool = DriveTool::new(RobotConfig::default());
-        let result = tool.execute(json!({"action": "stop"})).await.unwrap();
+        let result = tool.execute(json!({"action": "stop"}), &ToolExecutionContext::default()).await.unwrap();
         assert!(result.success);
         assert!(result.output.contains("stopped"));
     }
@@ -422,7 +422,7 @@ mod tests {
     #[tokio::test]
     async fn drive_unknown_action() {
         let tool = DriveTool::new(RobotConfig::default());
-        let result = tool.execute(json!({"action": "fly"})).await.unwrap();
+        let result = tool.execute(json!({"action": "fly"}), &ToolExecutionContext::default()).await.unwrap();
         assert!(!result.success);
     }
 }

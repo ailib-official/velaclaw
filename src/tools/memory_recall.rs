@@ -43,7 +43,11 @@ impl Tool for MemoryRecallTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value, _ctx: &ToolExecutionContext) -> anyhow::Result<ToolResult> {
+    async fn execute(
+        &self,
+        args: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> anyhow::Result<ToolResult> {
         let query = args
             .get("query")
             .and_then(|v| v.as_str())
@@ -104,7 +108,13 @@ mod tests {
     async fn recall_empty() {
         let (_tmp, mem) = seeded_mem();
         let tool = MemoryRecallTool::new(mem);
-        let result = tool.execute(json!({"query": "anything"}), &ToolExecutionContext::default()).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"query": "anything"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
         assert!(result.success);
         assert!(result.output.contains("No memories found"));
     }
@@ -120,7 +130,10 @@ mod tests {
             .unwrap();
 
         let tool = MemoryRecallTool::new(mem);
-        let result = tool.execute(json!({"query": "Rust"}), &ToolExecutionContext::default()).await.unwrap();
+        let result = tool
+            .execute(json!({"query": "Rust"}), &ToolExecutionContext::default())
+            .await
+            .unwrap();
         assert!(result.success);
         assert!(result.output.contains("Rust"));
         assert!(result.output.contains("Found 1"));
@@ -142,7 +155,10 @@ mod tests {
 
         let tool = MemoryRecallTool::new(mem);
         let result = tool
-            .execute(json!({"query": "Rust", "limit": 3}), &ToolExecutionContext::default())
+            .execute(
+                json!({"query": "Rust", "limit": 3}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(result.success);
@@ -153,7 +169,9 @@ mod tests {
     async fn recall_missing_query() {
         let (_tmp, mem) = seeded_mem();
         let tool = MemoryRecallTool::new(mem);
-        let result = tool.execute(json!({}), &ToolExecutionContext::default()).await;
+        let result = tool
+            .execute(json!({}), &ToolExecutionContext::default())
+            .await;
         assert!(result.is_err());
     }
 

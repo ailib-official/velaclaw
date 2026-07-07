@@ -59,7 +59,11 @@ impl Tool for HardwareMemoryReadTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value, _ctx: &ToolExecutionContext) -> anyhow::Result<ToolResult> {
+    async fn execute(
+        &self,
+        args: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> anyhow::Result<ToolResult> {
         if self.boards.is_empty() {
             return Ok(ToolResult {
                 success: false,

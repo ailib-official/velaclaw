@@ -15,9 +15,9 @@ pub use dispatcher::{
     build_tool_dispatcher, build_tool_dispatcher_for_logical_model, text_tool_parser_from_manifest,
     NativeToolDispatcher, ParsedToolCall, ToolDispatcher, ToolExecutionResult, XmlToolDispatcher,
 };
+pub use execution_context::ToolExecutionContext;
 pub use provider::{
     ChatMessage, ChatRequest, ChatResponse, ConversationMessage, NativeToolCapable, ToolCall,
     ToolResultMessage,
 };
-pub use execution_context::ToolExecutionContext;
 pub use tools::{Tool, ToolResult, ToolSpec};

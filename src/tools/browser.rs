@@ -997,7 +997,11 @@ impl Tool for BrowserTool {
         })
     }
 
-    async fn execute(&self, args: Value, _ctx: &ToolExecutionContext) -> anyhow::Result<ToolResult> {
+    async fn execute(
+        &self,
+        args: Value,
+        _ctx: &ToolExecutionContext,
+    ) -> anyhow::Result<ToolResult> {
         // Security checks
         if !self.security.can_act() {
             return Ok(ToolResult {

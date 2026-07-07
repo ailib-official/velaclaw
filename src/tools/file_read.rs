@@ -96,7 +96,10 @@ impl Tool for FileReadTool {
             }
         };
 
-        if !self.security.is_resolved_path_allowed(&resolved_path) {
+        if !self
+            .security
+            .allows_workspace_symlink_read(&full_path, &resolved_path)
+        {
             return Ok(ToolResult {
                 success: false,
                 output: String::new(),
@@ -553,5 +556,34 @@ mod tests {
         assert!(result.error.as_ref().unwrap().contains("File too large"));
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn file_read_follows_workspace_symlink_directory_in_full_mode() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join("velaclaw_test_file_read_symlink");
+        let _ = tokio::fs::remove_dir_all(&root).await;
+        let workspace = root.join("workspace");
+        let external = root.join("external");
+        tokio::fs::create_dir_all(&workspace).await.unwrap();
+        tokio::fs::create_dir_all(external.join("tools"))
+            .await
+            .unwrap();
+        tokio::fs::write(external.join("tools/INDEX.md"), "tool index")
+            .await
+            .unwrap();
+        symlink(&external, workspace.join("ai-lib-plans")).unwrap();
+
+        let tool = FileReadTool::new(test_security_with(workspace, AutonomyLevel::Full, 20));
+        let result = tool
+            .execute(json!({"path": "ai-lib-plans/tools/INDEX.md"}))
+            .await
+            .unwrap();
+        assert!(result.success, "expected success, got {:?}", result.error);
+        assert!(result.output.contains("tool index"));
+
+        let _ = tokio::fs::remove_dir_all(&root).await;
     }
 }

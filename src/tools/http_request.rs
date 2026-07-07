@@ -10,6 +10,7 @@ use std::time::Duration;
 pub struct HttpRequestTool {
     security: Arc<SecurityPolicy>,
     allowed_domains: Vec<String>,
+    allow_private_hosts: bool,
     max_response_size: usize,
     timeout_secs: u64,
 }
@@ -18,12 +19,14 @@ impl HttpRequestTool {
     pub fn new(
         security: Arc<SecurityPolicy>,
         allowed_domains: Vec<String>,
+        allow_private_hosts: bool,
         max_response_size: usize,
         timeout_secs: u64,
     ) -> Self {
         Self {
             security,
             allowed_domains: normalize_allowed_domains(allowed_domains),
+            allow_private_hosts,
             max_response_size,
             timeout_secs,
         }
@@ -52,7 +55,7 @@ impl HttpRequestTool {
 
         let host = extract_host(url)?;
 
-        if is_private_or_local_host(&host) {
+        if !self.allow_private_hosts && is_private_or_local_host(&host) {
             anyhow::bail!("Blocked local/private host: {host}");
         }
 
@@ -371,6 +374,9 @@ fn extract_host(url: &str) -> anyhow::Result<String> {
 }
 
 fn host_matches_allowlist(host: &str, allowed_domains: &[String]) -> bool {
+    if allowed_domains.iter().any(|domain| domain == "*") {
+        return true;
+    }
     allowed_domains.iter().any(|domain| {
         host == domain
             || host
@@ -447,6 +453,7 @@ mod tests {
         HttpRequestTool::new(
             security,
             allowed_domains.into_iter().map(String::from).collect(),
+            false,
             1_000_000,
             30,
         )
@@ -540,7 +547,7 @@ mod tests {
     #[test]
     fn validate_requires_allowlist() {
         let security = Arc::new(SecurityPolicy::default());
-        let tool = HttpRequestTool::new(security, vec![], 1_000_000, 30);
+        let tool = HttpRequestTool::new(security, vec![], false, 1_000_000, 30);
         let err = tool
             .validate_url("https://example.com")
             .unwrap_err()
@@ -656,7 +663,7 @@ mod tests {
             autonomy: AutonomyLevel::ReadOnly,
             ..SecurityPolicy::default()
         });
-        let tool = HttpRequestTool::new(security, vec!["example.com".into()], 1_000_000, 30);
+        let tool = HttpRequestTool::new(security, vec!["example.com".into()], false, 1_000_000, 30);
         let result = tool
             .execute(json!({"url": "https://example.com"}))
             .await
@@ -671,7 +678,7 @@ mod tests {
             max_actions_per_hour: 0,
             ..SecurityPolicy::default()
         });
-        let tool = HttpRequestTool::new(security, vec!["example.com".into()], 1_000_000, 30);
+        let tool = HttpRequestTool::new(security, vec!["example.com".into()], false, 1_000_000, 30);
         let result = tool
             .execute(json!({"url": "https://example.com"}))
             .await
@@ -692,6 +699,7 @@ mod tests {
         let tool = HttpRequestTool::new(
             Arc::new(SecurityPolicy::default()),
             vec!["example.com".into()],
+            false,
             10,
             30,
         );

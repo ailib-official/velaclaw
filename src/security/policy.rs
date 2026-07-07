@@ -328,6 +328,7 @@ fn contains_unquoted_single_ampersand(command: &str) -> bool {
     let mut quote = QuoteState::None;
     let mut escaped = false;
     let mut chars = command.chars().peekable();
+    let mut prev_significant = None;
 
     while let Some(ch) = chars.next() {
         match quote {
@@ -361,9 +362,23 @@ fn contains_unquoted_single_ampersand(command: &str) -> bool {
                 match ch {
                     '\'' => quote = QuoteState::Single,
                     '"' => quote = QuoteState::Double,
-                    '&' if chars.next_if_eq(&'&').is_none() => {
+                    '&' => {
+                        if chars.next_if_eq(&'&').is_some() {
+                            prev_significant = Some('&');
+                            continue;
+                        }
+                        if prev_significant == Some('>') {
+                            if let Some(next) = chars.peek() {
+                                if next.is_ascii_digit() || *next == '-' {
+                                    chars.next();
+                                }
+                            }
+                            prev_significant = Some('&');
+                            continue;
+                        }
                         return true;
                     }
+                    ch if !ch.is_whitespace() => prev_significant = Some(ch),
                     _ => {}
                 }
             }
@@ -415,6 +430,78 @@ fn contains_unquoted_char(command: &str, target: char) -> bool {
                 }
             }
         }
+    }
+
+    false
+}
+
+/// Detect output redirects that can write to arbitrary paths.
+/// Permits `2>/dev/null`, `1>/dev/null`, and `2>&1` style fd duplication.
+fn contains_unquoted_unsafe_redirect(command: &str) -> bool {
+    let mut quote = QuoteState::None;
+    let mut escaped = false;
+    let bytes = command.as_bytes();
+    let mut i = 0usize;
+
+    while i < bytes.len() {
+        let ch = command[i..].chars().next().unwrap();
+        let ch_len = ch.len_utf8();
+
+        match quote {
+            QuoteState::Single => {
+                if ch == '\'' {
+                    quote = QuoteState::None;
+                }
+            }
+            QuoteState::Double => {
+                if escaped {
+                    escaped = false;
+                } else if ch == '\\' {
+                    escaped = true;
+                } else if ch == '"' {
+                    quote = QuoteState::None;
+                }
+            }
+            QuoteState::None => {
+                if escaped {
+                    escaped = false;
+                } else if ch == '\\' {
+                    escaped = true;
+                } else if ch == '\'' {
+                    quote = QuoteState::Single;
+                } else if ch == '"' {
+                    quote = QuoteState::Double;
+                } else if ch == '>' {
+                    if i + 1 < bytes.len() && bytes[i + 1] == b'>' {
+                        return true;
+                    }
+
+                    let mut k = i + 1;
+                    while k < bytes.len() && bytes[k].is_ascii_whitespace() {
+                        k += 1;
+                    }
+
+                    if k < bytes.len() && bytes[k] == b'&' {
+                        k += 1;
+                        if k < bytes.len() && (bytes[k].is_ascii_digit() || bytes[k] == b'-') {
+                            i = k + 1;
+                            continue;
+                        }
+                        return true;
+                    }
+
+                    let tail = &command[k..];
+                    if tail.starts_with("/dev/null") {
+                        i = k + "/dev/null".len();
+                        continue;
+                    }
+
+                    return true;
+                }
+            }
+        }
+
+        i += ch_len;
     }
 
     false
@@ -612,9 +699,9 @@ impl SecurityPolicy {
             return false;
         }
 
-        // Block output redirections (`>`, `>>`) — they can write to arbitrary paths.
-        // Ignore quoted literals, e.g. `echo "a>b"`.
-        if contains_unquoted_char(command, '>') {
+        // Block output redirections to files (`>`, `>>`). Allow safe stderr sinks
+        // (`2>/dev/null`, `2>&1`) so routine diagnostics work for non-programmers.
+        if contains_unquoted_unsafe_redirect(command) {
             return false;
         }
 
@@ -769,6 +856,14 @@ impl SecurityPolicy {
             .canonicalize()
             .unwrap_or_else(|_| self.workspace_dir.clone());
         resolved.starts_with(workspace_root)
+    }
+
+    /// Allow reads via workspace-relative paths that traverse symlinked trees (home-lab).
+    pub fn allows_workspace_symlink_read(&self, logical_full: &Path, resolved: &Path) -> bool {
+        if self.is_resolved_path_allowed(resolved) {
+            return true;
+        }
+        self.autonomy == AutonomyLevel::Full && logical_full.starts_with(&self.workspace_dir)
     }
 
     /// Check if autonomy level permits any action at all
@@ -1481,6 +1576,20 @@ mod tests {
         let p = default_policy();
         assert!(!p.is_command_allowed("echo secret > /etc/crontab"));
         assert!(!p.is_command_allowed("ls >> /tmp/exfil.txt"));
+    }
+
+    #[test]
+    fn safe_stderr_redirects_are_allowed() {
+        let p = default_policy();
+        assert!(p.is_command_allowed("ls -la 2>/dev/null"));
+        assert!(p.is_command_allowed("ls 2>&1"));
+        assert!(p.is_command_allowed("ls -la ai-lib-plans/tools/ 2>/dev/null || echo missing"));
+    }
+
+    #[test]
+    fn unsafe_fd_redirects_remain_blocked() {
+        let p = default_policy();
+        assert!(!p.is_command_allowed("ls 2> /tmp/out.txt"));
     }
 
     #[test]

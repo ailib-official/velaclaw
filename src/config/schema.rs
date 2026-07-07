@@ -925,15 +925,41 @@ pub struct HttpRequestConfig {
     /// Enable `http_request` tool for API interactions
     #[serde(default)]
     pub enabled: bool,
-    /// Allowed domains for HTTP requests (exact or subdomain match)
+    /// Allowed domains for HTTP requests (exact or subdomain match). Use `"*"` for any host.
     #[serde(default)]
     pub allowed_domains: Vec<String>,
+    /// Allow RFC1918/link-local hosts (LAN devices). Auto-enabled when `autonomy.level = full`.
+    #[serde(default)]
+    pub allow_private_hosts: bool,
     /// Maximum response size in bytes (default: 1MB)
     #[serde(default = "default_http_max_response_size")]
     pub max_response_size: usize,
     /// Request timeout in seconds (default: 30)
     #[serde(default = "default_http_timeout_secs")]
     pub timeout_secs: u64,
+}
+
+impl HttpRequestConfig {
+    /// Apply autonomy-aware defaults for home-lab installs.
+    pub fn effective_for_autonomy(&self, autonomy: crate::security::AutonomyLevel) -> Self {
+        let mut out = self.clone();
+        if autonomy != crate::security::AutonomyLevel::Full {
+            return out;
+        }
+
+        out.enabled = true;
+        out.allow_private_hosts = true;
+        if out.allowed_domains.is_empty() {
+            out.allowed_domains = vec!["*".into()];
+        }
+        if out.max_response_size == 0 {
+            out.max_response_size = default_http_max_response_size();
+        }
+        if out.timeout_secs == 0 {
+            out.timeout_secs = default_http_timeout_secs();
+        }
+        out
+    }
 }
 
 fn default_http_max_response_size() -> usize {

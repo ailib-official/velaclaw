@@ -1573,12 +1573,13 @@ pub(crate) async fn run_tool_call_loop(
                 }
             }
             history.push(ChatMessage::assistant(response_text.clone()));
-            return Ok(display_text);
+            return Ok(crate::util::strip_tool_call_markup(&display_text));
         }
 
         // Print any text the LLM produced alongside tool calls (unless silent)
-        if !silent && !display_text.is_empty() {
-            print!("{display_text}");
+        let visible_text = crate::util::strip_tool_call_markup(&display_text);
+        if !silent && !visible_text.is_empty() {
+            print!("{visible_text}");
             let _ = std::io::stdout().flush();
         }
 
@@ -1678,8 +1679,11 @@ pub(crate) fn append_execution_policy_to_prompt(
     security: &SecurityPolicy,
     config: &Config,
 ) {
+    let http = config
+        .http_request
+        .effective_for_autonomy(security.autonomy);
     let extras = crate::security::PolicyPromptExtras {
-        http_request_enabled: config.http_request.enabled,
+        http_request_enabled: http.enabled,
         proxy_enabled: config.proxy.enabled,
         proxy_http: if config.proxy.enabled {
             config.proxy.http_proxy.clone()
@@ -1688,6 +1692,11 @@ pub(crate) fn append_execution_policy_to_prompt(
         },
     };
     security.append_execution_policy_prompt(system_prompt, &extras);
+    if http.enabled && http.allow_private_hosts {
+        system_prompt.push_str(
+            "- HTTP LAN access: enabled for private/local hosts when `autonomy.level = full`.\n\n",
+        );
+    }
 }
 
 // ── CLI Entrypoint ───────────────────────────────────────────────────────
@@ -2224,9 +2233,13 @@ pub async fn run(
                 }
             };
             final_output = response.clone();
+            let visible_response = crate::util::strip_tool_call_markup(&response);
             if let Err(e) = crate::channels::Channel::send(
                 &cli,
-                &crate::channels::traits::SendMessage::new(format!("\n{response}\n"), "user"),
+                &crate::channels::traits::SendMessage::new(
+                    format!("\n{visible_response}\n"),
+                    "user",
+                ),
             )
             .await
             {

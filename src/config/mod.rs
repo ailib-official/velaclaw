@@ -1,9 +1,13 @@
 #[cfg(feature = "ai-protocol")]
 pub mod agent_policy;
 #[cfg(feature = "ai-protocol")]
+pub mod approval_runtime;
+#[cfg(feature = "ai-protocol")]
 pub mod effective_execution_policy;
 #[cfg(feature = "ai-protocol")]
 pub mod effective_policy;
+#[cfg(feature = "ai-protocol")]
+pub mod policy_overrides;
 pub mod schema;
 
 #[cfg(feature = "ai-protocol")]
@@ -31,9 +35,13 @@ pub use schema::{
 };
 
 #[cfg(feature = "ai-protocol")]
+pub use approval_runtime::{create_approval_manager, ApprovalManagerWiring};
+#[cfg(feature = "ai-protocol")]
 pub use effective_execution_policy::resolve_effective_autonomy;
 #[cfg(feature = "ai-protocol")]
 pub use effective_policy::{merge_tool_dispatcher, EffectivePolicy};
+#[cfg(feature = "ai-protocol")]
+pub use policy_overrides::{discover_policy_overrides, PolicyOverridesStore};
 
 #[cfg(test)]
 mod tests {

@@ -2,7 +2,7 @@
 //! 工作区策略文件：tool_calling、autonomy、approval、self_adjust；禁止 secret 字段。
 
 use anyhow::{bail, Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 pub const AGENT_POLICY_FILE: &str = "agent-policy.yaml";
@@ -31,7 +31,7 @@ pub struct ToolCallingPolicySection {
 }
 
 /// Optional L2 overrides for autonomy / shell guardrails (`agent-policy.yaml` v2).
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct AutonomyPolicySection {
     pub level: Option<String>,
     pub workspace_only: Option<bool>,
@@ -164,16 +164,17 @@ const FORBIDDEN_YAML_KEYS: &[&str] = &[
     "app_secret",
 ];
 
-fn reject_forbidden_secret_keys(raw: &str) -> Result<()> {
+/// Reject YAML documents that embed secret-like keys (shared by L2/L2.5 policy files).
+pub fn reject_forbidden_secret_keys(raw: &str) -> Result<()> {
     let value: serde_yaml::Value =
-        serde_yaml::from_str(raw).context("parse agent-policy.yaml for validation")?;
+        serde_yaml::from_str(raw).context("parse policy YAML for validation")?;
     let mut violations = Vec::new();
     collect_forbidden_keys(&value, "", &mut violations);
     if violations.is_empty() {
         return Ok(());
     }
     bail!(
-        "agent-policy.yaml must not contain secret fields: {}",
+        "policy YAML must not contain secret fields: {}",
         violations.join(", ")
     );
 }

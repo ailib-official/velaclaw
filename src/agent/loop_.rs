@@ -1990,7 +1990,8 @@ pub async fn run(
 
     // ── Approval manager (supervised mode) ───────────────────────
     let effective_autonomy = crate::config::resolve_effective_autonomy(&config)?;
-    let approval_manager = ApprovalManager::from_config(&effective_autonomy);
+    let approval_wiring = crate::config::ApprovalManagerWiring::from_config(&config)?;
+    let approval_manager = approval_wiring.spawn_manager(&effective_autonomy);
 
     // ── Execute ──────────────────────────────────────────────────
     let start = Instant::now();

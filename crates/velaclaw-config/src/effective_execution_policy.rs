@@ -2,6 +2,7 @@
 //! L1/L2 合并：工作区 agent-policy.yaml 覆盖 config.toml [autonomy] 子集。
 
 use crate::agent_policy::{AgentPolicyLayer, ApprovalPolicySection, AutonomyPolicySection};
+use crate::policy_overrides::{merge_policy_overrides, PolicyOverridesLayer};
 
 /// Portable autonomy + approval snapshot used across merge layers.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,6 +19,23 @@ pub struct AutonomyLayerValues {
     pub always_ask: Vec<String>,
 }
 
+impl Default for AutonomyLayerValues {
+    fn default() -> Self {
+        Self {
+            level: "supervised".into(),
+            workspace_only: true,
+            allowed_commands: Vec::new(),
+            forbidden_paths: Vec::new(),
+            max_actions_per_hour: 20,
+            max_cost_per_day_cents: 500,
+            require_approval_for_medium_risk: true,
+            block_high_risk_commands: true,
+            auto_approve: Vec::new(),
+            always_ask: Vec::new(),
+        }
+    }
+}
+
 /// Resolved execution policy after L1 + L2 merge (autonomy/approval subset).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EffectiveExecutionPolicy {
@@ -25,14 +43,19 @@ pub struct EffectiveExecutionPolicy {
 }
 
 impl EffectiveExecutionPolicy {
-    /// Merge L1 base values with optional L2 `agent-policy.yaml` overrides.
-    pub fn resolve(l1: AutonomyLayerValues, l2: Option<&AgentPolicyLayer>) -> Self {
+    /// Merge L1 + L2 `agent-policy.yaml` + optional L2.5 `policy-overrides.yaml`.
+    pub fn resolve(
+        l1: AutonomyLayerValues,
+        l2: Option<&AgentPolicyLayer>,
+        l25: Option<&PolicyOverridesLayer>,
+    ) -> Self {
         let autonomy = match l2 {
             Some(layer) => {
                 merge_autonomy_layers(&l1, layer.autonomy.as_ref(), layer.approval.as_ref())
             }
             None => l1,
         };
+        let autonomy = merge_policy_overrides(autonomy, l25);
         Self { autonomy }
     }
 }
@@ -120,7 +143,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        let resolved = EffectiveExecutionPolicy::resolve(sample_l1(), Some(&l2));
+        let resolved = EffectiveExecutionPolicy::resolve(sample_l1(), Some(&l2), None);
         assert_eq!(resolved.autonomy.allowed_commands, vec!["echo"]);
         assert_eq!(resolved.autonomy.level, "supervised");
     }
@@ -135,15 +158,34 @@ mod tests {
             }),
             ..Default::default()
         };
-        let resolved = EffectiveExecutionPolicy::resolve(sample_l1(), Some(&l2));
+        let resolved = EffectiveExecutionPolicy::resolve(sample_l1(), Some(&l2), None);
         assert_eq!(resolved.autonomy.auto_approve, vec!["shell"]);
         assert_eq!(resolved.autonomy.always_ask, vec!["file_write"]);
     }
 
     #[test]
+    fn l25_session_allowlist_merges_into_auto_approve() {
+        use crate::policy_overrides::{ApprovalOverridesSection, PolicyOverridesLayer};
+
+        let l25 = PolicyOverridesLayer {
+            version: Some(1),
+            approval: Some(ApprovalOverridesSection {
+                session_allowlist: vec!["file_write".into()],
+            }),
+            autonomy: None,
+        };
+        let resolved = EffectiveExecutionPolicy::resolve(sample_l1(), None, Some(&l25));
+        assert!(resolved.autonomy.auto_approve.contains(&"file_read".into()));
+        assert!(resolved
+            .autonomy
+            .auto_approve
+            .contains(&"file_write".into()));
+    }
+
+    #[test]
     fn no_l2_passthrough_l1() {
         let l1 = sample_l1();
-        let resolved = EffectiveExecutionPolicy::resolve(l1.clone(), None);
+        let resolved = EffectiveExecutionPolicy::resolve(l1.clone(), None, None);
         assert_eq!(resolved.autonomy, l1);
     }
 }

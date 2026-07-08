@@ -235,6 +235,7 @@ struct ChannelRuntimeContext {
     channel_approval_hub: Arc<ChannelApprovalHub>,
     approval_managers: Arc<Mutex<HashMap<String, Arc<ApprovalManager>>>>,
     autonomy_config: Arc<crate::config::AutonomyConfig>,
+    approval_wiring: Arc<crate::config::ApprovalManagerWiring>,
     telegram_approval: Option<(ChannelApprovalMode, u64)>,
 }
 
@@ -289,7 +290,7 @@ fn get_or_create_approval_manager(
         .unwrap_or_else(|e| e.into_inner());
     managers
         .entry(sender_key.to_string())
-        .or_insert_with(|| Arc::new(ApprovalManager::from_config(&ctx.autonomy_config)))
+        .or_insert_with(|| Arc::new(ctx.approval_wiring.spawn_manager(&ctx.autonomy_config)))
         .clone()
 }
 
@@ -2795,6 +2796,7 @@ pub async fn start_channels(config: Config) -> Result<()> {
         Arc::from(runtime::create_runtime(&config.runtime)?);
     let security = Arc::new(SecurityPolicy::from_workspace_config(&config)?);
     let effective_autonomy = crate::config::resolve_effective_autonomy(&config)?;
+    let approval_wiring = Arc::new(crate::config::ApprovalManagerWiring::from_config(&config)?);
     let channel_approval_hub = Arc::new(ChannelApprovalHub::new());
     let telegram_approval = config
         .channels_config
@@ -3260,6 +3262,7 @@ pub async fn start_channels(config: Config) -> Result<()> {
         channel_approval_hub,
         approval_managers: Arc::new(Mutex::new(HashMap::new())),
         autonomy_config: Arc::new(effective_autonomy),
+        approval_wiring,
         telegram_approval,
     });
 
@@ -3312,13 +3315,19 @@ mod tests {
         Arc<ChannelApprovalHub>,
         Arc<Mutex<HashMap<String, Arc<ApprovalManager>>>>,
         Arc<crate::config::AutonomyConfig>,
+        Arc<crate::config::ApprovalManagerWiring>,
         Option<(ChannelApprovalMode, u64)>,
     ) {
+        let mut config = crate::config::Config::default();
+        config.workspace_dir = std::env::temp_dir();
+        let wiring = crate::config::ApprovalManagerWiring::from_config(&config)
+            .expect("test approval wiring");
         (
             Arc::new(SecurityPolicy::default()),
             Arc::new(ChannelApprovalHub::new()),
             Arc::new(Mutex::new(HashMap::new())),
             Arc::new(crate::config::AutonomyConfig::default()),
+            Arc::new(wiring),
             None,
         )
     }
@@ -3463,7 +3472,8 @@ mod tests {
             channel_approval_hub: test_channel_approval_runtime_fields().1,
             approval_managers: test_channel_approval_runtime_fields().2,
             autonomy_config: test_channel_approval_runtime_fields().3,
-            telegram_approval: test_channel_approval_runtime_fields().4,
+            approval_wiring: test_channel_approval_runtime_fields().4,
+            telegram_approval: test_channel_approval_runtime_fields().5,
         };
 
         assert!(compact_sender_history(&ctx, &sender));
@@ -3925,7 +3935,8 @@ BTC is currently around $65,000 based on latest tool output."#
             channel_approval_hub: test_channel_approval_runtime_fields().1,
             approval_managers: test_channel_approval_runtime_fields().2,
             autonomy_config: test_channel_approval_runtime_fields().3,
-            telegram_approval: test_channel_approval_runtime_fields().4,
+            approval_wiring: test_channel_approval_runtime_fields().4,
+            telegram_approval: test_channel_approval_runtime_fields().5,
         });
 
         process_channel_message(
@@ -3993,7 +4004,8 @@ BTC is currently around $65,000 based on latest tool output."#
             channel_approval_hub: test_channel_approval_runtime_fields().1,
             approval_managers: test_channel_approval_runtime_fields().2,
             autonomy_config: test_channel_approval_runtime_fields().3,
-            telegram_approval: test_channel_approval_runtime_fields().4,
+            approval_wiring: test_channel_approval_runtime_fields().4,
+            telegram_approval: test_channel_approval_runtime_fields().5,
         });
 
         process_channel_message(
@@ -4061,7 +4073,8 @@ BTC is currently around $65,000 based on latest tool output."#
             channel_approval_hub: test_channel_approval_runtime_fields().1,
             approval_managers: test_channel_approval_runtime_fields().2,
             autonomy_config: test_channel_approval_runtime_fields().3,
-            telegram_approval: test_channel_approval_runtime_fields().4,
+            approval_wiring: test_channel_approval_runtime_fields().4,
+            telegram_approval: test_channel_approval_runtime_fields().5,
         });
 
         process_channel_message(
@@ -4138,7 +4151,8 @@ BTC is currently around $65,000 based on latest tool output."#
             channel_approval_hub: test_channel_approval_runtime_fields().1,
             approval_managers: test_channel_approval_runtime_fields().2,
             autonomy_config: test_channel_approval_runtime_fields().3,
-            telegram_approval: test_channel_approval_runtime_fields().4,
+            approval_wiring: test_channel_approval_runtime_fields().4,
+            telegram_approval: test_channel_approval_runtime_fields().5,
         });
 
         process_channel_message(
@@ -4238,7 +4252,8 @@ BTC is currently around $65,000 based on latest tool output."#
             channel_approval_hub: test_channel_approval_runtime_fields().1,
             approval_managers: test_channel_approval_runtime_fields().2,
             autonomy_config: test_channel_approval_runtime_fields().3,
-            telegram_approval: test_channel_approval_runtime_fields().4,
+            approval_wiring: test_channel_approval_runtime_fields().4,
+            telegram_approval: test_channel_approval_runtime_fields().5,
         });
 
         process_channel_message(
@@ -4318,7 +4333,8 @@ BTC is currently around $65,000 based on latest tool output."#
             channel_approval_hub: test_channel_approval_runtime_fields().1,
             approval_managers: test_channel_approval_runtime_fields().2,
             autonomy_config: test_channel_approval_runtime_fields().3,
-            telegram_approval: test_channel_approval_runtime_fields().4,
+            approval_wiring: test_channel_approval_runtime_fields().4,
+            telegram_approval: test_channel_approval_runtime_fields().5,
         });
 
         process_channel_message(
@@ -4413,7 +4429,8 @@ BTC is currently around $65,000 based on latest tool output."#
             channel_approval_hub: test_channel_approval_runtime_fields().1,
             approval_managers: test_channel_approval_runtime_fields().2,
             autonomy_config: test_channel_approval_runtime_fields().3,
-            telegram_approval: test_channel_approval_runtime_fields().4,
+            approval_wiring: test_channel_approval_runtime_fields().4,
+            telegram_approval: test_channel_approval_runtime_fields().5,
         });
 
         process_channel_message(
@@ -4493,7 +4510,8 @@ BTC is currently around $65,000 based on latest tool output."#
             channel_approval_hub: test_channel_approval_runtime_fields().1,
             approval_managers: test_channel_approval_runtime_fields().2,
             autonomy_config: test_channel_approval_runtime_fields().3,
-            telegram_approval: test_channel_approval_runtime_fields().4,
+            approval_wiring: test_channel_approval_runtime_fields().4,
+            telegram_approval: test_channel_approval_runtime_fields().5,
         });
 
         process_channel_message(
@@ -4562,7 +4580,8 @@ BTC is currently around $65,000 based on latest tool output."#
             channel_approval_hub: test_channel_approval_runtime_fields().1,
             approval_managers: test_channel_approval_runtime_fields().2,
             autonomy_config: test_channel_approval_runtime_fields().3,
-            telegram_approval: test_channel_approval_runtime_fields().4,
+            approval_wiring: test_channel_approval_runtime_fields().4,
+            telegram_approval: test_channel_approval_runtime_fields().5,
         });
 
         process_channel_message(
@@ -4742,7 +4761,8 @@ BTC is currently around $65,000 based on latest tool output."#
             channel_approval_hub: test_channel_approval_runtime_fields().1,
             approval_managers: test_channel_approval_runtime_fields().2,
             autonomy_config: test_channel_approval_runtime_fields().3,
-            telegram_approval: test_channel_approval_runtime_fields().4,
+            approval_wiring: test_channel_approval_runtime_fields().4,
+            telegram_approval: test_channel_approval_runtime_fields().5,
         });
 
         let (tx, rx) = tokio::sync::mpsc::channel::<traits::ChannelMessage>(4);
@@ -4831,7 +4851,8 @@ BTC is currently around $65,000 based on latest tool output."#
             channel_approval_hub: test_channel_approval_runtime_fields().1,
             approval_managers: test_channel_approval_runtime_fields().2,
             autonomy_config: test_channel_approval_runtime_fields().3,
-            telegram_approval: test_channel_approval_runtime_fields().4,
+            approval_wiring: test_channel_approval_runtime_fields().4,
+            telegram_approval: test_channel_approval_runtime_fields().5,
         });
 
         let (tx, rx) = tokio::sync::mpsc::channel::<traits::ChannelMessage>(8);
@@ -4932,7 +4953,8 @@ BTC is currently around $65,000 based on latest tool output."#
             channel_approval_hub: test_channel_approval_runtime_fields().1,
             approval_managers: test_channel_approval_runtime_fields().2,
             autonomy_config: test_channel_approval_runtime_fields().3,
-            telegram_approval: test_channel_approval_runtime_fields().4,
+            approval_wiring: test_channel_approval_runtime_fields().4,
+            telegram_approval: test_channel_approval_runtime_fields().5,
         });
 
         let (tx, rx) = tokio::sync::mpsc::channel::<traits::ChannelMessage>(8);
@@ -5015,7 +5037,8 @@ BTC is currently around $65,000 based on latest tool output."#
             channel_approval_hub: test_channel_approval_runtime_fields().1,
             approval_managers: test_channel_approval_runtime_fields().2,
             autonomy_config: test_channel_approval_runtime_fields().3,
-            telegram_approval: test_channel_approval_runtime_fields().4,
+            approval_wiring: test_channel_approval_runtime_fields().4,
+            telegram_approval: test_channel_approval_runtime_fields().5,
         });
 
         process_channel_message(
@@ -5535,7 +5558,8 @@ BTC is currently around $65,000 based on latest tool output."#
             channel_approval_hub: test_channel_approval_runtime_fields().1,
             approval_managers: test_channel_approval_runtime_fields().2,
             autonomy_config: test_channel_approval_runtime_fields().3,
-            telegram_approval: test_channel_approval_runtime_fields().4,
+            approval_wiring: test_channel_approval_runtime_fields().4,
+            telegram_approval: test_channel_approval_runtime_fields().5,
         });
 
         process_channel_message(
@@ -5629,7 +5653,8 @@ BTC is currently around $65,000 based on latest tool output."#
             channel_approval_hub: test_channel_approval_runtime_fields().1,
             approval_managers: test_channel_approval_runtime_fields().2,
             autonomy_config: test_channel_approval_runtime_fields().3,
-            telegram_approval: test_channel_approval_runtime_fields().4,
+            approval_wiring: test_channel_approval_runtime_fields().4,
+            telegram_approval: test_channel_approval_runtime_fields().5,
         });
 
         process_channel_message(
@@ -5723,7 +5748,8 @@ BTC is currently around $65,000 based on latest tool output."#
             channel_approval_hub: test_channel_approval_runtime_fields().1,
             approval_managers: test_channel_approval_runtime_fields().2,
             autonomy_config: test_channel_approval_runtime_fields().3,
-            telegram_approval: test_channel_approval_runtime_fields().4,
+            approval_wiring: test_channel_approval_runtime_fields().4,
+            telegram_approval: test_channel_approval_runtime_fields().5,
         });
 
         process_channel_message(

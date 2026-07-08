@@ -21,6 +21,7 @@ pub enum AuditEventType {
     AuthFailure,
     PolicyViolation,
     SecurityEvent,
+    ToolApproval,
 }
 
 /// Actor information (who performed the action)
@@ -207,6 +208,22 @@ impl AuditLogger {
             )
             .with_result(entry.success, None, entry.duration_ms, None);
 
+        self.log(&event)
+    }
+
+    /// Log a tool approval decision (VL-SEC-004).
+    pub fn log_tool_approval(
+        &self,
+        channel: &str,
+        tool_name: &str,
+        decision: &str,
+        arguments_summary: &str,
+        approved: bool,
+    ) -> Result<()> {
+        let command = format!("{tool_name} [{decision}]: {arguments_summary}");
+        let event = AuditEvent::new(AuditEventType::ToolApproval)
+            .with_actor(channel.to_string(), None, None)
+            .with_action(command, "tool_approval".into(), approved, approved);
         self.log(&event)
     }
 

@@ -325,6 +325,8 @@ mod tests {
             draft_update_interval_ms: 1000,
             interrupt_on_new_message: false,
             mention_only: false,
+            approval_mode: crate::config::ChannelApprovalMode::default(),
+            approval_timeout_secs: 300,
         });
         assert!(has_supervised_channels(&config));
     }

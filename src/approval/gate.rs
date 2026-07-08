@@ -3,7 +3,7 @@
 
 pub use velaclaw_agent_runtime::GateDecision;
 
-use super::backend::{ManagerApprovalBackend, SecurityPolicyShellHook};
+use super::backend::{ChannelApprovalSession, ManagerApprovalBackend, SecurityPolicyShellHook};
 use super::{ApprovalHub, ApprovalManager};
 use crate::agent::dispatcher::ParsedToolCall;
 use crate::security::SecurityPolicy;
@@ -30,6 +30,11 @@ impl<'a> ApprovalGate<'a> {
 
     pub fn with_hub(mut self, hub: Arc<ApprovalHub>) -> Self {
         self.backend = self.backend.with_hub(hub);
+        self
+    }
+
+    pub fn with_channel_session(mut self, session: ChannelApprovalSession) -> Self {
+        self.backend = self.backend.with_channel_session(session);
         self
     }
 

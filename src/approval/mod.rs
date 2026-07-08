@@ -4,10 +4,12 @@
 //! with session-scoped "Always" allowlists and audit logging.
 
 mod backend;
+mod channel_hub;
 mod gate;
 mod hub;
 
-pub use backend::{ManagerApprovalBackend, SecurityPolicyShellHook};
+pub use backend::{ChannelApprovalSession, ManagerApprovalBackend, SecurityPolicyShellHook};
+pub use channel_hub::ChannelApprovalHub;
 pub use gate::{ApprovalGate, GateDecision};
 pub use hub::ApprovalHub;
 
@@ -440,5 +442,74 @@ mod tests {
         let json = serde_json::to_string(&req).unwrap();
         let parsed: ApprovalRequest = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.tool_name, "shell");
+    }
+
+    #[tokio::test]
+    async fn approval_channel_supervised_denies_without_human() {
+        use super::channel_hub::ChannelApprovalHub;
+        use super::gate::ApprovalGate;
+        use crate::agent::dispatcher::ParsedToolCall;
+        use crate::channels::traits::{Channel, ChannelMessage, SendMessage};
+        use crate::config::{AutonomyConfig, ChannelApprovalMode};
+        use crate::security::{AutonomyLevel, SecurityPolicy};
+        use async_trait::async_trait;
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        struct SilentChannel;
+
+        #[async_trait]
+        impl Channel for SilentChannel {
+            fn name(&self) -> &str {
+                "telegram"
+            }
+
+            async fn send(&self, _message: &SendMessage) -> anyhow::Result<()> {
+                Ok(())
+            }
+
+            async fn listen(
+                &self,
+                _tx: tokio::sync::mpsc::Sender<ChannelMessage>,
+            ) -> anyhow::Result<()> {
+                Ok(())
+            }
+        }
+
+        let autonomy = AutonomyConfig {
+            level: AutonomyLevel::Supervised,
+            always_ask: vec!["shell".into()],
+            ..AutonomyConfig::default()
+        };
+        let mgr = ApprovalManager::from_config(&autonomy);
+        let security = SecurityPolicy::default();
+        let session = super::backend::ChannelApprovalSession {
+            hub: Arc::new(ChannelApprovalHub::new()),
+            channel: Arc::new(SilentChannel),
+            reply_target: "chat-1".into(),
+            sender: "velaclaw_user".into(),
+            mode: ChannelApprovalMode::Inline,
+            timeout: Duration::from_millis(50),
+        };
+        let gate =
+            ApprovalGate::new(&mgr, "telegram", Some(&security)).with_channel_session(session);
+
+        let call = ParsedToolCall {
+            name: "shell".into(),
+            arguments: serde_json::json!({"command": "curl https://example.com"}),
+            tool_call_id: None,
+        };
+
+        match gate.decide_async(&call).await {
+            GateDecision::Denied { message } => {
+                assert!(
+                    message.contains("Denied"),
+                    "expected denial message, got: {message}"
+                );
+            }
+            GateDecision::Proceed { .. } => {
+                panic!("expected denial without human approval, got proceed")
+            }
+        }
     }
 }

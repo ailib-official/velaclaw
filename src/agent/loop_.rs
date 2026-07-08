@@ -1,4 +1,4 @@
-use crate::approval::{ApprovalGate, ApprovalManager, GateDecision};
+use crate::approval::{ApprovalGate, ApprovalManager, ChannelApprovalSession, GateDecision};
 use crate::config::Config;
 #[cfg(not(feature = "ai-protocol"))]
 use crate::config::DEFAULT_PROTOCOL_MODEL_ID;
@@ -1089,6 +1089,7 @@ pub(crate) async fn agent_turn(
         None,
         None,
         None,
+        None,
         false,
     )
     .await
@@ -1218,10 +1219,17 @@ async fn execute_tools_sequential(
     approval: Option<&ApprovalManager>,
     security: Option<&SecurityPolicy>,
     channel_name: &str,
+    channel_approval: Option<ChannelApprovalSession>,
     cancellation_token: Option<&CancellationToken>,
 ) -> Result<Vec<String>> {
     let mut individual_results: Vec<String> = Vec::with_capacity(tool_calls.len());
-    let gate = approval.map(|mgr| ApprovalGate::new(mgr, channel_name, security));
+    let gate = approval.map(|mgr| {
+        let mut gate = ApprovalGate::new(mgr, channel_name, security);
+        if let Some(session) = channel_approval {
+            gate = gate.with_channel_session(session);
+        }
+        gate
+    });
 
     for call in tool_calls {
         let args = normalize_tool_arguments(&call.name, call.arguments.clone());
@@ -1232,7 +1240,7 @@ async fn execute_tools_sequential(
                 arguments: call.arguments.clone(),
                 tool_call_id: None,
             };
-            match gate.decide_sync(&gate_call) {
+            match gate.decide_async(&gate_call).await {
                 GateDecision::Denied { message } => {
                     individual_results.push(message);
                     (false, false)
@@ -1316,6 +1324,7 @@ pub(crate) async fn run_tool_call_loop(
     on_delta: Option<tokio::sync::mpsc::Sender<String>>,
     tool_dispatcher: Option<&dyn crate::agent::dispatcher::ToolDispatcher>,
     security: Option<&SecurityPolicy>,
+    channel_approval: Option<ChannelApprovalSession>,
     // When true, tool results use `[Tool results]` user text (Hybrid manifests).
     text_tool_result_history: bool,
 ) -> Result<String> {
@@ -1568,6 +1577,7 @@ pub(crate) async fn run_tool_call_loop(
                 approval,
                 security,
                 channel_name,
+                channel_approval.clone(),
                 cancellation_token.as_ref(),
             )
             .await?
@@ -2033,6 +2043,7 @@ pub async fn run(
             None,
             tool_dispatcher_ref,
             Some(security.as_ref()),
+            None,
             text_tool_result_history,
         )
         .await?;
@@ -2182,6 +2193,7 @@ pub async fn run(
                 None,
                 tool_dispatcher_ref,
                 Some(security.as_ref()),
+                None,
                 text_tool_result_history,
             )
             .await
@@ -2677,6 +2689,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             false,
         )
         .await
@@ -2724,6 +2737,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             false,
         )
         .await
@@ -2761,6 +2775,7 @@ mod tests {
             "cli",
             &crate::config::MultimodalConfig::default(),
             3,
+            None,
             None,
             None,
             None,
@@ -2884,6 +2899,7 @@ mod tests {
             "telegram",
             &crate::config::MultimodalConfig::default(),
             4,
+            None,
             None,
             None,
             None,

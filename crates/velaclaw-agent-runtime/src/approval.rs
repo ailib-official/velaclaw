@@ -26,8 +26,13 @@ pub trait HumanApprovalBackend: Send + Sync {
     /// Whether interactive shell-policy prompts are available on this channel.
     fn interactive_shell_approval(&self) -> bool;
 
-    /// Prompt for medium/high-risk shell command approval.
+    /// Prompt for medium/high-risk shell command approval (sync path — CLI).
     fn approve_shell_command_sync(&self, command: &str) -> bool;
+
+    /// Prompt for medium/high-risk shell command approval (async path — channel/gateway).
+    async fn approve_shell_command_async(&self, command: &str) -> bool {
+        self.approve_shell_command_sync(command)
+    }
 }
 
 /// App-layer shell policy enforcement (`SecurityPolicy`); runtime only holds the slot.
@@ -69,7 +74,8 @@ impl<'a, B: HumanApprovalBackend + ?Sized> ApprovalGate<'a, B> {
         if let Some(denied) = self.tool_level_decision_async(call).await {
             return denied;
         }
-        self.shell_policy_decision(&call.name, &call.arguments)
+        self.shell_policy_decision_async(&call.name, &call.arguments)
+            .await
     }
 
     fn tool_level_decision_sync(&self, call: &ParsedToolCall) -> Option<GateDecision> {
@@ -142,6 +148,47 @@ impl<'a, B: HumanApprovalBackend + ?Sized> ApprovalGate<'a, B> {
             }
         }
     }
+
+    async fn shell_policy_decision_async(&self, tool_name: &str, args: &Value) -> GateDecision {
+        if !is_shell_policy_tool(tool_name) {
+            return GateDecision::Proceed {
+                shell_human_approved: false,
+            };
+        }
+        let Some(hook) = self.shell_hook else {
+            return GateDecision::Proceed {
+                shell_human_approved: false,
+            };
+        };
+        let Some(command) = shell_command_from_args(tool_name, args) else {
+            return GateDecision::Proceed {
+                shell_human_approved: false,
+            };
+        };
+        if hook.validate_shell_command(tool_name, args, false).is_ok() {
+            return GateDecision::Proceed {
+                shell_human_approved: false,
+            };
+        }
+        if self.backend.interactive_shell_approval() {
+            if self.backend.approve_shell_command_async(command).await {
+                GateDecision::Proceed {
+                    shell_human_approved: true,
+                }
+            } else {
+                GateDecision::Denied {
+                    message: "Denied by user.".into(),
+                }
+            }
+        } else {
+            GateDecision::Denied {
+                message: format!(
+                    "Command requires explicit human approval: {command}. \
+                     Interactive approval is not available on this channel."
+                ),
+            }
+        }
+    }
 }
 
 pub fn is_shell_policy_tool(tool_name: &str) -> bool {
@@ -180,6 +227,9 @@ mod tests {
             true
         }
         fn approve_shell_command_sync(&self, _: &str) -> bool {
+            true
+        }
+        async fn approve_shell_command_async(&self, _: &str) -> bool {
             true
         }
     }

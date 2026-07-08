@@ -64,7 +64,8 @@ pub use whatsapp_web::WhatsAppWebChannel;
 #[cfg(feature = "ai-protocol")]
 use crate::agent::dispatcher::ToolDispatcher;
 use crate::agent::loop_::{append_text_tool_prompt, build_tool_instructions, run_tool_call_loop};
-use crate::config::{Config, DEFAULT_PROTOCOL_MODEL_ID};
+use crate::approval::{ApprovalManager, ChannelApprovalHub, ChannelApprovalSession};
+use crate::config::{ChannelApprovalMode, Config, DEFAULT_PROTOCOL_MODEL_ID};
 use crate::identity;
 use crate::memory::{self, Memory};
 use crate::observability::{self, Observer};
@@ -230,6 +231,11 @@ struct ChannelRuntimeContext {
     workspace_tool_dispatcher: Arc<Option<String>>,
     #[cfg(feature = "ai-protocol")]
     tool_dispatcher_cache: ToolDispatcherCacheMap,
+    security: Arc<SecurityPolicy>,
+    channel_approval_hub: Arc<ChannelApprovalHub>,
+    approval_managers: Arc<Mutex<HashMap<String, Arc<ApprovalManager>>>>,
+    autonomy_config: Arc<crate::config::AutonomyConfig>,
+    telegram_approval: Option<(ChannelApprovalMode, u64)>,
 }
 
 #[derive(Clone)]
@@ -271,6 +277,20 @@ fn conversation_memory_key(msg: &traits::ChannelMessage) -> String {
 
 fn conversation_history_key(msg: &traits::ChannelMessage) -> String {
     format!("{}_{}", msg.channel, msg.sender)
+}
+
+fn get_or_create_approval_manager(
+    ctx: &ChannelRuntimeContext,
+    sender_key: &str,
+) -> Arc<ApprovalManager> {
+    let mut managers = ctx
+        .approval_managers
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    managers
+        .entry(sender_key.to_string())
+        .or_insert_with(|| Arc::new(ApprovalManager::from_config(&ctx.autonomy_config)))
+        .clone()
 }
 
 fn interruption_scope_key(msg: &traits::ChannelMessage) -> String {
@@ -1431,6 +1451,18 @@ async fn process_channel_message(
         return;
     }
 
+    if ctx
+        .channel_approval_hub
+        .try_resolve_text(&msg.channel, &msg.reply_target, &msg.content)
+    {
+        tracing::info!(
+            channel = %msg.channel,
+            sender = %msg.sender,
+            "Resolved inline tool approval from channel reply"
+        );
+        return;
+    }
+
     println!(
         "  💬 [{}] from {}: {}",
         msg.channel,
@@ -1623,6 +1655,24 @@ async fn process_channel_message(
         return;
     }
 
+    let approval_manager = get_or_create_approval_manager(ctx.as_ref(), &history_key);
+    let channel_approval = if msg.channel == "telegram" {
+        ctx.telegram_approval.and_then(|(mode, timeout_secs)| {
+            ctx.channels_by_name
+                .get(&msg.channel)
+                .map(|channel| ChannelApprovalSession {
+                    hub: Arc::clone(&ctx.channel_approval_hub),
+                    channel: Arc::clone(channel),
+                    reply_target: msg.reply_target.clone(),
+                    sender: msg.sender.clone(),
+                    mode,
+                    timeout: Duration::from_secs(timeout_secs),
+                })
+        })
+    } else {
+        None
+    };
+
     enum LlmExecutionResult {
         Completed(Result<Result<String, anyhow::Error>, tokio::time::error::Elapsed>),
         Cancelled,
@@ -1643,7 +1693,7 @@ async fn process_channel_message(
                 route.model.as_str(),
                 runtime_defaults.temperature,
                 true,
-                None,
+                Some(approval_manager.as_ref()),
                 msg.channel.as_str(),
                 &ctx.multimodal,
                 ctx.max_tool_iterations,
@@ -1659,7 +1709,8 @@ async fn process_channel_message(
                         None
                     }
                 },
-                None,
+                Some(ctx.security.as_ref()),
+                channel_approval,
                 text_tool_result_history,
             ),
         ) => LlmExecutionResult::Completed(result),
@@ -2743,6 +2794,13 @@ pub async fn start_channels(config: Config) -> Result<()> {
     let runtime: Arc<dyn runtime::RuntimeAdapter> =
         Arc::from(runtime::create_runtime(&config.runtime)?);
     let security = Arc::new(SecurityPolicy::from_workspace_config(&config)?);
+    let effective_autonomy = crate::config::resolve_effective_autonomy(&config)?;
+    let channel_approval_hub = Arc::new(ChannelApprovalHub::new());
+    let telegram_approval = config
+        .channels_config
+        .telegram
+        .as_ref()
+        .map(|tg| (tg.approval_mode, tg.approval_timeout_secs));
     let model = resolved_default_model(&config);
     let temperature = config.default_temperature;
     let mem: Arc<dyn Memory> = Arc::from(memory::create_memory_with_storage(
@@ -2911,7 +2969,8 @@ pub async fn start_channels(config: Config) -> Result<()> {
                 tg.allowed_users.clone(),
                 tg.mention_only,
             )
-            .with_streaming(tg.stream_mode, tg.draft_update_interval_ms),
+            .with_streaming(tg.stream_mode, tg.draft_update_interval_ms)
+            .with_channel_approval_hub(Arc::clone(&channel_approval_hub)),
         ));
     }
 
@@ -3197,6 +3256,11 @@ pub async fn start_channels(config: Config) -> Result<()> {
         workspace_tool_dispatcher,
         #[cfg(feature = "ai-protocol")]
         tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
+        security: Arc::clone(&security),
+        channel_approval_hub,
+        approval_managers: Arc::new(Mutex::new(HashMap::new())),
+        autonomy_config: Arc::new(effective_autonomy),
+        telegram_approval,
     });
 
     run_message_dispatch_loop(rx, runtime_ctx, max_in_flight_messages).await;
@@ -3240,6 +3304,23 @@ mod tests {
         .unwrap();
         std::fs::write(tmp.path().join("MEMORY.md"), "# Memory\nUser likes Rust.").unwrap();
         tmp
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn test_channel_approval_runtime_fields() -> (
+        Arc<SecurityPolicy>,
+        Arc<ChannelApprovalHub>,
+        Arc<Mutex<HashMap<String, Arc<ApprovalManager>>>>,
+        Arc<crate::config::AutonomyConfig>,
+        Option<(ChannelApprovalMode, u64)>,
+    ) {
+        (
+            Arc::new(SecurityPolicy::default()),
+            Arc::new(ChannelApprovalHub::new()),
+            Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(crate::config::AutonomyConfig::default()),
+            None,
+        )
     }
 
     #[test]
@@ -3378,6 +3459,11 @@ mod tests {
             workspace_tool_dispatcher: Arc::new(None),
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
+            security: test_channel_approval_runtime_fields().0,
+            channel_approval_hub: test_channel_approval_runtime_fields().1,
+            approval_managers: test_channel_approval_runtime_fields().2,
+            autonomy_config: test_channel_approval_runtime_fields().3,
+            telegram_approval: test_channel_approval_runtime_fields().4,
         };
 
         assert!(compact_sender_history(&ctx, &sender));
@@ -3835,6 +3921,11 @@ BTC is currently around $65,000 based on latest tool output."#
             workspace_tool_dispatcher: Arc::new(None),
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
+            security: test_channel_approval_runtime_fields().0,
+            channel_approval_hub: test_channel_approval_runtime_fields().1,
+            approval_managers: test_channel_approval_runtime_fields().2,
+            autonomy_config: test_channel_approval_runtime_fields().3,
+            telegram_approval: test_channel_approval_runtime_fields().4,
         });
 
         process_channel_message(
@@ -3898,6 +3989,11 @@ BTC is currently around $65,000 based on latest tool output."#
             workspace_tool_dispatcher: Arc::new(None),
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
+            security: test_channel_approval_runtime_fields().0,
+            channel_approval_hub: test_channel_approval_runtime_fields().1,
+            approval_managers: test_channel_approval_runtime_fields().2,
+            autonomy_config: test_channel_approval_runtime_fields().3,
+            telegram_approval: test_channel_approval_runtime_fields().4,
         });
 
         process_channel_message(
@@ -3961,6 +4057,11 @@ BTC is currently around $65,000 based on latest tool output."#
             workspace_tool_dispatcher: Arc::new(None),
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
+            security: test_channel_approval_runtime_fields().0,
+            channel_approval_hub: test_channel_approval_runtime_fields().1,
+            approval_managers: test_channel_approval_runtime_fields().2,
+            autonomy_config: test_channel_approval_runtime_fields().3,
+            telegram_approval: test_channel_approval_runtime_fields().4,
         });
 
         process_channel_message(
@@ -4033,6 +4134,11 @@ BTC is currently around $65,000 based on latest tool output."#
             workspace_tool_dispatcher: Arc::new(None),
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
+            security: test_channel_approval_runtime_fields().0,
+            channel_approval_hub: test_channel_approval_runtime_fields().1,
+            approval_managers: test_channel_approval_runtime_fields().2,
+            autonomy_config: test_channel_approval_runtime_fields().3,
+            telegram_approval: test_channel_approval_runtime_fields().4,
         });
 
         process_channel_message(
@@ -4128,6 +4234,11 @@ BTC is currently around $65,000 based on latest tool output."#
             workspace_tool_dispatcher: Arc::new(None),
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
+            security: test_channel_approval_runtime_fields().0,
+            channel_approval_hub: test_channel_approval_runtime_fields().1,
+            approval_managers: test_channel_approval_runtime_fields().2,
+            autonomy_config: test_channel_approval_runtime_fields().3,
+            telegram_approval: test_channel_approval_runtime_fields().4,
         });
 
         process_channel_message(
@@ -4203,6 +4314,11 @@ BTC is currently around $65,000 based on latest tool output."#
             workspace_tool_dispatcher: Arc::new(None),
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
+            security: test_channel_approval_runtime_fields().0,
+            channel_approval_hub: test_channel_approval_runtime_fields().1,
+            approval_managers: test_channel_approval_runtime_fields().2,
+            autonomy_config: test_channel_approval_runtime_fields().3,
+            telegram_approval: test_channel_approval_runtime_fields().4,
         });
 
         process_channel_message(
@@ -4293,6 +4409,11 @@ BTC is currently around $65,000 based on latest tool output."#
             workspace_tool_dispatcher: Arc::new(None),
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
+            security: test_channel_approval_runtime_fields().0,
+            channel_approval_hub: test_channel_approval_runtime_fields().1,
+            approval_managers: test_channel_approval_runtime_fields().2,
+            autonomy_config: test_channel_approval_runtime_fields().3,
+            telegram_approval: test_channel_approval_runtime_fields().4,
         });
 
         process_channel_message(
@@ -4368,6 +4489,11 @@ BTC is currently around $65,000 based on latest tool output."#
             workspace_tool_dispatcher: Arc::new(None),
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
+            security: test_channel_approval_runtime_fields().0,
+            channel_approval_hub: test_channel_approval_runtime_fields().1,
+            approval_managers: test_channel_approval_runtime_fields().2,
+            autonomy_config: test_channel_approval_runtime_fields().3,
+            telegram_approval: test_channel_approval_runtime_fields().4,
         });
 
         process_channel_message(
@@ -4432,6 +4558,11 @@ BTC is currently around $65,000 based on latest tool output."#
             workspace_tool_dispatcher: Arc::new(None),
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
+            security: test_channel_approval_runtime_fields().0,
+            channel_approval_hub: test_channel_approval_runtime_fields().1,
+            approval_managers: test_channel_approval_runtime_fields().2,
+            autonomy_config: test_channel_approval_runtime_fields().3,
+            telegram_approval: test_channel_approval_runtime_fields().4,
         });
 
         process_channel_message(
@@ -4607,6 +4738,11 @@ BTC is currently around $65,000 based on latest tool output."#
             workspace_tool_dispatcher: Arc::new(None),
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
+            security: test_channel_approval_runtime_fields().0,
+            channel_approval_hub: test_channel_approval_runtime_fields().1,
+            approval_managers: test_channel_approval_runtime_fields().2,
+            autonomy_config: test_channel_approval_runtime_fields().3,
+            telegram_approval: test_channel_approval_runtime_fields().4,
         });
 
         let (tx, rx) = tokio::sync::mpsc::channel::<traits::ChannelMessage>(4);
@@ -4691,6 +4827,11 @@ BTC is currently around $65,000 based on latest tool output."#
             workspace_tool_dispatcher: Arc::new(None),
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
+            security: test_channel_approval_runtime_fields().0,
+            channel_approval_hub: test_channel_approval_runtime_fields().1,
+            approval_managers: test_channel_approval_runtime_fields().2,
+            autonomy_config: test_channel_approval_runtime_fields().3,
+            telegram_approval: test_channel_approval_runtime_fields().4,
         });
 
         let (tx, rx) = tokio::sync::mpsc::channel::<traits::ChannelMessage>(8);
@@ -4787,6 +4928,11 @@ BTC is currently around $65,000 based on latest tool output."#
             workspace_tool_dispatcher: Arc::new(None),
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
+            security: test_channel_approval_runtime_fields().0,
+            channel_approval_hub: test_channel_approval_runtime_fields().1,
+            approval_managers: test_channel_approval_runtime_fields().2,
+            autonomy_config: test_channel_approval_runtime_fields().3,
+            telegram_approval: test_channel_approval_runtime_fields().4,
         });
 
         let (tx, rx) = tokio::sync::mpsc::channel::<traits::ChannelMessage>(8);
@@ -4865,6 +5011,11 @@ BTC is currently around $65,000 based on latest tool output."#
             workspace_tool_dispatcher: Arc::new(None),
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
+            security: test_channel_approval_runtime_fields().0,
+            channel_approval_hub: test_channel_approval_runtime_fields().1,
+            approval_managers: test_channel_approval_runtime_fields().2,
+            autonomy_config: test_channel_approval_runtime_fields().3,
+            telegram_approval: test_channel_approval_runtime_fields().4,
         });
 
         process_channel_message(
@@ -5380,6 +5531,11 @@ BTC is currently around $65,000 based on latest tool output."#
             workspace_tool_dispatcher: Arc::new(None),
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
+            security: test_channel_approval_runtime_fields().0,
+            channel_approval_hub: test_channel_approval_runtime_fields().1,
+            approval_managers: test_channel_approval_runtime_fields().2,
+            autonomy_config: test_channel_approval_runtime_fields().3,
+            telegram_approval: test_channel_approval_runtime_fields().4,
         });
 
         process_channel_message(
@@ -5469,6 +5625,11 @@ BTC is currently around $65,000 based on latest tool output."#
             workspace_tool_dispatcher: Arc::new(None),
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
+            security: test_channel_approval_runtime_fields().0,
+            channel_approval_hub: test_channel_approval_runtime_fields().1,
+            approval_managers: test_channel_approval_runtime_fields().2,
+            autonomy_config: test_channel_approval_runtime_fields().3,
+            telegram_approval: test_channel_approval_runtime_fields().4,
         });
 
         process_channel_message(
@@ -5558,6 +5719,11 @@ BTC is currently around $65,000 based on latest tool output."#
             workspace_tool_dispatcher: Arc::new(None),
             #[cfg(feature = "ai-protocol")]
             tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
+            security: test_channel_approval_runtime_fields().0,
+            channel_approval_hub: test_channel_approval_runtime_fields().1,
+            approval_managers: test_channel_approval_runtime_fields().2,
+            autonomy_config: test_channel_approval_runtime_fields().3,
+            telegram_approval: test_channel_approval_runtime_fields().4,
         });
 
         process_channel_message(

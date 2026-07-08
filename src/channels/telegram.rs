@@ -1,4 +1,5 @@
 use super::traits::{Channel, ChannelMessage, SendMessage};
+use crate::approval::ChannelApprovalHub;
 use crate::config::{Config, StreamMode};
 use crate::security::pairing::PairingGuard;
 use anyhow::Context;
@@ -220,6 +221,7 @@ pub struct TelegramChannel {
     last_draft_edit: Mutex<std::collections::HashMap<String, std::time::Instant>>,
     mention_only: bool,
     bot_username: Mutex<Option<String>>,
+    channel_approval_hub: Option<Arc<ChannelApprovalHub>>,
 }
 
 impl TelegramChannel {
@@ -247,7 +249,13 @@ impl TelegramChannel {
             typing_handle: Mutex::new(None),
             mention_only,
             bot_username: Mutex::new(None),
+            channel_approval_hub: None,
         }
+    }
+
+    pub fn with_channel_approval_hub(mut self, hub: Arc<ChannelApprovalHub>) -> Self {
+        self.channel_approval_hub = Some(hub);
+        self
     }
 
     /// Configure streaming mode for progressive draft updates.
@@ -1656,6 +1664,29 @@ impl Channel for TelegramChannel {
             None => (message.recipient.as_str(), None),
         };
 
+        if let Some(markup) = &message.reply_markup {
+            let mut body = serde_json::json!({
+                "chat_id": chat_id,
+                "text": content,
+                "reply_markup": markup,
+            });
+            if let Some(tid) = thread_id {
+                body["message_thread_id"] = serde_json::Value::String(tid.to_string());
+            }
+            let resp = self
+                .http_client()
+                .post(self.api_url("sendMessage"))
+                .json(&body)
+                .send()
+                .await?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let err = resp.text().await.unwrap_or_default();
+                anyhow::bail!("Telegram sendMessage failed ({status}): {err}");
+            }
+            return Ok(());
+        }
+
         let (text_without_markers, attachments) = parse_attachment_markers(&content);
 
         if !attachments.is_empty() {
@@ -1830,6 +1861,29 @@ Ensure only one `velaclaw` process is using this bot token."
                     // Advance offset past this update
                     if let Some(uid) = update.get("update_id").and_then(serde_json::Value::as_i64) {
                         offset = uid + 1;
+                    }
+
+                    if let Some(callback) = update.get("callback_query") {
+                        if let Some(data) = callback.get("data").and_then(serde_json::Value::as_str)
+                        {
+                            if let Some(hub) = self.channel_approval_hub.as_ref() {
+                                let _ = hub.try_resolve_callback(data);
+                            }
+                        }
+                        if let Some(callback_id) =
+                            callback.get("id").and_then(serde_json::Value::as_str)
+                        {
+                            let body = serde_json::json!({
+                                "callback_query_id": callback_id,
+                            });
+                            let _ = self
+                                .http_client()
+                                .post(self.api_url("answerCallbackQuery"))
+                                .json(&body)
+                                .send()
+                                .await;
+                        }
+                        continue;
                     }
 
                     let Some((mut msg, photo_file_id)) = self.parse_update_message(update) else {

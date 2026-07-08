@@ -728,7 +728,9 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::schema::{IMessageConfig, MatrixConfig, StreamMode, TelegramConfig};
+    use crate::config::schema::{
+        ChannelApprovalMode, IMessageConfig, MatrixConfig, StreamMode, TelegramConfig,
+    };
     use crate::config::Config;
 
     #[test]
@@ -795,6 +797,8 @@ mod tests {
             draft_update_interval_ms: 1000,
             interrupt_on_new_message: false,
             mention_only: false,
+            approval_mode: ChannelApprovalMode::default(),
+            approval_timeout_secs: 300,
         });
         let entries = all_integrations();
         let tg = entries.iter().find(|e| e.name == "Telegram").unwrap();

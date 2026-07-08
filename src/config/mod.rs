@@ -16,17 +16,18 @@ pub use schema::{
     apply_runtime_proxy_to_builder, build_runtime_proxy_client,
     build_runtime_proxy_client_with_timeouts, runtime_proxy_config, set_runtime_proxy_config,
     AgentConfig, AuditConfig, AutonomyConfig, BrowserComputerUseConfig, BrowserConfig,
-    ChannelsConfig, ClassificationRule, ComposioConfig, Config, CostConfig, CronConfig,
-    DelegateAgentConfig, DeployConfig, DeploymentSettingsConfig, DeploymentTargetConfig,
-    DiscordConfig, DockerRuntimeConfig, EmbeddingRouteConfig, ExecutionRoutingConfig,
-    GatewayConfig, HardwareConfig, HardwareTransport, HeartbeatConfig, HttpRequestConfig,
-    IMessageConfig, IdentityConfig, LarkConfig, MatrixConfig, MemoryConfig, ModelRouteConfig,
-    MultimodalConfig, NextcloudTalkConfig, ObservabilityConfig, PeripheralBoardConfig,
-    PeripheralsConfig, ProviderRoutingMode, ProxyConfig, ProxyScope, QueryClassificationConfig,
-    ReliabilityConfig, ResourceLimitsConfig, RuntimeConfig, SandboxBackend, SandboxConfig,
-    SchedulerConfig, SecretsConfig, SecurityConfig, SkillsConfig, SkillsPromptInjectionMode,
-    SlackConfig, StorageConfig, StorageProviderConfig, StorageProviderSection, StreamMode,
-    TelegramConfig, TunnelConfig, WebSearchConfig, WebhookConfig,
+    ChannelApprovalMode, ChannelsConfig, ClassificationRule, ComposioConfig, Config, CostConfig,
+    CronConfig, DelegateAgentConfig, DeployConfig, DeploymentSettingsConfig,
+    DeploymentTargetConfig, DiscordConfig, DockerRuntimeConfig, EmbeddingRouteConfig,
+    ExecutionRoutingConfig, GatewayConfig, HardwareConfig, HardwareTransport, HeartbeatConfig,
+    HttpRequestConfig, IMessageConfig, IdentityConfig, LarkConfig, MatrixConfig, MemoryConfig,
+    ModelRouteConfig, MultimodalConfig, NextcloudTalkConfig, ObservabilityConfig,
+    PeripheralBoardConfig, PeripheralsConfig, ProviderRoutingMode, ProxyConfig, ProxyScope,
+    QueryClassificationConfig, ReliabilityConfig, ResourceLimitsConfig, RuntimeConfig,
+    SandboxBackend, SandboxConfig, SchedulerConfig, SecretsConfig, SecurityConfig, SkillsConfig,
+    SkillsPromptInjectionMode, SlackConfig, StorageConfig, StorageProviderConfig,
+    StorageProviderSection, StreamMode, TelegramConfig, TunnelConfig, WebSearchConfig,
+    WebhookConfig,
 };
 
 #[cfg(feature = "ai-protocol")]
@@ -56,6 +57,8 @@ mod tests {
             draft_update_interval_ms: 1000,
             interrupt_on_new_message: false,
             mention_only: false,
+            approval_mode: ChannelApprovalMode::default(),
+            approval_timeout_secs: 300,
         };
 
         let discord = DiscordConfig {

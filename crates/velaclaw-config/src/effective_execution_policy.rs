@@ -132,7 +132,6 @@ mod tests {
             approval: Some(ApprovalPolicySection {
                 auto_approve: Some(vec!["shell".into()]),
                 always_ask: Some(vec!["file_write".into()]),
-                ..Default::default()
             }),
             ..Default::default()
         };

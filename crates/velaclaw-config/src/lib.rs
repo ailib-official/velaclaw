@@ -9,12 +9,15 @@ pub mod agent_policy;
 pub mod effective_execution_policy;
 #[cfg(feature = "ai-protocol")]
 pub mod effective_policy;
+#[cfg(feature = "ai-protocol")]
+pub mod policy_overrides;
 
 pub use defaults::{DEFAULT_PROTOCOL_MODEL_ID, DEFAULT_PROTOCOL_MODEL_LABEL};
 
 #[cfg(feature = "ai-protocol")]
 pub use agent_policy::{
-    AgentPolicyLayer, ApprovalPolicySection, AutonomyPolicySection, SelfAdjustSection,
+    reject_forbidden_secret_keys, AgentPolicyLayer, ApprovalPolicySection, AutonomyPolicySection,
+    SelfAdjustSection,
 };
 #[cfg(feature = "ai-protocol")]
 pub use effective_execution_policy::{
@@ -22,3 +25,9 @@ pub use effective_execution_policy::{
 };
 #[cfg(feature = "ai-protocol")]
 pub use effective_policy::{merge_tool_dispatcher, EffectivePolicy};
+#[cfg(feature = "ai-protocol")]
+pub use policy_overrides::{
+    discover_and_load_policy_overrides, load_policy_overrides_from_path, merge_policy_overrides,
+    policy_overrides_path, ApprovalOverridesSection, PolicyOverridesLayer, SelfAdjustEnforcer,
+    POLICY_OVERRIDES_DIR, POLICY_OVERRIDES_FILE,
+};

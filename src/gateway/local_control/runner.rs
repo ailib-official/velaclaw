@@ -52,9 +52,9 @@ pub async fn run_agent_chat(
 
     let mut agent = Agent::from_config(&effective_config).context("failed to build agent")?;
     if let Some(hub) = approval_hub {
-        let autonomy = crate::config::resolve_effective_autonomy(&effective_config)
-            .context("resolve effective autonomy for gateway approval")?;
-        agent.enable_gateway_approval(Arc::clone(hub), &autonomy);
+        agent
+            .enable_gateway_approval(Arc::clone(hub), &effective_config)
+            .context("wire gateway approval manager")?;
     }
     let content = agent
         .turn(&user_message)

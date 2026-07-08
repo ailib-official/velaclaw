@@ -14,12 +14,15 @@ pub use gate::{ApprovalGate, GateDecision};
 pub use hub::ApprovalHub;
 
 use crate::config::AutonomyConfig;
+use crate::config::PolicyOverridesStore;
+use crate::security::audit::AuditLogger;
 use crate::security::AutonomyLevel;
 use chrono::Utc;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::io::{self, BufRead, Write};
+use std::sync::Arc;
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -70,6 +73,10 @@ pub struct ApprovalManager {
     session_allowlist: Mutex<HashSet<String>>,
     /// Audit trail of approval decisions.
     audit_log: Mutex<Vec<ApprovalLogEntry>>,
+    /// L2.5 persistence for "Always" decisions (VL-SEC-004).
+    overrides_store: Option<Arc<PolicyOverridesStore>>,
+    /// Optional `security.audit` bridge (VL-SEC-004).
+    security_audit: Option<Arc<AuditLogger>>,
 }
 
 impl ApprovalManager {
@@ -81,7 +88,19 @@ impl ApprovalManager {
             autonomy_level: config.level,
             session_allowlist: Mutex::new(HashSet::new()),
             audit_log: Mutex::new(Vec::new()),
+            overrides_store: None,
+            security_audit: None,
         }
+    }
+
+    pub fn with_overrides_store(mut self, store: Arc<PolicyOverridesStore>) -> Self {
+        self.overrides_store = Some(store);
+        self
+    }
+
+    pub fn with_security_audit(mut self, audit: Arc<AuditLogger>) -> Self {
+        self.security_audit = Some(audit);
+        self
     }
 
     /// Check whether a tool call requires interactive approval.
@@ -126,10 +145,18 @@ impl ApprovalManager {
         decision: ApprovalResponse,
         channel: &str,
     ) {
-        // If "Always", add to session allowlist.
         if decision == ApprovalResponse::Always {
             let mut allowlist = self.session_allowlist.lock();
             allowlist.insert(tool_name.to_string());
+            if let Some(store) = &self.overrides_store {
+                if let Err(err) = store.persist_session_allowlist_add(tool_name) {
+                    tracing::warn!(
+                        tool = tool_name,
+                        error = %err,
+                        "failed to persist session allowlist to policy-overrides.yaml"
+                    );
+                }
+            }
         }
 
         // Append to audit log.
@@ -137,12 +164,29 @@ impl ApprovalManager {
         let entry = ApprovalLogEntry {
             timestamp: Utc::now().to_rfc3339(),
             tool_name: tool_name.to_string(),
-            arguments_summary: summary,
+            arguments_summary: summary.clone(),
             decision,
             channel: channel.to_string(),
         };
         let mut log = self.audit_log.lock();
         log.push(entry);
+
+        if let Some(audit) = &self.security_audit {
+            let approved = decision != ApprovalResponse::No;
+            if let Err(err) = audit.log_tool_approval(
+                channel,
+                tool_name,
+                approval_decision_label(decision),
+                &summary,
+                approved,
+            ) {
+                tracing::warn!(
+                    tool = tool_name,
+                    error = %err,
+                    "failed to write tool approval to security audit log"
+                );
+            }
+        }
     }
 
     /// Get a snapshot of the audit log.
@@ -195,6 +239,14 @@ fn prompt_cli_interactive(request: &ApprovalRequest) -> ApprovalResponse {
         "y" | "yes" => ApprovalResponse::Yes,
         "a" | "always" => ApprovalResponse::Always,
         _ => ApprovalResponse::No,
+    }
+}
+
+fn approval_decision_label(decision: ApprovalResponse) -> &'static str {
+    match decision {
+        ApprovalResponse::Yes => "yes",
+        ApprovalResponse::No => "no",
+        ApprovalResponse::Always => "always",
     }
 }
 
@@ -341,6 +393,36 @@ mod tests {
             "cli",
         );
         assert!(mgr.needs_approval("file_write"));
+    }
+
+    #[test]
+    fn always_response_persists_to_policy_overrides() {
+        use crate::config::PolicyOverridesStore;
+        use std::fs;
+        use tempfile::TempDir;
+        use velaclaw_config::POLICY_OVERRIDES_DIR;
+
+        let dir = TempDir::new().unwrap();
+        let mut config = crate::config::Config::default();
+        config.workspace_dir = dir.path().to_path_buf();
+        let store = Arc::new(PolicyOverridesStore::new(&config, None));
+        let mgr = ApprovalManager::from_config(&supervised_config()).with_overrides_store(store);
+
+        mgr.record_decision(
+            "file_write",
+            &serde_json::json!({"path": "out.txt"}),
+            ApprovalResponse::Always,
+            "cli",
+        );
+
+        let path = dir
+            .path()
+            .join(POLICY_OVERRIDES_DIR)
+            .join("policy-overrides.yaml");
+        assert!(path.is_file());
+        let raw = fs::read_to_string(path).unwrap();
+        assert!(raw.contains("file_write"));
+        assert!(!raw.contains("api_key"));
     }
 
     // ── audit log ────────────────────────────────────────────

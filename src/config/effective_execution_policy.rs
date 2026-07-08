@@ -1,16 +1,17 @@
 //! Effective execution policy — L1 config.toml + L2 agent-policy.yaml merge (VL-SEC-001).
 //! 主 crate 桥接：AutonomyConfig ↔ velaclaw-config 分层合并。
 
-use super::{discover_and_load, AutonomyConfig, Config};
+use super::{discover_and_load, discover_policy_overrides, AutonomyConfig, Config};
 use crate::security::AutonomyLevel;
 use anyhow::{Context, Result};
 use velaclaw_config::{AutonomyLayerValues, EffectiveExecutionPolicy};
 
-/// Resolve merged `[autonomy]` after L1 `config.toml` + L2 `agent-policy.yaml`.
+/// Resolve merged `[autonomy]` after L1 + L2 + L2.5 policy layers.
 pub fn resolve_effective_autonomy(config: &Config) -> Result<AutonomyConfig> {
     let l1 = autonomy_config_to_layer(&config.autonomy);
     let l2 = discover_and_load(config).with_context(|| "load workspace agent-policy.yaml")?;
-    let effective = EffectiveExecutionPolicy::resolve(l1, l2.as_ref());
+    let l25 = discover_policy_overrides(config)?;
+    let effective = EffectiveExecutionPolicy::resolve(l1, l2.as_ref(), l25.as_ref());
     layer_to_autonomy_config(&effective.autonomy)
 }
 

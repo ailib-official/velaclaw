@@ -262,9 +262,11 @@ impl Agent {
     pub fn enable_gateway_approval(
         &mut self,
         hub: Arc<ApprovalHub>,
-        autonomy: &crate::config::AutonomyConfig,
-    ) {
-        self.gateway_approval = Some((ApprovalManager::from_config(autonomy), hub));
+        config: &crate::config::Config,
+    ) -> anyhow::Result<()> {
+        let manager = crate::config::create_approval_manager(config)?;
+        self.gateway_approval = Some((manager, hub));
+        Ok(())
     }
 
     pub fn from_config(config: &Config) -> Result<Self> {

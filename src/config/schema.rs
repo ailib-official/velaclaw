@@ -199,6 +199,10 @@ pub struct Config {
     /// Hardware configuration (wizard-driven physical world setup).
     #[serde(default)]
     pub hardware: HardwareConfig,
+
+    /// Security sandbox, resource limits, and audit logging (`[security]`).
+    #[serde(default)]
+    pub security: SecurityConfig,
 }
 
 // ── Delegate Agents ──────────────────────────────────────────────
@@ -3069,6 +3073,7 @@ fn config_skeleton() -> Config {
         agents: HashMap::new(),
         hardware: HardwareConfig::default(),
         query_classification: QueryClassificationConfig::default(),
+        security: SecurityConfig::default(),
     }
 }
 
@@ -4311,6 +4316,7 @@ default_temperature = 0.7
             deploy: DeployConfig::default(),
             agents: HashMap::new(),
             hardware: HardwareConfig::default(),
+            security: SecurityConfig::default(),
         };
 
         let toml_str = toml::to_string_pretty(&config).unwrap();
@@ -4520,6 +4526,7 @@ tool_dispatcher = "xml"
             deploy: DeployConfig::default(),
             agents: HashMap::new(),
             hardware: HardwareConfig::default(),
+            security: SecurityConfig::default(),
         };
 
         config.save().await.unwrap();

@@ -51,6 +51,7 @@ pub mod agent;
 pub mod approval;
 pub mod auth;
 pub mod channels;
+pub mod cli_render;
 pub mod config;
 pub mod cost;
 pub mod cron;

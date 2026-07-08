@@ -7835,6 +7835,7 @@ dependencies = [
  "tower-http 0.7.0",
  "tracing",
  "tracing-subscriber",
+ "unicode-width 0.2.2",
  "urlencoding",
  "uuid",
  "velaclaw-agent-runtime",

@@ -6,7 +6,7 @@
 // This is opt-in. Users who prefer sovereign/local-only mode skip this entirely.
 // The Composio API key is stored in the encrypted secret store.
 
-use super::traits::{Tool, ToolResult};
+use super::traits::{Tool, ToolExecutionContext, ToolResult};
 use crate::security::policy::ToolOperation;
 use crate::security::SecurityPolicy;
 use anyhow::Context;
@@ -609,7 +609,11 @@ impl Tool for ComposioTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
+    async fn execute(
+        &self,
+        args: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> anyhow::Result<ToolResult> {
         let action = args
             .get("action")
             .and_then(|v| v.as_str())
@@ -1176,14 +1180,22 @@ mod tests {
     #[tokio::test]
     async fn execute_missing_action_returns_error() {
         let tool = ComposioTool::new("test-key", None, test_security());
-        let result = tool.execute(json!({})).await;
+        let result = tool
+            .execute(json!({}), &ToolExecutionContext::default())
+            .await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn execute_unknown_action_returns_error() {
         let tool = ComposioTool::new("test-key", None, test_security());
-        let result = tool.execute(json!({"action": "unknown"})).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"action": "unknown"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
         assert!(!result.success);
         assert!(result.error.as_ref().unwrap().contains("Unknown action"));
     }
@@ -1191,14 +1203,24 @@ mod tests {
     #[tokio::test]
     async fn execute_without_action_name_returns_error() {
         let tool = ComposioTool::new("test-key", None, test_security());
-        let result = tool.execute(json!({"action": "execute"})).await;
+        let result = tool
+            .execute(
+                json!({"action": "execute"}),
+                &ToolExecutionContext::default(),
+            )
+            .await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn connect_without_target_returns_error() {
         let tool = ComposioTool::new("test-key", None, test_security());
-        let result = tool.execute(json!({"action": "connect"})).await;
+        let result = tool
+            .execute(
+                json!({"action": "connect"}),
+                &ToolExecutionContext::default(),
+            )
+            .await;
         assert!(result.is_err());
     }
 
@@ -1210,10 +1232,13 @@ mod tests {
         });
         let tool = ComposioTool::new("test-key", None, readonly);
         let result = tool
-            .execute(json!({
-                "action": "execute",
-                "action_name": "GITHUB_LIST_REPOS"
-            }))
+            .execute(
+                json!({
+                    "action": "execute",
+                    "action_name": "GITHUB_LIST_REPOS"
+                }),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(!result.success);
@@ -1232,10 +1257,13 @@ mod tests {
         });
         let tool = ComposioTool::new("test-key", None, limited);
         let result = tool
-            .execute(json!({
-                "action": "execute",
-                "action_name": "GITHUB_LIST_REPOS"
-            }))
+            .execute(
+                json!({
+                    "action": "execute",
+                    "action_name": "GITHUB_LIST_REPOS"
+                }),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(!result.success);
@@ -1637,11 +1665,17 @@ mod tests {
         // shape of error (network failure in test, not a dispatch error).
         let tool = ComposioTool::new("test-key", None, test_security());
         let r1 = tool
-            .execute(json!({"action": "list_accounts"}))
+            .execute(
+                json!({"action": "list_accounts"}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         let r2 = tool
-            .execute(json!({"action": "connected_accounts"}))
+            .execute(
+                json!({"action": "connected_accounts"}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         // Both fail the same way (network) — neither is a dispatch error.

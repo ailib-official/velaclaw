@@ -1,4 +1,4 @@
-use super::traits::{Tool, ToolResult};
+use super::traits::{Tool, ToolExecutionContext, ToolResult};
 use crate::security::SecurityPolicy;
 use async_trait::async_trait;
 use serde_json::json;
@@ -42,7 +42,11 @@ impl Tool for GlobSearchTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
+    async fn execute(
+        &self,
+        args: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> anyhow::Result<ToolResult> {
         let pattern = args
             .get("pattern")
             .and_then(|v| v.as_str())
@@ -234,7 +238,13 @@ mod tests {
         std::fs::write(dir.path().join("hello.txt"), "content").unwrap();
 
         let tool = GlobSearchTool::new(test_security(dir.path().to_path_buf()));
-        let result = tool.execute(json!({"pattern": "hello.txt"})).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"pattern": "hello.txt"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
 
         assert!(result.success);
         assert!(result.output.contains("hello.txt"));
@@ -248,7 +258,13 @@ mod tests {
         std::fs::write(dir.path().join("c.rs"), "").unwrap();
 
         let tool = GlobSearchTool::new(test_security(dir.path().to_path_buf()));
-        let result = tool.execute(json!({"pattern": "*.txt"})).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"pattern": "*.txt"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
 
         assert!(result.success);
         assert!(result.output.contains("a.txt"));
@@ -265,7 +281,13 @@ mod tests {
         std::fs::write(dir.path().join("sub/deep/leaf.txt"), "").unwrap();
 
         let tool = GlobSearchTool::new(test_security(dir.path().to_path_buf()));
-        let result = tool.execute(json!({"pattern": "**/*.txt"})).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"pattern": "**/*.txt"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
 
         assert!(result.success);
         assert!(result.output.contains("root.txt"));
@@ -279,7 +301,10 @@ mod tests {
 
         let tool = GlobSearchTool::new(test_security(dir.path().to_path_buf()));
         let result = tool
-            .execute(json!({"pattern": "*.nonexistent"}))
+            .execute(
+                json!({"pattern": "*.nonexistent"}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
 
@@ -290,14 +315,22 @@ mod tests {
     #[tokio::test]
     async fn glob_search_missing_param() {
         let tool = GlobSearchTool::new(test_security(std::env::temp_dir()));
-        let result = tool.execute(json!({})).await;
+        let result = tool
+            .execute(json!({}), &ToolExecutionContext::default())
+            .await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn glob_search_rejects_absolute_path() {
         let tool = GlobSearchTool::new(test_security(std::env::temp_dir()));
-        let result = tool.execute(json!({"pattern": "/etc/**/*"})).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"pattern": "/etc/**/*"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
 
         assert!(!result.success);
         assert!(result.error.as_ref().unwrap().contains("Absolute paths"));
@@ -307,7 +340,10 @@ mod tests {
     async fn glob_search_rejects_path_traversal() {
         let tool = GlobSearchTool::new(test_security(std::env::temp_dir()));
         let result = tool
-            .execute(json!({"pattern": "../../../etc/passwd"}))
+            .execute(
+                json!({"pattern": "../../../etc/passwd"}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
 
@@ -318,7 +354,10 @@ mod tests {
     #[tokio::test]
     async fn glob_search_rejects_dotdot_only() {
         let tool = GlobSearchTool::new(test_security(std::env::temp_dir()));
-        let result = tool.execute(json!({"pattern": ".."})).await.unwrap();
+        let result = tool
+            .execute(json!({"pattern": ".."}), &ToolExecutionContext::default())
+            .await
+            .unwrap();
 
         assert!(!result.success);
         assert!(result.error.as_ref().unwrap().contains("Path traversal"));
@@ -343,7 +382,13 @@ mod tests {
         std::fs::write(workspace.join("legit.txt"), "ok").unwrap();
 
         let tool = GlobSearchTool::new(test_security(workspace.clone()));
-        let result = tool.execute(json!({"pattern": "*.txt"})).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"pattern": "*.txt"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
 
         assert!(result.success);
         assert!(result.output.contains("legit.txt"));
@@ -367,7 +412,10 @@ mod tests {
 
         let tool = GlobSearchTool::new(test_security(workspace));
         let result = tool
-            .execute(json!({"pattern": "ai-lib-plans/tools/hk_vps*.sh"}))
+            .execute(
+                json!({"pattern": "ai-lib-plans/tools/hk_vps*.sh"}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
 
@@ -385,7 +433,13 @@ mod tests {
             AutonomyLevel::ReadOnly,
             20,
         ));
-        let result = tool.execute(json!({"pattern": "*.txt"})).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"pattern": "*.txt"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
 
         assert!(result.success);
         assert!(result.output.contains("file.txt"));
@@ -401,7 +455,13 @@ mod tests {
             AutonomyLevel::Supervised,
             0,
         ));
-        let result = tool.execute(json!({"pattern": "*.txt"})).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"pattern": "*.txt"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
 
         assert!(!result.success);
         assert!(result.error.as_ref().unwrap().contains("Rate limit"));
@@ -415,7 +475,13 @@ mod tests {
         std::fs::write(dir.path().join("b.txt"), "").unwrap();
 
         let tool = GlobSearchTool::new(test_security(dir.path().to_path_buf()));
-        let result = tool.execute(json!({"pattern": "*.txt"})).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"pattern": "*.txt"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
 
         assert!(result.success);
         let lines: Vec<&str> = result.output.lines().collect();
@@ -433,7 +499,10 @@ mod tests {
         std::fs::write(dir.path().join("file.txt"), "").unwrap();
 
         let tool = GlobSearchTool::new(test_security(dir.path().to_path_buf()));
-        let result = tool.execute(json!({"pattern": "*"})).await.unwrap();
+        let result = tool
+            .execute(json!({"pattern": "*"}), &ToolExecutionContext::default())
+            .await
+            .unwrap();
 
         assert!(result.success);
         assert!(result.output.contains("file.txt"));
@@ -445,7 +514,13 @@ mod tests {
         let dir = TempDir::new().unwrap();
 
         let tool = GlobSearchTool::new(test_security(dir.path().to_path_buf()));
-        let result = tool.execute(json!({"pattern": "[invalid"})).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"pattern": "[invalid"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
 
         assert!(!result.success);
         assert!(result

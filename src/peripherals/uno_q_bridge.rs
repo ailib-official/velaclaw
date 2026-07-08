@@ -3,7 +3,7 @@
 //! When VelaClaw runs on Uno Q, the Bridge app (Python + MCU) exposes
 //! digitalWrite/digitalRead over a local socket. These tools connect to it.
 
-use crate::tools::traits::{Tool, ToolResult};
+use crate::tools::traits::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::time::Duration;
@@ -56,7 +56,11 @@ impl Tool for UnoQGpioReadTool {
         })
     }
 
-    async fn execute(&self, args: Value) -> anyhow::Result<ToolResult> {
+    async fn execute(
+        &self,
+        args: Value,
+        _ctx: &ToolExecutionContext,
+    ) -> anyhow::Result<ToolResult> {
         let pin = args
             .get("pin")
             .and_then(|v| v.as_u64())
@@ -116,7 +120,11 @@ impl Tool for UnoQGpioWriteTool {
         })
     }
 
-    async fn execute(&self, args: Value) -> anyhow::Result<ToolResult> {
+    async fn execute(
+        &self,
+        args: Value,
+        _ctx: &ToolExecutionContext,
+    ) -> anyhow::Result<ToolResult> {
         let pin = args
             .get("pin")
             .and_then(|v| v.as_u64())

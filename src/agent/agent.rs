@@ -3,14 +3,14 @@ use crate::agent::dispatcher::{NativeToolDispatcher, XmlToolDispatcher};
 use crate::agent::dispatcher::{ParsedToolCall, ToolDispatcher, ToolExecutionResult};
 use crate::agent::memory_loader::{DefaultMemoryLoader, MemoryLoader};
 use crate::agent::prompt::{PromptContext, SystemPromptBuilder};
-use crate::approval::{ApprovalHub, ApprovalManager, ApprovalRequest, ApprovalResponse};
+use crate::approval::{ApprovalGate, ApprovalHub, ApprovalManager, GateDecision};
 use crate::config::{Config, DEFAULT_PROTOCOL_MODEL_ID};
 use crate::memory::{self, Memory, MemoryCategory};
 use crate::observability::{self, Observer, ObserverEvent};
 use crate::providers::{self, ChatMessage, ChatRequest, ConversationMessage, Provider};
 use crate::runtime;
 use crate::security::SecurityPolicy;
-use crate::tools::{self, Tool, ToolSpec};
+use crate::tools::{self, Tool, ToolExecutionContext, ToolSpec};
 use anyhow::Result;
 use std::io::Write as IoWrite;
 use std::sync::Arc;
@@ -38,6 +38,7 @@ pub struct Agent {
     history: Vec<ConversationMessage>,
     classification_config: crate::config::QueryClassificationConfig,
     available_hints: Vec<String>,
+    security: Arc<SecurityPolicy>,
     gateway_approval: Option<(ApprovalManager, Arc<ApprovalHub>)>,
 }
 
@@ -61,6 +62,7 @@ pub struct AgentBuilder {
     auto_save: Option<bool>,
     classification_config: Option<crate::config::QueryClassificationConfig>,
     available_hints: Option<Vec<String>>,
+    security: Option<Arc<SecurityPolicy>>,
 }
 
 impl AgentBuilder {
@@ -85,6 +87,7 @@ impl AgentBuilder {
             auto_save: None,
             classification_config: None,
             available_hints: None,
+            security: None,
         }
     }
 
@@ -185,6 +188,11 @@ impl AgentBuilder {
         self
     }
 
+    pub fn security(mut self, security: Arc<SecurityPolicy>) -> Self {
+        self.security = Some(security);
+        self
+    }
+
     pub fn build(self) -> Result<Agent> {
         let tools = self
             .tools
@@ -229,6 +237,9 @@ impl AgentBuilder {
             history: Vec::new(),
             classification_config: self.classification_config.unwrap_or_default(),
             available_hints: self.available_hints.unwrap_or_default(),
+            security: self
+                .security
+                .ok_or_else(|| anyhow::anyhow!("security is required"))?,
             gateway_approval: None,
         })
     }
@@ -261,10 +272,7 @@ impl Agent {
             Arc::from(observability::create_observer(&config.observability));
         let runtime: Arc<dyn runtime::RuntimeAdapter> =
             Arc::from(runtime::create_runtime(&config.runtime)?);
-        let security = Arc::new(SecurityPolicy::from_config(
-            &config.autonomy,
-            &config.workspace_dir,
-        ));
+        let security = Arc::new(SecurityPolicy::from_workspace_config(config)?);
 
         let memory: Arc<dyn Memory> = Arc::from(memory::create_memory_with_storage_and_routes(
             &config.memory,
@@ -387,6 +395,7 @@ impl Agent {
             ))
             .skills_prompt_mode(config.skills.prompt_injection_mode)
             .auto_save(config.memory.auto_save)
+            .security(security)
             .build()
     }
 
@@ -440,27 +449,29 @@ impl Agent {
     async fn execute_tool_call(&self, call: &ParsedToolCall) -> ToolExecutionResult {
         let start = Instant::now();
 
-        if let Some((mgr, hub)) = &self.gateway_approval {
-            if mgr.needs_approval(&call.name) {
-                let request = ApprovalRequest {
-                    tool_name: call.name.clone(),
-                    arguments: call.arguments.clone(),
-                };
-                let decision = mgr.prompt_gateway(hub, &request).await;
-                mgr.record_decision(&call.name, &call.arguments, decision, "web");
-                if decision == ApprovalResponse::No {
+        let shell_human_approved = if let Some((mgr, hub)) = &self.gateway_approval {
+            let gate = ApprovalGate::new(mgr, "web", Some(self.security.as_ref()))
+                .with_hub(Arc::clone(hub));
+            match gate.decide_async(call).await {
+                GateDecision::Denied { message } => {
                     return ToolExecutionResult {
                         name: call.name.clone(),
-                        output: "Denied by user.".to_string(),
+                        output: message,
                         success: false,
                         tool_call_id: call.tool_call_id.clone(),
                     };
                 }
+                GateDecision::Proceed {
+                    shell_human_approved,
+                } => shell_human_approved,
             }
-        }
+        } else {
+            false
+        };
 
+        let ctx = ToolExecutionContext::with_shell_human_approved(shell_human_approved);
         let result = if let Some(tool) = self.tools.iter().find(|t| t.name() == call.name) {
-            match tool.execute(call.arguments.clone()).await {
+            match tool.execute(call.arguments.clone(), &ctx).await {
                 Ok(r) => {
                     self.observer.record_event(&ObserverEvent::ToolCall {
                         tool: call.name.clone(),
@@ -759,13 +770,24 @@ mod tests {
             serde_json::json!({"type": "object"})
         }
 
-        async fn execute(&self, _args: serde_json::Value) -> Result<crate::tools::ToolResult> {
+        async fn execute(
+            &self,
+            _args: serde_json::Value,
+            _ctx: &ToolExecutionContext,
+        ) -> Result<crate::tools::ToolResult> {
             Ok(crate::tools::ToolResult {
                 success: true,
                 output: "tool-out".into(),
                 error: None,
             })
         }
+    }
+
+    fn test_security() -> Arc<SecurityPolicy> {
+        Arc::new(SecurityPolicy::from_config(
+            &crate::config::AutonomyConfig::default(),
+            &std::path::PathBuf::from("/tmp"),
+        ))
     }
 
     #[tokio::test]
@@ -794,6 +816,7 @@ mod tests {
             .observer(observer)
             .tool_dispatcher(Box::new(XmlToolDispatcher::default()))
             .workspace_dir(std::path::PathBuf::from("/tmp"))
+            .security(test_security())
             .build()
             .expect("agent builder should succeed with valid config");
 
@@ -837,6 +860,7 @@ mod tests {
             .observer(observer)
             .tool_dispatcher(Box::new(NativeToolDispatcher::default()))
             .workspace_dir(std::path::PathBuf::from("/tmp"))
+            .security(test_security())
             .build()
             .expect("agent builder should succeed with valid config");
 

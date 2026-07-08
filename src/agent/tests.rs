@@ -35,7 +35,8 @@ use crate::providers::{
     ChatMessage, ChatRequest, ChatResponse, ConversationMessage, Provider, ToolCall,
     ToolResultMessage,
 };
-use crate::tools::{Tool, ToolResult};
+use crate::security::SecurityPolicy;
+use crate::tools::{Tool, ToolExecutionContext, ToolResult};
 use anyhow::Result;
 use async_trait::async_trait;
 use std::sync::{Arc, Mutex};
@@ -146,7 +147,11 @@ impl Tool for EchoTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value) -> Result<ToolResult> {
+    async fn execute(
+        &self,
+        args: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> Result<ToolResult> {
         let msg = args
             .get("message")
             .and_then(|v| v.as_str())
@@ -177,7 +182,11 @@ impl Tool for FailingTool {
         serde_json::json!({"type": "object"})
     }
 
-    async fn execute(&self, _args: serde_json::Value) -> Result<ToolResult> {
+    async fn execute(
+        &self,
+        _args: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> Result<ToolResult> {
         Ok(ToolResult {
             success: false,
             output: String::new(),
@@ -203,7 +212,11 @@ impl Tool for PanickingTool {
         serde_json::json!({"type": "object"})
     }
 
-    async fn execute(&self, _args: serde_json::Value) -> Result<ToolResult> {
+    async fn execute(
+        &self,
+        _args: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> Result<ToolResult> {
         anyhow::bail!("catastrophic tool failure")
     }
 }
@@ -239,7 +252,11 @@ impl Tool for CountingTool {
         serde_json::json!({"type": "object"})
     }
 
-    async fn execute(&self, _args: serde_json::Value) -> Result<ToolResult> {
+    async fn execute(
+        &self,
+        _args: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> Result<ToolResult> {
         let mut c = self.count.lock().unwrap();
         *c += 1;
         Ok(ToolResult {
@@ -272,6 +289,13 @@ fn make_observer() -> Arc<dyn Observer> {
     Arc::from(NoopObserver {})
 }
 
+fn test_security() -> Arc<SecurityPolicy> {
+    Arc::new(SecurityPolicy::from_config(
+        &crate::config::AutonomyConfig::default(),
+        &std::env::temp_dir(),
+    ))
+}
+
 fn build_agent_with(
     provider: Box<dyn Provider>,
     tools: Vec<Box<dyn Tool>>,
@@ -284,6 +308,7 @@ fn build_agent_with(
         .observer(make_observer())
         .tool_dispatcher(dispatcher)
         .workspace_dir(std::env::temp_dir())
+        .security(test_security())
         .build()
         .unwrap()
 }
@@ -302,6 +327,7 @@ fn build_agent_with_memory(
         .tool_dispatcher(Box::new(NativeToolDispatcher::default()))
         .workspace_dir(std::env::temp_dir())
         .auto_save(auto_save)
+        .security(test_security())
         .build()
         .unwrap()
 }
@@ -319,6 +345,7 @@ fn build_agent_with_config(
         .tool_dispatcher(Box::new(NativeToolDispatcher::default()))
         .workspace_dir(std::env::temp_dir())
         .config(config)
+        .security(test_security())
         .build()
         .unwrap()
 }

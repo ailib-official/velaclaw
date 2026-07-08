@@ -1,4 +1,4 @@
-use super::traits::{Tool, ToolResult};
+use super::traits::{Tool, ToolExecutionContext, ToolResult};
 use crate::config::Config;
 use crate::cron;
 use crate::security::SecurityPolicy;
@@ -67,7 +67,11 @@ impl Tool for CronRemoveTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
+    async fn execute(
+        &self,
+        args: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> anyhow::Result<ToolResult> {
         if !self.config.cron.enabled {
             return Ok(ToolResult {
                 success: false,
@@ -139,7 +143,10 @@ mod tests {
         let job = cron::add_job(&cfg, "*/5 * * * *", "echo ok").unwrap();
         let tool = CronRemoveTool::new(cfg.clone(), test_security(&cfg));
 
-        let result = tool.execute(json!({"job_id": job.id})).await.unwrap();
+        let result = tool
+            .execute(json!({"job_id": job.id}), &ToolExecutionContext::default())
+            .await
+            .unwrap();
         assert!(result.success);
         assert!(cron::list_jobs(&cfg).unwrap().is_empty());
     }
@@ -150,7 +157,10 @@ mod tests {
         let cfg = test_config(&tmp).await;
         let tool = CronRemoveTool::new(cfg.clone(), test_security(&cfg));
 
-        let result = tool.execute(json!({})).await.unwrap();
+        let result = tool
+            .execute(json!({}), &ToolExecutionContext::default())
+            .await
+            .unwrap();
         assert!(!result.success);
         assert!(result
             .error
@@ -172,7 +182,10 @@ mod tests {
         let job = cron::add_job(&cfg, "*/5 * * * *", "echo ok").unwrap();
         let tool = CronRemoveTool::new(cfg.clone(), test_security(&cfg));
 
-        let result = tool.execute(json!({"job_id": job.id})).await.unwrap();
+        let result = tool
+            .execute(json!({"job_id": job.id}), &ToolExecutionContext::default())
+            .await
+            .unwrap();
         assert!(!result.success);
         assert!(result.error.unwrap_or_default().contains("read-only"));
     }

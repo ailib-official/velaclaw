@@ -17,7 +17,7 @@
 //! Safety always wins.
 
 use crate::config::{RobotConfig, SafetyConfig};
-use crate::traits::ToolResult;
+use crate::traits::{ToolExecutionContext, ToolResult};
 use anyhow::Result;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -367,7 +367,11 @@ impl crate::traits::Tool for SafeDrive {
         self.inner_drive.parameters_schema()
     }
 
-    async fn execute(&self, args: serde_json::Value) -> Result<ToolResult> {
+    async fn execute(
+        &self,
+        args: serde_json::Value,
+        ctx: &ToolExecutionContext,
+    ) -> Result<ToolResult> {
         // ToolResult imported at top of file
 
         let action = args["action"].as_str().unwrap_or("unknown");
@@ -375,7 +379,7 @@ impl crate::traits::Tool for SafeDrive {
 
         // Always allow stop
         if action == "stop" {
-            return self.inner_drive.execute(args).await;
+            return self.inner_drive.execute(args, ctx).await;
         }
 
         // Request permission from safety system
@@ -393,7 +397,7 @@ impl crate::traits::Tool for SafeDrive {
                     );
                 }
 
-                self.inner_drive.execute(modified_args).await
+                self.inner_drive.execute(modified_args, ctx).await
             }
             Err(reason) => Ok(ToolResult {
                 success: false,

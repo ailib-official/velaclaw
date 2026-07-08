@@ -3,7 +3,7 @@
 //! Use when user asks to "read register values", "read memory at address", "dump lower memory", etc.
 //! Requires probe feature and Nucleo connected via USB.
 
-use super::traits::{Tool, ToolResult};
+use super::traits::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::json;
 
@@ -59,7 +59,11 @@ impl Tool for HardwareMemoryReadTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
+    async fn execute(
+        &self,
+        args: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> anyhow::Result<ToolResult> {
         if self.boards.is_empty() {
             return Ok(ToolResult {
                 success: false,

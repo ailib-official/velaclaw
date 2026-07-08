@@ -4,7 +4,7 @@
 //! returns the memory map. Uses probe-rs for Nucleo/STM32 when available; otherwise
 //! returns static maps from datasheets.
 
-use super::traits::{Tool, ToolResult};
+use super::traits::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::json;
 
@@ -72,7 +72,11 @@ impl Tool for HardwareMemoryMapTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
+    async fn execute(
+        &self,
+        args: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> anyhow::Result<ToolResult> {
         let board = args
             .get("board")
             .and_then(|v| v.as_str())

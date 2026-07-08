@@ -3,7 +3,7 @@
 //! Use when user asks "what board do I have?", "board info", "connected hardware", etc.
 //! Uses probe-rs for Nucleo when available; otherwise static datasheet info.
 
-use super::traits::{Tool, ToolResult};
+use super::traits::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::json;
 
@@ -86,7 +86,11 @@ impl Tool for HardwareBoardInfoTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
+    async fn execute(
+        &self,
+        args: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> anyhow::Result<ToolResult> {
         let board = args
             .get("board")
             .and_then(|v| v.as_str())

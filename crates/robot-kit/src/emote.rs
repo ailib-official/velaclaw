@@ -4,7 +4,7 @@
 //! Makes the robot more engaging for kids!
 
 use crate::config::RobotConfig;
-use crate::traits::{Tool, ToolResult};
+use crate::traits::{Tool, ToolExecutionContext, ToolResult};
 use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -251,7 +251,7 @@ impl Tool for EmoteTool {
         })
     }
 
-    async fn execute(&self, args: Value) -> Result<ToolResult> {
+    async fn execute(&self, args: Value, _ctx: &ToolExecutionContext) -> Result<ToolResult> {
         let expression_str = args["expression"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Missing 'expression' parameter"))?;
@@ -315,10 +315,13 @@ mod tests {
     async fn emote_happy() {
         let tool = EmoteTool::new(RobotConfig::default());
         let result = tool
-            .execute(json!({
-                "expression": "happy",
-                "duration": 0
-            }))
+            .execute(
+                json!({
+                    "expression": "happy",
+                    "duration": 0
+                }),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(result.success);

@@ -4,7 +4,7 @@
 //! Designed for offline operation on Raspberry Pi.
 
 use crate::config::RobotConfig;
-use crate::traits::{Tool, ToolResult};
+use crate::traits::{Tool, ToolExecutionContext, ToolResult};
 use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -143,7 +143,7 @@ impl Tool for ListenTool {
         })
     }
 
-    async fn execute(&self, args: Value) -> Result<ToolResult> {
+    async fn execute(&self, args: Value, _ctx: &ToolExecutionContext) -> Result<ToolResult> {
         let duration = args["duration"].as_u64().unwrap_or(5).clamp(1, 30);
 
         // Record audio

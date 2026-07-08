@@ -1,4 +1,4 @@
-use super::traits::{Tool, ToolResult};
+use super::traits::{Tool, ToolExecutionContext, ToolResult};
 use crate::security::SecurityPolicy;
 use async_trait::async_trait;
 use serde_json::json;
@@ -111,7 +111,11 @@ impl Tool for PushoverTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
+    async fn execute(
+        &self,
+        args: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> anyhow::Result<ToolResult> {
         if !self.security.can_act() {
             return Ok(ToolResult {
                 success: false,
@@ -401,7 +405,13 @@ mod tests {
             PathBuf::from("/tmp"),
         );
 
-        let result = tool.execute(json!({"message": "hello"})).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"message": "hello"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
         assert!(!result.success);
         assert!(result.error.unwrap().contains("read-only"));
     }
@@ -410,7 +420,13 @@ mod tests {
     async fn execute_blocks_rate_limit() {
         let tool = PushoverTool::new(test_security(AutonomyLevel::Full, 0), PathBuf::from("/tmp"));
 
-        let result = tool.execute(json!({"message": "hello"})).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"message": "hello"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
         assert!(!result.success);
         assert!(result.error.unwrap().contains("rate limit"));
     }
@@ -423,7 +439,10 @@ mod tests {
         );
 
         let result = tool
-            .execute(json!({"message": "hello", "priority": 5}))
+            .execute(
+                json!({"message": "hello", "priority": 5}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
 

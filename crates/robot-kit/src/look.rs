@@ -4,7 +4,7 @@
 //! using a local vision model (LLaVA, Moondream) via Ollama.
 
 use crate::config::RobotConfig;
-use crate::traits::{Tool, ToolResult};
+use crate::traits::{Tool, ToolExecutionContext, ToolResult};
 use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -153,7 +153,7 @@ impl Tool for LookTool {
         })
     }
 
-    async fn execute(&self, args: Value) -> Result<ToolResult> {
+    async fn execute(&self, args: Value, _ctx: &ToolExecutionContext) -> Result<ToolResult> {
         let action = args["action"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Missing 'action' parameter"))?;

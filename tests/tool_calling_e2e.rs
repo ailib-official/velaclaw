@@ -33,7 +33,7 @@ use velaclaw::memory::Memory;
 use velaclaw::observability::{NoopObserver, Observer};
 use velaclaw::providers::{ChatRequest, ChatResponse, Provider, ToolCall};
 use velaclaw::security::{AutonomyLevel, SecurityPolicy};
-use velaclaw::tools::{self, Tool, ToolResult, ToolSpec};
+use velaclaw::tools::{self, Tool, ToolExecutionContext, ToolResult, ToolSpec};
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Helpers
@@ -185,13 +185,18 @@ fn tool_response(calls: Vec<ToolCall>) -> ChatResponse {
 }
 
 fn build_agent(provider: Box<dyn Provider>, tools: Vec<Box<dyn Tool>>, tmp: &TempDir) -> Agent {
+    let workspace = tmp.path().to_path_buf();
     Agent::builder()
         .provider(provider)
         .tools(tools)
         .memory(make_memory(tmp))
         .observer(make_observer())
         .tool_dispatcher(Box::new(NativeToolDispatcher::default()))
-        .workspace_dir(tmp.path().to_path_buf())
+        .workspace_dir(workspace.clone())
+        .security(Arc::new(SecurityPolicy::from_config(
+            &velaclaw::config::AutonomyConfig::default(),
+            &workspace,
+        )))
         .build()
         .unwrap()
 }
@@ -327,7 +332,10 @@ mod tool_execution {
         let tool = tools::ShellTool::new(sec, runtime);
 
         let result = tool
-            .execute(json!({"command": "echo hello-world-42"}))
+            .execute(
+                json!({"command": "echo hello-world-42"}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(result.success, "echo should succeed: {:?}", result.error);
@@ -342,7 +350,9 @@ mod tool_execution {
         let runtime = Arc::new(velaclaw::runtime::NativeRuntime::new());
         let tool = tools::ShellTool::new(sec, runtime);
 
-        let result = tool.execute(json!({})).await;
+        let result = tool
+            .execute(json!({}), &ToolExecutionContext::default())
+            .await;
         assert!(result.is_err(), "Missing command should error");
         assert!(result.unwrap_err().to_string().contains("command"));
     }
@@ -354,7 +364,9 @@ mod tool_execution {
         let runtime = Arc::new(velaclaw::runtime::NativeRuntime::new());
         let tool = tools::ShellTool::new(sec, runtime);
 
-        let result = tool.execute(json!({"command": 123})).await;
+        let result = tool
+            .execute(json!({"command": 123}), &ToolExecutionContext::default())
+            .await;
         assert!(result.is_err(), "Non-string command should error");
     }
 
@@ -367,7 +379,10 @@ mod tool_execution {
         let tool = tools::ShellTool::new(sec, runtime);
 
         let result = tool
-            .execute(json!({"command": "ls /nonexistent_xyz_123"}))
+            .execute(
+                json!({"command": "ls /nonexistent_xyz_123"}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(!result.success, "Command to nonexistent path should fail");
@@ -380,7 +395,10 @@ mod tool_execution {
         let runtime = Arc::new(velaclaw::runtime::NativeRuntime::new());
         let tool = tools::ShellTool::new(sec, runtime);
 
-        let result = tool.execute(json!({"command": "ls"})).await.unwrap();
+        let result = tool
+            .execute(json!({"command": "ls"}), &ToolExecutionContext::default())
+            .await
+            .unwrap();
         assert!(!result.success, "ReadOnly autonomy should block shell");
         assert!(result.error.unwrap().contains("not allowed"));
     }
@@ -396,7 +414,13 @@ mod tool_execution {
         let sec = test_security(tmp.path().to_path_buf());
         let tool = tools::FileReadTool::new(sec);
 
-        let result = tool.execute(json!({"path": "hello.txt"})).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"path": "hello.txt"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
         assert!(result.success);
         assert!(result.output.contains("1: hello world"));
         assert!(result.output.contains("lines total"));
@@ -408,7 +432,13 @@ mod tool_execution {
         let sec = test_security(tmp.path().to_path_buf());
         let tool = tools::FileReadTool::new(sec);
 
-        let result = tool.execute(json!({"path": "nope.txt"})).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"path": "nope.txt"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
         assert!(!result.success);
         assert!(result.error.as_ref().unwrap().contains("Failed to resolve"));
     }
@@ -419,7 +449,9 @@ mod tool_execution {
         let sec = test_security(tmp.path().to_path_buf());
         let tool = tools::FileReadTool::new(sec);
 
-        let result = tool.execute(json!({})).await;
+        let result = tool
+            .execute(json!({}), &ToolExecutionContext::default())
+            .await;
         assert!(result.is_err());
     }
 
@@ -430,7 +462,10 @@ mod tool_execution {
         let tool = tools::FileReadTool::new(sec);
 
         let result = tool
-            .execute(json!({"path": "../../../etc/passwd"}))
+            .execute(
+                json!({"path": "../../../etc/passwd"}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(!result.success);
@@ -446,7 +481,13 @@ mod tool_execution {
         let sec = test_security(tmp.path().to_path_buf());
         let tool = tools::FileReadTool::new(sec);
 
-        let result = tool.execute(json!({"path": "empty.txt"})).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"path": "empty.txt"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
         assert!(result.success);
         assert_eq!(result.output, "");
     }
@@ -460,10 +501,13 @@ mod tool_execution {
         let tool = tools::FileWriteTool::new(sec);
 
         let result = tool
-            .execute(json!({
-                "path": "new_file.txt",
-                "content": "created by test"
-            }))
+            .execute(
+                json!({
+                    "path": "new_file.txt",
+                    "content": "created by test"
+                }),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(result.success);
@@ -484,10 +528,13 @@ mod tool_execution {
         let tool = tools::FileWriteTool::new(sec);
 
         let result = tool
-            .execute(json!({
-                "path": "existing.txt",
-                "content": "new content"
-            }))
+            .execute(
+                json!({
+                    "path": "existing.txt",
+                    "content": "new content"
+                }),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(result.success);
@@ -504,10 +551,14 @@ mod tool_execution {
         let sec = permissive_security(tmp.path().to_path_buf());
         let tool = tools::FileWriteTool::new(sec);
 
-        let result = tool.execute(json!({"path": "f.txt"})).await;
+        let result = tool
+            .execute(json!({"path": "f.txt"}), &ToolExecutionContext::default())
+            .await;
         assert!(result.is_err());
 
-        let result = tool.execute(json!({"content": "x"})).await;
+        let result = tool
+            .execute(json!({"content": "x"}), &ToolExecutionContext::default())
+            .await;
         assert!(result.is_err());
     }
 
@@ -518,10 +569,13 @@ mod tool_execution {
         let tool = tools::FileWriteTool::new(sec);
 
         let result = tool
-            .execute(json!({
-                "path": "blocked.txt",
-                "content": "should not write"
-            }))
+            .execute(
+                json!({
+                    "path": "blocked.txt",
+                    "content": "should not write"
+                }),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(!result.success);
@@ -535,10 +589,13 @@ mod tool_execution {
         let tool = tools::FileWriteTool::new(sec);
 
         let result = tool
-            .execute(json!({
-                "path": "../../../etc/hacked",
-                "content": "malware"
-            }))
+            .execute(
+                json!({
+                    "path": "../../../etc/hacked",
+                    "content": "malware"
+                }),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(!result.success);
@@ -558,7 +615,10 @@ mod tool_execution {
         let sec = test_security(tmp.path().to_path_buf());
         let tool = tools::GlobSearchTool::new(sec);
 
-        let result = tool.execute(json!({"pattern": "*.rs"})).await.unwrap();
+        let result = tool
+            .execute(json!({"pattern": "*.rs"}), &ToolExecutionContext::default())
+            .await
+            .unwrap();
         assert!(result.success);
         assert!(result.output.contains("a.rs"));
         assert!(result.output.contains("b.rs"));
@@ -583,7 +643,13 @@ mod tool_execution {
         let sec = test_security(tmp.path().to_path_buf());
         let tool = tools::GlobSearchTool::new(sec);
 
-        let result = tool.execute(json!({"pattern": "**/*.txt"})).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"pattern": "**/*.txt"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
         assert!(result.success);
         assert!(result.output.contains("root.txt"));
         assert!(result.output.contains("sub/mid.txt"));
@@ -597,7 +663,10 @@ mod tool_execution {
         let tool = tools::GlobSearchTool::new(sec);
 
         let result = tool
-            .execute(json!({"pattern": "nonexistent*"}))
+            .execute(
+                json!({"pattern": "nonexistent*"}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(result.success);
@@ -615,7 +684,10 @@ mod tool_execution {
         let tool = tools::GlobSearchTool::new(sec);
 
         let result = tool
-            .execute(json!({"pattern": "/etc/passwd"}))
+            .execute(
+                json!({"pattern": "/etc/passwd"}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(!result.success);
@@ -633,7 +705,10 @@ mod tool_execution {
         let tool = tools::GlobSearchTool::new(sec);
 
         let result = tool
-            .execute(json!({"pattern": "../outside"}))
+            .execute(
+                json!({"pattern": "../outside"}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(!result.success);
@@ -646,7 +721,9 @@ mod tool_execution {
         let sec = test_security(tmp.path().to_path_buf());
         let tool = tools::GlobSearchTool::new(sec);
 
-        let result = tool.execute(json!({})).await;
+        let result = tool
+            .execute(json!({}), &ToolExecutionContext::default())
+            .await;
         assert!(result.is_err());
     }
 
@@ -661,13 +738,19 @@ mod tool_execution {
 
         let content = "Write-then-read integration test content.\nLine 2.\nLine 3.";
         let w = writer
-            .execute(json!({"path": "roundtrip.txt", "content": content}))
+            .execute(
+                json!({"path": "roundtrip.txt", "content": content}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(w.success, "write failed: {:?}", w.error);
 
         let r = reader
-            .execute(json!({"path": "roundtrip.txt"}))
+            .execute(
+                json!({"path": "roundtrip.txt"}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(r.success, "read failed: {:?}", r.error);
@@ -1118,7 +1201,11 @@ mod agent_dispatch {
         fn parameters_schema(&self) -> serde_json::Value {
             json!({"type": "object", "properties": {}})
         }
-        async fn execute(&self, _args: serde_json::Value) -> Result<ToolResult> {
+        async fn execute(
+            &self,
+            _args: serde_json::Value,
+            _ctx: &ToolExecutionContext,
+        ) -> Result<ToolResult> {
             let mut c = self.count.lock().unwrap();
             *c += 1;
             Ok(ToolResult {
@@ -1293,7 +1380,11 @@ mod agent_dispatch {
             fn parameters_schema(&self) -> serde_json::Value {
                 json!({"type": "object", "properties": {}})
             }
-            async fn execute(&self, _args: serde_json::Value) -> Result<ToolResult> {
+            async fn execute(
+                &self,
+                _args: serde_json::Value,
+                _ctx: &ToolExecutionContext,
+            ) -> Result<ToolResult> {
                 Ok(ToolResult {
                     success: false,
                     output: String::new(),
@@ -1402,7 +1493,11 @@ mod agent_dispatch {
             fn parameters_schema(&self) -> serde_json::Value {
                 json!({"type": "object", "properties": {}})
             }
-            async fn execute(&self, _args: serde_json::Value) -> Result<ToolResult> {
+            async fn execute(
+                &self,
+                _args: serde_json::Value,
+                _ctx: &ToolExecutionContext,
+            ) -> Result<ToolResult> {
                 anyhow::bail!("deliberate tool panic")
             }
         }
@@ -1443,13 +1538,22 @@ mod security_enforcement {
         let tool = tools::FileReadTool::new(sec);
 
         // First two: should succeed
-        let r1 = tool.execute(json!({"path": "f.txt"})).await.unwrap();
+        let r1 = tool
+            .execute(json!({"path": "f.txt"}), &ToolExecutionContext::default())
+            .await
+            .unwrap();
         assert!(r1.success, "First read should succeed");
-        let r2 = tool.execute(json!({"path": "f.txt"})).await.unwrap();
+        let r2 = tool
+            .execute(json!({"path": "f.txt"}), &ToolExecutionContext::default())
+            .await
+            .unwrap();
         assert!(r2.success, "Second read should succeed");
 
         // Third: rate limited
-        let r3 = tool.execute(json!({"path": "f.txt"})).await.unwrap();
+        let r3 = tool
+            .execute(json!({"path": "f.txt"}), &ToolExecutionContext::default())
+            .await
+            .unwrap();
         assert!(!r3.success, "Third read should be rate limited");
         assert!(r3.error.unwrap().contains("Rate limit"));
     }
@@ -1461,10 +1565,13 @@ mod security_enforcement {
         let tool = tools::FileWriteTool::new(sec);
 
         let result = tool
-            .execute(json!({
-                "path": "blocked.txt",
-                "content": "should not write"
-            }))
+            .execute(
+                json!({
+                    "path": "blocked.txt",
+                    "content": "should not write"
+                }),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(!result.success);
@@ -1479,7 +1586,13 @@ mod security_enforcement {
         let runtime = Arc::new(velaclaw::runtime::NativeRuntime::new());
         let tool = tools::ShellTool::new(sec, runtime);
 
-        let result = tool.execute(json!({"command": "echo test"})).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"command": "echo test"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
         assert!(!result.success);
         assert!(result.error.unwrap().contains("not allowed"));
     }
@@ -1492,7 +1605,13 @@ mod security_enforcement {
         let runtime = Arc::new(velaclaw::runtime::NativeRuntime::new());
         let tool = tools::ShellTool::new(sec, runtime);
 
-        let result = tool.execute(json!({"command": "rm -rf /"})).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"command": "rm -rf /"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
         assert!(!result.success);
         let error = result.error.unwrap();
         assert!(
@@ -1508,7 +1627,13 @@ mod security_enforcement {
         let sec = test_security(tmp.path().to_path_buf());
         let tool = tools::FileReadTool::new(sec);
 
-        let result = tool.execute(json!({"path": "/etc/passwd"})).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"path": "/etc/passwd"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
         assert!(!result.success);
         assert!(result.error.unwrap().contains("not allowed"));
     }
@@ -1524,15 +1649,39 @@ mod security_enforcement {
         let globber = tools::GlobSearchTool::new(sec);
 
         // Consume budget with reader
-        let _ = reader.execute(json!({"path": "shared.txt"})).await.unwrap();
-        let _ = reader.execute(json!({"path": "shared.txt"})).await.unwrap();
+        let _ = reader
+            .execute(
+                json!({"path": "shared.txt"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
+        let _ = reader
+            .execute(
+                json!({"path": "shared.txt"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
 
         // Glob should still have budget
-        let r = globber.execute(json!({"pattern": "*.txt"})).await.unwrap();
+        let r = globber
+            .execute(
+                json!({"pattern": "*.txt"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
         assert!(r.success, "Glob should succeed within budget");
 
         // 4th action should fail
-        let r4 = globber.execute(json!({"pattern": "*.txt"})).await.unwrap();
+        let r4 = globber
+            .execute(
+                json!({"pattern": "*.txt"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
         assert!(!r4.success, "Should be rate limited on 4th action");
     }
 }
@@ -1576,7 +1725,10 @@ mod git_operations {
         let tool = tools::GitOperationsTool::new(sec, tmp.path().to_path_buf());
 
         let result = tool
-            .execute(json!({"operation": "log", "limit": 1}))
+            .execute(
+                json!({"operation": "log", "limit": 1}),
+                &ToolExecutionContext::default(),
+            )
             .await
             .unwrap();
         assert!(result.success, "git log failed: {:?}", result.error);
@@ -1589,7 +1741,13 @@ mod git_operations {
         let sec = test_security(tmp.path().to_path_buf());
         let tool = tools::GitOperationsTool::new(sec, tmp.path().to_path_buf());
 
-        let result = tool.execute(json!({"operation": "status"})).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"operation": "status"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
         assert!(result.success, "git status failed: {:?}", result.error);
     }
 
@@ -1600,7 +1758,13 @@ mod git_operations {
         let sec = test_security(tmp.path().to_path_buf());
         let tool = tools::GitOperationsTool::new(sec, tmp.path().to_path_buf());
 
-        let result = tool.execute(json!({"operation": "branch"})).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"operation": "branch"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
         assert!(result.success, "git branch failed: {:?}", result.error);
     }
 
@@ -1611,7 +1775,13 @@ mod git_operations {
         let sec = readonly_security(tmp.path().to_path_buf());
         let tool = tools::GitOperationsTool::new(sec, tmp.path().to_path_buf());
 
-        let result = tool.execute(json!({"operation": "commit"})).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"operation": "commit"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
         assert!(!result.success);
         let error = result.error.unwrap();
         assert!(
@@ -1632,7 +1802,10 @@ mod git_operations {
 
         let ops = ["reset", "rebase", "push", "pull", "fetch"];
         for op in ops {
-            let result = tool.execute(json!({"operation": op})).await.unwrap();
+            let result = tool
+                .execute(json!({"operation": op}), &ToolExecutionContext::default())
+                .await
+                .unwrap();
             assert!(
                 !result.success,
                 "Operation '{}' should be rejected as unknown or unsafe, got: {:?}",
@@ -1648,7 +1821,10 @@ mod git_operations {
         let sec = test_security(tmp.path().to_path_buf());
         let tool = tools::GitOperationsTool::new(sec, tmp.path().to_path_buf());
 
-        let result = tool.execute(json!({"args": ""})).await.unwrap();
+        let result = tool
+            .execute(json!({"args": ""}), &ToolExecutionContext::default())
+            .await
+            .unwrap();
         assert!(!result.success);
         assert!(result.error.as_deref().unwrap_or("").contains("operation"));
     }
@@ -1669,7 +1845,10 @@ mod config_dependent {
         let tool = tools::PushoverTool::new(sec, tmp.path().to_path_buf());
 
         match tool
-            .execute(json!({"title": "Test", "message": "Hello"}))
+            .execute(
+                json!({"title": "Test", "message": "Hello"}),
+                &ToolExecutionContext::default(),
+            )
             .await
         {
             Ok(result) => {
@@ -1709,7 +1888,10 @@ mod config_dependent {
         };
         let tool = tools::ScheduleTool::new(sec, cfg);
 
-        let result = tool.execute(json!({"action": "list"})).await.unwrap();
+        let result = tool
+            .execute(json!({"action": "list"}), &ToolExecutionContext::default())
+            .await
+            .unwrap();
         assert!(result.success);
         // Should return a list (possibly empty)
         assert!(!result.output.is_empty() || result.output.contains("No scheduled"));
@@ -1726,7 +1908,9 @@ mod config_dependent {
         };
         let tool = tools::ProxyConfigTool::new(Arc::new(cfg), sec);
 
-        let result = tool.execute(json!({"action": "get"})).await;
+        let result = tool
+            .execute(json!({"action": "get"}), &ToolExecutionContext::default())
+            .await;
         assert!(
             result.is_ok(),
             "proxy get should not panic: {:?}",

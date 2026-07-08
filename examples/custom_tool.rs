@@ -15,12 +15,17 @@ pub struct ToolResult {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ToolExecutionContext {
+    pub human_shell_approved: bool,
+}
+
 #[async_trait]
 pub trait Tool: Send + Sync {
     fn name(&self) -> &str;
     fn description(&self) -> &str;
     fn parameters_schema(&self) -> Value;
-    async fn execute(&self, args: Value) -> Result<ToolResult>;
+    async fn execute(&self, args: Value, ctx: &ToolExecutionContext) -> Result<ToolResult>;
 }
 
 /// Example: A tool that fetches a URL and returns the status code
@@ -46,7 +51,7 @@ impl Tool for HttpGetTool {
         })
     }
 
-    async fn execute(&self, args: Value) -> Result<ToolResult> {
+    async fn execute(&self, args: Value, _ctx: &ToolExecutionContext) -> Result<ToolResult> {
         let url = args["url"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Missing 'url' parameter"))?;

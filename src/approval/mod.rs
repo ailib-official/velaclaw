@@ -3,8 +3,12 @@
 //! Provides a pre-execution hook that prompts the user before tool calls,
 //! with session-scoped "Always" allowlists and audit logging.
 
+mod backend;
+mod gate;
 mod hub;
 
+pub use backend::{ManagerApprovalBackend, SecurityPolicyShellHook};
+pub use gate::{ApprovalGate, GateDecision};
 pub use hub::ApprovalHub;
 
 use crate::config::AutonomyConfig;

@@ -1,4 +1,4 @@
-use super::traits::{Tool, ToolResult};
+use super::traits::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use regex::Regex;
 use serde_json::json;
@@ -204,7 +204,11 @@ impl Tool for WebSearchTool {
         })
     }
 
-    async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
+    async fn execute(
+        &self,
+        args: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> anyhow::Result<ToolResult> {
         let query = args
             .get("query")
             .and_then(|q| q.as_str())
@@ -310,21 +314,27 @@ mod tests {
     #[tokio::test]
     async fn test_execute_missing_query() {
         let tool = WebSearchTool::new("duckduckgo".to_string(), None, 5, 15);
-        let result = tool.execute(json!({})).await;
+        let result = tool
+            .execute(json!({}), &ToolExecutionContext::default())
+            .await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn test_execute_empty_query() {
         let tool = WebSearchTool::new("duckduckgo".to_string(), None, 5, 15);
-        let result = tool.execute(json!({"query": ""})).await;
+        let result = tool
+            .execute(json!({"query": ""}), &ToolExecutionContext::default())
+            .await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn test_execute_brave_without_api_key() {
         let tool = WebSearchTool::new("brave".to_string(), None, 5, 15);
-        let result = tool.execute(json!({"query": "test"})).await;
+        let result = tool
+            .execute(json!({"query": "test"}), &ToolExecutionContext::default())
+            .await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("API key"));
     }

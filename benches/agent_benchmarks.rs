@@ -20,7 +20,7 @@ use velaclaw::memory;
 use velaclaw::memory::{Memory, MemoryCategory};
 use velaclaw::observability::{NoopObserver, Observer};
 use velaclaw::providers::{ChatRequest, ChatResponse, Provider, ToolCall};
-use velaclaw::tools::{Tool, ToolResult};
+use velaclaw::tools::{Tool, ToolExecutionContext, ToolResult};
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -105,7 +105,11 @@ impl Tool for NoopTool {
     fn parameters_schema(&self) -> serde_json::Value {
         serde_json::json!({"type": "object"})
     }
-    async fn execute(&self, _args: serde_json::Value) -> Result<ToolResult> {
+    async fn execute(
+        &self,
+        _args: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> Result<ToolResult> {
         Ok(ToolResult {
             success: true,
             output: String::new(),

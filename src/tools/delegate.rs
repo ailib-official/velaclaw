@@ -574,7 +574,7 @@ mod tests {
         async fn execute(
             &self,
             args: serde_json::Value,
-            ctx: &ToolExecutionContext,
+            _ctx: &ToolExecutionContext,
         ) -> anyhow::Result<ToolResult> {
             let value = args
                 .get("value")

@@ -150,7 +150,7 @@ impl Tool for EchoTool {
     async fn execute(
         &self,
         args: serde_json::Value,
-        ctx: &ToolExecutionContext,
+        _ctx: &ToolExecutionContext,
     ) -> Result<ToolResult> {
         let msg = args
             .get("message")

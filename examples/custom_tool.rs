@@ -51,7 +51,7 @@ impl Tool for HttpGetTool {
         })
     }
 
-    async fn execute(&self, args: Value, ctx: &ToolExecutionContext) -> Result<ToolResult> {
+    async fn execute(&self, args: Value, _ctx: &ToolExecutionContext) -> Result<ToolResult> {
         let url = args["url"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Missing 'url' parameter"))?;

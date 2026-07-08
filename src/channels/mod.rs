@@ -3215,7 +3215,7 @@ mod tests {
     use crate::memory::{Memory, MemoryCategory, SqliteMemory};
     use crate::observability::NoopObserver;
     use crate::providers::{ChatMessage, Provider};
-    use crate::tools::{Tool, ToolExecutionContext, ToolResult};
+    use crate::tools::{Tool, ToolResult};
     use std::collections::{HashMap, HashSet};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
@@ -3775,7 +3775,7 @@ BTC is currently around $65,000 based on latest tool output."#
             })
         }
 
-        async fn execute(&self, args: serde_json::Value, ctx: &ToolExecutionContext) -> anyhow::Result<ToolResult> {
+        async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
             let symbol = args.get("symbol").and_then(serde_json::Value::as_str);
             if symbol != Some("BTC") {
                 return Ok(ToolResult {

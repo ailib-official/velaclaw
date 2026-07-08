@@ -17,7 +17,7 @@
 //! Safety always wins.
 
 use crate::config::{RobotConfig, SafetyConfig};
-use crate::traits::ToolResult;
+use crate::traits::{ToolExecutionContext, ToolResult};
 use anyhow::Result;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;

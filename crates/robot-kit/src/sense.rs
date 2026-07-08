@@ -4,7 +4,7 @@
 //! Supports multiple backends: direct GPIO, ROS2 topics, or mock.
 
 use crate::config::RobotConfig;
-use crate::traits::{Tool, ToolResult};
+use crate::traits::{Tool, ToolExecutionContext, ToolResult};
 use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::{json, Value};

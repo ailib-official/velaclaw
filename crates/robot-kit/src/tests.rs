@@ -8,7 +8,7 @@
 #[cfg(test)]
 mod unit_tests {
     use crate::config::RobotConfig;
-    use crate::traits::Tool;
+    use crate::traits::{Tool, ToolExecutionContext};
     use crate::{DriveTool, EmoteTool, ListenTool, LookTool, SenseTool, SpeakTool};
     use serde_json::json;
 
@@ -505,7 +505,7 @@ mod safety_tests {
 #[cfg(test)]
 mod integration_tests {
     use crate::config::RobotConfig;
-    use crate::traits::Tool;
+    use crate::traits::{Tool, ToolExecutionContext};
     use crate::{create_tools, DriveTool, SenseTool};
     use serde_json::json;
 

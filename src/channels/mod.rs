@@ -3778,7 +3778,7 @@ BTC is currently around $65,000 based on latest tool output."#
         async fn execute(
             &self,
             args: serde_json::Value,
-            ctx: &ToolExecutionContext,
+            _ctx: &ToolExecutionContext,
         ) -> anyhow::Result<ToolResult> {
             let symbol = args.get("symbol").and_then(serde_json::Value::as_str);
             if symbol != Some("BTC") {

@@ -65,7 +65,9 @@ Go to:
 |---|---|---|---|
 | `velaclaw` | VelaClaw internal HTTP clients | No | Normal runtime proxying without process-level side effects |
 | `services` | Only selected service keys/selectors | No | Fine-grained routing for specific providers/tools/channels |
-| `environment` | Runtime + process environment proxy variables | Yes | Integrations that require `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` |
+| `environment` | Runtime + process environment proxy variables | Yes | Integrations that require `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` — **includes LLM calls via ai-lib-rust** |
+
+> **LLM boundary:** `[proxy]` scope `velaclaw` / `services` does **not** configure `AiClient` HTTP transport. For BYOK model API calls, use scope `environment` + `apply_env`, or set `http_proxy` / `https_proxy` / `no_proxy` before starting VelaClaw. See [PROXY_CONFIG.md](./PROXY_CONFIG.md).
 
 ---
 

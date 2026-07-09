@@ -97,6 +97,38 @@ self_adjust:
     - channels.*.credentials
 ```
 
+**Version 2** adds optional `autonomy` and `approval` override blocks (merged over L1 `[autonomy]`). See [policy-approval-reference.md](policy-approval-reference.md).
+
+### L2.5 — `.velaclaw/policy-overrides.yaml` (workspace)
+
+Persistent operator/agent policy patches live under:
+
+```
+<workspace>/.velaclaw/policy-overrides.yaml
+```
+
+Created automatically when:
+
+- An operator chooses **Always** on a supervised tool prompt (appends to `approval.session_allowlist`).
+- The agent invokes the `policy_patch` tool with an allowed dot-path (`self_adjust` globs in L2).
+
+Merged **after** L2 `agent-policy.yaml` when computing effective autonomy/approval. Autonomy patches hot-reload via `PolicyHandle` without process restart.
+
+Example:
+
+```yaml
+version: 1
+approval:
+  session_allowlist:
+    - file_write
+autonomy:
+  allowed_commands:
+    - git
+    - cargo
+```
+
+See [policy-approval-reference.md](policy-approval-reference.md) and [migration-policy-v0.7.0.md](migration-policy-v0.7.0.md).
+
 ## `[cli_render]`
 
 Optional. When omitted, runtime uses the same defaults as an explicit section.
@@ -329,7 +361,8 @@ Notes:
 Notes:
 
 - **Recommended default for new installs**: keep `level = "supervised"` and `workspace_only = true`. Use `full` only when operators accept broader shell/filesystem scope.
-- **Two approval layers**: `[autonomy]` enforces path/command guardrails (`allowed_commands`, `forbidden_paths`, `workspace_only`); tool-level `ApprovalManager` gates medium/high-risk operations when `level = "supervised"`. A command can fail on guardrails even when `level = "full"`.
+- **Two approval layers**: `[autonomy]` enforces path/command guardrails (`allowed_commands`, `forbidden_paths`, `workspace_only`); `ApprovalGate` gates medium/high-risk tool operations when `level = "supervised"`. A command can fail on guardrails even when `level = "full"`.
+- **Unified gate**: shell tools no longer accept model-supplied `approved`; human consent is injected only after CLI/Gateway/Channel approval. See [policy-approval-reference.md](policy-approval-reference.md).
 - **Shell allowlist**: commands not listed in `allowed_commands` are rejected before execution; CLI sessions cannot override the allowlist interactively—add the executable name to config instead.
 - `level = "full"` skips medium-risk approval gating for shell execution, while still enforcing configured guardrails.
 - Shell separator/operator parsing is quote-aware. Characters like `;` inside quoted arguments are treated as literals, not command separators.

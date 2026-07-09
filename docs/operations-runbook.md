@@ -126,3 +126,5 @@ If a rollout regresses behavior:
 - [troubleshooting.md](troubleshooting.md)
 - [config-reference.md](config-reference.md)
 - [commands-reference.md](commands-reference.md)
+- [policy-approval-reference.md](policy-approval-reference.md)
+- [migration-policy-v0.7.0.md](migration-policy-v0.7.0.md)

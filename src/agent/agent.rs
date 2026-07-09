@@ -719,8 +719,8 @@ pub async fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::security::SecurityPolicy;
     use crate::agent::dispatcher::{NativeToolDispatcher, XmlToolDispatcher};
+    use crate::security::SecurityPolicy;
     use async_trait::async_trait;
     use parking_lot::Mutex;
 

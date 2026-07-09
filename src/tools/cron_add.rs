@@ -258,10 +258,10 @@ impl Tool for CronAddTool {
 
 #[cfg(test)]
 mod tests {
-    use crate::security::SecurityPolicy;
     use super::*;
     use crate::config::Config;
     use crate::security::AutonomyLevel;
+    use crate::security::SecurityPolicy;
     use tempfile::TempDir;
 
     async fn test_config(tmp: &TempDir) -> Arc<Config> {

@@ -219,9 +219,9 @@ impl Tool for PushoverTool {
 
 #[cfg(test)]
 mod tests {
-    use crate::security::SecurityPolicy;
     use super::*;
     use crate::security::AutonomyLevel;
+    use crate::security::SecurityPolicy;
     use std::fs;
     use tempfile::TempDir;
 

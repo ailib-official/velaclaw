@@ -2094,8 +2094,8 @@ fn host_matches_allowlist(host: &str, allowed: &[String]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::security::SecurityPolicy;
     use super::*;
+    use crate::security::SecurityPolicy;
 
     #[test]
     fn normalize_domains_works() {

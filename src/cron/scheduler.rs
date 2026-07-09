@@ -97,18 +97,13 @@ async fn process_due_jobs(
     crate::health::mark_component_ok(component);
 
     let max_concurrent = config.scheduler.max_concurrent.max(1);
-    let mut in_flight =
-        stream::iter(
-            jobs.into_iter().map(|job| {
-                let config = config.clone();
-                let policy = security.snapshot();
-                let component = component.to_owned();
-                async move {
-                    execute_and_persist_job(&config, &policy, &job, &component).await
-                }
-            }),
-        )
-        .buffer_unordered(max_concurrent);
+    let mut in_flight = stream::iter(jobs.into_iter().map(|job| {
+        let config = config.clone();
+        let policy = security.snapshot();
+        let component = component.to_owned();
+        async move { execute_and_persist_job(&config, &policy, &job, &component).await }
+    }))
+    .buffer_unordered(max_concurrent);
 
     while let Some((job_id, success)) = in_flight.next().await {
         if !success {

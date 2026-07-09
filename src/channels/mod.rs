@@ -3280,11 +3280,11 @@ pub async fn start_channels(config: Config) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::security::SecurityPolicy;
     use super::*;
     use crate::memory::{Memory, MemoryCategory, SqliteMemory};
     use crate::observability::NoopObserver;
     use crate::providers::{ChatMessage, Provider};
+    use crate::security::SecurityPolicy;
     use crate::tools::{Tool, ToolExecutionContext, ToolResult};
     use std::collections::{HashMap, HashSet};
     use std::sync::atomic::{AtomicUsize, Ordering};

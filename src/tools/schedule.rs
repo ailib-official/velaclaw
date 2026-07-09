@@ -393,9 +393,9 @@ impl ScheduleTool {
 
 #[cfg(test)]
 mod tests {
-    use crate::security::SecurityPolicy;
     use super::*;
     use crate::security::AutonomyLevel;
+    use crate::security::SecurityPolicy;
     use tempfile::TempDir;
 
     async fn test_setup() -> (TempDir, Config, PolicyHandle) {

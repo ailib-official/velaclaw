@@ -37,6 +37,28 @@ cli = true
 
 Each channel is enabled by creating its sub-table (for example, `[channels_config.telegram]`).
 
+## Supervised tool approval (channel profile)
+
+When `[autonomy].level = "supervised"`, messaging channels use `ApprovalGate` with a channel-specific profile:
+
+| `approval_mode` | Behavior |
+|---|---|
+| `inline` (default) | In-channel prompt (inline keyboard / Y-N-A). Waits up to `approval_timeout_secs` (default 300). |
+| `deny` | Deny tool calls that require interactive human approval. |
+| `gateway_redirect` | Reserved — defer to gateway Web UI (not all channels wired). |
+
+Example (Telegram):
+
+```toml
+[channels_config.telegram]
+bot_token = "..."
+allowed_users = ["velaclaw_user"]
+approval_mode = "inline"
+approval_timeout_secs = 300
+```
+
+Full matrix (CLI / Gateway / Channel): [policy-approval-reference.md](policy-approval-reference.md).
+
 ## In-Chat Runtime Model Switching (Telegram / Discord)
 
 When running `velaclaw channel start` (or daemon mode), Telegram and Discord now support sender-scoped runtime switching:

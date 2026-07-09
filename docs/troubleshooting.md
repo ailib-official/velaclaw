@@ -226,6 +226,40 @@ curl -fsSL https://raw.githubusercontent.com/velaclaw-labs/velaclaw/main/scripts
 
 `install.sh` is a compatibility entry and forwards/falls back to bootstrap behavior.
 
+## Policy / approval (0.7.0+)
+
+### Supervised tools denied on channels
+
+Symptoms:
+
+- Agent replies with denial when requesting `shell` or other gated tools on Telegram/Discord
+- Works in CLI but not in channel
+
+Checks:
+
+1. `[autonomy].level` — `supervised` requires human approval.
+2. Channel `approval_mode` — `deny` blocks interactive approval; use `inline` for in-chat prompts.
+3. `approval_timeout_secs` — expired prompts deny the call.
+4. Operator responded in time and used Y/N/A (not plain chat).
+
+See [policy-approval-reference.md](policy-approval-reference.md).
+
+### Shell fails after upgrade (no `approved` parameter)
+
+Symptoms:
+
+- Model attempts `shell` with `approved: true` but execution still denied
+
+Fix:
+
+- Remove system prompts that tell the model to self-approve.
+- Approve via CLI stdin, gateway Web UI, or channel inline prompt.
+- See [migration-policy-v0.7.0.md](migration-policy-v0.7.0.md).
+
+### Session allowlist lost after restart (pre-0.7)
+
+On **0.7.0+**, **Always** decisions persist to `<workspace>/.velaclaw/policy-overrides.yaml`. Verify the file exists and `[security.audit]` / workspace path is correct.
+
 ## Still Stuck?
 
 Collect and include these outputs when filing an issue:

@@ -115,6 +115,9 @@ cron = "0.17"
 dialoguer = { version = "0.12", features = ["fuzzy-select"] }
 console = "0.16"
 
+# Terminal rendering — CJK width + Markdown → ANSI (`src/cli_render`)
+unicode-width = "0.2"
+
 # Hardware discovery (device path globbing)
 glob = "0.3"
 

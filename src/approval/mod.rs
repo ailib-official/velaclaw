@@ -9,7 +9,8 @@ mod gate;
 mod hub;
 
 pub use backend::{
-    ChannelApprovalSession, ManagerApprovalBackend, PolicyHandleShellHook, SecurityPolicyShellHook,
+    ChannelApprovalSession, DenyApprovalBackend, ManagerApprovalBackend, PolicyHandleShellHook,
+    SecurityPolicyShellHook,
 };
 pub use channel_hub::ChannelApprovalHub;
 pub use gate::{ApprovalGate, GateDecision};

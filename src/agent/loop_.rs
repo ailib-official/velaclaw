@@ -1,4 +1,4 @@
-use crate::approval::{ApprovalGate, ApprovalManager, ChannelApprovalSession, GateDecision};
+use crate::approval::{ApprovalManager, ChannelApprovalSession};
 use crate::cli_render::{RenderOpts, RenderStyle};
 use crate::config::Config;
 #[cfg(not(feature = "ai-protocol"))]
@@ -11,10 +11,11 @@ use crate::providers::{
 };
 use crate::runtime;
 use crate::security::PolicyHandle;
-use crate::tools::{self, Tool, ToolExecutionContext};
+use crate::agent::tool_batch::{self, ParsedToolCall};
+use crate::tools::{self, Tool};
 use crate::util::truncate_with_ellipsis;
 use anyhow::{Context, Result};
-use regex::{Regex, RegexSet};
+use regex::Regex;
 use std::collections::HashMap;
 use std::fmt::Write;
 use std::io::Write as _;
@@ -72,62 +73,6 @@ const DEFAULT_MAX_TOOL_ITERATIONS: usize = 10;
 /// Minimum user-message length (in chars) for auto-save to memory.
 /// Matches the channel-side constant in `channels/mod.rs`.
 const AUTOSAVE_MIN_MESSAGE_CHARS: usize = 20;
-
-static SENSITIVE_KEY_PATTERNS: LazyLock<RegexSet> = LazyLock::new(|| {
-    RegexSet::new([
-        r"(?i)token",
-        r"(?i)api[_-]?key",
-        r"(?i)password",
-        r"(?i)secret",
-        r"(?i)user[_-]?key",
-        r"(?i)bearer",
-        r"(?i)credential",
-    ])
-    .unwrap()
-});
-
-static SENSITIVE_KV_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?i)(token|api[_-]?key|password|secret|user[_-]?key|bearer|credential)["']?\s*[:=]\s*(?:"([^"]{8,})"|'([^']{8,})'|([a-zA-Z0-9_\-\.]{8,}))"#).unwrap()
-});
-
-/// Scrub credentials from tool output to prevent accidental exfiltration.
-/// Replaces known credential patterns with a redacted placeholder while preserving
-/// a small prefix for context.
-fn scrub_credentials(input: &str) -> String {
-    SENSITIVE_KV_REGEX
-        .replace_all(input, |caps: &regex::Captures| {
-            let full_match = &caps[0];
-            let key = &caps[1];
-            let val = caps
-                .get(2)
-                .or(caps.get(3))
-                .or(caps.get(4))
-                .map(|m| m.as_str())
-                .unwrap_or("");
-
-            // Preserve first 4 chars for context, then redact
-            let prefix = if val.len() > 4 { &val[..4] } else { "" };
-
-            if full_match.contains(':') {
-                if full_match.contains('"') {
-                    format!("\"{}\": \"{}*[REDACTED]\"", key, prefix)
-                } else {
-                    format!("{}: {}*[REDACTED]", key, prefix)
-                }
-            } else if full_match.contains('=') {
-                if full_match.contains('"') {
-                    format!("{}=\"{}*[REDACTED]\"", key, prefix)
-                } else {
-                    format!("{}={}*[REDACTED]", key, prefix)
-                }
-            } else {
-                format!("{}: {}*[REDACTED]", key, prefix)
-            }
-        })
-        .to_string()
-}
-
-/// Default trigger for auto-compaction when non-system message count exceeds this threshold.
 /// Prefer passing the config-driven value via `run_tool_call_loop`; this constant is only
 /// used when callers omit the parameter.
 const DEFAULT_MAX_HISTORY_MESSAGES: usize = 50;
@@ -328,11 +273,6 @@ fn build_hardware_context(
     }
     context.push('\n');
     context
-}
-
-/// Find a tool by name in the registry.
-fn find_tool<'a>(tools: &'a [Box<dyn Tool>], name: &str) -> Option<&'a dyn Tool> {
-    tools.iter().find(|t| t.name() == name).map(|t| t.as_ref())
 }
 
 fn parse_arguments_value(raw: Option<&serde_json::Value>) -> serde_json::Value {
@@ -1077,12 +1017,6 @@ fn build_assistant_history_with_tool_calls(text: &str, tool_calls: &[ToolCall]) 
 }
 
 #[derive(Debug)]
-struct ParsedToolCall {
-    name: String,
-    arguments: serde_json::Value,
-}
-
-#[derive(Debug)]
 pub(crate) struct ToolLoopCancelled;
 
 impl std::fmt::Display for ToolLoopCancelled {
@@ -1143,184 +1077,6 @@ pub(crate) async fn agent_turn(
         None,
     )
     .await
-}
-
-/// Map common DSML / model parameter aliases to tool schema keys.
-fn normalize_tool_arguments(tool_name: &str, mut args: serde_json::Value) -> serde_json::Value {
-    let Some(obj) = args.as_object_mut() else {
-        return args;
-    };
-    match tool_name {
-        "file_read" | "file_write" if !obj.contains_key("path") => {
-            if let Some(path) = obj.remove("file_path") {
-                obj.insert("path".to_string(), path);
-            }
-        }
-        "shell" if !obj.contains_key("command") => {
-            if let Some(cmd) = obj.remove("cmd") {
-                obj.insert("command".to_string(), cmd);
-            }
-        }
-        _ => {}
-    }
-    args
-}
-
-async fn execute_one_tool(
-    call_name: &str,
-    call_arguments: serde_json::Value,
-    tools_registry: &[Box<dyn Tool>],
-    observer: &dyn Observer,
-    cancellation_token: Option<&CancellationToken>,
-    ctx: &ToolExecutionContext,
-) -> Result<String> {
-    let call_arguments = normalize_tool_arguments(call_name, call_arguments);
-    let Some(tool) = find_tool(tools_registry, call_name) else {
-        return Ok(format!("Unknown tool: {call_name}"));
-    };
-
-    observer.record_event(&ObserverEvent::ToolCallStart {
-        tool: call_name.to_string(),
-    });
-    let start = Instant::now();
-
-    let tool_future = tool.execute(call_arguments, ctx);
-    let tool_result = if let Some(token) = cancellation_token {
-        tokio::select! {
-            () = token.cancelled() => return Err(ToolLoopCancelled.into()),
-            result = tool_future => result,
-        }
-    } else {
-        tool_future.await
-    };
-
-    match tool_result {
-        Ok(r) => {
-            observer.record_event(&ObserverEvent::ToolCall {
-                tool: call_name.to_string(),
-                duration: start.elapsed(),
-                success: r.success,
-            });
-            if r.success {
-                Ok(scrub_credentials(&r.output))
-            } else {
-                Ok(format!("Error: {}", r.error.unwrap_or_else(|| r.output)))
-            }
-        }
-        Err(e) => {
-            observer.record_event(&ObserverEvent::ToolCall {
-                tool: call_name.to_string(),
-                duration: start.elapsed(),
-                success: false,
-            });
-            Ok(format!("Error executing {call_name}: {e}"))
-        }
-    }
-}
-
-fn should_execute_tools_in_parallel(
-    tool_calls: &[ParsedToolCall],
-    approval: Option<&ApprovalManager>,
-) -> bool {
-    if tool_calls.len() <= 1 {
-        return false;
-    }
-
-    if let Some(mgr) = approval {
-        if tool_calls.iter().any(|call| mgr.needs_approval(&call.name)) {
-            // Approval-gated calls must keep sequential handling so the caller can
-            // enforce CLI prompt/deny policy consistently.
-            return false;
-        }
-    }
-
-    true
-}
-
-async fn execute_tools_parallel(
-    tool_calls: &[ParsedToolCall],
-    tools_registry: &[Box<dyn Tool>],
-    observer: &dyn Observer,
-    cancellation_token: Option<&CancellationToken>,
-) -> Result<Vec<String>> {
-    let ctx_default = ToolExecutionContext::default();
-    let futures: Vec<_> = tool_calls
-        .iter()
-        .map(|call| {
-            execute_one_tool(
-                &call.name,
-                call.arguments.clone(),
-                tools_registry,
-                observer,
-                cancellation_token,
-                &ctx_default,
-            )
-        })
-        .collect();
-
-    let results = futures_util::future::join_all(futures).await;
-    results.into_iter().collect()
-}
-
-async fn execute_tools_sequential(
-    tool_calls: &[ParsedToolCall],
-    tools_registry: &[Box<dyn Tool>],
-    observer: &dyn Observer,
-    approval: Option<&ApprovalManager>,
-    security: Option<&PolicyHandle>,
-    channel_name: &str,
-    channel_approval: Option<ChannelApprovalSession>,
-    cancellation_token: Option<&CancellationToken>,
-) -> Result<Vec<String>> {
-    let mut individual_results: Vec<String> = Vec::with_capacity(tool_calls.len());
-    let gate = approval.map(|mgr| {
-        let mut gate = ApprovalGate::new(mgr, channel_name, security.cloned());
-        if let Some(session) = channel_approval {
-            gate = gate.with_channel_session(session);
-        }
-        gate
-    });
-
-    for call in tool_calls {
-        let args = normalize_tool_arguments(&call.name, call.arguments.clone());
-
-        let (shell_human_approved, proceed) = if let Some(gate) = &gate {
-            let gate_call = crate::agent::dispatcher::ParsedToolCall {
-                name: call.name.clone(),
-                arguments: call.arguments.clone(),
-                tool_call_id: None,
-            };
-            match gate.decide_async(&gate_call).await {
-                GateDecision::Denied { message } => {
-                    individual_results.push(message);
-                    (false, false)
-                }
-                GateDecision::Proceed {
-                    shell_human_approved,
-                } => (shell_human_approved, true),
-            }
-        } else {
-            (false, true)
-        };
-
-        if !proceed {
-            continue;
-        }
-
-        let ctx = ToolExecutionContext::with_shell_human_approved(shell_human_approved);
-        let result = execute_one_tool(
-            &call.name,
-            args,
-            tools_registry,
-            observer,
-            cancellation_token,
-            &ctx,
-        )
-        .await?;
-        individual_results.push(result);
-    }
-
-    Ok(individual_results)
 }
 
 // ── Agent Tool-Call Loop ──────────────────────────────────────────────────
@@ -1613,28 +1369,21 @@ pub(crate) async fn run_tool_call_loop(
         // When multiple tool calls are present and interactive CLI approval is not needed, run
         // tool executions concurrently for lower wall-clock latency.
         let mut tool_results = String::new();
-        let should_parallel = should_execute_tools_in_parallel(&tool_calls, approval);
-        let individual_results = if should_parallel {
-            execute_tools_parallel(
-                &tool_calls,
-                tools_registry,
-                observer,
-                cancellation_token.as_ref(),
-            )
-            .await?
-        } else {
-            execute_tools_sequential(
-                &tool_calls,
-                tools_registry,
-                observer,
-                approval,
-                security,
-                channel_name,
-                channel_approval.clone(),
-                cancellation_token.as_ref(),
-            )
-            .await?
-        };
+        let batch_results = tool_batch::execute_tool_batch(
+            &tool_calls,
+            tools_registry,
+            observer,
+            approval,
+            security,
+            channel_name,
+            channel_approval.clone(),
+            cancellation_token.as_ref(),
+        )
+        .await?;
+        let individual_results: Vec<String> = batch_results
+            .into_iter()
+            .map(|r| r.output)
+            .collect();
 
         for (call, result) in tool_calls.iter().zip(individual_results.iter()) {
             let _ = writeln!(
@@ -2586,7 +2335,7 @@ mod tests {
     #[test]
     fn test_scrub_credentials() {
         let input = "API_KEY=sk-1234567890abcdef; token: 1234567890; password=\"secret123456\"";
-        let scrubbed = scrub_credentials(input);
+        let scrubbed = tool_batch::scrub_credentials(input);
         assert!(scrubbed.contains("API_KEY=sk-1*[REDACTED]"));
         assert!(scrubbed.contains("token: 1234*[REDACTED]"));
         assert!(scrubbed.contains("password=\"secr*[REDACTED]\""));
@@ -2597,7 +2346,7 @@ mod tests {
     #[test]
     fn test_scrub_credentials_json() {
         let input = r#"{"api_key": "sk-1234567890", "other": "public"}"#;
-        let scrubbed = scrub_credentials(input);
+        let scrubbed = tool_batch::scrub_credentials(input);
         assert!(scrubbed.contains("\"api_key\": \"sk-1*[REDACTED]\""));
         assert!(scrubbed.contains("public"));
     }
@@ -2952,11 +2701,13 @@ mod tests {
             arguments: serde_json::json!({"path": "a.txt"}),
         }];
 
-        assert!(!should_execute_tools_in_parallel(&calls, None));
+        assert!(!tool_batch::should_execute_tools_in_parallel(&calls, None));
     }
 
     #[test]
     fn should_execute_tools_in_parallel_returns_false_when_approval_is_required() {
+        use crate::approval::ApprovalGate;
+
         let calls = vec![
             ParsedToolCall {
                 name: "shell".to_string(),
@@ -2969,15 +2720,18 @@ mod tests {
         ];
         let approval_cfg = crate::config::AutonomyConfig::default();
         let approval_mgr = ApprovalManager::from_config(&approval_cfg);
+        let gate = ApprovalGate::new(&approval_mgr, "cli", None);
 
-        assert!(!should_execute_tools_in_parallel(
+        assert!(!tool_batch::should_execute_tools_in_parallel(
             &calls,
-            Some(&approval_mgr)
+            Some(&gate)
         ));
     }
 
     #[test]
     fn should_execute_tools_in_parallel_returns_true_when_cli_has_no_interactive_approvals() {
+        use crate::approval::ApprovalGate;
+
         let calls = vec![
             ParsedToolCall {
                 name: "shell".to_string(),
@@ -2993,10 +2747,11 @@ mod tests {
             ..crate::config::AutonomyConfig::default()
         };
         let approval_mgr = ApprovalManager::from_config(&approval_cfg);
+        let gate = ApprovalGate::new(&approval_mgr, "cli", None);
 
-        assert!(should_execute_tools_in_parallel(
+        assert!(tool_batch::should_execute_tools_in_parallel(
             &calls,
-            Some(&approval_mgr)
+            Some(&gate)
         ));
     }
 
@@ -4094,14 +3849,14 @@ Let me check the result."#;
 
     #[test]
     fn scrub_credentials_empty_input() {
-        let result = scrub_credentials("");
+        let result = tool_batch::scrub_credentials("");
         assert_eq!(result, "");
     }
 
     #[test]
     fn scrub_credentials_no_sensitive_data() {
         let input = "normal text without any secrets";
-        let result = scrub_credentials(input);
+        let result = tool_batch::scrub_credentials(input);
         assert_eq!(
             result, input,
             "non-sensitive text should pass through unchanged"
@@ -4112,7 +3867,7 @@ Let me check the result."#;
     fn scrub_credentials_short_values_not_redacted() {
         // Values shorter than 8 chars should not be redacted
         let input = r#"api_key="short""#;
-        let result = scrub_credentials(input);
+        let result = tool_batch::scrub_credentials(input);
         assert_eq!(result, input, "short values should not be redacted");
     }
 

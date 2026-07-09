@@ -152,6 +152,36 @@ impl HumanApprovalBackend for ManagerApprovalBackend<'_> {
     }
 }
 
+/// Backend that denies all interactive tool/shell approval (channel Deny profile).
+pub struct DenyApprovalBackend;
+
+#[async_trait]
+impl HumanApprovalBackend for DenyApprovalBackend {
+    fn needs_tool_approval(&self, _tool_name: &str) -> bool {
+        true
+    }
+
+    fn approve_tool_sync(&self, _tool_name: &str, _arguments: &serde_json::Value) -> bool {
+        false
+    }
+
+    async fn approve_tool_async(
+        &self,
+        _tool_name: &str,
+        _arguments: &serde_json::Value,
+    ) -> bool {
+        false
+    }
+
+    fn interactive_shell_approval(&self) -> bool {
+        false
+    }
+
+    fn approve_shell_command_sync(&self, _command: &str) -> bool {
+        false
+    }
+}
+
 /// [`PolicyHandle`] as runtime shell hook with live policy reads (VL-SEC-005).
 pub struct PolicyHandleShellHook(pub crate::security::PolicyHandle);
 

@@ -35,6 +35,13 @@ impl RenderStyle {
             markdown: false,
         }
     }
+
+    /// Render a Markdown string with this style and return a ready-to-print `String`.
+    /// 一次调用即形成可输出字符串，避免 caller 同时调顶层 `render` 与参数构造。
+    #[must_use]
+    pub fn render(self, input: &str) -> String {
+        render(input, self)
+    }
 }
 
 /// Convert a piece of Markdown into a terminal-friendly string.

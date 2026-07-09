@@ -3,6 +3,8 @@ use async_trait::async_trait;
 use tokio::io::{self, AsyncBufReadExt, BufReader};
 use uuid::Uuid;
 
+use crate::cli_render::{render, RenderStyle};
+
 /// CLI channel — stdin/stdout, always available, zero deps
 pub struct CliChannel;
 
@@ -19,7 +21,8 @@ impl Channel for CliChannel {
     }
 
     async fn send(&self, message: &SendMessage) -> anyhow::Result<()> {
-        println!("{}", message.content);
+        let rendered = render(&message.content, RenderStyle::auto_markdown());
+        println!("{rendered}");
         Ok(())
     }
 

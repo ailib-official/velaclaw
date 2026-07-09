@@ -1,3 +1,4 @@
+use crate::agent::tool_batch::{self, ParsedToolCall};
 use crate::approval::{ApprovalManager, ChannelApprovalSession};
 use crate::cli_render::{RenderOpts, RenderStyle};
 use crate::config::Config;
@@ -11,7 +12,6 @@ use crate::providers::{
 };
 use crate::runtime;
 use crate::security::PolicyHandle;
-use crate::agent::tool_batch::{self, ParsedToolCall};
 use crate::tools::{self, Tool};
 use crate::util::truncate_with_ellipsis;
 use anyhow::{Context, Result};
@@ -1380,10 +1380,7 @@ pub(crate) async fn run_tool_call_loop(
             cancellation_token.as_ref(),
         )
         .await?;
-        let individual_results: Vec<String> = batch_results
-            .into_iter()
-            .map(|r| r.output)
-            .collect();
+        let individual_results: Vec<String> = batch_results.into_iter().map(|r| r.output).collect();
 
         for (call, result) in tool_calls.iter().zip(individual_results.iter()) {
             let _ = writeln!(

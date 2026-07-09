@@ -2,9 +2,7 @@
 //! 统一工具批执行：批准门 + 并行/串行调度。
 
 use crate::agent::dispatcher::ParsedToolCall as GateToolCall;
-use crate::approval::{
-    ApprovalGate, ApprovalManager, ChannelApprovalSession, GateDecision,
-};
+use crate::approval::{ApprovalGate, ApprovalManager, ChannelApprovalSession, GateDecision};
 use crate::observability::{Observer, ObserverEvent};
 use crate::security::PolicyHandle;
 use crate::tools::{Tool, ToolExecutionContext};
@@ -88,7 +86,10 @@ fn find_tool<'a>(tools: &'a [Box<dyn Tool>], name: &str) -> Option<&'a dyn Tool>
 }
 
 /// Map common DSML / model parameter aliases to tool schema keys.
-pub(crate) fn normalize_tool_arguments(tool_name: &str, mut args: serde_json::Value) -> serde_json::Value {
+pub(crate) fn normalize_tool_arguments(
+    tool_name: &str,
+    mut args: serde_json::Value,
+) -> serde_json::Value {
     let Some(obj) = args.as_object_mut() else {
         return args;
     };
@@ -187,7 +188,10 @@ pub(crate) fn should_execute_tools_in_parallel(
     }
 
     if let Some(gate) = gate {
-        if tool_calls.iter().any(|call| gate.needs_approval(&call.name)) {
+        if tool_calls
+            .iter()
+            .any(|call| gate.needs_approval(&call.name))
+        {
             return false;
         }
     }
@@ -322,13 +326,8 @@ pub(crate) async fn execute_tool_batch(
     let should_parallel = should_execute_tools_in_parallel(tool_calls, gate_ref);
 
     if should_parallel {
-        return execute_tools_parallel(
-            tool_calls,
-            tools_registry,
-            observer,
-            cancellation_token,
-        )
-        .await;
+        return execute_tools_parallel(tool_calls, tools_registry, observer, cancellation_token)
+            .await;
     }
 
     if let Some(gate) = gate_ref {
@@ -341,13 +340,8 @@ pub(crate) async fn execute_tool_batch(
         )
         .await
     } else {
-        execute_tools_sequential_no_gate(
-            tool_calls,
-            tools_registry,
-            observer,
-            cancellation_token,
-        )
-        .await
+        execute_tools_sequential_no_gate(tool_calls, tools_registry, observer, cancellation_token)
+            .await
     }
 }
 
@@ -382,10 +376,7 @@ mod tests {
         let approval_mgr = ApprovalManager::from_config(&approval_cfg);
         let gate = ApprovalGate::new(&approval_mgr, "cli", None);
 
-        assert!(!should_execute_tools_in_parallel(
-            &calls,
-            Some(&gate)
-        ));
+        assert!(!should_execute_tools_in_parallel(&calls, Some(&gate)));
     }
 
     #[test]

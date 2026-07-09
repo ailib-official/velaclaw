@@ -165,11 +165,7 @@ impl HumanApprovalBackend for DenyApprovalBackend {
         false
     }
 
-    async fn approve_tool_async(
-        &self,
-        _tool_name: &str,
-        _arguments: &serde_json::Value,
-    ) -> bool {
+    async fn approve_tool_async(&self, _tool_name: &str, _arguments: &serde_json::Value) -> bool {
         false
     }
 

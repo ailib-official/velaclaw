@@ -472,9 +472,11 @@ impl Agent {
         };
 
         let ctx = ToolExecutionContext::with_shell_human_approved(shell_human_approved);
+        let mut success = false;
         let result = if let Some(tool) = self.tools.iter().find(|t| t.name() == call.name) {
             match tool.execute(call.arguments.clone(), &ctx).await {
                 Ok(r) => {
+                    success = r.success;
                     self.observer.record_event(&ObserverEvent::ToolCall {
                         tool: call.name.clone(),
                         duration: start.elapsed(),
@@ -502,7 +504,7 @@ impl Agent {
         ToolExecutionResult {
             name: call.name.clone(),
             output: result,
-            success: true,
+            success,
             tool_call_id: call.tool_call_id.clone(),
         }
     }

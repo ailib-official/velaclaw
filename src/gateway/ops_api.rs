@@ -9,7 +9,7 @@ use crate::cron::{
 };
 use crate::providers::{self, ChatMessage, ChatRequest};
 use crate::runtime;
-use crate::security::SecurityPolicy;
+use crate::security::PolicyHandle;
 use crate::tools;
 use axum::extract::{ConnectInfo, Path, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -206,7 +206,7 @@ pub async fn handle_list_tools(
         return e.into_response();
     }
     let config = state.config.lock().clone();
-    let security = match SecurityPolicy::from_workspace_config(&config) {
+    let security = match PolicyHandle::from_workspace_config(&config) {
         Ok(policy) => Arc::new(policy),
         Err(e) => {
             return api_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response();

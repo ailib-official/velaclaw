@@ -1,7 +1,7 @@
 use super::traits::{Tool, ToolExecutionContext, ToolResult};
 use crate::memory::Memory;
 use crate::security::policy::ToolOperation;
-use crate::security::SecurityPolicy;
+use crate::security::PolicyHandle;
 use async_trait::async_trait;
 use serde_json::json;
 use std::sync::Arc;
@@ -9,11 +9,11 @@ use std::sync::Arc;
 /// Let the agent forget/delete a memory entry
 pub struct MemoryForgetTool {
     memory: Arc<dyn Memory>,
-    security: Arc<SecurityPolicy>,
+    security: PolicyHandle,
 }
 
 impl MemoryForgetTool {
-    pub fn new(memory: Arc<dyn Memory>, security: Arc<SecurityPolicy>) -> Self {
+    pub fn new(memory: Arc<dyn Memory>, security: PolicyHandle) -> Self {
         Self { memory, security }
     }
 }
@@ -86,11 +86,11 @@ impl Tool for MemoryForgetTool {
 mod tests {
     use super::*;
     use crate::memory::{MemoryCategory, SqliteMemory};
-    use crate::security::{AutonomyLevel, SecurityPolicy};
+    use crate::security::{AutonomyLevel, PolicyHandle, SecurityPolicy};
     use tempfile::TempDir;
 
-    fn test_security() -> Arc<SecurityPolicy> {
-        Arc::new(SecurityPolicy::default())
+    fn test_security() -> PolicyHandle {
+        PolicyHandle::new(SecurityPolicy::default())
     }
 
     fn test_mem() -> (TempDir, Arc<dyn Memory>) {
@@ -153,7 +153,7 @@ mod tests {
         mem.store("temp", "temporary", MemoryCategory::Conversation, None)
             .await
             .unwrap();
-        let readonly = Arc::new(SecurityPolicy {
+        let readonly = PolicyHandle::new(SecurityPolicy {
             autonomy: AutonomyLevel::ReadOnly,
             ..SecurityPolicy::default()
         });
@@ -177,7 +177,7 @@ mod tests {
         mem.store("temp", "temporary", MemoryCategory::Conversation, None)
             .await
             .unwrap();
-        let limited = Arc::new(SecurityPolicy {
+        let limited = PolicyHandle::new(SecurityPolicy {
             max_actions_per_hour: 0,
             ..SecurityPolicy::default()
         });

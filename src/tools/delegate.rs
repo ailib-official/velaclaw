@@ -5,7 +5,7 @@ use crate::config::DelegateAgentConfig;
 use crate::observability::traits::{Observer, ObserverEvent, ObserverMetric};
 use crate::providers::{self, ChatMessage, Provider};
 use crate::security::policy::ToolOperation;
-use crate::security::SecurityPolicy;
+use crate::security::PolicyHandle;
 use async_trait::async_trait;
 use serde_json::json;
 use std::collections::HashMap;
@@ -23,7 +23,7 @@ const DELEGATE_AGENTIC_TIMEOUT_SECS: u64 = 300;
 /// summarization) to purpose-built sub-agents.
 pub struct DelegateTool {
     agents: Arc<HashMap<String, DelegateAgentConfig>>,
-    security: Arc<SecurityPolicy>,
+    security: PolicyHandle,
     /// Global credential fallback (from config.api_key)
     fallback_credential: Option<String>,
     /// Provider runtime options inherited from root config.
@@ -40,7 +40,7 @@ impl DelegateTool {
     pub fn new(
         agents: HashMap<String, DelegateAgentConfig>,
         fallback_credential: Option<String>,
-        security: Arc<SecurityPolicy>,
+        security: PolicyHandle,
     ) -> Self {
         Self::new_with_options(
             agents,
@@ -53,7 +53,7 @@ impl DelegateTool {
     pub fn new_with_options(
         agents: HashMap<String, DelegateAgentConfig>,
         fallback_credential: Option<String>,
-        security: Arc<SecurityPolicy>,
+        security: PolicyHandle,
         provider_runtime_options: providers::ProviderRuntimeOptions,
     ) -> Self {
         Self {
@@ -73,7 +73,7 @@ impl DelegateTool {
     pub fn with_depth(
         agents: HashMap<String, DelegateAgentConfig>,
         fallback_credential: Option<String>,
-        security: Arc<SecurityPolicy>,
+        security: PolicyHandle,
         depth: u32,
     ) -> Self {
         Self::with_depth_and_options(
@@ -88,7 +88,7 @@ impl DelegateTool {
     pub fn with_depth_and_options(
         agents: HashMap<String, DelegateAgentConfig>,
         fallback_credential: Option<String>,
-        security: Arc<SecurityPolicy>,
+        security: PolicyHandle,
         depth: u32,
         provider_runtime_options: providers::ProviderRuntimeOptions,
     ) -> Self {
@@ -519,11 +519,11 @@ mod tests {
     use super::*;
     use crate::config::DEFAULT_PROTOCOL_MODEL_ID;
     use crate::providers::{ChatRequest, ChatResponse, ToolCall};
-    use crate::security::{AutonomyLevel, SecurityPolicy};
+    use crate::security::{AutonomyLevel, PolicyHandle, SecurityPolicy};
     use anyhow::anyhow;
 
-    fn test_security() -> Arc<SecurityPolicy> {
-        Arc::new(SecurityPolicy::default())
+    fn test_security() -> PolicyHandle {
+        PolicyHandle::new(SecurityPolicy::default())
     }
 
     fn sample_agents() -> HashMap<String, DelegateAgentConfig> {
@@ -897,7 +897,7 @@ mod tests {
 
     #[tokio::test]
     async fn delegation_blocked_in_readonly_mode() {
-        let readonly = Arc::new(SecurityPolicy {
+        let readonly = PolicyHandle::new(SecurityPolicy {
             autonomy: AutonomyLevel::ReadOnly,
             ..SecurityPolicy::default()
         });
@@ -919,7 +919,7 @@ mod tests {
 
     #[tokio::test]
     async fn delegation_blocked_when_rate_limited() {
-        let limited = Arc::new(SecurityPolicy {
+        let limited = PolicyHandle::new(SecurityPolicy {
             max_actions_per_hour: 0,
             ..SecurityPolicy::default()
         });

@@ -2,7 +2,7 @@ use super::traits::{Tool, ToolExecutionContext, ToolResult};
 use crate::config::{
     runtime_proxy_config, set_runtime_proxy_config, Config, ProxyConfig, ProxyScope,
 };
-use crate::security::SecurityPolicy;
+use crate::security::PolicyHandle;
 use crate::util::MaybeSet;
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -11,11 +11,11 @@ use std::sync::Arc;
 
 pub struct ProxyConfigTool {
     config: Arc<Config>,
-    security: Arc<SecurityPolicy>,
+    security: PolicyHandle,
 }
 
 impl ProxyConfigTool {
-    pub fn new(config: Arc<Config>, security: Arc<SecurityPolicy>) -> Self {
+    pub fn new(config: Arc<Config>, security: PolicyHandle) -> Self {
         Self { config, security }
     }
 
@@ -442,11 +442,11 @@ impl Tool for ProxyConfigTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::security::{AutonomyLevel, SecurityPolicy};
+    use crate::security::{AutonomyLevel, PolicyHandle, SecurityPolicy};
     use tempfile::TempDir;
 
-    fn test_security() -> Arc<SecurityPolicy> {
-        Arc::new(SecurityPolicy {
+    fn test_security() -> PolicyHandle {
+        PolicyHandle::new(SecurityPolicy {
             autonomy: AutonomyLevel::Supervised,
             workspace_dir: std::env::temp_dir(),
             ..SecurityPolicy::default()

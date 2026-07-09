@@ -1,6 +1,6 @@
 use super::traits::{Tool, ToolExecutionContext, ToolResult};
 use crate::runtime::RuntimeAdapter;
-use crate::security::SecurityPolicy;
+use crate::security::PolicyHandle;
 use async_trait::async_trait;
 use serde_json::json;
 use std::sync::Arc;
@@ -18,12 +18,12 @@ const SAFE_ENV_VARS: &[&str] = &[
 
 /// Shell command execution tool with sandboxing
 pub struct ShellTool {
-    security: Arc<SecurityPolicy>,
+    security: PolicyHandle,
     runtime: Arc<dyn RuntimeAdapter>,
 }
 
 impl ShellTool {
-    pub fn new(security: Arc<SecurityPolicy>, runtime: Arc<dyn RuntimeAdapter>) -> Self {
+    pub fn new(security: PolicyHandle, runtime: Arc<dyn RuntimeAdapter>) -> Self {
         Self { security, runtime }
     }
 }
@@ -97,7 +97,7 @@ impl Tool for ShellTool {
         // (CWE-200), then re-add only safe, functional variables.
         let mut cmd = match self
             .runtime
-            .build_shell_command(command, &self.security.workspace_dir)
+            .build_shell_command(command, &self.security.workspace_dir())
         {
             Ok(cmd) => cmd,
             Err(e) => {
@@ -166,10 +166,10 @@ impl Tool for ShellTool {
 mod tests {
     use super::*;
     use crate::runtime::{NativeRuntime, RuntimeAdapter};
-    use crate::security::{AutonomyLevel, SecurityPolicy};
+    use crate::security::{AutonomyLevel, PolicyHandle, SecurityPolicy};
 
-    fn test_security(autonomy: AutonomyLevel) -> Arc<SecurityPolicy> {
-        Arc::new(SecurityPolicy {
+    fn test_security(autonomy: AutonomyLevel) -> PolicyHandle {
+        PolicyHandle::new(SecurityPolicy {
             autonomy,
             workspace_dir: std::env::temp_dir(),
             ..SecurityPolicy::default()
@@ -285,8 +285,8 @@ mod tests {
         assert!(!result.success);
     }
 
-    fn test_security_with_env_cmd() -> Arc<SecurityPolicy> {
-        Arc::new(SecurityPolicy {
+    fn test_security_with_env_cmd() -> PolicyHandle {
+        PolicyHandle::new(SecurityPolicy {
             autonomy: AutonomyLevel::Supervised,
             workspace_dir: std::env::temp_dir(),
             allowed_commands: vec!["env".into(), "echo".into()],
@@ -375,7 +375,7 @@ mod tests {
     #[tokio::test]
     #[cfg(unix)]
     async fn shell_requires_approval_for_medium_risk_command() {
-        let security = Arc::new(SecurityPolicy {
+        let security = PolicyHandle::new(SecurityPolicy {
             autonomy: AutonomyLevel::Supervised,
             allowed_commands: vec!["touch".into()],
             workspace_dir: std::env::temp_dir(),
@@ -457,7 +457,7 @@ mod tests {
     #[tokio::test]
     #[cfg(unix)]
     async fn shell_blocks_rate_limited() {
-        let security = Arc::new(SecurityPolicy {
+        let security = PolicyHandle::new(SecurityPolicy {
             autonomy: AutonomyLevel::Supervised,
             max_actions_per_hour: 0,
             workspace_dir: std::env::temp_dir(),

@@ -65,6 +65,12 @@ pub struct PolicyPromptExtras {
     pub http_request_enabled: bool,
     pub proxy_enabled: bool,
     pub proxy_http: Option<String>,
+    /// L2 `self_adjust.allowed_writes` patterns (empty = default session-allowlist only).
+    pub self_adjust_allowed_writes: Vec<String>,
+    /// L2 `self_adjust.denied_writes` patterns.
+    pub self_adjust_denied_writes: Vec<String>,
+    /// Whether the `policy_patch` tool is registered for this session.
+    pub policy_patch_enabled: bool,
 }
 
 /// Classifies whether a tool operation is read-only or side-effecting.
@@ -968,6 +974,34 @@ impl SecurityPolicy {
             }
         } else {
             prompt.push_str("- Proxy: disabled.\n");
+        }
+        if extras.policy_patch_enabled {
+            prompt.push_str(
+                "- Policy self-adjust: `policy_patch` tool is available for L2.5 overrides.\n",
+            );
+        } else {
+            prompt.push_str(
+                "- Policy self-adjust: `policy_patch` is not registered in this session.\n",
+            );
+        }
+        if extras.self_adjust_allowed_writes.is_empty()
+            && extras.self_adjust_denied_writes.is_empty()
+        {
+            prompt.push_str(
+                "- self_adjust writes: default — only `approval.session_allowlist` / `approval.*`; \
+                 `security.*`, `gateway.*`, and `channels.*` are denied.\n",
+            );
+        } else {
+            let _ = writeln!(
+                prompt,
+                "- self_adjust allowed_writes: {}",
+                extras.self_adjust_allowed_writes.join(", ")
+            );
+            let _ = writeln!(
+                prompt,
+                "- self_adjust denied_writes: {}",
+                extras.self_adjust_denied_writes.join(", ")
+            );
         }
         prompt.push_str(
             "\n**CRITICAL tool-use rules:**\n\

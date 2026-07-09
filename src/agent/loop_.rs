@@ -10,7 +10,7 @@ use crate::providers::{
     self, ChatMessage, ChatRequest, Provider, ProviderCapabilityError, ToolCall,
 };
 use crate::runtime;
-use crate::security::SecurityPolicy;
+use crate::security::PolicyHandle;
 use crate::tools::{self, Tool, ToolExecutionContext};
 use crate::util::truncate_with_ellipsis;
 use anyhow::{Context, Result};
@@ -1267,14 +1267,14 @@ async fn execute_tools_sequential(
     tools_registry: &[Box<dyn Tool>],
     observer: &dyn Observer,
     approval: Option<&ApprovalManager>,
-    security: Option<&SecurityPolicy>,
+    security: Option<&PolicyHandle>,
     channel_name: &str,
     channel_approval: Option<ChannelApprovalSession>,
     cancellation_token: Option<&CancellationToken>,
 ) -> Result<Vec<String>> {
     let mut individual_results: Vec<String> = Vec::with_capacity(tool_calls.len());
     let gate = approval.map(|mgr| {
-        let mut gate = ApprovalGate::new(mgr, channel_name, security);
+        let mut gate = ApprovalGate::new(mgr, channel_name, security.cloned());
         if let Some(session) = channel_approval {
             gate = gate.with_channel_session(session);
         }
@@ -1373,7 +1373,7 @@ pub(crate) async fn run_tool_call_loop(
     cancellation_token: Option<CancellationToken>,
     on_delta: Option<tokio::sync::mpsc::Sender<String>>,
     tool_dispatcher: Option<&dyn crate::agent::dispatcher::ToolDispatcher>,
-    security: Option<&SecurityPolicy>,
+    security: Option<&PolicyHandle>,
     channel_approval: Option<ChannelApprovalSession>,
     // When true, tool results use `[Tool results]` user text (Hybrid manifests).
     text_tool_result_history: bool,
@@ -1701,12 +1701,13 @@ pub(crate) fn build_tool_instructions(tools_registry: &[Box<dyn Tool>]) -> Strin
 /// Surface configured autonomy/shell/path policy in the system prompt.
 pub(crate) fn append_execution_policy_to_prompt(
     system_prompt: &mut String,
-    security: &SecurityPolicy,
+    security: &PolicyHandle,
     config: &Config,
 ) {
     let http = config
         .http_request
-        .effective_for_autonomy(security.autonomy);
+        .effective_for_autonomy(security.autonomy());
+    let (self_adjust_allowed_writes, self_adjust_denied_writes) = self_adjust_prompt_fields(config);
     let extras = crate::security::PolicyPromptExtras {
         http_request_enabled: http.enabled,
         proxy_enabled: config.proxy.enabled,
@@ -1715,12 +1716,45 @@ pub(crate) fn append_execution_policy_to_prompt(
         } else {
             None
         },
+        self_adjust_allowed_writes,
+        self_adjust_denied_writes,
+        policy_patch_enabled: cfg!(feature = "ai-protocol"),
     };
     security.append_execution_policy_prompt(system_prompt, &extras);
     if http.enabled && http.allow_private_hosts {
         system_prompt.push_str(
             "- HTTP LAN access: enabled for private/local hosts when `autonomy.level = full`.\n\n",
         );
+    }
+}
+
+fn self_adjust_prompt_fields(config: &Config) -> (Vec<String>, Vec<String>) {
+    #[cfg(feature = "ai-protocol")]
+    {
+        match crate::config::discover_and_load(config) {
+            Ok(Some(layer)) => {
+                if let Some(section) = layer.self_adjust {
+                    return (section.allowed_writes, section.denied_writes);
+                }
+                (
+                    vec!["approval.session_allowlist".into(), "approval.*".into()],
+                    vec![
+                        "security".into(),
+                        "security.*".into(),
+                        "gateway".into(),
+                        "gateway.*".into(),
+                        "channels".into(),
+                        "channels.*".into(),
+                    ],
+                )
+            }
+            Ok(None) | Err(_) => (Vec::new(), Vec::new()),
+        }
+    }
+    #[cfg(not(feature = "ai-protocol"))]
+    {
+        let _ = config;
+        (Vec::new(), Vec::new())
     }
 }
 
@@ -1754,7 +1788,7 @@ pub async fn run(
     let observer: Arc<dyn Observer> = Arc::from(base_observer);
     let runtime: Arc<dyn runtime::RuntimeAdapter> =
         Arc::from(runtime::create_runtime(&config.runtime)?);
-    let security = Arc::new(SecurityPolicy::from_workspace_config(&config)?);
+    let security = PolicyHandle::from_workspace_config(&config)?;
 
     // ── Memory (the brain) ────────────────────────────────────────
     let mem: Arc<dyn Memory> = Arc::from(memory::create_memory_with_storage(
@@ -2044,7 +2078,7 @@ pub async fn run(
             system_prompt.push_str(&build_tool_instructions(&tools_registry));
         }
     }
-    append_execution_policy_to_prompt(&mut system_prompt, security.as_ref(), &config);
+    append_execution_policy_to_prompt(&mut system_prompt, &security, &config);
 
     let tool_dispatcher_ref = tool_dispatcher.as_deref();
 
@@ -2103,7 +2137,7 @@ pub async fn run(
             None,
             None,
             tool_dispatcher_ref,
-            Some(security.as_ref()),
+            Some(&security),
             None,
             text_tool_result_history,
             render_opts,
@@ -2285,7 +2319,7 @@ pub async fn run(
                 None,
                 None,
                 tool_dispatcher_ref,
-                Some(security.as_ref()),
+                Some(&security),
                 None,
                 text_tool_result_history,
                 render_opts,
@@ -2352,7 +2386,7 @@ pub async fn process_message(config: Config, message: &str) -> Result<String> {
         Arc::from(observability::create_observer(&config.observability));
     let runtime: Arc<dyn runtime::RuntimeAdapter> =
         Arc::from(runtime::create_runtime(&config.runtime)?);
-    let security = Arc::new(SecurityPolicy::from_workspace_config(&config)?);
+    let security = PolicyHandle::from_workspace_config(&config)?;
     let mem: Arc<dyn Memory> = Arc::from(memory::create_memory_with_storage(
         &config.memory,
         Some(&config.storage.provider.config),
@@ -2504,7 +2538,7 @@ pub async fn process_message(config: Config, message: &str) -> Result<String> {
     if !native_tools {
         system_prompt.push_str(&build_tool_instructions(&tools_registry));
     }
-    append_execution_policy_to_prompt(&mut system_prompt, security.as_ref(), &config);
+    append_execution_policy_to_prompt(&mut system_prompt, &security, &config);
 
     let mem_context = build_context(mem.as_ref(), message, config.memory.min_relevance_score).await;
     let rag_limit = if config.agent.compact_context { 2 } else { 5 };
@@ -3448,11 +3482,10 @@ Done."#;
 
     #[test]
     fn build_tool_instructions_includes_all_tools() {
-        use crate::security::SecurityPolicy;
-        let security = Arc::new(SecurityPolicy::from_config(
+        let security = PolicyHandle::from_config(
             &crate::config::AutonomyConfig::default(),
             std::path::Path::new("/tmp"),
-        ));
+        );
         let tools = tools::default_tools(security);
         let instructions = build_tool_instructions(&tools);
 
@@ -3465,11 +3498,10 @@ Done."#;
 
     #[test]
     fn tools_to_openai_format_produces_valid_schema() {
-        use crate::security::SecurityPolicy;
-        let security = Arc::new(SecurityPolicy::from_config(
+        let security = PolicyHandle::from_config(
             &crate::config::AutonomyConfig::default(),
             std::path::Path::new("/tmp"),
-        ));
+        );
         let tools = tools::default_tools(security);
         let formatted = tools_to_openai_format(&tools);
 

@@ -30,6 +30,7 @@ pub mod firejail;
 pub mod landlock;
 pub mod pairing;
 pub mod policy;
+pub mod policy_handle;
 pub mod secrets;
 pub mod traits;
 
@@ -39,7 +40,10 @@ pub use audit::{AuditEvent, AuditEventType, AuditLogger};
 pub use detect::create_sandbox;
 #[allow(unused_imports)]
 pub use pairing::PairingGuard;
-pub use policy::{normalize_autonomy_config, AutonomyLevel, PolicyPromptExtras, SecurityPolicy};
+pub use policy::{
+    normalize_autonomy_config, AutonomyLevel, PolicyPromptExtras, SecurityPolicy, ToolOperation,
+};
+pub use policy_handle::PolicyHandle;
 #[allow(unused_imports)]
 pub use secrets::SecretStore;
 #[allow(unused_imports)]

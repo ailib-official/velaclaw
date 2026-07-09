@@ -1,20 +1,19 @@
 use super::traits::{Tool, ToolExecutionContext, ToolResult};
-use crate::security::SecurityPolicy;
+use crate::security::PolicyHandle;
 use async_trait::async_trait;
 use serde_json::json;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 const PUSHOVER_API_URL: &str = "https://api.pushover.net/1/messages.json";
 const PUSHOVER_REQUEST_TIMEOUT_SECS: u64 = 15;
 
 pub struct PushoverTool {
-    security: Arc<SecurityPolicy>,
+    security: PolicyHandle,
     workspace_dir: PathBuf,
 }
 
 impl PushoverTool {
-    pub fn new(security: Arc<SecurityPolicy>, workspace_dir: PathBuf) -> Self {
+    pub fn new(security: PolicyHandle, workspace_dir: PathBuf) -> Self {
         Self {
             security,
             workspace_dir,
@@ -222,11 +221,12 @@ impl Tool for PushoverTool {
 mod tests {
     use super::*;
     use crate::security::AutonomyLevel;
+    use crate::security::SecurityPolicy;
     use std::fs;
     use tempfile::TempDir;
 
-    fn test_security(level: AutonomyLevel, max_actions_per_hour: u32) -> Arc<SecurityPolicy> {
-        Arc::new(SecurityPolicy {
+    fn test_security(level: AutonomyLevel, max_actions_per_hour: u32) -> PolicyHandle {
+        PolicyHandle::new(SecurityPolicy {
             autonomy: level,
             max_actions_per_hour,
             workspace_dir: std::env::temp_dir(),

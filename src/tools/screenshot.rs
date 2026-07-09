@@ -1,10 +1,9 @@
 use super::traits::{Tool, ToolExecutionContext, ToolResult};
-use crate::security::SecurityPolicy;
+use crate::security::PolicyHandle;
 use async_trait::async_trait;
 use serde_json::json;
 use std::fmt::Write;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::Duration;
 
 /// Maximum time to wait for a screenshot command to complete.
@@ -17,11 +16,11 @@ const MAX_BASE64_BYTES: usize = 2_097_152;
 /// macOS: `screencapture`
 /// Linux: tries `gnome-screenshot`, `scrot`, `import` (`ImageMagick`) in order.
 pub struct ScreenshotTool {
-    security: Arc<SecurityPolicy>,
+    security: PolicyHandle,
 }
 
 impl ScreenshotTool {
-    pub fn new(security: Arc<SecurityPolicy>) -> Self {
+    pub fn new(security: PolicyHandle) -> Self {
         Self { security }
     }
 
@@ -80,7 +79,7 @@ impl ScreenshotTool {
             });
         }
 
-        let output_path = self.security.workspace_dir.join(&safe_name);
+        let output_path = self.security.workspace_dir().join(&safe_name);
         let output_str = output_path.to_string_lossy().to_string();
 
         let Some(mut cmd_args) = Self::screenshot_command(&output_str) else {
@@ -257,10 +256,10 @@ impl Tool for ScreenshotTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::security::{AutonomyLevel, SecurityPolicy};
+    use crate::security::{AutonomyLevel, PolicyHandle, SecurityPolicy};
 
-    fn test_security() -> Arc<SecurityPolicy> {
-        Arc::new(SecurityPolicy {
+    fn test_security() -> PolicyHandle {
+        PolicyHandle::new(SecurityPolicy {
             autonomy: AutonomyLevel::Full,
             workspace_dir: std::env::temp_dir(),
             ..SecurityPolicy::default()

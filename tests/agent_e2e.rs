@@ -22,7 +22,7 @@ use velaclaw::providers::traits::ChatMessage;
 use velaclaw::providers::{
     ChatRequest, ChatResponse, ConversationMessage, Provider, ProviderRuntimeOptions, ToolCall,
 };
-use velaclaw::security::SecurityPolicy;
+use velaclaw::security::{PolicyHandle, SecurityPolicy};
 use velaclaw::tools::{Tool, ToolExecutionContext, ToolResult};
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -254,8 +254,8 @@ fn tool_response(calls: Vec<ToolCall>) -> ChatResponse {
     }
 }
 
-fn test_security() -> Arc<SecurityPolicy> {
-    Arc::new(SecurityPolicy::from_config(
+fn test_security() -> PolicyHandle {
+    PolicyHandle::new(SecurityPolicy::from_config(
         &velaclaw::config::AutonomyConfig::default(),
         &std::env::temp_dir(),
     ))

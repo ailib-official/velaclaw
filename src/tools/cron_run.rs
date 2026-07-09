@@ -1,7 +1,7 @@
 use super::traits::{Tool, ToolExecutionContext, ToolResult};
 use crate::config::Config;
 use crate::cron::{self, JobType};
-use crate::security::SecurityPolicy;
+use crate::security::PolicyHandle;
 use async_trait::async_trait;
 use chrono::Utc;
 use serde_json::json;
@@ -9,11 +9,11 @@ use std::sync::Arc;
 
 pub struct CronRunTool {
     config: Arc<Config>,
-    security: Arc<SecurityPolicy>,
+    security: PolicyHandle,
 }
 
 impl CronRunTool {
-    pub fn new(config: Arc<Config>, security: Arc<SecurityPolicy>) -> Self {
+    pub fn new(config: Arc<Config>, security: PolicyHandle) -> Self {
         Self { config, security }
     }
 }
@@ -150,6 +150,7 @@ mod tests {
     use super::*;
     use crate::config::Config;
     use crate::security::AutonomyLevel;
+    use crate::security::SecurityPolicy;
     use tempfile::TempDir;
 
     async fn test_config(tmp: &TempDir) -> Arc<Config> {
@@ -164,8 +165,8 @@ mod tests {
         Arc::new(config)
     }
 
-    fn test_security(cfg: &Config) -> Arc<SecurityPolicy> {
-        Arc::new(SecurityPolicy::from_config(
+    fn test_security(cfg: &Config) -> PolicyHandle {
+        PolicyHandle::new(SecurityPolicy::from_config(
             &cfg.autonomy,
             &cfg.workspace_dir,
         ))

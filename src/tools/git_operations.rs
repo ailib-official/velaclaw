@@ -1,18 +1,17 @@
 use super::traits::{Tool, ToolExecutionContext, ToolResult};
-use crate::security::{AutonomyLevel, SecurityPolicy};
+use crate::security::{AutonomyLevel, PolicyHandle};
 use async_trait::async_trait;
 use serde_json::json;
-use std::sync::Arc;
 
 /// Git operations tool for structured repository management.
 /// Provides safe, parsed git operations with JSON output.
 pub struct GitOperationsTool {
-    security: Arc<SecurityPolicy>,
+    security: PolicyHandle,
     workspace_dir: std::path::PathBuf,
 }
 
 impl GitOperationsTool {
-    pub fn new(security: Arc<SecurityPolicy>, workspace_dir: std::path::PathBuf) -> Self {
+    pub fn new(security: PolicyHandle, workspace_dir: std::path::PathBuf) -> Self {
         Self {
             security,
             workspace_dir,
@@ -530,7 +529,7 @@ impl Tool for GitOperationsTool {
                 });
             }
 
-            match self.security.autonomy {
+            match self.security.autonomy() {
                 AutonomyLevel::ReadOnly => {
                     return Ok(ToolResult {
                         success: false,
@@ -573,11 +572,11 @@ impl Tool for GitOperationsTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::security::SecurityPolicy;
+    use crate::security::{PolicyHandle, SecurityPolicy};
     use tempfile::TempDir;
 
     fn test_tool(dir: &std::path::Path) -> GitOperationsTool {
-        let security = Arc::new(SecurityPolicy {
+        let security = PolicyHandle::new(SecurityPolicy {
             autonomy: AutonomyLevel::Supervised,
             ..SecurityPolicy::default()
         });
@@ -704,7 +703,7 @@ mod tests {
             .output()
             .unwrap();
 
-        let security = Arc::new(SecurityPolicy {
+        let security = PolicyHandle::new(SecurityPolicy {
             autonomy: AutonomyLevel::ReadOnly,
             ..SecurityPolicy::default()
         });
@@ -736,7 +735,7 @@ mod tests {
             .output()
             .unwrap();
 
-        let security = Arc::new(SecurityPolicy {
+        let security = PolicyHandle::new(SecurityPolicy {
             autonomy: AutonomyLevel::ReadOnly,
             ..SecurityPolicy::default()
         });
@@ -760,7 +759,7 @@ mod tests {
     #[tokio::test]
     async fn allows_readonly_ops_in_readonly_mode() {
         let tmp = TempDir::new().unwrap();
-        let security = Arc::new(SecurityPolicy {
+        let security = PolicyHandle::new(SecurityPolicy {
             autonomy: AutonomyLevel::ReadOnly,
             ..SecurityPolicy::default()
         });

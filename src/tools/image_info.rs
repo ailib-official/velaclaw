@@ -1,10 +1,9 @@
 use super::traits::{Tool, ToolExecutionContext, ToolResult};
-use crate::security::SecurityPolicy;
+use crate::security::PolicyHandle;
 use async_trait::async_trait;
 use serde_json::json;
 use std::fmt::Write;
 use std::path::Path;
-use std::sync::Arc;
 
 /// Maximum file size we will read and base64-encode (5 MB).
 const MAX_IMAGE_BYTES: u64 = 5_242_880;
@@ -15,11 +14,11 @@ const MAX_IMAGE_BYTES: u64 = 5_242_880;
 /// (file size, format, dimensions from header bytes) and provides base64
 /// data for future multimodal provider support.
 pub struct ImageInfoTool {
-    security: Arc<SecurityPolicy>,
+    security: PolicyHandle,
 }
 
 impl ImageInfoTool {
-    pub fn new(security: Arc<SecurityPolicy>) -> Self {
+    pub fn new(security: PolicyHandle) -> Self {
         Self { security }
     }
 
@@ -235,10 +234,10 @@ impl Tool for ImageInfoTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::security::{AutonomyLevel, SecurityPolicy};
+    use crate::security::{AutonomyLevel, PolicyHandle, SecurityPolicy};
 
-    fn test_security() -> Arc<SecurityPolicy> {
-        Arc::new(SecurityPolicy {
+    fn test_security() -> PolicyHandle {
+        PolicyHandle::new(SecurityPolicy {
             autonomy: AutonomyLevel::Full,
             workspace_dir: std::env::temp_dir(),
             workspace_only: false,

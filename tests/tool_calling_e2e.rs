@@ -32,15 +32,15 @@ use velaclaw::memory;
 use velaclaw::memory::Memory;
 use velaclaw::observability::{NoopObserver, Observer};
 use velaclaw::providers::{ChatRequest, ChatResponse, Provider, ToolCall};
-use velaclaw::security::{AutonomyLevel, SecurityPolicy};
+use velaclaw::security::{AutonomyLevel, PolicyHandle, SecurityPolicy};
 use velaclaw::tools::{self, Tool, ToolExecutionContext, ToolResult, ToolSpec};
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Helpers
 // ═════════════════════════════════════════════════════════════════════════════
 
-fn test_security(workspace: std::path::PathBuf) -> Arc<SecurityPolicy> {
-    Arc::new(SecurityPolicy {
+fn test_security(workspace: std::path::PathBuf) -> PolicyHandle {
+    PolicyHandle::new(SecurityPolicy {
         autonomy: AutonomyLevel::Supervised,
         workspace_dir: workspace,
         allowed_commands: vec![
@@ -65,8 +65,8 @@ fn test_security(workspace: std::path::PathBuf) -> Arc<SecurityPolicy> {
     })
 }
 
-fn permissive_security(workspace: std::path::PathBuf) -> Arc<SecurityPolicy> {
-    Arc::new(SecurityPolicy {
+fn permissive_security(workspace: std::path::PathBuf) -> PolicyHandle {
+    PolicyHandle::new(SecurityPolicy {
         autonomy: AutonomyLevel::Full,
         workspace_dir: workspace,
         max_actions_per_hour: 10_000,
@@ -94,8 +94,8 @@ fn permissive_security(workspace: std::path::PathBuf) -> Arc<SecurityPolicy> {
     })
 }
 
-fn limited_security(workspace: std::path::PathBuf, max_actions: u32) -> Arc<SecurityPolicy> {
-    Arc::new(SecurityPolicy {
+fn limited_security(workspace: std::path::PathBuf, max_actions: u32) -> PolicyHandle {
+    PolicyHandle::new(SecurityPolicy {
         autonomy: AutonomyLevel::Supervised,
         workspace_dir: workspace,
         max_actions_per_hour: max_actions,
@@ -104,8 +104,8 @@ fn limited_security(workspace: std::path::PathBuf, max_actions: u32) -> Arc<Secu
     })
 }
 
-fn readonly_security(workspace: std::path::PathBuf) -> Arc<SecurityPolicy> {
-    Arc::new(SecurityPolicy {
+fn readonly_security(workspace: std::path::PathBuf) -> PolicyHandle {
+    PolicyHandle::new(SecurityPolicy {
         autonomy: AutonomyLevel::ReadOnly,
         workspace_dir: workspace,
         max_actions_per_hour: 1000,
@@ -193,7 +193,7 @@ fn build_agent(provider: Box<dyn Provider>, tools: Vec<Box<dyn Tool>>, tmp: &Tem
         .observer(make_observer())
         .tool_dispatcher(Box::new(NativeToolDispatcher::default()))
         .workspace_dir(workspace.clone())
-        .security(Arc::new(SecurityPolicy::from_config(
+        .security(PolicyHandle::new(SecurityPolicy::from_config(
             &velaclaw::config::AutonomyConfig::default(),
             &workspace,
         )))

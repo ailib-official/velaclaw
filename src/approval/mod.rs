@@ -8,7 +8,9 @@ mod channel_hub;
 mod gate;
 mod hub;
 
-pub use backend::{ChannelApprovalSession, ManagerApprovalBackend, SecurityPolicyShellHook};
+pub use backend::{
+    ChannelApprovalSession, ManagerApprovalBackend, PolicyHandleShellHook, SecurityPolicyShellHook,
+};
 pub use channel_hub::ChannelApprovalHub;
 pub use gate::{ApprovalGate, GateDecision};
 pub use hub::ApprovalHub;
@@ -533,7 +535,7 @@ mod tests {
         use crate::agent::dispatcher::ParsedToolCall;
         use crate::channels::traits::{Channel, ChannelMessage, SendMessage};
         use crate::config::{AutonomyConfig, ChannelApprovalMode};
-        use crate::security::{AutonomyLevel, SecurityPolicy};
+        use crate::security::{AutonomyLevel, PolicyHandle, SecurityPolicy};
         use async_trait::async_trait;
         use std::sync::Arc;
         use std::time::Duration;
@@ -564,7 +566,7 @@ mod tests {
             ..AutonomyConfig::default()
         };
         let mgr = ApprovalManager::from_config(&autonomy);
-        let security = SecurityPolicy::default();
+        let security = PolicyHandle::new(SecurityPolicy::default());
         let session = super::backend::ChannelApprovalSession {
             hub: Arc::new(ChannelApprovalHub::new()),
             channel: Arc::new(SilentChannel),
@@ -574,7 +576,7 @@ mod tests {
             timeout: Duration::from_millis(50),
         };
         let gate =
-            ApprovalGate::new(&mgr, "telegram", Some(&security)).with_channel_session(session);
+            ApprovalGate::new(&mgr, "telegram", Some(security)).with_channel_session(session);
 
         let call = ParsedToolCall {
             name: "shell".into(),

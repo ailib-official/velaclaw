@@ -1,8 +1,7 @@
 use super::traits::{Tool, ToolExecutionContext, ToolResult};
-use crate::security::SecurityPolicy;
+use crate::security::PolicyHandle;
 use async_trait::async_trait;
 use serde_json::json;
-use std::sync::Arc;
 
 /// Maximum PDF file size (50 MB).
 const MAX_PDF_BYTES: u64 = 50 * 1024 * 1024;
@@ -19,11 +18,11 @@ const MAX_OUTPUT_CHARS: usize = 200_000;
 /// Without the feature the tool is still registered so the LLM receives a
 /// clear, actionable error rather than a missing-tool confusion.
 pub struct PdfReadTool {
-    security: Arc<SecurityPolicy>,
+    security: PolicyHandle,
 }
 
 impl PdfReadTool {
-    pub fn new(security: Arc<SecurityPolicy>) -> Self {
+    pub fn new(security: PolicyHandle) -> Self {
         Self { security }
     }
 }
@@ -104,7 +103,7 @@ impl Tool for PdfReadTool {
             });
         }
 
-        let full_path = self.security.workspace_dir.join(path);
+        let full_path = self.security.workspace_dir().join(path);
 
         let resolved_path = match tokio::fs::canonicalize(&full_path).await {
             Ok(p) => p,
@@ -238,22 +237,19 @@ impl Tool for PdfReadTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::security::{AutonomyLevel, SecurityPolicy};
+    use crate::security::{AutonomyLevel, PolicyHandle, SecurityPolicy};
     use tempfile::TempDir;
 
-    fn test_security(workspace: std::path::PathBuf) -> Arc<SecurityPolicy> {
-        Arc::new(SecurityPolicy {
+    fn test_security(workspace: std::path::PathBuf) -> PolicyHandle {
+        PolicyHandle::new(SecurityPolicy {
             autonomy: AutonomyLevel::Supervised,
             workspace_dir: workspace,
             ..SecurityPolicy::default()
         })
     }
 
-    fn test_security_with_limit(
-        workspace: std::path::PathBuf,
-        max_actions: u32,
-    ) -> Arc<SecurityPolicy> {
-        Arc::new(SecurityPolicy {
+    fn test_security_with_limit(workspace: std::path::PathBuf, max_actions: u32) -> PolicyHandle {
+        PolicyHandle::new(SecurityPolicy {
             autonomy: AutonomyLevel::Supervised,
             workspace_dir: workspace,
             max_actions_per_hour: max_actions,

@@ -1,14 +1,13 @@
 use super::traits::{Tool, ToolExecutionContext, ToolResult};
-use crate::security::SecurityPolicy;
+use crate::security::PolicyHandle;
 use async_trait::async_trait;
 use serde_json::json;
-use std::sync::Arc;
 use std::time::Duration;
 
 /// HTTP request tool for API interactions.
 /// Supports GET, POST, PUT, DELETE methods with configurable security.
 pub struct HttpRequestTool {
-    security: Arc<SecurityPolicy>,
+    security: PolicyHandle,
     allowed_domains: Vec<String>,
     allow_private_hosts: bool,
     max_response_size: usize,
@@ -17,7 +16,7 @@ pub struct HttpRequestTool {
 
 impl HttpRequestTool {
     pub fn new(
-        security: Arc<SecurityPolicy>,
+        security: PolicyHandle,
         allowed_domains: Vec<String>,
         allow_private_hosts: bool,
         max_response_size: usize,
@@ -447,10 +446,10 @@ fn is_non_global_v6(v6: std::net::Ipv6Addr) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::security::{AutonomyLevel, SecurityPolicy};
+    use crate::security::{AutonomyLevel, PolicyHandle, SecurityPolicy};
 
     fn test_tool(allowed_domains: Vec<&str>) -> HttpRequestTool {
-        let security = Arc::new(SecurityPolicy {
+        let security = PolicyHandle::new(SecurityPolicy {
             autonomy: AutonomyLevel::Supervised,
             ..SecurityPolicy::default()
         });
@@ -550,7 +549,7 @@ mod tests {
 
     #[test]
     fn validate_requires_allowlist() {
-        let security = Arc::new(SecurityPolicy::default());
+        let security = PolicyHandle::new(SecurityPolicy::default());
         let tool = HttpRequestTool::new(security, vec![], false, 1_000_000, 30);
         let err = tool
             .validate_url("https://example.com")
@@ -663,7 +662,7 @@ mod tests {
 
     #[tokio::test]
     async fn execute_blocks_readonly_mode() {
-        let security = Arc::new(SecurityPolicy {
+        let security = PolicyHandle::new(SecurityPolicy {
             autonomy: AutonomyLevel::ReadOnly,
             ..SecurityPolicy::default()
         });
@@ -681,7 +680,7 @@ mod tests {
 
     #[tokio::test]
     async fn execute_blocks_when_rate_limited() {
-        let security = Arc::new(SecurityPolicy {
+        let security = PolicyHandle::new(SecurityPolicy {
             max_actions_per_hour: 0,
             ..SecurityPolicy::default()
         });
@@ -707,7 +706,7 @@ mod tests {
     #[test]
     fn truncate_response_over_limit() {
         let tool = HttpRequestTool::new(
-            Arc::new(SecurityPolicy::default()),
+            PolicyHandle::new(SecurityPolicy::default()),
             vec!["example.com".into()],
             false,
             10,

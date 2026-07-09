@@ -72,7 +72,7 @@ use crate::memory::{self, Memory};
 use crate::observability::{self, Observer};
 use crate::providers::{self, ChatMessage, Provider};
 use crate::runtime;
-use crate::security::SecurityPolicy;
+use crate::security::PolicyHandle;
 use crate::tools::{self, Tool};
 use crate::util::truncate_with_ellipsis;
 use anyhow::{Context, Result};
@@ -232,7 +232,7 @@ struct ChannelRuntimeContext {
     workspace_tool_dispatcher: Arc<Option<String>>,
     #[cfg(feature = "ai-protocol")]
     tool_dispatcher_cache: ToolDispatcherCacheMap,
-    security: Arc<SecurityPolicy>,
+    security: PolicyHandle,
     channel_approval_hub: Arc<ChannelApprovalHub>,
     approval_managers: Arc<Mutex<HashMap<String, Arc<ApprovalManager>>>>,
     autonomy_config: Arc<crate::config::AutonomyConfig>,
@@ -1711,7 +1711,7 @@ async fn process_channel_message(
                         None
                     }
                 },
-                Some(ctx.security.as_ref()),
+                Some(&ctx.security),
                 channel_approval,
                 text_tool_result_history,
             RenderOpts {
@@ -2800,7 +2800,7 @@ pub async fn start_channels(config: Config) -> Result<()> {
         Arc::from(observability::create_observer(&config.observability));
     let runtime: Arc<dyn runtime::RuntimeAdapter> =
         Arc::from(runtime::create_runtime(&config.runtime)?);
-    let security = Arc::new(SecurityPolicy::from_workspace_config(&config)?);
+    let security = PolicyHandle::from_workspace_config(&config)?;
     let effective_autonomy = crate::config::resolve_effective_autonomy(&config)?;
     let approval_wiring = Arc::new(crate::config::ApprovalManagerWiring::from_config(&config)?);
     let channel_approval_hub = Arc::new(ChannelApprovalHub::new());
@@ -2950,11 +2950,7 @@ pub async fn start_channels(config: Config) -> Result<()> {
             system_prompt.push_str(&build_tool_instructions(tools_registry.as_ref()));
         }
     }
-    crate::agent::loop_::append_execution_policy_to_prompt(
-        &mut system_prompt,
-        security.as_ref(),
-        &config,
-    );
+    crate::agent::loop_::append_execution_policy_to_prompt(&mut system_prompt, &security, &config);
 
     if !skills.is_empty() {
         println!(
@@ -3264,7 +3260,7 @@ pub async fn start_channels(config: Config) -> Result<()> {
         workspace_tool_dispatcher,
         #[cfg(feature = "ai-protocol")]
         tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
-        security: Arc::clone(&security),
+        security: security.clone(),
         channel_approval_hub,
         approval_managers: Arc::new(Mutex::new(HashMap::new())),
         autonomy_config: Arc::new(effective_autonomy),
@@ -3288,6 +3284,7 @@ mod tests {
     use crate::memory::{Memory, MemoryCategory, SqliteMemory};
     use crate::observability::NoopObserver;
     use crate::providers::{ChatMessage, Provider};
+    use crate::security::SecurityPolicy;
     use crate::tools::{Tool, ToolExecutionContext, ToolResult};
     use std::collections::{HashMap, HashSet};
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -3317,7 +3314,7 @@ mod tests {
 
     #[allow(clippy::type_complexity)]
     fn test_channel_approval_runtime_fields() -> (
-        Arc<SecurityPolicy>,
+        PolicyHandle,
         Arc<ChannelApprovalHub>,
         Arc<Mutex<HashMap<String, Arc<ApprovalManager>>>>,
         Arc<crate::config::AutonomyConfig>,
@@ -3329,7 +3326,7 @@ mod tests {
         let wiring = crate::config::ApprovalManagerWiring::from_config(&config)
             .expect("test approval wiring");
         (
-            Arc::new(SecurityPolicy::default()),
+            PolicyHandle::new(SecurityPolicy::default()),
             Arc::new(ChannelApprovalHub::new()),
             Arc::new(Mutex::new(HashMap::new())),
             Arc::new(crate::config::AutonomyConfig::default()),

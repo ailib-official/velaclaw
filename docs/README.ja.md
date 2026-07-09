@@ -14,6 +14,7 @@
 | ワンコマンドで導入したい | [one-click-bootstrap.md](one-click-bootstrap.md) |
 | コマンドを用途別に確認したい | [commands-reference.md](commands-reference.md) |
 | 設定キーと既定値を確認したい | [config-reference.md](config-reference.md) |
+| CLI 端末レンダリング（Markdown / 折りたたみ） | [cli-render.md](cli-render.md) |
 | カスタム Provider / endpoint を追加したい | [custom-providers.md](custom-providers.md) |
 | Z.AI / GLM Provider を設定したい | [zai-glm-setup.md](zai-glm-setup.md) |
 | LangGraph ツール連携を使いたい | [langgraph-integration.md](langgraph-integration.md) |
@@ -51,6 +52,7 @@
 - [providers-reference.md](providers-reference.md)
 - [channels-reference.md](channels-reference.md)
 - [config-reference.md](config-reference.md)
+- [cli-render.md](cli-render.md)
 - [custom-providers.md](custom-providers.md)
 - [zai-glm-setup.md](zai-glm-setup.md)
 - [langgraph-integration.md](langgraph-integration.md)

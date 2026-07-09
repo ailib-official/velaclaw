@@ -203,6 +203,46 @@ pub struct Config {
     /// Security sandbox, resource limits, and audit logging (`[security]`).
     #[serde(default)]
     pub security: SecurityConfig,
+
+    /// CLI terminal render options (`[cli_render]`). `None` keeps backward-compatible
+    /// defaults via [`CliRenderConfig::default`] at the call site.
+    #[serde(default)]
+    pub cli_render: Option<CliRenderConfig>,
+}
+
+/// CLI terminal render configuration (`[cli_render]` section).
+///
+/// Controls Markdown→ANSI rendering and long-output fold thresholds for the
+/// interactive REPL. Absent/`None` on [`Config`] means use these defaults.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct CliRenderConfig {
+    /// Max visible lines before folding long tool/code blocks. Default: `10`.
+    #[serde(default = "default_cli_render_fold_lines")]
+    pub fold_lines: usize,
+    /// When false, strip Markdown to plain text (no ANSI structure). Default: `true`.
+    #[serde(default = "default_true")]
+    pub markdown_enabled: bool,
+}
+
+fn default_cli_render_fold_lines() -> usize {
+    10
+}
+
+impl Default for CliRenderConfig {
+    fn default() -> Self {
+        Self {
+            fold_lines: default_cli_render_fold_lines(),
+            markdown_enabled: true,
+        }
+    }
+}
+
+impl CliRenderConfig {
+    /// Effective config: explicit `[cli_render]` or built-in defaults.
+    #[must_use]
+    pub fn resolve(opt: Option<&Self>) -> Self {
+        opt.cloned().unwrap_or_default()
+    }
 }
 
 // ── Delegate Agents ──────────────────────────────────────────────
@@ -3027,6 +3067,8 @@ struct EmbeddedConfigTemplate {
     default_temperature: Option<f64>,
     #[serde(default)]
     autonomy: Option<AutonomyConfig>,
+    #[serde(default)]
+    cli_render: Option<CliRenderConfig>,
 }
 
 fn config_skeleton() -> Config {
@@ -3074,6 +3116,7 @@ fn config_skeleton() -> Config {
         hardware: HardwareConfig::default(),
         query_classification: QueryClassificationConfig::default(),
         security: SecurityConfig::default(),
+        cli_render: None,
     }
 }
 
@@ -3102,6 +3145,9 @@ fn apply_embedded_template(config: &mut Config) -> Result<()> {
     }
     if let Some(autonomy) = template.autonomy {
         config.autonomy = autonomy;
+    }
+    if let Some(cli_render) = template.cli_render {
+        config.cli_render = Some(cli_render);
     }
     Ok(())
 }
@@ -4317,6 +4363,7 @@ default_temperature = 0.7
             agents: HashMap::new(),
             hardware: HardwareConfig::default(),
             security: SecurityConfig::default(),
+            cli_render: None,
         };
 
         let toml_str = toml::to_string_pretty(&config).unwrap();
@@ -4527,6 +4574,7 @@ tool_dispatcher = "xml"
             agents: HashMap::new(),
             hardware: HardwareConfig::default(),
             security: SecurityConfig::default(),
+            cli_render: None,
         };
 
         config.save().await.unwrap();

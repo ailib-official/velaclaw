@@ -49,6 +49,7 @@ Last reviewed: **February 18, 2026**.
 | `docs/channels-reference.md` | Current Reference | users/operators |
 | `docs/nextcloud-talk-setup.md` | Current Guide | operators |
 | `docs/config-reference.md` | Current Reference | operators |
+| `docs/cli-render.md` | Current Reference | users/operators |
 | `docs/custom-providers.md` | Current Integration Guide | integration developers |
 | `docs/zai-glm-setup.md` | Current Provider Setup Guide | users/operators |
 | `docs/langgraph-integration.md` | Current Integration Guide | integration developers |

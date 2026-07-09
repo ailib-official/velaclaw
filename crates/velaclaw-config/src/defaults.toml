@@ -5,3 +5,8 @@
 default_provider = "nvidia/nemotron-4-340b-instruct"
 default_model = "nvidia/nemotron-4-340b-instruct"
 default_temperature = 0.7
+
+# CLI terminal render (VL-CLI-RENDER-003). Optional; omit for same defaults.
+[cli_render]
+fold_lines = 10
+markdown_enabled = true

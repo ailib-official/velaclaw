@@ -1,5 +1,6 @@
 use super::traits::{Tool, ToolExecutionContext, ToolResult};
 use crate::agent::loop_::run_tool_call_loop;
+use crate::cli_render::{RenderOpts, RenderStyle};
 use crate::config::DelegateAgentConfig;
 use crate::observability::traits::{Observer, ObserverEvent, ObserverMetric};
 use crate::providers::{self, ChatMessage, Provider};
@@ -417,6 +418,15 @@ impl DelegateTool {
                 None,
                 None,
                 false,
+                RenderOpts {
+                    style: RenderStyle {
+                        ansi: false,
+                        markdown: true,
+                    },
+                    fold_lines: 10,
+                    fold_enabled: false,
+                },
+                None,
             ),
         )
         .await;

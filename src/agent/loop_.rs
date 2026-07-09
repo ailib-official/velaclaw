@@ -1,5 +1,5 @@
 use crate::approval::{ApprovalGate, ApprovalManager, ChannelApprovalSession, GateDecision};
-use crate::cli_render::{render, RenderStyle};
+use crate::cli_render::{RenderOpts, RenderStyle};
 use crate::config::Config;
 #[cfg(not(feature = "ai-protocol"))]
 use crate::config::DEFAULT_PROTOCOL_MODEL_ID;
@@ -15,12 +15,52 @@ use crate::tools::{self, Tool, ToolExecutionContext};
 use crate::util::truncate_with_ellipsis;
 use anyhow::{Context, Result};
 use regex::{Regex, RegexSet};
+use std::collections::HashMap;
 use std::fmt::Write;
 use std::io::Write as _;
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Instant;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
+
+/// Session-scoped store for folded CLI payloads (`/expand <id>`).
+type FoldCache = Arc<Mutex<HashMap<u64, String>>>;
+
+/// Allocate the next fold id and store `payload` for `/expand`.
+fn store_fold_payload(cache: &FoldCache, payload: &str) -> u64 {
+    let mut guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+    let id = guard.len() as u64 + 1;
+    guard.insert(id, payload.to_string());
+    id
+}
+
+/// Print a tool result block, folding when `render_opts.fold_enabled` and over threshold.
+fn print_tool_result_block(
+    tool_name: &str,
+    result: &str,
+    render_opts: RenderOpts,
+    fold_cache: Option<&FoldCache>,
+) {
+    let rendered = render_opts.render(result);
+    let total_lines = rendered.split('\n').count();
+    let should_fold =
+        render_opts.fold_enabled && fold_cache.is_some() && total_lines > render_opts.fold_lines;
+    if !should_fold {
+        println!("\n── tool:{tool_name} ──\n{rendered}\n");
+        return;
+    }
+    let cache = fold_cache.expect("fold_cache checked above");
+    let id = store_fold_payload(cache, &rendered);
+    let head: String = rendered
+        .split('\n')
+        .take(render_opts.fold_lines)
+        .collect::<Vec<_>>()
+        .join("\n");
+    println!(
+        "\n── tool:{tool_name} (前 {} 行 / 共 {total_lines} 行) ──\n{head}\n─────\n用 /expand {id} 展开全部\n",
+        render_opts.fold_lines
+    );
+}
 
 /// Minimum characters per chunk when relaying LLM text to a streaming draft.
 const STREAM_CHUNK_MIN_CHARS: usize = 80;
@@ -1092,6 +1132,15 @@ pub(crate) async fn agent_turn(
         None,
         None,
         false,
+        RenderOpts {
+            style: RenderStyle {
+                ansi: false,
+                markdown: true,
+            },
+            fold_lines: 10,
+            fold_enabled: false,
+        },
+        None,
     )
     .await
 }
@@ -1328,6 +1377,8 @@ pub(crate) async fn run_tool_call_loop(
     channel_approval: Option<ChannelApprovalSession>,
     // When true, tool results use `[Tool results]` user text (Hybrid manifests).
     text_tool_result_history: bool,
+    render_opts: RenderOpts,
+    fold_cache: Option<&FoldCache>,
 ) -> Result<String> {
     let max_iterations = if max_tool_iterations == 0 {
         DEFAULT_MAX_TOOL_ITERATIONS
@@ -1551,7 +1602,7 @@ pub(crate) async fn run_tool_call_loop(
         // Print any text the LLM produced alongside tool calls (unless silent)
         let visible_text = crate::util::strip_tool_call_markup(&display_text);
         if !silent && !visible_text.is_empty() {
-            let rendered = render(&visible_text, RenderStyle::auto_markdown());
+            let rendered = render_opts.render(&visible_text);
             print!("{rendered}");
             let _ = std::io::stdout().flush();
         }
@@ -1595,8 +1646,7 @@ pub(crate) async fn run_tool_call_loop(
 
         if !silent {
             for (call, result) in tool_calls.iter().zip(individual_results.iter()) {
-                let rendered = render(result, RenderStyle::auto_markdown());
-                println!("\n── tool:{} ──\n{rendered}\n", call.name);
+                print_tool_result_block(&call.name, result, render_opts, fold_cache);
             }
             let _ = std::io::stdout().flush();
         }
@@ -1688,9 +1738,16 @@ pub async fn run(
     model_override: Option<String>,
     temperature: f64,
     peripheral_overrides: Vec<String>,
+    no_color: bool,
+    no_fold: bool,
 ) -> Result<String> {
     #[cfg(feature = "ai-protocol")]
     let _ = (&provider_override, &model_override);
+
+    let interactive = message.is_none();
+    let render_opts =
+        RenderOpts::from_config(config.cli_render.as_ref(), no_color, no_fold, interactive);
+    let fold_cache: FoldCache = Arc::new(Mutex::new(HashMap::new()));
 
     // ── Wire up agnostic subsystems ──────────────────────────────
     let base_observer = observability::create_observer(&config.observability);
@@ -2049,16 +2106,18 @@ pub async fn run(
             Some(security.as_ref()),
             None,
             text_tool_result_history,
+            render_opts,
+            None,
         )
         .await?;
         final_output = response.clone();
-        let rendered = render(&response, RenderStyle::auto_markdown());
+        let rendered = render_opts.render(&response);
         println!("{rendered}");
         observer.record_event(&ObserverEvent::TurnComplete);
     } else {
         println!("🦀 VelaClaw Interactive Mode");
         println!("Type /help for commands.\n");
-        let cli = crate::channels::CliChannel::new();
+        let cli = crate::channels::CliChannel::with_render_opts(render_opts);
 
         // Persistent conversation history across turns
         let mut history = vec![ChatMessage::system(&system_prompt)];
@@ -2091,6 +2150,7 @@ pub async fn run(
                     println!("  /version     Show VelaClaw version");
                     println!("  /models      List providers (or `/models <provider>`)");
                     println!("  /model       Show/set model for this session");
+                    println!("  /expand <id> Replay a folded long output by id");
                     println!("  /clear /new  Clear conversation history");
                     println!("  /quit /exit  Exit interactive mode\n");
                     continue;
@@ -2102,6 +2162,34 @@ pub async fn run(
                         session_provider,
                         session_model
                     );
+                    continue;
+                }
+                cmd if cmd.starts_with("/expand") => {
+                    let id_str = cmd.strip_prefix("/expand").unwrap_or("").trim();
+                    if id_str.is_empty() {
+                        println!("Usage: /expand <id>\n");
+                        continue;
+                    }
+                    match id_str.parse::<u64>() {
+                        Ok(id) => {
+                            let payload = {
+                                let guard = fold_cache.lock().unwrap_or_else(|e| e.into_inner());
+                                guard.get(&id).cloned()
+                            };
+                            match payload {
+                                Some(text) => {
+                                    // Replay raw stored payload without re-rendering.
+                                    println!("{text}\n");
+                                }
+                                None => {
+                                    println!("No folded output with id {id}.\n");
+                                }
+                            }
+                        }
+                        Err(_) => {
+                            println!("Usage: /expand <id>  (id must be a number)\n");
+                        }
+                    }
                     continue;
                 }
                 "/clear" | "/new" => {
@@ -2200,6 +2288,8 @@ pub async fn run(
                 Some(security.as_ref()),
                 None,
                 text_tool_result_history,
+                render_opts,
+                Some(&fold_cache),
             )
             .await
             {
@@ -2696,6 +2786,15 @@ mod tests {
             None,
             None,
             false,
+            RenderOpts {
+                style: RenderStyle {
+                    ansi: false,
+                    markdown: true,
+                },
+                fold_lines: 10,
+                fold_enabled: false,
+            },
+            None,
         )
         .await
         .expect_err("provider without vision support should fail");
@@ -2744,6 +2843,15 @@ mod tests {
             None,
             None,
             false,
+            RenderOpts {
+                style: RenderStyle {
+                    ansi: false,
+                    markdown: true,
+                },
+                fold_lines: 10,
+                fold_enabled: false,
+            },
+            None,
         )
         .await
         .expect_err("oversized payload must fail");
@@ -2786,6 +2894,15 @@ mod tests {
             None,
             None,
             false,
+            RenderOpts {
+                style: RenderStyle {
+                    ansi: false,
+                    markdown: true,
+                },
+                fold_lines: 10,
+                fold_enabled: false,
+            },
+            None,
         )
         .await
         .expect("valid multimodal payload should pass");
@@ -2910,6 +3027,15 @@ mod tests {
             None,
             None,
             false,
+            RenderOpts {
+                style: RenderStyle {
+                    ansi: false,
+                    markdown: true,
+                },
+                fold_lines: 10,
+                fold_enabled: false,
+            },
+            None,
         )
         .await
         .expect("parallel execution should complete");

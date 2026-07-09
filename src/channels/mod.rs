@@ -65,6 +65,7 @@ pub use whatsapp_web::WhatsAppWebChannel;
 use crate::agent::dispatcher::ToolDispatcher;
 use crate::agent::loop_::{append_text_tool_prompt, build_tool_instructions, run_tool_call_loop};
 use crate::approval::{ApprovalManager, ChannelApprovalHub, ChannelApprovalSession};
+use crate::cli_render::{RenderOpts, RenderStyle};
 use crate::config::{ChannelApprovalMode, Config, DEFAULT_PROTOCOL_MODEL_ID};
 use crate::identity;
 use crate::memory::{self, Memory};
@@ -1713,7 +1714,12 @@ async fn process_channel_message(
                 Some(ctx.security.as_ref()),
                 channel_approval,
                 text_tool_result_history,
-            ),
+            RenderOpts {
+                style: RenderStyle { ansi: false, markdown: true },
+                fold_lines: 10,
+                fold_enabled: false,
+            },
+            None),
         ) => LlmExecutionResult::Completed(result),
     };
 

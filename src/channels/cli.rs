@@ -3,14 +3,36 @@ use async_trait::async_trait;
 use tokio::io::{self, AsyncBufReadExt, BufReader};
 use uuid::Uuid;
 
-use crate::cli_render::{render, RenderStyle};
+use crate::cli_render::RenderOpts;
 
 /// CLI channel — stdin/stdout, always available, zero deps
-pub struct CliChannel;
+pub struct CliChannel {
+    render_opts: RenderOpts,
+}
 
 impl CliChannel {
     pub fn new() -> Self {
-        Self
+        Self {
+            render_opts: RenderOpts::interactive_default(),
+        }
+    }
+
+    /// Construct with explicit render options (config + CLI flags).
+    #[must_use]
+    pub fn with_render_opts(render_opts: RenderOpts) -> Self {
+        Self { render_opts }
+    }
+
+    /// Current render options (style + fold knobs).
+    #[must_use]
+    pub fn render_opts(&self) -> RenderOpts {
+        self.render_opts
+    }
+}
+
+impl Default for CliChannel {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -21,7 +43,7 @@ impl Channel for CliChannel {
     }
 
     async fn send(&self, message: &SendMessage) -> anyhow::Result<()> {
-        let rendered = render(&message.content, RenderStyle::auto_markdown());
+        let rendered = self.render_opts.render(&message.content);
         println!("{rendered}");
         Ok(())
     }
@@ -64,6 +86,8 @@ impl Channel for CliChannel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cli_render::RenderStyle;
+    use crate::config::CliRenderConfig;
 
     #[test]
     fn cli_channel_name() {
@@ -104,6 +128,44 @@ mod tests {
     async fn cli_channel_health_check() {
         let ch = CliChannel::new();
         assert!(ch.health_check().await);
+    }
+
+    #[tokio::test]
+    async fn cli_channel_send_renders_markdown_without_raw_markers() {
+        let opts = RenderOpts {
+            style: RenderStyle {
+                ansi: false,
+                markdown: true,
+            },
+            fold_lines: 10,
+            fold_enabled: false,
+        };
+        let ch = CliChannel::with_render_opts(opts);
+        let md = "## Title\n**bold**\n| a | b |\n| - | - |\n| 1 | 2 |";
+        let result = ch
+            .send(&SendMessage {
+                content: md.into(),
+                recipient: "user".into(),
+                subject: None,
+                thread_ts: None,
+                reply_markup: None,
+            })
+            .await;
+        assert!(result.is_ok());
+        let rendered = opts.render(md);
+        assert!(!rendered.contains("## "));
+        assert!(!rendered.contains("**"));
+    }
+
+    #[test]
+    fn cli_channel_with_render_opts_preserves_fold_lines() {
+        let cfg = CliRenderConfig {
+            fold_lines: 7,
+            markdown_enabled: true,
+        };
+        let opts = RenderOpts::from_config(Some(&cfg), false, false, true);
+        let ch = CliChannel::with_render_opts(opts);
+        assert_eq!(ch.render_opts().fold_lines, 7);
     }
 
     #[test]

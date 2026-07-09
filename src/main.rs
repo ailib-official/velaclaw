@@ -154,6 +154,14 @@ Examples:
         /// Attach a peripheral (board:path, e.g. nucleo-f401re:/dev/ttyACM0)
         #[arg(long)]
         peripheral: Vec<String>,
+
+        /// Disable ANSI/Markdown terminal rendering (plain output)
+        #[arg(long, default_value_t = false)]
+        no_color: bool,
+
+        /// Disable long-output folding in interactive REPL
+        #[arg(long, default_value_t = false)]
+        no_fold: bool,
     },
 
     /// Start the gateway server (webhooks, websockets)
@@ -637,9 +645,20 @@ async fn main() -> Result<()> {
             model,
             temperature,
             peripheral,
-        } => agent::run(config, message, provider, model, temperature, peripheral)
-            .await
-            .map(|_| ()),
+            no_color,
+            no_fold,
+        } => agent::run(
+            config,
+            message,
+            provider,
+            model,
+            temperature,
+            peripheral,
+            no_color,
+            no_fold,
+        )
+        .await
+        .map(|_| ()),
 
         Commands::Gateway { port, host } => {
             let port = port.unwrap_or(config.gateway.port);
@@ -1485,6 +1504,47 @@ mod tests {
         match cli.command {
             Commands::Onboard { force, .. } => assert!(force),
             other => panic!("expected onboard command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn agent_cli_accepts_no_color_and_no_fold_flags() {
+        let cli = Cli::try_parse_from([
+            "velaclaw",
+            "agent",
+            "--no-color",
+            "--no-fold",
+            "-m",
+            "hello",
+        ])
+        .expect("agent flags should parse");
+
+        match cli.command {
+            Commands::Agent {
+                message,
+                no_color,
+                no_fold,
+                ..
+            } => {
+                assert_eq!(message.as_deref(), Some("hello"));
+                assert!(no_color);
+                assert!(no_fold);
+            }
+            other => panic!("expected agent command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn agent_cli_flags_default_off() {
+        let cli = Cli::try_parse_from(["velaclaw", "agent"]).expect("agent defaults");
+        match cli.command {
+            Commands::Agent {
+                no_color, no_fold, ..
+            } => {
+                assert!(!no_color);
+                assert!(!no_fold);
+            }
+            other => panic!("expected agent command, got {other:?}"),
         }
     }
 }

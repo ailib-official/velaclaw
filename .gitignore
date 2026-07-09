@@ -32,3 +32,6 @@ credentials.json
 .work/
 ui-chat/node_modules/
 ui-chat/dist/
+
+# CodeGraph local index
+.codegraph/

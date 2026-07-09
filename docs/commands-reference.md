@@ -51,6 +51,16 @@ Last verified: **February 20, 2026**.
 - `velaclaw agent -m "Hello"`
 - `velaclaw agent --provider <ID> --model <MODEL> --temperature <0.0-2.0>`
 - `velaclaw agent --peripheral <board:path>`
+- `velaclaw agent --no-color`
+- `velaclaw agent --no-fold`
+
+Interactive REPL extras:
+
+- `/expand <id>` — replay a folded long tool/code block from the current session
+- Long tool outputs fold after `[cli_render].fold_lines` (default `10`) when stdout is a TTY and `--no-fold` is not set
+- `--no-color` forces plain output (also honors `NO_COLOR`); non-TTY/pipe already strips ANSI
+
+See `[cli_render]` in [config-reference.md](config-reference.md).
 
 ### `gateway` / `daemon`
 

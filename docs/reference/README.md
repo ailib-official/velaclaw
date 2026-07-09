@@ -8,6 +8,7 @@ Structured reference index for commands, providers, channels, config, and integr
 - Provider IDs / aliases / env vars: [../providers-reference.md](../providers-reference.md)
 - Channel setup + allowlists: [../channels-reference.md](../channels-reference.md)
 - Config defaults and keys: [../config-reference.md](../config-reference.md)
+- CLI terminal render (Markdown / fold): [../cli-render.md](../cli-render.md)
 
 ## Provider & Integration Extensions
 

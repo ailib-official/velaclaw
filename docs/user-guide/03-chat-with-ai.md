@@ -43,6 +43,17 @@ VelaClaw: 递归是一种编程技术...
 velaclaw agent --message "什么是机器学习？"
 ```
 
+### 终端输出渲染
+
+交互模式下，TTY 会话会把常见 Markdown 渲染为终端友好格式，并对超长工具输出折叠；可用 `/expand <id>` 展开。
+
+```bash
+velaclaw agent --no-color   # 强制纯文本
+velaclaw agent --no-fold    # 禁用折叠
+```
+
+详见 [cli-render.md](../cli-render.md) 与配置节 `[cli_render]`。
+
 ### 指定模型
 
 ```bash

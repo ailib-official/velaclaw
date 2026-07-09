@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-09
+
+### Added
+
+- **CLI render layer (VL-CLI-RENDER-001..003)**: terminal Markdown→ANSI/box rendering with CJK-aware width (`unicode-width`), TTY/`NO_COLOR` detection, and interactive long-output folding.
+- **`[cli_render]` config**: optional `fold_lines` (default `10`) and `markdown_enabled` (default `true`); absent section keeps backward-compatible defaults.
+- **`velaclaw agent --no-color` / `--no-fold`**: force plain output and disable REPL folding.
+- **REPL `/expand <id>`**: replay a folded tool/code block without re-rendering.
+
+### Changed
+
+- CLI `CliChannel::send` and agent loop print sites now route through `cli_render::render` / `RenderOpts` (non-TTY stays pipe-friendly plain with box-drawing preserved).
+
 ## [0.5.1] - 2026-07-05
 
 ### Added

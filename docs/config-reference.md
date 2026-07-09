@@ -97,6 +97,27 @@ self_adjust:
     - channels.*.credentials
 ```
 
+## `[cli_render]`
+
+Optional. When omitted, runtime uses the same defaults as an explicit section.
+
+| Key | Default | Purpose |
+|---|---|---|
+| `fold_lines` | `10` | Visible lines kept when folding long tool/code blocks in interactive REPL |
+| `markdown_enabled` | `true` | When `false`, skip Markdown structure rendering (fenced blocks still dropped in plain mode) |
+
+Notes:
+
+- Folding applies only in interactive `velaclaw agent` (not one-shot `-m` / pipe / CI).
+- Override with CLI: `velaclaw agent --no-color` / `--no-fold`.
+- Env: `NO_COLOR` disables ANSI regardless of TTY.
+
+```toml
+[cli_render]
+fold_lines = 10
+markdown_enabled = true
+```
+
 Secret fields (`api_key`, `token`, `credentials`, etc.) are rejected at load time.
 
 Notes:

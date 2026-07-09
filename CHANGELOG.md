@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-09
+
+### Added
+
+- **Unified policy layers (VL-SEC-001)**: L1 `config.toml` + L2 `agent-policy.yaml` v2 + L2.5 `.velaclaw/policy-overrides.yaml` merge via `EffectiveExecutionPolicy`.
+- **ApprovalGate (VL-SEC-002)**: single human approval path for CLI, gateway, and channels; shell tool schema no longer exposes model-writable `approved`.
+- **Channel inline approval (VL-SEC-003)**: Telegram/Discord supervised tool prompts via `approval_mode` (`inline` / `deny` / `gateway_redirect`).
+- **Policy persistence (VL-SEC-004)**: operator **Always** decisions and audit trail persist to L2.5; session allowlist survives restart.
+- **`policy_patch` tool (VL-SEC-005)**: `self_adjust` glob-enforced dot-path patches with `PolicyHandle` hot refresh ([#117](https://github.com/ailib-official/velaclaw/pull/117)).
+- **`execute_tool_batch` (VL-UR-003 / VL-SEC-006)**: gate-aware parallel/sequential tool dispatch shared by CLI/channel/gateway loops ([#118](https://github.com/ailib-official/velaclaw/pull/118)).
+- **`DenyApprovalBackend`**: runtime backend for channel deny profiles (exported; gate wiring follow-up as needed).
+
+### Changed
+
+- **Breaking**: models cannot self-approve shell via `approved` parameter; human consent is injected only after `ApprovalGate` approval.
+- **Breaking**: channel supervised tools require configured `approval_mode`; legacy bypass paths removed.
+- `Agent::execute_tool_call` now reports accurate `success` from tool execution results.
+
+### Documentation
+
+- **Policy & approval runtime reference (VL-SEC-007)**: `docs/policy-approval-reference.md`, `docs/migration-policy-v0.7.0.md`; updated config/channels/runbook/troubleshooting ([#119](https://github.com/ailib-official/velaclaw/pull/119)).
+
 ## [0.6.0] - 2026-07-09
 
 ### Added

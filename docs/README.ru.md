@@ -14,6 +14,7 @@
 | Установить одной командой | [one-click-bootstrap.md](one-click-bootstrap.md) |
 | Найти команды по задаче | [commands-reference.md](commands-reference.md) |
 | Проверить ключи конфигурации и дефолты | [config-reference.md](config-reference.md) |
+| Рендер CLI-терминала (Markdown / свёртка) | [cli-render.md](cli-render.md) |
 | Подключить кастомный provider / endpoint | [custom-providers.md](custom-providers.md) |
 | Настроить provider Z.AI / GLM | [zai-glm-setup.md](zai-glm-setup.md) |
 | Использовать интеграцию LangGraph | [langgraph-integration.md](langgraph-integration.md) |
@@ -51,6 +52,7 @@
 - [providers-reference.md](providers-reference.md)
 - [channels-reference.md](channels-reference.md)
 - [config-reference.md](config-reference.md)
+- [cli-render.md](cli-render.md)
 - [custom-providers.md](custom-providers.md)
 - [zai-glm-setup.md](zai-glm-setup.md)
 - [langgraph-integration.md](langgraph-integration.md)

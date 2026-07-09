@@ -14,6 +14,7 @@
 | 一键安装与初始化 | [one-click-bootstrap.md](one-click-bootstrap.md) |
 | 按任务找命令 | [commands-reference.md](commands-reference.md) |
 | 快速查看配置默认值与关键项 | [config-reference.md](config-reference.md) |
+| CLI 终端渲染（Markdown / 折叠） | [cli-render.md](cli-render.md) |
 | 接入自定义 Provider / endpoint | [custom-providers.md](custom-providers.md) |
 | 配置 Z.AI / GLM Provider | [zai-glm-setup.md](zai-glm-setup.md) |
 | 使用 LangGraph 工具调用集成 | [langgraph-integration.md](langgraph-integration.md) |
@@ -51,6 +52,7 @@
 - [providers-reference.md](providers-reference.md)
 - [channels-reference.md](channels-reference.md)
 - [config-reference.md](config-reference.md)
+- [cli-render.md](cli-render.md)
 - [custom-providers.md](custom-providers.md)
 - [zai-glm-setup.md](zai-glm-setup.md)
 - [langgraph-integration.md](langgraph-integration.md)

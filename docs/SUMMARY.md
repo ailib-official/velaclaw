@@ -32,6 +32,7 @@ Last refreshed: **February 18, 2026**.
 - [channels-reference.md](channels-reference.md)
 - [nextcloud-talk-setup.md](nextcloud-talk-setup.md)
 - [config-reference.md](config-reference.md)
+- [cli-render.md](cli-render.md)
 - [custom-providers.md](custom-providers.md)
 - [zai-glm-setup.md](zai-glm-setup.md)
 - [langgraph-integration.md](langgraph-integration.md)

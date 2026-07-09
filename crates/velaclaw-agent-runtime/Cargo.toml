@@ -13,7 +13,7 @@ default = []
 ai-protocol = ["dep:ai-lib-rust", "dep:tracing"]
 
 [dependencies]
-velaclaw-config = { path = "../velaclaw-config", features = ["ai-protocol"] }
+velaclaw-config = { path = "../velaclaw-config", version = "0.1.0", features = ["ai-protocol"] }
 serde = { version = "1.0", default-features = false, features = ["derive"] }
 serde_json = { version = "1.0", default-features = false, features = ["std"] }
 anyhow = "1.0"

@@ -42,8 +42,8 @@ serde_json = { version = "1.0", default-features = false, features = ["std"] }
     serde_ignored = "0.1"
 
 # Config
-velaclaw-config = { path = "crates/velaclaw-config" }
-velaclaw-agent-runtime = { path = "crates/velaclaw-agent-runtime" }
+velaclaw-config = { path = "crates/velaclaw-config", version = "0.1.0" }
+velaclaw-agent-runtime = { path = "crates/velaclaw-agent-runtime", version = "0.1.0" }
 directories = "6.0"
 toml = "1.0"
 shellexpand = "3.1"

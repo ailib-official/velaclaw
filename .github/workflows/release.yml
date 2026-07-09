@@ -48,9 +48,13 @@ jobs:
         run: cargo test --workspace --locked
 
       - name: cargo publish crates.io
+        continue-on-error: true
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish --locked
+        run: |
+          cargo publish -p velaclaw-config --locked
+          cargo publish -p velaclaw-agent-runtime --locked
+          cargo publish -p velaclaw --locked
 
       - name: GitHub Release
         uses: softprops/action-gh-release@v2

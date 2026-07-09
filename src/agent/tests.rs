@@ -35,7 +35,7 @@ use crate::providers::{
     ChatMessage, ChatRequest, ChatResponse, ConversationMessage, Provider, ToolCall,
     ToolResultMessage,
 };
-use crate::security::{PolicyHandle, SecurityPolicy};
+use crate::security::PolicyHandle;
 use crate::tools::{Tool, ToolExecutionContext, ToolResult};
 use anyhow::Result;
 use async_trait::async_trait;

@@ -5,12 +5,13 @@ use crate::agent::memory_loader::{DefaultMemoryLoader, MemoryLoader};
 use crate::agent::prompt::{PromptContext, SystemPromptBuilder};
 use crate::approval::{ApprovalGate, ApprovalHub, ApprovalManager, GateDecision};
 use crate::config::{Config, DEFAULT_PROTOCOL_MODEL_ID};
-use crate::memory::{self, Memory, MemoryCategory};
-use crate::observability::{self, Observer, ObserverEvent};
-use crate::providers::{self, ChatMessage, ChatRequest, ConversationMessage, Provider};
-use crate::runtime;
+use crate::memory::{Memory, MemoryCategory};
+use crate::observability::{Observer, ObserverEvent};
+#[cfg(not(feature = "ai-protocol"))]
+use crate::providers;
+use crate::providers::{ChatMessage, ChatRequest, ConversationMessage, Provider};
 use crate::security::PolicyHandle;
-use crate::tools::{self, Tool, ToolExecutionContext, ToolSpec};
+use crate::tools::{Tool, ToolExecutionContext, ToolSpec};
 use anyhow::Result;
 use std::io::Write as IoWrite;
 use std::sync::Arc;
@@ -225,7 +226,7 @@ impl AgentBuilder {
             config: self.config.unwrap_or_default(),
             model_name: self
                 .model_name
-                .unwrap_or_else(|| "anthropic/claude-sonnet-4-20250514".into()),
+                .unwrap_or_else(|| DEFAULT_PROTOCOL_MODEL_ID.into()),
             temperature: self.temperature.unwrap_or(0.7),
             workspace_dir: self
                 .workspace_dir
@@ -270,52 +271,17 @@ impl Agent {
     }
 
     pub fn from_config(config: &Config) -> Result<Self> {
-        let observer: Arc<dyn Observer> =
-            Arc::from(observability::create_observer(&config.observability));
-        let runtime: Arc<dyn runtime::RuntimeAdapter> =
-            Arc::from(runtime::create_runtime(&config.runtime)?);
-        let security = PolicyHandle::from_workspace_config(config)?;
-
-        let memory: Arc<dyn Memory> = Arc::from(memory::create_memory_with_storage_and_routes(
-            &config.memory,
-            &config.embedding_routes,
-            Some(&config.storage.provider.config),
-            &config.workspace_dir,
-            config.api_key.as_deref(),
-        )?);
-
-        let composio_key = if config.composio.enabled {
-            config.composio.api_key.as_deref()
-        } else {
-            None
-        };
-        let composio_entity_id = if config.composio.enabled {
-            Some(config.composio.entity_id.as_str())
-        } else {
-            None
-        };
-
-        let tools = tools::all_tools_with_runtime(
-            Arc::new(config.clone()),
-            &security,
-            runtime,
-            memory.clone(),
-            composio_key,
-            composio_entity_id,
-            &config.browser,
-            &config.http_request,
-            &config.workspace_dir,
-            &config.agents,
-            config.api_key.as_deref(),
+        let boot = crate::config::bootstrap_runtime(
             config,
-        );
-
-        let provider_runtime_options = providers::ProviderRuntimeOptions {
-            auth_profile_override: None,
-            velaclaw_dir: config.config_path.parent().map(std::path::PathBuf::from),
-            secrets_encrypt: config.secrets.encrypt,
-            reasoning_enabled: config.runtime.reasoning_enabled,
-        };
+            crate::config::BootstrapOptions {
+                with_embedding_routes: true,
+            },
+        )?;
+        let security = boot.security;
+        let memory = boot.memory;
+        let observer = boot.observer;
+        let tools = boot.tools;
+        let provider_runtime_options = boot.provider_runtime_options;
 
         #[cfg(feature = "ai-protocol")]
         let (execution, provider, model_name) = {
@@ -545,10 +511,13 @@ impl Agent {
         }
 
         if self.auto_save {
-            let _ = self
+            if let Err(err) = self
                 .memory
                 .store("user_msg", user_message, MemoryCategory::Conversation, None)
-                .await;
+                .await
+            {
+                tracing::warn!(error = %err, "auto_save failed to store user message");
+            }
         }
 
         let context = self

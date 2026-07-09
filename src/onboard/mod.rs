@@ -1,3 +1,4 @@
+pub mod model_catalog;
 pub mod wizard;
 
 pub use wizard::run_models_refresh;

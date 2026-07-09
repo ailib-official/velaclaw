@@ -384,6 +384,40 @@ async fn run_quick_setup_with_home(
     force: bool,
     home: &Path,
 ) -> Result<Config> {
+    // Pin marker root via VELACLAW_CONFIG_DIR under the shared config-resolution
+    // env lock so parallel tests never write the operator's real ~/.velaclaw.
+    let _env_guard = crate::config::schema::config_resolution_env_lock().await;
+
+    let original_config_dir = std::env::var_os("VELACLAW_CONFIG_DIR");
+    let marker_root = home.join(".velaclaw");
+    std::env::set_var("VELACLAW_CONFIG_DIR", &marker_root);
+
+    let result = run_quick_setup_with_home_inner(
+        credential_override,
+        provider,
+        model_override,
+        memory_backend,
+        force,
+        home,
+    )
+    .await;
+
+    match original_config_dir {
+        Some(value) => std::env::set_var("VELACLAW_CONFIG_DIR", value),
+        None => std::env::remove_var("VELACLAW_CONFIG_DIR"),
+    }
+
+    result
+}
+
+async fn run_quick_setup_with_home_inner(
+    credential_override: Option<&str>,
+    provider: Option<&str>,
+    model_override: Option<&str>,
+    memory_backend: Option<&str>,
+    force: bool,
+    home: &Path,
+) -> Result<Config> {
     println!("{}", style(BANNER).cyan().bold());
     println!(
         "  {}",
@@ -603,7 +637,16 @@ fn default_model_for_provider(provider: &str) -> String {
         return provider.to_string();
     }
 
-    match canonical_provider_name(provider) {
+    let canonical = canonical_provider_name(provider);
+    if let Some(from_manifest) = super::model_catalog::default_model_from_manifest(canonical) {
+        return from_manifest;
+    }
+
+    curated_default_model_for_provider(canonical)
+}
+
+fn curated_default_model_for_provider(canonical: &str) -> String {
+    match canonical {
         "anthropic" => "claude-sonnet-4-5-20250929".into(),
         "openai" => "gpt-5.2".into(),
         "openai-codex" => "gpt-5-codex".into(),
@@ -632,7 +675,16 @@ fn default_model_for_provider(provider: &str) -> String {
 }
 
 fn curated_models_for_provider(provider_name: &str) -> Vec<(String, String)> {
-    match canonical_provider_name(provider_name) {
+    let canonical = canonical_provider_name(provider_name);
+    if let Some(from_manifest) = super::model_catalog::models_from_manifest(canonical) {
+        return from_manifest;
+    }
+
+    curated_models_fallback(canonical)
+}
+
+fn curated_models_fallback(canonical: &str) -> Vec<(String, String)> {
+    match canonical {
         "openrouter" => vec![
             (
                 "anthropic/claude-sonnet-4.6".to_string(),
@@ -5571,49 +5623,39 @@ mod tests {
 
     #[test]
     fn default_model_for_provider_uses_latest_defaults() {
+        // Curated offline defaults (manifest path is env-dependent via AI_PROTOCOL_DIR).
+        let curated =
+            |provider: &str| curated_default_model_for_provider(canonical_provider_name(provider));
+        assert_eq!(curated("openai"), "gpt-5.2");
+        assert_eq!(curated("openai-codex"), "gpt-5-codex");
+        assert_eq!(curated("anthropic"), "claude-sonnet-4-5-20250929");
+        assert_eq!(curated("qwen"), "qwen-plus");
+        assert_eq!(curated("qwen-intl"), "qwen-plus");
+        assert_eq!(curated("qwen-code"), "qwen3-coder-plus");
+        assert_eq!(curated("glm-cn"), "glm-5");
+        assert_eq!(curated("minimax-cn"), "MiniMax-M2.5");
+        assert_eq!(curated("zai-cn"), "glm-5");
+        assert_eq!(curated("gemini"), "gemini-2.5-pro");
+        assert_eq!(curated("google"), "gemini-2.5-pro");
+        assert_eq!(curated("kimi-code"), "kimi-for-coding");
         assert_eq!(
-            default_model_for_provider(DEFAULT_PROTOCOL_MODEL_ID),
-            DEFAULT_PROTOCOL_MODEL_ID
-        );
-        assert_eq!(default_model_for_provider("openai"), "gpt-5.2");
-        assert_eq!(default_model_for_provider("openai-codex"), "gpt-5-codex");
-        assert_eq!(
-            default_model_for_provider("anthropic"),
-            "claude-sonnet-4-5-20250929"
-        );
-        assert_eq!(default_model_for_provider("qwen"), "qwen-plus");
-        assert_eq!(default_model_for_provider("qwen-intl"), "qwen-plus");
-        assert_eq!(default_model_for_provider("qwen-code"), "qwen3-coder-plus");
-        assert_eq!(default_model_for_provider("glm-cn"), "glm-5");
-        assert_eq!(default_model_for_provider("minimax-cn"), "MiniMax-M2.5");
-        assert_eq!(default_model_for_provider("zai-cn"), "glm-5");
-        assert_eq!(default_model_for_provider("gemini"), "gemini-2.5-pro");
-        assert_eq!(default_model_for_provider("google"), "gemini-2.5-pro");
-        assert_eq!(default_model_for_provider("kimi-code"), "kimi-for-coding");
-        assert_eq!(
-            default_model_for_provider("bedrock"),
+            curated("bedrock"),
             "anthropic.claude-sonnet-4-5-20250929-v1:0"
         );
+        assert_eq!(curated("google-gemini"), "gemini-2.5-pro");
+        assert_eq!(curated("venice"), "zai-org-glm-5");
+        assert_eq!(curated("moonshot"), "kimi-k2.5");
+        assert_eq!(curated("nvidia"), "meta/llama-3.3-70b-instruct");
+        assert_eq!(curated("nvidia-nim"), "meta/llama-3.3-70b-instruct");
+        assert_eq!(curated("llamacpp"), "ggml-org/gpt-oss-20b-GGUF");
         assert_eq!(
-            default_model_for_provider("google-gemini"),
-            "gemini-2.5-pro"
+            curated_default_model_for_provider("astrai"),
+            DEFAULT_PROTOCOL_MODEL_ID
         );
-        assert_eq!(default_model_for_provider("venice"), "zai-org-glm-5");
-        assert_eq!(default_model_for_provider("moonshot"), "kimi-k2.5");
+
+        // Protocol provider/model ids pass through unchanged.
         assert_eq!(
-            default_model_for_provider("nvidia"),
-            "meta/llama-3.3-70b-instruct"
-        );
-        assert_eq!(
-            default_model_for_provider("nvidia-nim"),
-            "meta/llama-3.3-70b-instruct"
-        );
-        assert_eq!(
-            default_model_for_provider("llamacpp"),
-            "ggml-org/gpt-oss-20b-GGUF"
-        );
-        assert_eq!(
-            default_model_for_provider("astrai"),
+            default_model_for_provider(DEFAULT_PROTOCOL_MODEL_ID),
             DEFAULT_PROTOCOL_MODEL_ID
         );
     }
@@ -5641,7 +5683,7 @@ mod tests {
 
     #[test]
     fn curated_models_for_openai_include_latest_choices() {
-        let ids: Vec<String> = curated_models_for_provider("openai")
+        let ids: Vec<String> = curated_models_fallback(canonical_provider_name("openai"))
             .into_iter()
             .map(|(id, _)| id)
             .collect();
@@ -5652,7 +5694,7 @@ mod tests {
 
     #[test]
     fn curated_models_for_glm_removes_deprecated_flash_plus_aliases() {
-        let ids: Vec<String> = curated_models_for_provider("glm")
+        let ids: Vec<String> = curated_models_fallback(canonical_provider_name("glm"))
             .into_iter()
             .map(|(id, _)| id)
             .collect();
@@ -5666,7 +5708,7 @@ mod tests {
 
     #[test]
     fn curated_models_for_openai_codex_include_codex_family() {
-        let ids: Vec<String> = curated_models_for_provider("openai-codex")
+        let ids: Vec<String> = curated_models_fallback(canonical_provider_name("openai-codex"))
             .into_iter()
             .map(|(id, _)| id)
             .collect();
@@ -5677,7 +5719,7 @@ mod tests {
 
     #[test]
     fn curated_models_for_openrouter_use_valid_anthropic_id() {
-        let ids: Vec<String> = curated_models_for_provider("openrouter")
+        let ids: Vec<String> = curated_models_fallback(canonical_provider_name("openrouter"))
             .into_iter()
             .map(|(id, _)| id)
             .collect();
@@ -5687,7 +5729,7 @@ mod tests {
 
     #[test]
     fn curated_models_for_bedrock_include_verified_model_ids() {
-        let ids: Vec<String> = curated_models_for_provider("bedrock")
+        let ids: Vec<String> = curated_models_fallback(canonical_provider_name("bedrock"))
             .into_iter()
             .map(|(id, _)| id)
             .collect();
@@ -5700,7 +5742,7 @@ mod tests {
 
     #[test]
     fn curated_models_for_moonshot_drop_deprecated_aliases() {
-        let ids: Vec<String> = curated_models_for_provider("moonshot")
+        let ids: Vec<String> = curated_models_fallback(canonical_provider_name("moonshot"))
             .into_iter()
             .map(|(id, _)| id)
             .collect();
@@ -5728,7 +5770,7 @@ mod tests {
 
     #[test]
     fn curated_models_for_kimi_code_include_official_agent_model() {
-        let ids: Vec<String> = curated_models_for_provider("kimi-code")
+        let ids: Vec<String> = curated_models_fallback(canonical_provider_name("kimi-code"))
             .into_iter()
             .map(|(id, _)| id)
             .collect();
@@ -5739,7 +5781,7 @@ mod tests {
 
     #[test]
     fn curated_models_for_qwen_code_include_coding_plan_models() {
-        let ids: Vec<String> = curated_models_for_provider("qwen-code")
+        let ids: Vec<String> = curated_models_fallback(canonical_provider_name("qwen-code"))
             .into_iter()
             .map(|(id, _)| id)
             .collect();
@@ -5774,58 +5816,58 @@ mod tests {
     #[test]
     fn curated_models_provider_aliases_share_same_catalog() {
         assert_eq!(
-            curated_models_for_provider("xai"),
-            curated_models_for_provider("grok")
+            curated_models_fallback(canonical_provider_name("xai")),
+            curated_models_fallback(canonical_provider_name("grok"))
         );
         assert_eq!(
-            curated_models_for_provider("together-ai"),
-            curated_models_for_provider("together")
+            curated_models_fallback(canonical_provider_name("together-ai")),
+            curated_models_fallback(canonical_provider_name("together"))
         );
         assert_eq!(
-            curated_models_for_provider("gemini"),
-            curated_models_for_provider("google")
+            curated_models_fallback(canonical_provider_name("gemini")),
+            curated_models_fallback(canonical_provider_name("google"))
         );
         assert_eq!(
-            curated_models_for_provider("gemini"),
-            curated_models_for_provider("google-gemini")
+            curated_models_fallback(canonical_provider_name("gemini")),
+            curated_models_fallback(canonical_provider_name("google-gemini"))
         );
         assert_eq!(
-            curated_models_for_provider("qwen"),
-            curated_models_for_provider("qwen-intl")
+            curated_models_fallback(canonical_provider_name("qwen")),
+            curated_models_fallback(canonical_provider_name("qwen-intl"))
         );
         assert_eq!(
-            curated_models_for_provider("qwen"),
-            curated_models_for_provider("dashscope-us")
+            curated_models_fallback(canonical_provider_name("qwen")),
+            curated_models_fallback(canonical_provider_name("dashscope-us"))
         );
         assert_eq!(
-            curated_models_for_provider("minimax"),
-            curated_models_for_provider("minimax-cn")
+            curated_models_fallback(canonical_provider_name("minimax")),
+            curated_models_fallback(canonical_provider_name("minimax-cn"))
         );
         assert_eq!(
-            curated_models_for_provider("zai"),
-            curated_models_for_provider("zai-cn")
+            curated_models_fallback(canonical_provider_name("zai")),
+            curated_models_fallback(canonical_provider_name("zai-cn"))
         );
         assert_eq!(
-            curated_models_for_provider("nvidia"),
-            curated_models_for_provider("nvidia-nim")
+            curated_models_fallback(canonical_provider_name("nvidia")),
+            curated_models_fallback(canonical_provider_name("nvidia-nim"))
         );
         assert_eq!(
-            curated_models_for_provider("nvidia"),
-            curated_models_for_provider("build.nvidia.com")
+            curated_models_fallback(canonical_provider_name("nvidia")),
+            curated_models_fallback(canonical_provider_name("build.nvidia.com"))
         );
         assert_eq!(
-            curated_models_for_provider("llamacpp"),
-            curated_models_for_provider("llama.cpp")
+            curated_models_fallback(canonical_provider_name("llamacpp")),
+            curated_models_fallback(canonical_provider_name("llama.cpp"))
         );
         assert_eq!(
-            curated_models_for_provider("bedrock"),
-            curated_models_for_provider("aws-bedrock")
+            curated_models_fallback(canonical_provider_name("bedrock")),
+            curated_models_fallback(canonical_provider_name("aws-bedrock"))
         );
     }
 
     #[test]
     fn curated_models_for_nvidia_include_nim_catalog_entries() {
-        let ids: Vec<String> = curated_models_for_provider("nvidia")
+        let ids: Vec<String> = curated_models_fallback(canonical_provider_name("nvidia"))
             .into_iter()
             .map(|(id, _)| id)
             .collect();

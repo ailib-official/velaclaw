@@ -21,7 +21,11 @@ impl PrismRouterHandle {
     pub fn from_config(config: &Config) -> anyhow::Result<Self> {
         let logical_model_id = crate::execution::logical_model_id_from_config(config);
         let env = Arc::new(EnvConfig::from_env());
-        let router = build_router(&env, &logical_model_id)?;
+        let router = build_router(
+            &env,
+            &logical_model_id,
+            &config.reliability.fallback_providers,
+        )?;
         Ok(Self {
             router: Arc::new(router),
             env,
@@ -62,7 +66,36 @@ pub fn route_model_id(logical_model_id: &str) -> &str {
         .unwrap_or(logical_model_id)
 }
 
-fn build_router(env: &EnvConfig, logical_model_id: &str) -> anyhow::Result<FallbackRouter> {
+/// Order discovered provider ids so entries listed in `priority` come first (stable).
+///
+/// `priority` values may be bare provider ids (`groq`) or protocol ids (`groq/model`);
+/// only the provider segment is used for matching.
+fn order_provider_ids(discovered: Vec<String>, priority: &[String]) -> Vec<String> {
+    if priority.is_empty() || discovered.is_empty() {
+        return discovered;
+    }
+
+    let mut ordered = Vec::with_capacity(discovered.len());
+    let mut remaining: Vec<String> = discovered;
+
+    for raw in priority {
+        let want = raw
+            .split_once('/')
+            .map(|(provider, _)| provider)
+            .unwrap_or(raw.as_str());
+        if let Some(idx) = remaining.iter().position(|id| id == want) {
+            ordered.push(remaining.remove(idx));
+        }
+    }
+    ordered.extend(remaining);
+    ordered
+}
+
+fn build_router(
+    env: &EnvConfig,
+    logical_model_id: &str,
+    fallback_priority: &[String],
+) -> anyhow::Result<FallbackRouter> {
     let route_model = route_model_id(logical_model_id).to_string();
     let mut key_entries = Vec::new();
     let mut base_urls = HashMap::new();
@@ -94,6 +127,8 @@ fn build_router(env: &EnvConfig, logical_model_id: &str) -> anyhow::Result<Fallb
         );
     }
 
+    // Prefer `[reliability].fallback_providers` order when set; else env discovery order.
+    let provider_ids = order_provider_ids(provider_ids, fallback_priority);
     let pool = KeyPool::new(key_entries);
     let fallback_order = vec![(route_model, provider_ids)];
     Ok(FallbackRouter::new(fallback_order, base_urls, pool))
@@ -141,5 +176,29 @@ mod tests {
             .route("llama-3.1-8b-instant")
             .expect("route decision");
         assert_eq!(decision.provider_id, "groq");
+    }
+
+    #[test]
+    fn order_provider_ids_applies_priority_then_remainder() {
+        let discovered = vec![
+            "groq".to_string(),
+            "deepseek".to_string(),
+            "openai".to_string(),
+        ];
+        let priority = vec!["deepseek".to_string(), "openai/gpt-4o".to_string()];
+        assert_eq!(
+            order_provider_ids(discovered, &priority),
+            vec![
+                "deepseek".to_string(),
+                "openai".to_string(),
+                "groq".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn order_provider_ids_empty_priority_keeps_discovery_order() {
+        let discovered = vec!["a".to_string(), "b".to_string()];
+        assert_eq!(order_provider_ids(discovered.clone(), &[]), discovered);
     }
 }

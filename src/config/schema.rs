@@ -3165,12 +3165,25 @@ fn default_config_and_workspace_dirs() -> Result<(PathBuf, PathBuf)> {
 
 const ACTIVE_WORKSPACE_STATE_FILE: &str = "active_workspace.toml";
 
+/// Serialize mutations of config-resolution environment variables across tests
+/// and onboard helpers that temporarily pin `VELACLAW_CONFIG_DIR`.
+pub(crate) async fn config_resolution_env_lock() -> tokio::sync::MutexGuard<'static, ()> {
+    static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    LOCK.lock().await
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct ActiveWorkspaceState {
     config_dir: String,
 }
 
 fn default_config_dir() -> Result<PathBuf> {
+    if let Ok(custom) = std::env::var("VELACLAW_CONFIG_DIR") {
+        let trimmed = custom.trim();
+        if !trimmed.is_empty() {
+            return Ok(PathBuf::from(trimmed));
+        }
+    }
     let home = UserDirs::new()
         .map(|u| u.home_dir().to_path_buf())
         .context("Could not find home directory")?;
@@ -4073,7 +4086,7 @@ mod tests {
     use std::path::PathBuf;
     #[cfg(unix)]
     use std::{fs::Permissions, os::unix::fs::PermissionsExt};
-    use tokio::sync::{Mutex, MutexGuard};
+    use tokio::sync::MutexGuard;
     use tokio::test;
     use tokio_stream::wrappers::ReadDirStream;
     use tokio_stream::StreamExt;
@@ -5463,8 +5476,13 @@ default_temperature = 0.7
     // ── Environment variable overrides (Docker support) ─────────
 
     async fn env_override_lock() -> MutexGuard<'static, ()> {
-        static ENV_OVERRIDE_TEST_LOCK: Mutex<()> = Mutex::const_new(());
-        ENV_OVERRIDE_TEST_LOCK.lock().await
+        crate::config::schema::config_resolution_env_lock().await
+    }
+
+    /// Clear host-exported config-resolution vars that would otherwise leak into tests.
+    fn clear_config_resolution_env() {
+        std::env::remove_var("VELACLAW_CONFIG_DIR");
+        std::env::remove_var("VELACLAW_WORKSPACE");
     }
 
     fn clear_proxy_env_test_vars() {
@@ -5795,12 +5813,11 @@ default_temperature = 0.7
     #[test]
     async fn resolve_runtime_config_dirs_uses_active_workspace_marker() {
         let _env_guard = env_override_lock().await;
+        clear_config_resolution_env();
         let default_config_dir = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
         let default_workspace_dir = default_config_dir.join("workspace");
         let marker_config_dir = default_config_dir.join("profiles").join("alpha");
         let state_path = default_config_dir.join(ACTIVE_WORKSPACE_STATE_FILE);
-
-        std::env::remove_var("VELACLAW_WORKSPACE");
         fs::create_dir_all(&default_config_dir).await.unwrap();
         let state = ActiveWorkspaceState {
             config_dir: marker_config_dir.to_string_lossy().into_owned(),
@@ -5824,10 +5841,9 @@ default_temperature = 0.7
     #[test]
     async fn resolve_runtime_config_dirs_falls_back_to_default_layout() {
         let _env_guard = env_override_lock().await;
+        clear_config_resolution_env();
         let default_config_dir = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
         let default_workspace_dir = default_config_dir.join("workspace");
-
-        std::env::remove_var("VELACLAW_WORKSPACE");
         let (config_dir, resolved_workspace_dir, source) =
             resolve_runtime_config_dirs(&default_config_dir, &default_workspace_dir)
                 .await
@@ -5844,6 +5860,7 @@ default_temperature = 0.7
     #[cfg(unix)]
     async fn load_or_init_workspace_override_uses_workspace_root_for_config() {
         let _env_guard = env_override_lock().await;
+        clear_config_resolution_env();
         let temp_home =
             std::env::temp_dir().join(format!("velaclaw_test_home_{}", uuid::Uuid::new_v4()));
         let workspace_dir = temp_home.join("profile-a");
@@ -5871,6 +5888,7 @@ default_temperature = 0.7
     #[cfg(unix)]
     async fn load_or_init_workspace_suffix_uses_legacy_config_layout() {
         let _env_guard = env_override_lock().await;
+        clear_config_resolution_env();
         let temp_home =
             std::env::temp_dir().join(format!("velaclaw_test_home_{}", uuid::Uuid::new_v4()));
         let workspace_dir = temp_home.join("workspace");
@@ -5899,6 +5917,7 @@ default_temperature = 0.7
     #[cfg(unix)]
     async fn load_or_init_workspace_override_keeps_existing_legacy_config() {
         let _env_guard = env_override_lock().await;
+        clear_config_resolution_env();
         let temp_home =
             std::env::temp_dir().join(format!("velaclaw_test_home_{}", uuid::Uuid::new_v4()));
         let workspace_dir = temp_home.join("custom-workspace");
@@ -5938,6 +5957,7 @@ default_model = "legacy-model"
     #[cfg(unix)]
     async fn load_or_init_uses_persisted_active_workspace_marker() {
         let _env_guard = env_override_lock().await;
+        clear_config_resolution_env();
         let temp_home =
             std::env::temp_dir().join(format!("velaclaw_test_home_{}", uuid::Uuid::new_v4()));
         let custom_config_dir = temp_home.join("profiles").join("agent-alpha");
@@ -5976,6 +5996,7 @@ default_model = "legacy-model"
     #[cfg(unix)]
     async fn load_or_init_env_workspace_override_takes_priority_over_marker() {
         let _env_guard = env_override_lock().await;
+        clear_config_resolution_env();
         let temp_home =
             std::env::temp_dir().join(format!("velaclaw_test_home_{}", uuid::Uuid::new_v4()));
         let marker_config_dir = temp_home.join("profiles").join("persisted-profile");

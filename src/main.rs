@@ -38,8 +38,10 @@ use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use dialoguer::{Input, Password};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
-use tracing::{info, warn};
+use tracing::warn;
 use tracing_subscriber::{fmt, EnvFilter};
+
+mod cli_dispatch;
 
 fn parse_temperature(s: &str) -> std::result::Result<f64, String> {
     let t: f64 = s.parse().map_err(|e| format!("{e}"))?;
@@ -57,10 +59,8 @@ mod skillforge;
 // Do not re-declare `mod agent;` etc. here — that compiles every source file twice
 // and breaks whenever a new lib module (e.g. `execution`) is added without mirroring main.
 use velaclaw::{
-    agent, auth, channels, config, cron, daemon, doctor, gateway, hardware, integrations, memory,
-    migration, onboard, peripherals, providers, security, service, skills, ChannelCommands, Config,
-    CronCommands, HardwareCommands, IntegrationCommands, MemoryCommands, MigrateCommands,
-    PeripheralCommands, ServiceCommands, SkillCommands, DEFAULT_PROTOCOL_MODEL_ID,
+    auth, security, ChannelCommands, Config, CronCommands, HardwareCommands, IntegrationCommands,
+    MemoryCommands, MigrateCommands, PeripheralCommands, ServiceCommands, SkillCommands,
 };
 
 /// `VelaClaw` - Protocol-driven autonomous AI agent runtime.
@@ -543,7 +543,6 @@ enum DoctorCommands {
 }
 
 #[tokio::main]
-#[allow(clippy::too_many_lines)]
 async fn main() -> Result<()> {
     // Install default crypto provider for Rustls TLS.
     // This prevents the error: "could not automatically determine the process-level CryptoProvider"
@@ -578,10 +577,6 @@ async fn main() -> Result<()> {
 
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
-    // Onboard runs quick setup by default, or the interactive wizard with --interactive.
-    // The onboard wizard uses reqwest::blocking internally, which creates its own
-    // Tokio runtime. To avoid "Cannot drop a runtime in a context where blocking is
-    // not allowed", we run the wizard on a blocking thread via spawn_blocking.
     if let Commands::Onboard {
         interactive,
         force,
@@ -592,356 +587,27 @@ async fn main() -> Result<()> {
         memory,
     } = &cli.command
     {
-        let interactive = *interactive;
-        let force = *force;
-        let channels_only = *channels_only;
-        let api_key = api_key.clone();
-        let provider = provider.clone();
-        let model = model.clone();
-        let memory = memory.clone();
-
-        if interactive && channels_only {
-            bail!("Use either --interactive or --channels-only, not both");
-        }
-        if channels_only
-            && (api_key.is_some() || provider.is_some() || model.is_some() || memory.is_some())
-        {
-            bail!("--channels-only does not accept --api-key, --provider, --model, or --memory");
-        }
-        if channels_only && force {
-            bail!("--channels-only does not accept --force");
-        }
-        let config = if channels_only {
-            onboard::wizard::run_channels_repair_wizard().await
-        } else if interactive {
-            onboard::wizard::run_wizard(force).await
-        } else {
-            onboard::wizard::run_quick_setup(
-                api_key.as_deref(),
-                provider.as_deref(),
-                model.as_deref(),
-                memory.as_deref(),
-                force,
-            )
-            .await
-        }?;
-        // Auto-start channels if user said yes during wizard
-        if std::env::var("VELACLAW_AUTOSTART_CHANNELS").as_deref() == Ok("1") {
-            channels::start_channels(config).await?;
-        }
-        return Ok(());
+        return cli_dispatch::run_onboard_command(
+            *interactive,
+            *force,
+            *channels_only,
+            api_key.clone(),
+            provider.clone(),
+            model.clone(),
+            memory.clone(),
+        )
+        .await;
     }
 
     // All other commands need config loaded first
     let mut config = Config::load_or_init().await?;
     config.apply_env_overrides();
 
-    match cli.command {
-        Commands::Onboard { .. } | Commands::Completions { .. } => unreachable!(),
-
-        Commands::Agent {
-            message,
-            provider,
-            model,
-            temperature,
-            peripheral,
-            no_color,
-            no_fold,
-        } => agent::run(
-            config,
-            message,
-            provider,
-            model,
-            temperature,
-            peripheral,
-            no_color,
-            no_fold,
-        )
-        .await
-        .map(|_| ()),
-
-        Commands::Gateway { port, host } => {
-            let port = port.unwrap_or(config.gateway.port);
-            let host = host.unwrap_or_else(|| config.gateway.host.clone());
-            if port == 0 {
-                info!("🚀 Starting VelaClaw Gateway on {host} (random port)");
-            } else {
-                info!("🚀 Starting VelaClaw Gateway on {host}:{port}");
-            }
-            gateway::run_gateway(&host, port, config).await
-        }
-
-        Commands::Daemon { port, host } => {
-            let port = port.unwrap_or(config.gateway.port);
-            let host = host.unwrap_or_else(|| config.gateway.host.clone());
-            if port == 0 {
-                info!("🧠 Starting VelaClaw Daemon on {host} (random port)");
-            } else {
-                info!("🧠 Starting VelaClaw Daemon on {host}:{port}");
-            }
-            daemon::run(config, host, port).await
-        }
-
-        Commands::Status => {
-            println!("🦀 VelaClaw Status");
-            println!();
-            println!("Version:     {}", env!("CARGO_PKG_VERSION"));
-            println!("Workspace:   {}", config.workspace_dir.display());
-            println!("Config:      {}", config.config_path.display());
-            println!();
-            println!(
-                "🤖 Provider:      {}",
-                config
-                    .default_provider
-                    .as_deref()
-                    .unwrap_or(DEFAULT_PROTOCOL_MODEL_ID)
-            );
-            println!(
-                "   Model:         {}",
-                config.default_model.as_deref().unwrap_or("(default)")
-            );
-            println!("📊 Observability:  {}", config.observability.backend);
-            println!("🛡️  Autonomy:      {:?}", config.autonomy.level);
-            println!("⚙️  Runtime:       {}", config.runtime.kind);
-            let effective_memory_backend = memory::effective_memory_backend_name(
-                &config.memory.backend,
-                Some(&config.storage.provider.config),
-            );
-            println!(
-                "💓 Heartbeat:      {}",
-                if config.heartbeat.enabled {
-                    format!("every {}min", config.heartbeat.interval_minutes)
-                } else {
-                    "disabled".into()
-                }
-            );
-            println!(
-                "🧠 Memory:         {} (auto-save: {})",
-                effective_memory_backend,
-                if config.memory.auto_save { "on" } else { "off" }
-            );
-
-            println!();
-            println!("Security:");
-            println!("  Workspace only:    {}", config.autonomy.workspace_only);
-            println!(
-                "  Allowed commands:  {}",
-                config.autonomy.allowed_commands.join(", ")
-            );
-            println!(
-                "  Max actions/hour:  {}",
-                config.autonomy.max_actions_per_hour
-            );
-            println!(
-                "  Max cost/day:      ${:.2}",
-                f64::from(config.autonomy.max_cost_per_day_cents) / 100.0
-            );
-            println!();
-            println!("Channels:");
-            println!("  CLI:      ✅ always");
-            for (name, configured) in [
-                ("Telegram", config.channels_config.telegram.is_some()),
-                ("Discord", config.channels_config.discord.is_some()),
-                ("Slack", config.channels_config.slack.is_some()),
-                ("Webhook", config.channels_config.webhook.is_some()),
-                ("Nextcloud", config.channels_config.nextcloud_talk.is_some()),
-            ] {
-                println!(
-                    "  {name:9} {}",
-                    if configured {
-                        "✅ configured"
-                    } else {
-                        "❌ not configured"
-                    }
-                );
-            }
-            println!();
-            println!("Peripherals:");
-            println!(
-                "  Enabled:   {}",
-                if config.peripherals.enabled {
-                    "yes"
-                } else {
-                    "no"
-                }
-            );
-            println!("  Boards:    {}", config.peripherals.boards.len());
-
-            Ok(())
-        }
-
-        Commands::Cron { cron_command } => cron::handle_command(cron_command, &config),
-
-        Commands::Models { model_command } => match model_command {
-            ModelCommands::Refresh { provider, force } => {
-                let config_for_refresh = config.clone();
-                tokio::task::spawn_blocking(move || {
-                    onboard::run_models_refresh(&config_for_refresh, provider.as_deref(), force)
-                })
-                .await
-                .map_err(|e| anyhow::anyhow!("models refresh task failed: {e}"))?
-            }
-            #[cfg(feature = "ai-protocol")]
-            ModelCommands::ProtocolProviders { json } => {
-                use velaclaw::protocol_registry::{
-                    resolve_local_protocol_root, scan_protocol_root,
-                };
-                let Some(root) = resolve_local_protocol_root() else {
-                    anyhow::bail!(
-                        "Set AI_PROTOCOL_DIR to a local ai-protocol checkout (not a URL) to list manifests."
-                    );
-                };
-                let snap = scan_protocol_root(&root)?;
-                if json {
-                    println!("{}", serde_json::to_string_pretty(&snap)?);
-                } else {
-                    println!("Protocol root: {}\n", snap.protocol_root.display());
-                    println!("{:<24} {:<6} REQUIRED_ENVS", "PROVIDER_ID", "OK");
-                    for p in &snap.providers {
-                        println!(
-                            "{:<24} {:<6} [{}]",
-                            p.id,
-                            if p.available { "yes" } else { "no" },
-                            p.required_envs.join(", ")
-                        );
-                    }
-                }
-                Ok(())
-            }
-            #[cfg(not(feature = "ai-protocol"))]
-            ModelCommands::ProtocolProviders { .. } => {
-                anyhow::bail!("Rebuild with --features ai-protocol to use this command.")
-            }
-            #[cfg(feature = "ai-protocol")]
-            ModelCommands::ProtocolModels { json } => {
-                use velaclaw::protocol_registry::{
-                    resolve_local_protocol_root, scan_protocol_root,
-                };
-                let Some(root) = resolve_local_protocol_root() else {
-                    anyhow::bail!(
-                        "Set AI_PROTOCOL_DIR to a local ai-protocol checkout (not a URL) to list models."
-                    );
-                };
-                let snap = scan_protocol_root(&root)?;
-                if json {
-                    println!("{}", serde_json::to_string_pretty(&snap.models)?);
-                } else {
-                    println!("Models under {}:\n", root.display());
-                    println!("{:<40} PROVIDER", "LOGICAL_ID");
-                    for m in &snap.models {
-                        println!("{:<40} {}", m.logical_id, m.provider);
-                    }
-                }
-                Ok(())
-            }
-            #[cfg(not(feature = "ai-protocol"))]
-            ModelCommands::ProtocolModels { .. } => {
-                anyhow::bail!("Rebuild with --features ai-protocol to use this command.")
-            }
-        },
-
-        Commands::Providers => {
-            let providers = providers::list_providers();
-            let current = config
-                .default_provider
-                .as_deref()
-                .unwrap_or(DEFAULT_PROTOCOL_MODEL_ID)
-                .trim()
-                .to_ascii_lowercase();
-            println!("Supported providers ({} total):\n", providers.len());
-            println!("  ID (use in config)  DESCRIPTION");
-            println!("  ─────────────────── ───────────");
-            for p in &providers {
-                let is_active = p.name.eq_ignore_ascii_case(&current)
-                    || p.aliases
-                        .iter()
-                        .any(|alias| alias.eq_ignore_ascii_case(&current));
-                let marker = if is_active { " (active)" } else { "" };
-                let local_tag = if p.local { " [local]" } else { "" };
-                let aliases = if p.aliases.is_empty() {
-                    String::new()
-                } else {
-                    format!("  (aliases: {})", p.aliases.join(", "))
-                };
-                println!(
-                    "  {:<19} {}{}{}{}",
-                    p.name, p.display_name, local_tag, marker, aliases
-                );
-            }
-            println!(
-                "\n  Legacy string keys and custom:<URL> endpoints were removed in ZS-ML-015."
-            );
-            println!("  Use provider/model ids backed by ai-protocol manifests.");
-            Ok(())
-        }
-
-        Commands::Service {
-            service_command,
-            service_init,
-        } => {
-            let init_system = service_init.parse()?;
-            service::handle_command(&service_command, &config, init_system)
-        }
-
-        Commands::Doctor { doctor_command } => match doctor_command {
-            Some(DoctorCommands::Models {
-                provider,
-                use_cache,
-            }) => {
-                let config_for_models = config.clone();
-                tokio::task::spawn_blocking(move || {
-                    doctor::run_models(&config_for_models, provider.as_deref(), use_cache)
-                })
-                .await
-                .map_err(|e| anyhow::anyhow!("doctor models task failed: {e}"))?
-            }
-            None => doctor::run(&config),
-        },
-
-        Commands::Channel { channel_command } => match channel_command {
-            ChannelCommands::Start => channels::start_channels(config).await,
-            ChannelCommands::Doctor => channels::doctor_channels(config).await,
-            other => channels::handle_command(other, &config).await,
-        },
-
-        Commands::Integrations {
-            integration_command,
-        } => integrations::handle_command(integration_command, &config),
-
-        Commands::Skills { skill_command } => skills::handle_command(skill_command, &config),
-
-        Commands::Migrate { migrate_command } => {
-            migration::handle_command(migrate_command, &config).await
-        }
-
-        Commands::Memory { memory_command } => {
-            memory::cli::handle_command(memory_command, &config).await
-        }
-
-        Commands::Auth { auth_command } => handle_auth_command(auth_command, &config).await,
-
-        Commands::Hardware { hardware_command } => {
-            hardware::handle_command(hardware_command.clone(), &config)
-        }
-
-        Commands::Peripheral { peripheral_command } => {
-            peripherals::handle_command(peripheral_command.clone(), &config).await
-        }
-
-        Commands::Deploy { deploy_command } => {
-            deploy::cli::handle_command(deploy_command, &config).await
-        }
-        Commands::Config { config_command } => match config_command {
-            ConfigCommands::Schema => {
-                let schema = schemars::schema_for!(config::Config);
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&schema).expect("failed to serialize JSON Schema")
-                );
-                Ok(())
-            }
-        },
-    }
+    Box::pin(cli_dispatch::dispatch_configured_command(
+        cli.command,
+        config,
+    ))
+    .await
 }
 
 fn write_shell_completion<W: Write>(shell: CompletionShell, writer: &mut W) -> Result<()> {
@@ -1113,7 +779,7 @@ fn format_expiry(profile: &auth::profiles::AuthProfile) -> String {
 }
 
 #[allow(clippy::too_many_lines)]
-async fn handle_auth_command(auth_command: AuthCommands, config: &Config) -> Result<()> {
+pub(crate) async fn handle_auth_command(auth_command: AuthCommands, config: &Config) -> Result<()> {
     let auth_service = auth::AuthService::from_config(config);
 
     match auth_command {
@@ -1413,6 +1079,7 @@ async fn handle_auth_command(auth_command: AuthCommands, config: &Config) -> Res
 mod tests {
     use super::*;
     use clap::{CommandFactory, Parser};
+    use velaclaw::DEFAULT_PROTOCOL_MODEL_ID;
 
     #[test]
     fn cli_definition_has_no_flag_conflicts() {

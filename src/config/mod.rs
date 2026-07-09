@@ -8,11 +8,13 @@ pub mod effective_execution_policy;
 pub mod effective_policy;
 #[cfg(feature = "ai-protocol")]
 pub mod policy_overrides;
+pub mod runtime_bootstrap;
 pub mod schema;
 
 #[cfg(feature = "ai-protocol")]
 pub use agent_policy::{discover_and_load, AgentPolicyLayer};
 
+pub use runtime_bootstrap::{bootstrap_runtime, BootstrapOptions, RuntimeBootstrap};
 pub use velaclaw_config::defaults::{DEFAULT_PROTOCOL_MODEL_ID, DEFAULT_PROTOCOL_MODEL_LABEL};
 
 #[allow(unused_imports)]

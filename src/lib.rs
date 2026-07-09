@@ -79,6 +79,7 @@ pub mod runtime;
 pub mod security;
 pub mod service;
 pub mod skills;
+pub mod status;
 pub mod telemetry;
 pub mod tools;
 pub mod tunnel;

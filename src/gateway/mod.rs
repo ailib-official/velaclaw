@@ -25,7 +25,7 @@ use crate::memory::{self, Memory, MemoryCategory};
 use crate::providers::{self, ChatMessage, Provider, ProviderCapabilityError};
 use crate::runtime;
 use crate::security::pairing::{constant_time_eq, is_public_bind, PairingGuard};
-use crate::security::SecurityPolicy;
+use crate::security::PolicyHandle;
 use crate::tools;
 use crate::util::truncate_with_ellipsis;
 use anyhow::{Context, Result};
@@ -364,7 +364,7 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
     )?);
     let runtime: Arc<dyn runtime::RuntimeAdapter> =
         Arc::from(runtime::create_runtime(&config.runtime)?);
-    let security = Arc::new(SecurityPolicy::from_workspace_config(&config)?);
+    let security = PolicyHandle::from_workspace_config(&config)?;
 
     let (composio_key, composio_entity_id) = if config.composio.enabled {
         (

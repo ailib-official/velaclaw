@@ -9,7 +9,7 @@ use crate::memory::{self, Memory, MemoryCategory};
 use crate::observability::{self, Observer, ObserverEvent};
 use crate::providers::{self, ChatMessage, ChatRequest, ConversationMessage, Provider};
 use crate::runtime;
-use crate::security::SecurityPolicy;
+use crate::security::PolicyHandle;
 use crate::tools::{self, Tool, ToolExecutionContext, ToolSpec};
 use anyhow::Result;
 use std::io::Write as IoWrite;
@@ -38,7 +38,7 @@ pub struct Agent {
     history: Vec<ConversationMessage>,
     classification_config: crate::config::QueryClassificationConfig,
     available_hints: Vec<String>,
-    security: Arc<SecurityPolicy>,
+    security: PolicyHandle,
     gateway_approval: Option<(ApprovalManager, Arc<ApprovalHub>)>,
 }
 
@@ -62,7 +62,7 @@ pub struct AgentBuilder {
     auto_save: Option<bool>,
     classification_config: Option<crate::config::QueryClassificationConfig>,
     available_hints: Option<Vec<String>>,
-    security: Option<Arc<SecurityPolicy>>,
+    security: Option<PolicyHandle>,
 }
 
 impl AgentBuilder {
@@ -188,7 +188,7 @@ impl AgentBuilder {
         self
     }
 
-    pub fn security(mut self, security: Arc<SecurityPolicy>) -> Self {
+    pub fn security(mut self, security: PolicyHandle) -> Self {
         self.security = Some(security);
         self
     }
@@ -274,7 +274,7 @@ impl Agent {
             Arc::from(observability::create_observer(&config.observability));
         let runtime: Arc<dyn runtime::RuntimeAdapter> =
             Arc::from(runtime::create_runtime(&config.runtime)?);
-        let security = Arc::new(SecurityPolicy::from_workspace_config(config)?);
+        let security = PolicyHandle::from_workspace_config(config)?;
 
         let memory: Arc<dyn Memory> = Arc::from(memory::create_memory_with_storage_and_routes(
             &config.memory,
@@ -452,7 +452,7 @@ impl Agent {
         let start = Instant::now();
 
         let shell_human_approved = if let Some((mgr, hub)) = &self.gateway_approval {
-            let gate = ApprovalGate::new(mgr, "web", Some(self.security.as_ref()))
+            let gate = ApprovalGate::new(mgr, "web", Some(self.security.clone()))
                 .with_hub(Arc::clone(hub));
             match gate.decide_async(call).await {
                 GateDecision::Denied { message } => {
@@ -719,6 +719,7 @@ pub async fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::security::SecurityPolicy;
     use crate::agent::dispatcher::{NativeToolDispatcher, XmlToolDispatcher};
     use async_trait::async_trait;
     use parking_lot::Mutex;
@@ -785,8 +786,8 @@ mod tests {
         }
     }
 
-    fn test_security() -> Arc<SecurityPolicy> {
-        Arc::new(SecurityPolicy::from_config(
+    fn test_security() -> PolicyHandle {
+        PolicyHandle::new(SecurityPolicy::from_config(
             &crate::config::AutonomyConfig::default(),
             &std::path::PathBuf::from("/tmp"),
         ))

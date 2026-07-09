@@ -1,16 +1,15 @@
 use super::traits::{Tool, ToolExecutionContext, ToolResult};
-use crate::security::SecurityPolicy;
+use crate::security::PolicyHandle;
 use async_trait::async_trait;
 use serde_json::json;
-use std::sync::Arc;
 
 /// Write file contents with path sandboxing
 pub struct FileWriteTool {
-    security: Arc<SecurityPolicy>,
+    security: PolicyHandle,
 }
 
 impl FileWriteTool {
-    pub fn new(security: Arc<SecurityPolicy>) -> Self {
+    pub fn new(security: PolicyHandle) -> Self {
         Self { security }
     }
 }
@@ -82,7 +81,7 @@ impl Tool for FileWriteTool {
             });
         }
 
-        let full_path = self.security.workspace_dir.join(path);
+        let full_path = self.security.workspace_dir().join(path);
 
         let Some(parent) = full_path.parent() else {
             return Ok(ToolResult {
@@ -168,10 +167,10 @@ impl Tool for FileWriteTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::security::{AutonomyLevel, SecurityPolicy};
+    use crate::security::{AutonomyLevel, PolicyHandle, SecurityPolicy};
 
-    fn test_security(workspace: std::path::PathBuf) -> Arc<SecurityPolicy> {
-        Arc::new(SecurityPolicy {
+    fn test_security(workspace: std::path::PathBuf) -> PolicyHandle {
+        PolicyHandle::new(SecurityPolicy {
             autonomy: AutonomyLevel::Supervised,
             workspace_dir: workspace,
             ..SecurityPolicy::default()
@@ -182,8 +181,8 @@ mod tests {
         workspace: std::path::PathBuf,
         autonomy: AutonomyLevel,
         max_actions_per_hour: u32,
-    ) -> Arc<SecurityPolicy> {
-        Arc::new(SecurityPolicy {
+    ) -> PolicyHandle {
+        PolicyHandle::new(SecurityPolicy {
             autonomy,
             workspace_dir: workspace,
             max_actions_per_hour,

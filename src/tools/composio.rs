@@ -8,7 +8,7 @@
 
 use super::traits::{Tool, ToolExecutionContext, ToolResult};
 use crate::security::policy::ToolOperation;
-use crate::security::SecurityPolicy;
+use crate::security::PolicyHandle;
 use anyhow::Context;
 use async_trait::async_trait;
 use parking_lot::RwLock;
@@ -17,7 +17,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::fmt::Write as _;
-use std::sync::Arc;
 
 const COMPOSIO_API_BASE_V2: &str = "https://backend.composio.dev/api/v2";
 const COMPOSIO_API_BASE_V3: &str = "https://backend.composio.dev/api/v3";
@@ -36,16 +35,12 @@ fn ensure_https(url: &str) -> anyhow::Result<()> {
 pub struct ComposioTool {
     api_key: String,
     default_entity_id: String,
-    security: Arc<SecurityPolicy>,
+    security: PolicyHandle,
     recent_connected_accounts: RwLock<HashMap<String, String>>,
 }
 
 impl ComposioTool {
-    pub fn new(
-        api_key: &str,
-        default_entity_id: Option<&str>,
-        security: Arc<SecurityPolicy>,
-    ) -> Self {
+    pub fn new(api_key: &str, default_entity_id: Option<&str>, security: PolicyHandle) -> Self {
         Self {
             api_key: api_key.to_string(),
             default_entity_id: normalize_entity_id(default_entity_id.unwrap_or("default")),
@@ -1124,10 +1119,10 @@ pub struct ComposioAction {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::security::{AutonomyLevel, SecurityPolicy};
+    use crate::security::{AutonomyLevel, PolicyHandle, SecurityPolicy};
 
-    fn test_security() -> Arc<SecurityPolicy> {
-        Arc::new(SecurityPolicy::default())
+    fn test_security() -> PolicyHandle {
+        PolicyHandle::new(SecurityPolicy::default())
     }
 
     // ── Constructor ───────────────────────────────────────────
@@ -1226,7 +1221,7 @@ mod tests {
 
     #[tokio::test]
     async fn execute_blocked_in_readonly_mode() {
-        let readonly = Arc::new(SecurityPolicy {
+        let readonly = PolicyHandle::new(SecurityPolicy {
             autonomy: AutonomyLevel::ReadOnly,
             ..SecurityPolicy::default()
         });
@@ -1251,7 +1246,7 @@ mod tests {
 
     #[tokio::test]
     async fn execute_blocked_when_rate_limited() {
-        let limited = Arc::new(SecurityPolicy {
+        let limited = PolicyHandle::new(SecurityPolicy {
             max_actions_per_hour: 0,
             ..SecurityPolicy::default()
         });

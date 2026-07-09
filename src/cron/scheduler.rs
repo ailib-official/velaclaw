@@ -6,12 +6,11 @@ use crate::cron::{
     due_jobs, next_run_for_schedule, record_last_run, record_run, remove_job, reschedule_after_run,
     update_job, CronJob, CronJobPatch, DeliveryConfig, JobType, Schedule, SessionTarget,
 };
-use crate::security::SecurityPolicy;
+use crate::security::{PolicyHandle, SecurityPolicy};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use futures_util::{stream, StreamExt};
 use std::process::Stdio;
-use std::sync::Arc;
 use tokio::process::Command;
 use tokio::time::{self, Duration};
 
@@ -23,7 +22,7 @@ pub async fn run(config: Config) -> Result<()> {
     let poll_secs = config.reliability.scheduler_poll_secs.max(MIN_POLL_SECONDS);
     let mut interval = time::interval(Duration::from_secs(poll_secs));
     interval.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
-    let security = Arc::new(SecurityPolicy::from_workspace_config(&config)?);
+    let security = PolicyHandle::from_workspace_config(&config)?;
 
     crate::health::mark_component_ok(SCHEDULER_COMPONENT);
 
@@ -90,7 +89,7 @@ async fn execute_job_with_retry(
 
 async fn process_due_jobs(
     config: &Config,
-    security: &Arc<SecurityPolicy>,
+    security: &PolicyHandle,
     jobs: Vec<CronJob>,
     component: &str,
 ) {
@@ -102,10 +101,10 @@ async fn process_due_jobs(
         stream::iter(
             jobs.into_iter().map(|job| {
                 let config = config.clone();
-                let security = Arc::clone(security);
+                let policy = security.snapshot();
                 let component = component.to_owned();
                 async move {
-                    execute_and_persist_job(&config, security.as_ref(), &job, &component).await
+                    execute_and_persist_job(&config, &policy, &job, &component).await
                 }
             }),
         )
@@ -516,7 +515,7 @@ mod tests {
     use super::*;
     use crate::config::Config;
     use crate::cron::{self, DeliveryConfig};
-    use crate::security::SecurityPolicy;
+    use crate::security::{PolicyHandle, SecurityPolicy};
     use chrono::{Duration as ChronoDuration, Utc};
     use tempfile::TempDir;
 
@@ -750,10 +749,7 @@ mod tests {
     async fn process_due_jobs_marks_component_ok_even_when_idle() {
         let tmp = TempDir::new().unwrap();
         let config = test_config(&tmp).await;
-        let security = Arc::new(SecurityPolicy::from_config(
-            &config.autonomy,
-            &config.workspace_dir,
-        ));
+        let security = PolicyHandle::from_config(&config.autonomy, &config.workspace_dir);
         let component = unique_component("scheduler-idle");
 
         crate::health::mark_component_error(&component, "pre-existing error");
@@ -771,10 +767,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let config = test_config(&tmp).await;
         let job = test_job("ls definitely_missing_file_for_scheduler_component_health_test");
-        let security = Arc::new(SecurityPolicy::from_config(
-            &config.autonomy,
-            &config.workspace_dir,
-        ));
+        let security = PolicyHandle::from_config(&config.autonomy, &config.workspace_dir);
         let component = unique_component("scheduler-fail");
 
         crate::health::mark_component_ok(&component);

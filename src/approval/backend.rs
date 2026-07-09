@@ -152,6 +152,25 @@ impl HumanApprovalBackend for ManagerApprovalBackend<'_> {
     }
 }
 
+/// [`PolicyHandle`] as runtime shell hook with live policy reads (VL-SEC-005).
+pub struct PolicyHandleShellHook(pub crate::security::PolicyHandle);
+
+impl ShellPolicyHook for PolicyHandleShellHook {
+    fn validate_shell_command(
+        &self,
+        tool_name: &str,
+        arguments: &serde_json::Value,
+        human_approved: bool,
+    ) -> Result<(), String> {
+        let Some(command) = shell_command_from_args(tool_name, arguments) else {
+            return Ok(());
+        };
+        self.0
+            .validate_command_execution(command, human_approved)
+            .map(|_| ())
+    }
+}
+
 /// [`SecurityPolicy`] as runtime shell hook (policy stays in app per UR-002).
 pub struct SecurityPolicyShellHook<'a>(pub &'a SecurityPolicy);
 

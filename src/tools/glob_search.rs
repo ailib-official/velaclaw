@@ -1,18 +1,17 @@
 use super::traits::{Tool, ToolExecutionContext, ToolResult};
-use crate::security::SecurityPolicy;
+use crate::security::PolicyHandle;
 use async_trait::async_trait;
 use serde_json::json;
-use std::sync::Arc;
 
 const MAX_RESULTS: usize = 1000;
 
 /// Search for files by glob pattern within the workspace.
 pub struct GlobSearchTool {
-    security: Arc<SecurityPolicy>,
+    security: PolicyHandle,
 }
 
 impl GlobSearchTool {
-    pub fn new(security: Arc<SecurityPolicy>) -> Self {
+    pub fn new(security: PolicyHandle) -> Self {
         Self { security }
     }
 }
@@ -89,7 +88,7 @@ impl Tool for GlobSearchTool {
         }
 
         // Build full pattern anchored to workspace
-        let workspace = &self.security.workspace_dir;
+        let workspace = self.security.workspace_dir();
         let full_pattern = workspace.join(pattern).to_string_lossy().to_string();
 
         let entries = match glob::glob(&full_pattern) {
@@ -103,7 +102,7 @@ impl Tool for GlobSearchTool {
             }
         };
 
-        let workspace_canon = match std::fs::canonicalize(workspace) {
+        let workspace_canon = match std::fs::canonicalize(&workspace) {
             Ok(p) => p,
             Err(e) => {
                 return Ok(ToolResult {
@@ -125,12 +124,13 @@ impl Tool for GlobSearchTool {
 
             // Workspace-anchored globs may traverse symlinks (e.g. ai-lib-plans → ~/ai-lib-plans).
             // List logical workspace-relative paths; file_read still canonicalizes before read.
-            let under_workspace = path.starts_with(workspace) || path.starts_with(&workspace_canon);
+            let under_workspace =
+                path.starts_with(&workspace) || path.starts_with(&workspace_canon);
             if under_workspace {
                 let base = if path.starts_with(&workspace_canon) {
                     workspace_canon.as_path()
                 } else {
-                    workspace
+                    workspace.as_path()
                 };
                 if path.is_dir() {
                     continue;
@@ -194,12 +194,12 @@ impl Tool for GlobSearchTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::security::{AutonomyLevel, SecurityPolicy};
+    use crate::security::{AutonomyLevel, PolicyHandle, SecurityPolicy};
     use std::path::PathBuf;
     use tempfile::TempDir;
 
-    fn test_security(workspace: PathBuf) -> Arc<SecurityPolicy> {
-        Arc::new(SecurityPolicy {
+    fn test_security(workspace: PathBuf) -> PolicyHandle {
+        PolicyHandle::new(SecurityPolicy {
             autonomy: AutonomyLevel::Supervised,
             workspace_dir: workspace,
             ..SecurityPolicy::default()
@@ -210,8 +210,8 @@ mod tests {
         workspace: PathBuf,
         autonomy: AutonomyLevel,
         max_actions_per_hour: u32,
-    ) -> Arc<SecurityPolicy> {
-        Arc::new(SecurityPolicy {
+    ) -> PolicyHandle {
+        PolicyHandle::new(SecurityPolicy {
             autonomy,
             workspace_dir: workspace,
             max_actions_per_hour,

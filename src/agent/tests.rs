@@ -35,7 +35,7 @@ use crate::providers::{
     ChatMessage, ChatRequest, ChatResponse, ConversationMessage, Provider, ToolCall,
     ToolResultMessage,
 };
-use crate::security::SecurityPolicy;
+use crate::security::{PolicyHandle, SecurityPolicy};
 use crate::tools::{Tool, ToolExecutionContext, ToolResult};
 use anyhow::Result;
 use async_trait::async_trait;
@@ -289,11 +289,11 @@ fn make_observer() -> Arc<dyn Observer> {
     Arc::from(NoopObserver {})
 }
 
-fn test_security() -> Arc<SecurityPolicy> {
-    Arc::new(SecurityPolicy::from_config(
+fn test_security() -> PolicyHandle {
+    PolicyHandle::from_config(
         &crate::config::AutonomyConfig::default(),
         &std::env::temp_dir(),
-    ))
+    )
 }
 
 fn build_agent_with(

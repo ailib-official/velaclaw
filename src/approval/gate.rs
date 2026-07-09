@@ -3,28 +3,28 @@
 
 pub use velaclaw_agent_runtime::GateDecision;
 
-use super::backend::{ChannelApprovalSession, ManagerApprovalBackend, SecurityPolicyShellHook};
+use super::backend::{ChannelApprovalSession, ManagerApprovalBackend, PolicyHandleShellHook};
 use super::{ApprovalHub, ApprovalManager};
 use crate::agent::dispatcher::ParsedToolCall;
-use crate::security::SecurityPolicy;
+use crate::security::PolicyHandle;
 use std::sync::Arc;
 use velaclaw_agent_runtime::ApprovalGate as InnerGate;
 
 /// Channel-aware approval gate (app wrapper over runtime [`InnerGate`]).
 pub struct ApprovalGate<'a> {
     backend: ManagerApprovalBackend<'a>,
-    shell_hook: Option<SecurityPolicyShellHook<'a>>,
+    shell_hook: Option<PolicyHandleShellHook>,
 }
 
 impl<'a> ApprovalGate<'a> {
     pub fn new(
         manager: &'a ApprovalManager,
         channel: &'a str,
-        security: Option<&'a SecurityPolicy>,
+        security: Option<PolicyHandle>,
     ) -> Self {
         Self {
             backend: ManagerApprovalBackend::new(manager, channel),
-            shell_hook: security.map(SecurityPolicyShellHook),
+            shell_hook: security.map(PolicyHandleShellHook),
         }
     }
 

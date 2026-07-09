@@ -1,21 +1,20 @@
 use super::traits::{Tool, ToolExecutionContext, ToolResult};
 use crate::config::Config;
 use crate::cron;
-use crate::security::SecurityPolicy;
+use crate::security::PolicyHandle;
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde_json::json;
-use std::sync::Arc;
 
 /// Tool that lets the agent manage recurring and one-shot scheduled tasks.
 pub struct ScheduleTool {
-    security: Arc<SecurityPolicy>,
+    security: PolicyHandle,
     config: Config,
 }
 
 impl ScheduleTool {
-    pub fn new(security: Arc<SecurityPolicy>, config: Config) -> Self {
+    pub fn new(security: PolicyHandle, config: Config) -> Self {
         Self { security, config }
     }
 }
@@ -394,11 +393,12 @@ impl ScheduleTool {
 
 #[cfg(test)]
 mod tests {
+    use crate::security::SecurityPolicy;
     use super::*;
     use crate::security::AutonomyLevel;
     use tempfile::TempDir;
 
-    async fn test_setup() -> (TempDir, Config, Arc<SecurityPolicy>) {
+    async fn test_setup() -> (TempDir, Config, PolicyHandle) {
         let tmp = TempDir::new().unwrap();
         let config = Config {
             workspace_dir: tmp.path().join("workspace"),
@@ -408,7 +408,7 @@ mod tests {
         tokio::fs::create_dir_all(&config.workspace_dir)
             .await
             .unwrap();
-        let security = Arc::new(SecurityPolicy::from_config(
+        let security = PolicyHandle::new(SecurityPolicy::from_config(
             &config.autonomy,
             &config.workspace_dir,
         ));
@@ -551,7 +551,7 @@ mod tests {
         tokio::fs::create_dir_all(&config.workspace_dir)
             .await
             .unwrap();
-        let security = Arc::new(SecurityPolicy::from_config(
+        let security = PolicyHandle::new(SecurityPolicy::from_config(
             &config.autonomy,
             &config.workspace_dir,
         ));
@@ -605,7 +605,7 @@ mod tests {
         };
         config.cron.enabled = false;
         std::fs::create_dir_all(&config.workspace_dir).unwrap();
-        let security = Arc::new(SecurityPolicy::from_config(
+        let security = PolicyHandle::new(SecurityPolicy::from_config(
             &config.autonomy,
             &config.workspace_dir,
         ));
@@ -642,7 +642,7 @@ mod tests {
         config.autonomy.level = AutonomyLevel::Supervised;
         config.autonomy.allowed_commands = vec!["echo".into()];
         std::fs::create_dir_all(&config.workspace_dir).unwrap();
-        let security = Arc::new(SecurityPolicy::from_config(
+        let security = PolicyHandle::new(SecurityPolicy::from_config(
             &config.autonomy,
             &config.workspace_dir,
         ));
@@ -679,7 +679,7 @@ mod tests {
         config.autonomy.level = AutonomyLevel::Supervised;
         config.autonomy.allowed_commands = vec!["touch".into()];
         std::fs::create_dir_all(&config.workspace_dir).unwrap();
-        let security = Arc::new(SecurityPolicy::from_config(
+        let security = PolicyHandle::new(SecurityPolicy::from_config(
             &config.autonomy,
             &config.workspace_dir,
         ));

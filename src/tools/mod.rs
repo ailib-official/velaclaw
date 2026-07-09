@@ -39,6 +39,7 @@ pub mod memory_forget;
 pub mod memory_recall;
 pub mod memory_store;
 pub mod pdf_read;
+pub mod policy_patch;
 pub mod proxy_config;
 pub mod pushover;
 pub mod schedule;
@@ -74,6 +75,7 @@ pub use memory_forget::MemoryForgetTool;
 pub use memory_recall::MemoryRecallTool;
 pub use memory_store::MemoryStoreTool;
 pub use pdf_read::PdfReadTool;
+pub use policy_patch::PolicyPatchTool;
 pub use proxy_config::ProxyConfigTool;
 pub use pushover::PushoverTool;
 pub use schedule::ScheduleTool;
@@ -89,7 +91,7 @@ pub use web_search_tool::WebSearchTool;
 use crate::config::{Config, DelegateAgentConfig};
 use crate::memory::Memory;
 use crate::runtime::{NativeRuntime, RuntimeAdapter};
-use crate::security::SecurityPolicy;
+use crate::security::PolicyHandle;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -133,13 +135,13 @@ fn boxed_registry_from_arcs(tools: Vec<Arc<dyn Tool>>) -> Vec<Box<dyn Tool>> {
 }
 
 /// Create the default tool registry
-pub fn default_tools(security: Arc<SecurityPolicy>) -> Vec<Box<dyn Tool>> {
+pub fn default_tools(security: PolicyHandle) -> Vec<Box<dyn Tool>> {
     default_tools_with_runtime(security, Arc::new(NativeRuntime::new()))
 }
 
 /// Create the default tool registry with explicit runtime adapter.
 pub fn default_tools_with_runtime(
-    security: Arc<SecurityPolicy>,
+    security: PolicyHandle,
     runtime: Arc<dyn RuntimeAdapter>,
 ) -> Vec<Box<dyn Tool>> {
     vec![
@@ -154,7 +156,7 @@ pub fn default_tools_with_runtime(
 #[allow(clippy::implicit_hasher, clippy::too_many_arguments)]
 pub fn all_tools(
     config: Arc<Config>,
-    security: &Arc<SecurityPolicy>,
+    security: &PolicyHandle,
     memory: Arc<dyn Memory>,
     composio_key: Option<&str>,
     composio_entity_id: Option<&str>,
@@ -185,7 +187,7 @@ pub fn all_tools(
 #[allow(clippy::implicit_hasher, clippy::too_many_arguments)]
 pub fn all_tools_with_runtime(
     config: Arc<Config>,
-    security: &Arc<SecurityPolicy>,
+    security: &PolicyHandle,
     runtime: Arc<dyn RuntimeAdapter>,
     memory: Arc<dyn Memory>,
     composio_key: Option<&str>,
@@ -250,7 +252,7 @@ pub fn all_tools_with_runtime(
         )));
     }
 
-    let http_config = http_config.effective_for_autonomy(security.autonomy);
+    let http_config = http_config.effective_for_autonomy(security.autonomy());
     if http_config.enabled {
         tool_arcs.push(Arc::new(HttpRequestTool::new(
             security.clone(),
@@ -318,6 +320,19 @@ pub fn all_tools_with_runtime(
         tool_arcs.push(Arc::new(delegate_tool));
     }
 
+    #[cfg(feature = "ai-protocol")]
+    {
+        use crate::config::{discover_and_load, PolicyOverridesStore};
+        if let Ok(l2) = discover_and_load(root_config) {
+            let store = Arc::new(PolicyOverridesStore::new(root_config, l2.as_ref()));
+            tool_arcs.push(Arc::new(PolicyPatchTool::new(
+                config.clone(),
+                store,
+                security.clone(),
+            )));
+        }
+    }
+
     boxed_registry_from_arcs(tool_arcs)
 }
 
@@ -325,6 +340,7 @@ pub fn all_tools_with_runtime(
 mod tests {
     use super::*;
     use crate::config::{BrowserConfig, Config, MemoryConfig};
+    use crate::security::SecurityPolicy;
     use tempfile::TempDir;
 
     fn test_config(tmp: &TempDir) -> Config {
@@ -337,7 +353,7 @@ mod tests {
 
     #[test]
     fn default_tools_has_expected_count() {
-        let security = Arc::new(SecurityPolicy::default());
+        let security = PolicyHandle::new(SecurityPolicy::default());
         let tools = default_tools(security);
         assert_eq!(tools.len(), 4);
     }
@@ -345,7 +361,7 @@ mod tests {
     #[test]
     fn all_tools_excludes_browser_when_disabled() {
         let tmp = TempDir::new().unwrap();
-        let security = Arc::new(SecurityPolicy::default());
+        let security = PolicyHandle::new(SecurityPolicy::default());
         let mem_cfg = MemoryConfig {
             backend: "markdown".into(),
             ..MemoryConfig::default()
@@ -385,7 +401,7 @@ mod tests {
     #[test]
     fn all_tools_includes_browser_when_enabled() {
         let tmp = TempDir::new().unwrap();
-        let security = Arc::new(SecurityPolicy::default());
+        let security = PolicyHandle::new(SecurityPolicy::default());
         let mem_cfg = MemoryConfig {
             backend: "markdown".into(),
             ..MemoryConfig::default()
@@ -423,7 +439,7 @@ mod tests {
 
     #[test]
     fn default_tools_names() {
-        let security = Arc::new(SecurityPolicy::default());
+        let security = PolicyHandle::new(SecurityPolicy::default());
         let tools = default_tools(security);
         let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
         assert!(names.contains(&"shell"));
@@ -434,7 +450,7 @@ mod tests {
 
     #[test]
     fn default_tools_all_have_descriptions() {
-        let security = Arc::new(SecurityPolicy::default());
+        let security = PolicyHandle::new(SecurityPolicy::default());
         let tools = default_tools(security);
         for tool in &tools {
             assert!(
@@ -447,7 +463,7 @@ mod tests {
 
     #[test]
     fn default_tools_all_have_schemas() {
-        let security = Arc::new(SecurityPolicy::default());
+        let security = PolicyHandle::new(SecurityPolicy::default());
         let tools = default_tools(security);
         for tool in &tools {
             let schema = tool.parameters_schema();
@@ -466,7 +482,7 @@ mod tests {
 
     #[test]
     fn tool_spec_generation() {
-        let security = Arc::new(SecurityPolicy::default());
+        let security = PolicyHandle::new(SecurityPolicy::default());
         let tools = default_tools(security);
         for tool in &tools {
             let spec = tool.spec();
@@ -519,7 +535,7 @@ mod tests {
     #[test]
     fn all_tools_includes_delegate_when_agents_configured() {
         let tmp = TempDir::new().unwrap();
-        let security = Arc::new(SecurityPolicy::default());
+        let security = PolicyHandle::new(SecurityPolicy::default());
         let mem_cfg = MemoryConfig {
             backend: "markdown".into(),
             ..MemoryConfig::default()
@@ -567,7 +583,7 @@ mod tests {
     #[test]
     fn all_tools_excludes_delegate_when_no_agents() {
         let tmp = TempDir::new().unwrap();
-        let security = Arc::new(SecurityPolicy::default());
+        let security = PolicyHandle::new(SecurityPolicy::default());
         let mem_cfg = MemoryConfig {
             backend: "markdown".into(),
             ..MemoryConfig::default()

@@ -4086,7 +4086,7 @@ mod tests {
     use std::path::PathBuf;
     #[cfg(unix)]
     use std::{fs::Permissions, os::unix::fs::PermissionsExt};
-    use tokio::sync::{Mutex, MutexGuard};
+    use tokio::sync::MutexGuard;
     use tokio::test;
     use tokio_stream::wrappers::ReadDirStream;
     use tokio_stream::StreamExt;

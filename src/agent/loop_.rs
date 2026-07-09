@@ -1,4 +1,5 @@
 use crate::approval::{ApprovalGate, ApprovalManager, ChannelApprovalSession, GateDecision};
+use crate::cli_render::{render, RenderStyle};
 use crate::config::Config;
 #[cfg(not(feature = "ai-protocol"))]
 use crate::config::DEFAULT_PROTOCOL_MODEL_ID;
@@ -1550,7 +1551,8 @@ pub(crate) async fn run_tool_call_loop(
         // Print any text the LLM produced alongside tool calls (unless silent)
         let visible_text = crate::util::strip_tool_call_markup(&display_text);
         if !silent && !visible_text.is_empty() {
-            print!("{visible_text}");
+            let rendered = render(&visible_text, RenderStyle::auto_markdown());
+            print!("{rendered}");
             let _ = std::io::stdout().flush();
         }
 
@@ -1593,7 +1595,8 @@ pub(crate) async fn run_tool_call_loop(
 
         if !silent {
             for (call, result) in tool_calls.iter().zip(individual_results.iter()) {
-                println!("\n── tool:{} ──\n{}\n", call.name, result);
+                let rendered = render(result, RenderStyle::auto_markdown());
+                println!("\n── tool:{} ──\n{rendered}\n", call.name);
             }
             let _ = std::io::stdout().flush();
         }
@@ -2049,7 +2052,8 @@ pub async fn run(
         )
         .await?;
         final_output = response.clone();
-        println!("{response}");
+        let rendered = render(&response, RenderStyle::auto_markdown());
+        println!("{rendered}");
         observer.record_event(&ObserverEvent::TurnComplete);
     } else {
         println!("🦀 VelaClaw Interactive Mode");

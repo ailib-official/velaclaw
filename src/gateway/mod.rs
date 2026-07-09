@@ -12,21 +12,20 @@
 mod chat_api;
 mod chat_ws;
 mod config_api;
+mod http_router;
 mod local_control;
 mod memory_api;
 mod ops_api;
 mod providers_api;
 mod sessions_api;
 mod static_embed;
+mod webhook_channels;
 
 use crate::channels::{Channel, LinqChannel, NextcloudTalkChannel, SendMessage, WhatsAppChannel};
 use crate::config::{Config, DEFAULT_PROTOCOL_MODEL_ID};
-use crate::memory::{self, Memory, MemoryCategory};
+use crate::memory::{Memory, MemoryCategory};
 use crate::providers::{self, ChatMessage, Provider, ProviderCapabilityError};
-use crate::runtime;
 use crate::security::pairing::{constant_time_eq, is_public_bind, PairingGuard};
-use crate::security::PolicyHandle;
-use crate::tools;
 use crate::util::truncate_with_ellipsis;
 use anyhow::{Context, Result};
 use axum::{
@@ -34,16 +33,12 @@ use axum::{
     extract::{ConnectInfo, Query, State},
     http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Json},
-    routing::{delete, get, post, put},
-    Router,
 };
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tower_http::limit::RequestBodyLimitLayer;
-use tower_http::timeout::TimeoutLayer;
 use uuid::Uuid;
 
 /// Maximum request body size (64KB) — prevents memory exhaustion
@@ -309,7 +304,6 @@ pub struct AppState {
 }
 
 /// Run the HTTP gateway using axum with proper HTTP/1.1 compliance.
-#[allow(clippy::too_many_lines)]
 pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
     // ── Security: refuse public bind without tunnel or explicit opt-in ──
     if is_public_bind(host) && config.tunnel.provider == "none" && !config.gateway.allow_public_bind
@@ -337,58 +331,28 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
                 .filter(|model| providers::parse_protocol_provider_model(model).is_some())
         })
         .unwrap_or(DEFAULT_PROTOCOL_MODEL_ID);
+    let model = config.default_model.clone().unwrap_or_else(|| {
+        providers::parse_protocol_provider_model(provider_name)
+            .map(|(provider_id, model_id)| format!("{provider_id}/{model_id}"))
+            .unwrap_or_else(|| DEFAULT_PROTOCOL_MODEL_ID.into())
+    });
+    let temperature = config.default_temperature;
+    let boot = crate::config::bootstrap_runtime(
+        &config,
+        crate::config::BootstrapOptions {
+            with_embedding_routes: false,
+        },
+    )?;
+    let mem = boot.memory;
+    let _tools_registry = Arc::new(boot.tools);
     let provider: Arc<dyn Provider> = Arc::from(providers::create_resilient_provider_with_options(
         provider_name,
         config.api_key.as_deref(),
         config.api_url.as_deref(),
         &config.reliability,
-        &providers::ProviderRuntimeOptions {
-            auth_profile_override: None,
-            velaclaw_dir: config.config_path.parent().map(std::path::PathBuf::from),
-            secrets_encrypt: config.secrets.encrypt,
-            reasoning_enabled: config.runtime.reasoning_enabled,
-        },
+        &boot.provider_runtime_options,
         None,
     )?);
-    let model = config.default_model.clone().unwrap_or_else(|| {
-        providers::parse_protocol_provider_model(provider_name)
-            .map(|(provider_id, model_id)| format!("{provider_id}/{model_id}"))
-            .unwrap_or_else(|| "anthropic/claude-sonnet-4".into())
-    });
-    let temperature = config.default_temperature;
-    let mem: Arc<dyn Memory> = Arc::from(memory::create_memory_with_storage(
-        &config.memory,
-        Some(&config.storage.provider.config),
-        &config.workspace_dir,
-        config.api_key.as_deref(),
-    )?);
-    let runtime: Arc<dyn runtime::RuntimeAdapter> =
-        Arc::from(runtime::create_runtime(&config.runtime)?);
-    let security = PolicyHandle::from_workspace_config(&config)?;
-
-    let (composio_key, composio_entity_id) = if config.composio.enabled {
-        (
-            config.composio.api_key.as_deref(),
-            Some(config.composio.entity_id.as_str()),
-        )
-    } else {
-        (None, None)
-    };
-
-    let _tools_registry = Arc::new(tools::all_tools_with_runtime(
-        Arc::new(config.clone()),
-        &security,
-        runtime,
-        Arc::clone(&mem),
-        composio_key,
-        composio_entity_id,
-        &config.browser,
-        &config.http_request,
-        &config.workspace_dir,
-        &config.agents,
-        config.api_key.as_deref(),
-        &config,
-    ));
     // Extract webhook secret for authentication
     let webhook_secret_hash: Option<Arc<str>> =
         config.channels_config.webhook.as_ref().and_then(|webhook| {
@@ -399,101 +363,7 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
             })
         });
 
-    // WhatsApp channel (if configured)
-    let whatsapp_channel: Option<Arc<WhatsAppChannel>> = config
-        .channels_config
-        .whatsapp
-        .as_ref()
-        .filter(|wa| wa.is_cloud_config())
-        .map(|wa| {
-            Arc::new(WhatsAppChannel::new(
-                wa.access_token.clone().unwrap_or_default(),
-                wa.phone_number_id.clone().unwrap_or_default(),
-                wa.verify_token.clone().unwrap_or_default(),
-                wa.allowed_numbers.clone(),
-            ))
-        });
-
-    // WhatsApp app secret for webhook signature verification
-    // Priority: environment variable > config file
-    let whatsapp_app_secret: Option<Arc<str>> = std::env::var("VELACLAW_WHATSAPP_APP_SECRET")
-        .ok()
-        .and_then(|secret| {
-            let secret = secret.trim();
-            (!secret.is_empty()).then(|| secret.to_owned())
-        })
-        .or_else(|| {
-            config.channels_config.whatsapp.as_ref().and_then(|wa| {
-                wa.app_secret
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|secret| !secret.is_empty())
-                    .map(ToOwned::to_owned)
-            })
-        })
-        .map(Arc::from);
-
-    // Linq channel (if configured)
-    let linq_channel: Option<Arc<LinqChannel>> = config.channels_config.linq.as_ref().map(|lq| {
-        Arc::new(LinqChannel::new(
-            lq.api_token.clone(),
-            lq.from_phone.clone(),
-            lq.allowed_senders.clone(),
-        ))
-    });
-
-    // Linq signing secret for webhook signature verification
-    // Priority: environment variable > config file
-    let linq_signing_secret: Option<Arc<str>> = std::env::var("VELACLAW_LINQ_SIGNING_SECRET")
-        .ok()
-        .and_then(|secret| {
-            let secret = secret.trim();
-            (!secret.is_empty()).then(|| secret.to_owned())
-        })
-        .or_else(|| {
-            config.channels_config.linq.as_ref().and_then(|lq| {
-                lq.signing_secret
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|secret| !secret.is_empty())
-                    .map(ToOwned::to_owned)
-            })
-        })
-        .map(Arc::from);
-
-    // Nextcloud Talk channel (if configured)
-    let nextcloud_talk_channel: Option<Arc<NextcloudTalkChannel>> =
-        config.channels_config.nextcloud_talk.as_ref().map(|nc| {
-            Arc::new(NextcloudTalkChannel::new(
-                nc.base_url.clone(),
-                nc.app_token.clone(),
-                nc.allowed_users.clone(),
-            ))
-        });
-
-    // Nextcloud Talk webhook secret for signature verification
-    // Priority: environment variable > config file
-    let nextcloud_talk_webhook_secret: Option<Arc<str>> =
-        std::env::var("VELACLAW_NEXTCLOUD_TALK_WEBHOOK_SECRET")
-            .ok()
-            .and_then(|secret| {
-                let secret = secret.trim();
-                (!secret.is_empty()).then(|| secret.to_owned())
-            })
-            .or_else(|| {
-                config
-                    .channels_config
-                    .nextcloud_talk
-                    .as_ref()
-                    .and_then(|nc| {
-                        nc.webhook_secret
-                            .as_deref()
-                            .map(str::trim)
-                            .filter(|secret| !secret.is_empty())
-                            .map(ToOwned::to_owned)
-                    })
-            })
-            .map(Arc::from);
+    let webhook_channels = webhook_channels::init_webhook_channels(&config);
 
     // ── Pairing guard ──────────────────────────────────────
     let pairing = Arc::new(PairingGuard::new(
@@ -536,44 +406,20 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
         }
     }
 
-    println!("🦀 VelaClaw Gateway listening on http://{display_addr}");
-    if let Some(ref url) = tunnel_url {
-        println!("  🌐 Public URL: {url}");
-    }
-    println!("  POST /pair      — pair a new client (X-Pairing-Code header)");
-    println!("  POST /webhook   — {{\"message\": \"your prompt\"}}");
-    if whatsapp_channel.is_some() {
-        println!("  GET  /whatsapp  — Meta webhook verification");
-        println!("  POST /whatsapp  — WhatsApp message webhook");
-    }
-    if linq_channel.is_some() {
-        println!("  POST /linq      — Linq message webhook (iMessage/RCS/SMS)");
-    }
-    if nextcloud_talk_channel.is_some() {
-        println!("  POST /nextcloud-talk — Nextcloud Talk bot webhook");
-    }
-    println!("  GET  /health    — health check");
-    println!("  GET  /metrics   — Prometheus metrics");
-    println!("  GET  /dashboard — monitoring dashboard (cost, events, status)");
-    if let Some(code) = pairing.pairing_code() {
-        println!();
-        println!("  🔐 PAIRING REQUIRED — use this one-time code:");
-        println!("     ┌──────────────┐");
-        println!("     │  {code}  │");
-        println!("     └──────────────┘");
-        println!("     Send: POST /pair with header X-Pairing-Code: {code}");
-    } else if pairing.require_pairing() {
-        println!("  🔒 Pairing: ACTIVE (bearer token required)");
-    } else {
-        println!("  ⚠️  Pairing: DISABLED (all requests accepted)");
-    }
-    println!("  Press Ctrl+C to stop.\n");
+    let pairing_code = pairing.pairing_code();
+    http_router::print_gateway_banner(
+        &display_addr,
+        tunnel_url.as_deref(),
+        http_router::GatewayBannerChannels {
+            whatsapp: webhook_channels.whatsapp.is_some(),
+            linq: webhook_channels.linq.is_some(),
+            nextcloud: webhook_channels.nextcloud_talk.is_some(),
+        },
+        pairing_code.as_deref(),
+        pairing.require_pairing(),
+    );
 
     crate::health::mark_component_ok("gateway");
-
-    // Build shared state
-    let observer: Arc<dyn crate::observability::Observer> =
-        Arc::from(crate::observability::create_observer(&config.observability));
 
     // Cost tracker for dashboard (optional)
     let cost_tracker = crate::cost::CostTracker::new(config.cost.clone(), &config.workspace_dir)
@@ -594,70 +440,18 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
         trust_forwarded_headers: config.gateway.trust_forwarded_headers,
         rate_limiter,
         idempotency_store,
-        whatsapp: whatsapp_channel,
-        whatsapp_app_secret,
-        linq: linq_channel,
-        linq_signing_secret,
-        nextcloud_talk: nextcloud_talk_channel,
-        nextcloud_talk_webhook_secret,
-        observer,
+        whatsapp: webhook_channels.whatsapp,
+        whatsapp_app_secret: webhook_channels.whatsapp_app_secret,
+        linq: webhook_channels.linq,
+        linq_signing_secret: webhook_channels.linq_signing_secret,
+        nextcloud_talk: webhook_channels.nextcloud_talk,
+        nextcloud_talk_webhook_secret: webhook_channels.nextcloud_talk_webhook_secret,
+        observer: boot.observer,
         cost_tracker,
         approval_hub,
     };
 
-    // Build router with middleware
-    let app = Router::new()
-        .route("/health", get(handle_health))
-        .route("/metrics", get(handle_metrics))
-        .route("/dashboard", get(handle_dashboard))
-        .route("/api/dashboard", get(handle_dashboard_api))
-        .route("/api/chat", post(chat_api::handle_post_chat))
-        .route("/api/providers", get(providers_api::handle_get_providers))
-        .route("/api/sessions", get(sessions_api::handle_list_sessions))
-        .route("/api/sessions", post(sessions_api::handle_create_session))
-        .route("/api/sessions/{id}", get(sessions_api::handle_get_session))
-        .route(
-            "/api/sessions/{id}",
-            delete(sessions_api::handle_delete_session),
-        )
-        .route("/api/memory", get(memory_api::handle_list_memory))
-        .route("/api/memory/{id}", get(memory_api::handle_get_memory))
-        .route("/api/config", get(config_api::handle_get_config))
-        .route("/api/config", put(config_api::handle_put_config))
-        .route(
-            "/api/config/schema",
-            get(config_api::handle_get_config_schema),
-        )
-        .route("/api/cron", get(ops_api::handle_list_cron))
-        .route("/api/cron", post(ops_api::handle_create_cron))
-        .route("/api/cron/{id}", get(ops_api::handle_get_cron))
-        .route("/api/cron/{id}", put(ops_api::handle_update_cron))
-        .route("/api/cron/{id}", delete(ops_api::handle_delete_cron))
-        .route("/api/cron/{id}/run", post(ops_api::handle_run_cron))
-        .route("/api/tools", get(ops_api::handle_list_tools))
-        .route(
-            "/api/providers/{id}/test",
-            post(ops_api::handle_test_provider),
-        )
-        .route(
-            "/api/approvals/{id}/respond",
-            post(ops_api::handle_respond_approval),
-        )
-        .route("/ws", get(chat_ws::handle_ws_chat))
-        .route("/chat", get(static_embed::handle_chat_ui))
-        .route("/chat/{*asset_path}", get(static_embed::handle_chat_ui))
-        .route("/pair", post(handle_pair))
-        .route("/webhook", post(handle_webhook))
-        .route("/whatsapp", get(handle_whatsapp_verify))
-        .route("/whatsapp", post(handle_whatsapp_message))
-        .route("/linq", post(handle_linq_webhook))
-        .route("/nextcloud-talk", post(handle_nextcloud_talk_webhook))
-        .with_state(state)
-        .layer(RequestBodyLimitLayer::new(MAX_BODY_SIZE))
-        .layer(TimeoutLayer::with_status_code(
-            StatusCode::REQUEST_TIMEOUT,
-            Duration::from_secs(REQUEST_TIMEOUT_SECS),
-        ));
+    let app = http_router::build_gateway_router(state);
 
     // Run the server
     axum::serve(

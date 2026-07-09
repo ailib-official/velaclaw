@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-07-10
+
+### Changed
+
+- **VL-REVIEW remediation**: module-level splits and shared bootstrap without behavior changes to the public CLI/config contract.
+  - `channels/mod.rs` orchestration extracted to `runtime` / `dispatch` / `start` / `prompt` / `doctor` (entry ≤800 lines).
+  - CLI `main()` and `gateway::run_gateway()` slimmed via `cli_dispatch`, `status`, webhook/http router helpers.
+  - Agent/Gateway share `config::bootstrap_runtime`; default model fallbacks use `DEFAULT_PROTOCOL_MODEL_ID`.
+  - Onboard wizard prefers ai-protocol manifest catalog with curated offline fallback.
+  - Prism provider ordering respects `reliability.fallback_providers`.
+  - Memory `auto_save` failures emit `tracing::warn!` instead of silent discard.
+- Test isolation: config-resolution / quick-setup paths clear or pin `VELACLAW_CONFIG_DIR` under a shared lock so host env and sandboxes do not leak into unit tests.
+
 ## [0.7.0] - 2026-07-09
 
 ### Added

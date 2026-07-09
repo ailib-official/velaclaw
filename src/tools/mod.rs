@@ -152,7 +152,10 @@ pub fn default_tools_with_runtime(
     ]
 }
 
-/// Create full tool registry including memory tools and optional Composio
+/// Compatibility wrapper around [`all_tools_with_runtime`] using [`NativeRuntime`].
+///
+/// Prefer [`all_tools_with_runtime`] in production paths so the runtime adapter is explicit.
+/// This thin wrapper exists for tests and callers that do not inject a custom runtime.
 #[allow(clippy::implicit_hasher, clippy::too_many_arguments)]
 pub fn all_tools(
     config: Arc<Config>,
@@ -183,7 +186,7 @@ pub fn all_tools(
     )
 }
 
-/// Create full tool registry including memory tools and optional Composio.
+/// Canonical tool registry including memory tools and optional Composio.
 #[allow(clippy::implicit_hasher, clippy::too_many_arguments)]
 pub fn all_tools_with_runtime(
     config: Arc<Config>,

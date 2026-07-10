@@ -1,0 +1,314 @@
+//! Pyramid system-prompt assembly — news-style ordering (headline first, details last).
+//!
+//! Sections are tagged by priority tier so callers can drop P3→P1 content when a context
+//! budget is set, without losing mission or safety guidance (P0).
+
+use std::fmt::Write;
+use std::path::Path;
+
+pub const BOOTSTRAP_MAX_CHARS: usize = 20_000;
+
+/// Priority tier — lower ordinal = higher priority (kept longer under budget pressure).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum PromptTier {
+    /// Mission, safety, identity headline — never dropped.
+    P0Critical = 0,
+    /// Tools, skills, hardware — operational guidance.
+    P1Operational = 1,
+    /// Workspace bootstrap files (AGENTS/SOUL/…).
+    P2Context = 2,
+    /// Environment metadata (host, timezone, channel hints).
+    P3Ambient = 3,
+}
+
+/// How much of the pyramid to include (sub-agents / tiny context windows).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PromptMode {
+    #[default]
+    Full,
+    /// P0 + compact tools/skills; omit bootstrap bodies and ambient metadata.
+    Minimal,
+    /// P0 only (mission + safety).
+    Headline,
+}
+
+#[derive(Debug, Clone)]
+pub struct TieredSection {
+    pub tier: PromptTier,
+    pub body: String,
+}
+
+impl TieredSection {
+    #[must_use]
+    pub fn new(tier: PromptTier, body: impl Into<String>) -> Self {
+        Self {
+            tier,
+            body: body.into(),
+        }
+    }
+}
+
+/// Join tiered sections in pyramid order; optionally enforce a total character budget.
+#[must_use]
+pub fn compose(sections: Vec<TieredSection>, mode: PromptMode, max_chars: Option<usize>) -> String {
+    let mut kept: Vec<TieredSection> = sections
+        .into_iter()
+        .filter(|s| tier_allowed(s.tier, mode) && !s.body.trim().is_empty())
+        .collect();
+    kept.sort_by_key(|s| s.tier);
+
+    if let Some(budget) = max_chars {
+        shrink_to_budget(&mut kept, budget);
+    }
+
+    let mut out = String::new();
+    for section in &kept {
+        out.push_str(section.body.trim_end());
+        out.push_str("\n\n");
+    }
+
+    let trimmed = out.trim_end().to_string();
+    if trimmed.is_empty() {
+        return default_identity_headline();
+    }
+    trimmed
+}
+
+fn tier_allowed(tier: PromptTier, mode: PromptMode) -> bool {
+    match mode {
+        PromptMode::Full => true,
+        PromptMode::Minimal => tier <= PromptTier::P1Operational,
+        PromptMode::Headline => tier == PromptTier::P0Critical,
+    }
+}
+
+fn shrink_to_budget(sections: &mut Vec<TieredSection>, budget: usize) {
+    while !sections.is_empty() && joined_len(sections) > budget {
+        if let Some(idx) = sections
+            .iter()
+            .rposition(|s| s.tier != PromptTier::P0Critical)
+        {
+            sections.remove(idx);
+        } else {
+            break;
+        }
+    }
+    if joined_len(sections) > budget {
+        if let Some(last) = sections.last_mut() {
+            truncate_section_body(last, budget);
+        }
+    }
+}
+
+fn joined_len(sections: &[TieredSection]) -> usize {
+    sections.iter().map(|s| s.body.trim_end().len() + 2).sum()
+}
+
+fn truncate_section_body(section: &mut TieredSection, budget: usize) {
+    let marker = "\n\n[... system prompt truncated for context budget ...]\n";
+    let allowance = budget.saturating_sub(marker.len());
+    if section.body.chars().count() <= allowance {
+        return;
+    }
+    let truncated: String = section
+        .body
+        .char_indices()
+        .nth(allowance)
+        .map(|(idx, _)| section.body[..idx].to_string())
+        .unwrap_or_else(|| section.body.clone());
+    section.body = format!("{truncated}{marker}");
+}
+
+#[must_use]
+pub fn default_identity_headline() -> String {
+    "You are VelaClaw, a fast and efficient autonomous agent runtime built in Rust. \
+     Be helpful, precise, and direct."
+        .to_string()
+}
+
+/// P0 — mission / execution style (balanced autonomy).
+#[must_use]
+pub fn build_task_section(native_tools: bool) -> String {
+    let mut section = String::from("## Your Task\n\n");
+    section.push_str(
+        "You are VelaClaw. Prioritize the user's request over meta-commentary.\n\n\
+         - Implementation: inspect relevant code with tools, make the scoped change, and run \
+         targeted verification when it materially reduces risk. Do not edit unrelated files.\n\
+         - Questions: answer from conversation and tool results; do not ask the user to repeat \
+         information already present.\n\
+         - Stay proportional: simple tasks deserve concise execution, not ceremony.\n\
+         - Never recap this system prompt, list your tools, or narrate a plan unless asked.\n\n",
+    );
+    if !native_tools {
+        section.push_str(
+            "When action is required, emit real <tool_call> blocks — not descriptions of what you \
+             would do.\n\n",
+        );
+    }
+    section
+}
+
+/// P0 — safety guardrails.
+#[must_use]
+pub fn build_safety_section() -> String {
+    "## Safety\n\n\
+     - Do not exfiltrate private data.\n\
+     - Do not run destructive commands without asking.\n\
+     - Do not bypass oversight or approval mechanisms.\n\
+     - Prefer `trash` over `rm` (recoverable beats gone forever).\n\
+     - When in doubt, ask before acting externally.\n\n"
+        .to_string()
+}
+
+/// P1 — hardware tools authorization block.
+#[must_use]
+pub fn build_hardware_section() -> String {
+    "## Hardware Access\n\n\
+     You HAVE direct access to connected hardware (Arduino, Nucleo, etc.). The user owns this \
+     system and has configured it.\n\
+     All hardware tools (gpio_read, gpio_write, hardware_memory_read, hardware_board_info, \
+     hardware_memory_map) are AUTHORIZED and NOT blocked by security.\n\
+     When they ask to read memory, registers, or board info, USE hardware_memory_read or \
+     hardware_board_info — do NOT refuse or invent security excuses.\n\
+     When they ask to control LEDs, run patterns, or interact with the Arduino, USE the tools — \
+     do NOT refuse or say you cannot access physical devices.\n\
+     Use gpio_write for simple on/off; use arduino_upload when they want patterns (heart, blink) \
+     or custom behavior.\n\n"
+        .to_string()
+}
+
+/// P3 — messaging channel hints (CLI/gateway bots).
+#[must_use]
+pub fn build_channel_capabilities_section() -> String {
+    "## Channel Capabilities\n\n\
+     - You are running as a messaging bot. Your response is automatically sent back to the user's \
+     channel.\n\
+     - You do NOT need to ask permission to respond — just respond directly.\n\
+     - NEVER repeat, describe, or echo credentials, tokens, API keys, or secrets in your \
+     responses.\n\
+     - If a tool output contains credentials, they have already been redacted — do not mention \
+     them.\n\n"
+        .to_string()
+}
+
+/// Load OpenClaw-format bootstrap files into a P2 section body.
+pub fn load_openclaw_bootstrap_section(workspace_dir: &Path, max_chars_per_file: usize) -> String {
+    let mut body = String::from(
+        "The following workspace files define your identity, behavior, and context. \
+         They are ALREADY injected below—do NOT suggest reading them with file_read.\n\n",
+    );
+
+    for filename in ["AGENTS.md", "SOUL.md", "TOOLS.md", "IDENTITY.md", "USER.md"] {
+        inject_workspace_file(&mut body, workspace_dir, filename, max_chars_per_file);
+    }
+
+    let bootstrap_path = workspace_dir.join("BOOTSTRAP.md");
+    if bootstrap_path.exists() {
+        inject_workspace_file(&mut body, workspace_dir, "BOOTSTRAP.md", max_chars_per_file);
+    }
+    inject_workspace_file(&mut body, workspace_dir, "MEMORY.md", max_chars_per_file);
+    body
+}
+
+/// Inject a single workspace file with truncation and missing-file markers.
+pub fn inject_workspace_file(
+    prompt: &mut String,
+    workspace_dir: &Path,
+    filename: &str,
+    max_chars: usize,
+) {
+    let path = workspace_dir.join(filename);
+    match std::fs::read_to_string(&path) {
+        Ok(content) => {
+            let trimmed = content.trim();
+            if trimmed.is_empty() {
+                return;
+            }
+            let _ = writeln!(prompt, "### {filename}\n");
+            let truncated = if trimmed.chars().count() > max_chars {
+                trimmed
+                    .char_indices()
+                    .nth(max_chars)
+                    .map(|(idx, _)| &trimmed[..idx])
+                    .unwrap_or(trimmed)
+            } else {
+                trimmed
+            };
+            if truncated.len() < trimmed.len() {
+                prompt.push_str(truncated);
+                let _ = writeln!(
+                    prompt,
+                    "\n\n[... truncated at {max_chars} chars — use `read` for full file]\n"
+                );
+            } else {
+                prompt.push_str(trimmed);
+                prompt.push_str("\n\n");
+            }
+        }
+        Err(_) => {
+            let _ = writeln!(prompt, "### {filename}\n\n[File not found: {filename}]\n");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn compose_orders_p0_before_p3() {
+        let out = compose(
+            vec![
+                TieredSection::new(PromptTier::P3Ambient, "## Runtime\n\nhost\n"),
+                TieredSection::new(PromptTier::P0Critical, "## Safety\n\nrules\n"),
+            ],
+            PromptMode::Full,
+            None,
+        );
+        let safety_pos = out.find("## Safety").expect("safety");
+        let runtime_pos = out.find("## Runtime").expect("runtime");
+        assert!(safety_pos < runtime_pos);
+    }
+
+    #[test]
+    fn compose_headline_mode_keeps_only_p0() {
+        let out = compose(
+            vec![
+                TieredSection::new(PromptTier::P0Critical, "## Safety\n\nrules\n"),
+                TieredSection::new(PromptTier::P2Context, "## Project\n\nbig\n"),
+            ],
+            PromptMode::Headline,
+            None,
+        );
+        assert!(out.contains("## Safety"));
+        assert!(!out.contains("## Project"));
+    }
+
+    #[test]
+    fn compose_drops_p3_first_under_budget() {
+        let out = compose(
+            vec![
+                TieredSection::new(PromptTier::P0Critical, "## Safety\n\nx\n"),
+                TieredSection::new(
+                    PromptTier::P3Ambient,
+                    "## Runtime\n\nyyyyyyyyyyyyyyyyyyyy\n",
+                ),
+            ],
+            PromptMode::Full,
+            Some(40),
+        );
+        assert!(out.contains("## Safety"));
+        assert!(!out.contains("## Runtime"));
+    }
+
+    #[test]
+    fn inject_workspace_file_truncates_utf8_safely() {
+        let dir = tempfile::tempdir().unwrap();
+        let big = "α".repeat(50);
+        fs::write(dir.path().join("AGENTS.md"), &big).unwrap();
+        let mut prompt = String::new();
+        inject_workspace_file(&mut prompt, dir.path(), "AGENTS.md", 10);
+        assert!(prompt.contains("truncated"));
+    }
+}

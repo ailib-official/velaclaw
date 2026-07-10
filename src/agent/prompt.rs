@@ -1,3 +1,7 @@
+use crate::agent::prompt_composer::{
+    build_safety_section, build_task_section, compose, inject_workspace_file, PromptMode,
+    PromptTier, TieredSection, BOOTSTRAP_MAX_CHARS,
+};
 use crate::config::IdentityConfig;
 use crate::identity;
 use crate::skills::Skill;
@@ -7,7 +11,7 @@ use chrono::Local;
 use std::fmt::Write;
 use std::path::Path;
 
-const BOOTSTRAP_MAX_CHARS: usize = 20_000;
+const BOOTSTRAP_MAX_CHARS_LOCAL: usize = BOOTSTRAP_MAX_CHARS;
 
 pub struct PromptContext<'a> {
     pub workspace_dir: &'a Path,
@@ -33,10 +37,11 @@ impl SystemPromptBuilder {
     pub fn with_defaults() -> Self {
         Self {
             sections: vec![
-                Box::new(IdentitySection),
-                Box::new(ToolsSection),
+                Box::new(TaskSection),
                 Box::new(SafetySection),
+                Box::new(ToolsSection),
                 Box::new(SkillsSection),
+                Box::new(IdentitySection),
                 Box::new(WorkspaceSection),
                 Box::new(DateTimeSection),
                 Box::new(RuntimeSection),
@@ -50,19 +55,28 @@ impl SystemPromptBuilder {
     }
 
     pub fn build(&self, ctx: &PromptContext<'_>) -> Result<String> {
-        let mut output = String::new();
+        let mut tiered = Vec::with_capacity(self.sections.len());
         for section in &self.sections {
             let part = section.build(ctx)?;
             if part.trim().is_empty() {
                 continue;
             }
-            output.push_str(part.trim_end());
-            output.push_str("\n\n");
+            tiered.push(TieredSection::new(section_tier(section.name()), part));
         }
-        Ok(output)
+        Ok(compose(tiered, PromptMode::Full, None))
     }
 }
 
+fn section_tier(name: &str) -> PromptTier {
+    match name {
+        "task" | "safety" => PromptTier::P0Critical,
+        "tools" | "skills" => PromptTier::P1Operational,
+        "identity" => PromptTier::P2Context,
+        _ => PromptTier::P3Ambient,
+    }
+}
+
+pub struct TaskSection;
 pub struct IdentitySection;
 pub struct ToolsSection;
 pub struct SafetySection;
@@ -70,6 +84,17 @@ pub struct SkillsSection;
 pub struct WorkspaceSection;
 pub struct RuntimeSection;
 pub struct DateTimeSection;
+
+impl PromptSection for TaskSection {
+    fn name(&self) -> &str {
+        "task"
+    }
+
+    fn build(&self, ctx: &PromptContext<'_>) -> Result<String> {
+        let native = !ctx.dispatcher_instructions.contains("<tool_call>");
+        Ok(build_task_section(native))
+    }
+}
 
 impl PromptSection for IdentitySection {
     fn name(&self) -> &str {
@@ -107,7 +132,12 @@ impl PromptSection for IdentitySection {
             "BOOTSTRAP.md",
             "MEMORY.md",
         ] {
-            inject_workspace_file(&mut prompt, ctx.workspace_dir, file);
+            inject_workspace_file(
+                &mut prompt,
+                ctx.workspace_dir,
+                file,
+                BOOTSTRAP_MAX_CHARS_LOCAL,
+            );
         }
 
         Ok(prompt)
@@ -144,7 +174,7 @@ impl PromptSection for SafetySection {
     }
 
     fn build(&self, _ctx: &PromptContext<'_>) -> Result<String> {
-        Ok("## Safety\n\n- Do not exfiltrate private data.\n- Do not run destructive commands without asking.\n- Do not bypass oversight or approval mechanisms.\n- Prefer `trash` over `rm`.\n- When in doubt, ask before acting externally.".into())
+        Ok(build_safety_section())
     }
 }
 
@@ -197,46 +227,8 @@ impl PromptSection for DateTimeSection {
     }
 
     fn build(&self, _ctx: &PromptContext<'_>) -> Result<String> {
-        let now = Local::now();
-        Ok(format!(
-            "## Current Date & Time\n\n{} ({})",
-            now.format("%Y-%m-%d %H:%M:%S"),
-            now.format("%Z")
-        ))
-    }
-}
-
-fn inject_workspace_file(prompt: &mut String, workspace_dir: &Path, filename: &str) {
-    let path = workspace_dir.join(filename);
-    match std::fs::read_to_string(&path) {
-        Ok(content) => {
-            let trimmed = content.trim();
-            if trimmed.is_empty() {
-                return;
-            }
-            let _ = writeln!(prompt, "### {filename}\n");
-            let truncated = if trimmed.chars().count() > BOOTSTRAP_MAX_CHARS {
-                trimmed
-                    .char_indices()
-                    .nth(BOOTSTRAP_MAX_CHARS)
-                    .map(|(idx, _)| &trimmed[..idx])
-                    .unwrap_or(trimmed)
-            } else {
-                trimmed
-            };
-            prompt.push_str(truncated);
-            if truncated.len() < trimmed.len() {
-                let _ = writeln!(
-                    prompt,
-                    "\n\n[... truncated at {BOOTSTRAP_MAX_CHARS} chars — use `read` for full file]\n"
-                );
-            } else {
-                prompt.push_str("\n\n");
-            }
-        }
-        Err(_) => {
-            let _ = writeln!(prompt, "### {filename}\n\n[File not found: {filename}]\n");
-        }
+        let tz = Local::now().format("%Z").to_string();
+        Ok(format!("## Current Date & Time\n\nTimezone: {tz}\n"))
     }
 }
 
@@ -427,11 +419,7 @@ mod tests {
 
         let rendered = DateTimeSection.build(&ctx).unwrap();
         assert!(rendered.starts_with("## Current Date & Time\n\n"));
-
-        let payload = rendered.trim_start_matches("## Current Date & Time\n\n");
-        assert!(payload.chars().any(|c| c.is_ascii_digit()));
-        assert!(payload.contains(" ("));
-        assert!(payload.ends_with(')'));
+        assert!(rendered.contains("Timezone:"));
     }
 
     #[test]

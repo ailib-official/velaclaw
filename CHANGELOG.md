@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-07-11
+
+### Added
+
+- **Pyramid system-prompt composer** ([#126](https://github.com/ailib-official/velaclaw/pull/126)): P0–P3 tier assembly with Full/Minimal/Headline modes; headline-first truncation under char budget.
+- **Phase-specific prompt sections** ([#127](https://github.com/ailib-official/velaclaw/pull/127)): Execute, Approval, Compact, and Delegate phases wired into agent loop, channel start, history compaction, and delegate subagents; `compact_context` applies ~24k system-prompt budget.
+
+### Changed
+
+- **CLI REPL formatting** ([#124](https://github.com/ailib-official/velaclaw/pull/124), [#125](https://github.com/ailib-official/velaclaw/pull/125)): `>` / `>>` speaker prefixes with `>>` only on the first line of multi-line agent replies; richer box tables.
+- **Onboard workspace templates** ([#128](https://github.com/ailib-official/velaclaw/pull/128)): `AGENTS.md` / `SOUL.md` / `TOOLS.md` clarify separation from built-in system prompt; `compact_context` budget documented in config reference.
+
 ## [0.7.1] - 2026-07-10
 
 ### Changed

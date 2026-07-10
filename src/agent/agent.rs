@@ -921,7 +921,8 @@ mod tests {
             fold_enabled: false,
         });
         let out = agent.format_agent_output("line one\nline two");
-        assert!(out.contains(">> line one"));
-        assert!(out.contains(">> line two"));
+        assert!(out.starts_with(">> line one"));
+        assert!(out.contains("\nline two"));
+        assert!(!out.contains(">> line two"));
     }
 }

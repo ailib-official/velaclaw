@@ -390,9 +390,20 @@ impl DelegateTool {
         }
 
         let mut history = Vec::new();
-        if let Some(system_prompt) = agent_config.system_prompt.as_ref() {
-            history.push(ChatMessage::system(system_prompt.clone()));
-        }
+        let system_prompt = if let Some(custom) = agent_config.system_prompt.as_ref() {
+            custom.clone()
+        } else {
+            let allowed: Vec<&str> = agent_config
+                .allowed_tools
+                .iter()
+                .map(String::as_str)
+                .collect();
+            crate::agent::prompt_composer::build_delegate_subagent_prompt(
+                &allowed,
+                provider.supports_native_tools(),
+            )
+        };
+        history.push(ChatMessage::system(system_prompt));
         history.push(ChatMessage::user(full_prompt.to_string()));
 
         let noop_observer = NoopObserver;

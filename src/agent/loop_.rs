@@ -183,7 +183,7 @@ async fn auto_compact_history(
     let to_compact: Vec<ChatMessage> = history[start..compact_end].to_vec();
     let transcript = build_compaction_transcript(&to_compact);
 
-    let summarizer_system = "You are a conversation compaction engine. Summarize older chat history into concise context for future turns. Preserve: user preferences, commitments, decisions, unresolved tasks, key facts. Omit: filler, repeated chit-chat, verbose tool logs. Output plain text bullet points only.";
+    let summarizer_system = crate::agent::prompt_composer::build_compact_summarizer_system();
 
     let summarizer_user = format!(
         "Summarize the following conversation history for context preservation. Keep it short (max 12 bullet points).\n\n{}",
@@ -191,7 +191,7 @@ async fn auto_compact_history(
     );
 
     let summary_raw = provider
-        .chat_with_system(Some(summarizer_system), &summarizer_user, model, 0.2)
+        .chat_with_system(Some(&summarizer_system), &summarizer_user, model, 0.2)
         .await
         .unwrap_or_else(|_| {
             // Fallback to deterministic local truncation when summarization fails.
@@ -1790,8 +1790,10 @@ pub async fn run(
     } else {
         None
     };
+    let prompt_budget =
+        crate::agent::prompt_composer::system_prompt_char_budget(config.agent.compact_context);
     let native_tools = provider.supports_native_tools();
-    let mut system_prompt = crate::channels::build_system_prompt_with_mode(
+    let mut system_prompt = crate::channels::build_system_prompt_pyramid(
         &config.workspace_dir,
         &model_name,
         &tool_descs,
@@ -1800,6 +1802,8 @@ pub async fn run(
         bootstrap_max_chars,
         native_tools,
         config.skills.prompt_injection_mode,
+        crate::agent::prompt_composer::PromptMode::Full,
+        prompt_budget,
     );
 
     // Append structured tool-use instructions (Hybrid / xml mode; native-only Full skips).
@@ -1830,6 +1834,10 @@ pub async fn run(
         }
     }
     append_execution_policy_to_prompt(&mut system_prompt, &security, &config);
+    crate::agent::prompt_composer::append_phase_sections(
+        &mut system_prompt,
+        &[crate::agent::prompt_composer::PromptPhase::Approval],
+    );
 
     let tool_dispatcher_ref = tool_dispatcher.as_deref();
 
@@ -2275,8 +2283,10 @@ pub async fn process_message(config: Config, message: &str) -> Result<String> {
     } else {
         None
     };
+    let prompt_budget =
+        crate::agent::prompt_composer::system_prompt_char_budget(config.agent.compact_context);
     let native_tools = provider.supports_native_tools();
-    let mut system_prompt = crate::channels::build_system_prompt_with_mode(
+    let mut system_prompt = crate::channels::build_system_prompt_pyramid(
         &config.workspace_dir,
         &model_name,
         &tool_descs,
@@ -2285,11 +2295,17 @@ pub async fn process_message(config: Config, message: &str) -> Result<String> {
         bootstrap_max_chars,
         native_tools,
         config.skills.prompt_injection_mode,
+        crate::agent::prompt_composer::PromptMode::Full,
+        prompt_budget,
     );
     if !native_tools {
         system_prompt.push_str(&build_tool_instructions(&tools_registry));
     }
     append_execution_policy_to_prompt(&mut system_prompt, &security, &config);
+    crate::agent::prompt_composer::append_phase_sections(
+        &mut system_prompt,
+        &[crate::agent::prompt_composer::PromptPhase::Approval],
+    );
 
     let mem_context = build_context(mem.as_ref(), message, config.memory.min_relevance_score).await;
     let rag_limit = if config.agent.compact_context { 2 } else { 5 };

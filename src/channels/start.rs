@@ -154,8 +154,10 @@ pub async fn start_channels(config: Config) -> Result<()> {
     } else {
         None
     };
+    let prompt_budget =
+        crate::agent::prompt_composer::system_prompt_char_budget(config.agent.compact_context);
     let native_tools = provider.supports_native_tools();
-    let mut system_prompt = build_system_prompt_with_mode(
+    let mut system_prompt = crate::channels::build_system_prompt_pyramid(
         &workspace,
         &model,
         &tool_descs,
@@ -164,6 +166,8 @@ pub async fn start_channels(config: Config) -> Result<()> {
         bootstrap_max_chars,
         native_tools,
         config.skills.prompt_injection_mode,
+        crate::agent::prompt_composer::PromptMode::Full,
+        prompt_budget,
     );
     #[cfg(feature = "ai-protocol")]
     {
@@ -201,6 +205,10 @@ pub async fn start_channels(config: Config) -> Result<()> {
         }
     }
     crate::agent::loop_::append_execution_policy_to_prompt(&mut system_prompt, &security, &config);
+    crate::agent::prompt_composer::append_phase_sections(
+        &mut system_prompt,
+        &[crate::agent::prompt_composer::PromptPhase::Approval],
+    );
 
     if !skills.is_empty() {
         println!(

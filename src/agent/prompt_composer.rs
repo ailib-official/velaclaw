@@ -210,6 +210,101 @@ pub fn load_openclaw_bootstrap_section(workspace_dir: &Path, max_chars_per_file:
     body
 }
 
+// ── Phase-specific prompts (Phase B) ─────────────────────────────────────
+
+/// Task phase for specialized system-prompt overlays.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PromptPhase {
+    /// Default agent execution (main REPL / gateway).
+    Execute,
+    /// Interactive human approval may gate tool actions.
+    Approval,
+    /// History compaction summarizer (no tools).
+    Compact,
+    /// Delegated sub-agent with a narrow tool allowlist.
+    Delegate,
+}
+
+/// P0 — when shell/tool actions may require human approval.
+#[must_use]
+pub fn build_approval_section() -> String {
+    "## Human Approval\n\n\
+     Some tool actions require explicit human approval before execution.\n\
+     When approval is pending: do NOT retry the same action, invent workarounds, or bypass gates.\n\
+     Explain what approval is needed and wait for the user's decision.\n\
+     Never disable, override, or circumvent approval or security policy.\n\n"
+        .to_string()
+}
+
+/// System prompt for conversation compaction (no tool use).
+#[must_use]
+pub fn build_compact_summarizer_system() -> String {
+    "You are a conversation compaction engine. Summarize older chat history into concise \
+     context for future turns.\n\
+     Preserve: user preferences, commitments, decisions, unresolved tasks, key facts.\n\
+     Omit: filler, repeated chit-chat, verbose tool logs.\n\
+     Output plain-text bullet points only. Do not call tools or propose new actions.\n"
+        .to_string()
+}
+
+/// P0 — delegated sub-agent scope header.
+#[must_use]
+pub fn build_delegate_section() -> String {
+    "## Delegated Sub-agent\n\n\
+     You are a focused sub-agent executing ONE assigned task for a parent agent.\n\
+     Complete only the scoped objective. Do not expand scope or edit unrelated files.\n\
+     Return a concise result the parent can merge.\n\n"
+        .to_string()
+}
+
+/// Default system prompt for agentic delegate runs without a custom `system_prompt`.
+#[must_use]
+pub fn build_delegate_subagent_prompt(allowed_tools: &[&str], native_tools: bool) -> String {
+    let tools_line = if allowed_tools.is_empty() {
+        String::from("Allowed tools: (none configured)\n\n")
+    } else {
+        format!("Allowed tools: {}\n\n", allowed_tools.join(", "))
+    };
+    compose(
+        vec![
+            TieredSection::new(PromptTier::P0Critical, build_delegate_section()),
+            TieredSection::new(PromptTier::P0Critical, build_task_section(native_tools)),
+            TieredSection::new(PromptTier::P0Critical, build_safety_section()),
+            TieredSection::new(
+                PromptTier::P1Operational,
+                format!("## Tool Scope\n\n{tools_line}"),
+            ),
+        ],
+        PromptMode::Minimal,
+        Some(6_000),
+    )
+}
+
+/// Append phase overlays after the base system prompt is assembled.
+pub fn append_phase_sections(prompt: &mut String, phases: &[PromptPhase]) {
+    for phase in phases {
+        let section = match phase {
+            PromptPhase::Execute => continue,
+            PromptPhase::Approval => build_approval_section(),
+            PromptPhase::Compact => build_compact_summarizer_system(),
+            PromptPhase::Delegate => build_delegate_section(),
+        };
+        if !section.trim().is_empty() {
+            prompt.push_str(&section);
+        }
+    }
+}
+
+/// Optional total character budget when `compact_context` is enabled.
+#[must_use]
+pub fn system_prompt_char_budget(compact_context: bool) -> Option<usize> {
+    if compact_context {
+        Some(24_000)
+    } else {
+        None
+    }
+}
+
 /// Inject a single workspace file with truncation and missing-file markers.
 pub fn inject_workspace_file(
     prompt: &mut String,
@@ -300,6 +395,13 @@ mod tests {
         );
         assert!(out.contains("## Safety"));
         assert!(!out.contains("## Runtime"));
+    }
+
+    #[test]
+    fn delegate_subagent_prompt_lists_allowed_tools() {
+        let out = build_delegate_subagent_prompt(&["shell", "file_read"], true);
+        assert!(out.contains("Delegated Sub-agent"));
+        assert!(out.contains("shell, file_read"));
     }
 
     #[test]

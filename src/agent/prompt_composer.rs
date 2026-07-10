@@ -223,6 +223,10 @@ pub enum PromptPhase {
     Compact,
     /// Delegated sub-agent with a narrow tool allowlist.
     Delegate,
+    /// Periodic heartbeat task from HEARTBEAT.md.
+    Heartbeat,
+    /// Scheduled cron agent job.
+    Cron,
 }
 
 /// P0 — when shell/tool actions may require human approval.
@@ -257,6 +261,26 @@ pub fn build_delegate_section() -> String {
         .to_string()
 }
 
+/// P0 — periodic heartbeat task overlay.
+#[must_use]
+pub fn build_heartbeat_section() -> String {
+    "## Heartbeat Task\n\n\
+     You are executing one automated periodic task from HEARTBEAT.md.\n\
+     Complete only the scoped item; do not start unrelated work or edit unrelated files.\n\
+     If no action is required, reply briefly with HEARTBEAT_OK.\n\n"
+        .to_string()
+}
+
+/// P0 — scheduled cron agent job overlay.
+#[must_use]
+pub fn build_cron_section() -> String {
+    "## Scheduled Task\n\n\
+     You are executing an automated cron job.\n\
+     Complete only the job prompt within autonomy and approval policy.\n\
+     Return a concise completion summary.\n\n"
+        .to_string()
+}
+
 /// Default system prompt for agentic delegate runs without a custom `system_prompt`.
 #[must_use]
 pub fn build_delegate_subagent_prompt(allowed_tools: &[&str], native_tools: bool) -> String {
@@ -280,7 +304,13 @@ pub fn build_delegate_subagent_prompt(allowed_tools: &[&str], native_tools: bool
     )
 }
 
-/// Append phase overlays after the base system prompt is assembled.
+/// Build default prompt phases for an agent run (approval + optional overlays).
+#[must_use]
+pub fn default_run_prompt_phases(extra: &[PromptPhase]) -> Vec<PromptPhase> {
+    let mut phases = vec![PromptPhase::Approval];
+    phases.extend_from_slice(extra);
+    phases
+}
 pub fn append_phase_sections(prompt: &mut String, phases: &[PromptPhase]) {
     for phase in phases {
         let section = match phase {
@@ -288,6 +318,8 @@ pub fn append_phase_sections(prompt: &mut String, phases: &[PromptPhase]) {
             PromptPhase::Approval => build_approval_section(),
             PromptPhase::Compact => build_compact_summarizer_system(),
             PromptPhase::Delegate => build_delegate_section(),
+            PromptPhase::Heartbeat => build_heartbeat_section(),
+            PromptPhase::Cron => build_cron_section(),
         };
         if !section.trim().is_empty() {
             prompt.push_str(&section);
@@ -422,6 +454,19 @@ mod tests {
         let out = build_delegate_subagent_prompt(&["shell", "file_read"], true);
         assert!(out.contains("Delegated Sub-agent"));
         assert!(out.contains("shell, file_read"));
+    }
+
+    #[test]
+    fn heartbeat_and_cron_sections_are_non_empty() {
+        assert!(build_heartbeat_section().contains("HEARTBEAT_OK"));
+        assert!(build_cron_section().contains("Scheduled Task"));
+    }
+
+    #[test]
+    fn default_run_prompt_phases_includes_approval_and_extras() {
+        let phases = default_run_prompt_phases(&[PromptPhase::Cron]);
+        assert_eq!(phases[0], PromptPhase::Approval);
+        assert!(phases.contains(&PromptPhase::Cron));
     }
 
     #[test]

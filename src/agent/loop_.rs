@@ -1525,6 +1525,7 @@ pub async fn run(
     peripheral_overrides: Vec<String>,
     no_color: bool,
     no_fold: bool,
+    extra_prompt_phases: &[crate::agent::prompt_composer::PromptPhase],
 ) -> Result<String> {
     #[cfg(feature = "ai-protocol")]
     let _ = (&provider_override, &model_override);
@@ -1838,7 +1839,7 @@ pub async fn run(
     append_execution_policy_to_prompt(&mut system_prompt, &security, &config);
     crate::agent::prompt_composer::append_phase_sections(
         &mut system_prompt,
-        &[crate::agent::prompt_composer::PromptPhase::Approval],
+        &crate::agent::prompt_composer::default_run_prompt_phases(extra_prompt_phases),
     );
 
     let tool_dispatcher_ref = tool_dispatcher.as_deref();

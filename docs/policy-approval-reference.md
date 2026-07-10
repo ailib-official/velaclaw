@@ -35,7 +35,7 @@ The shell tool schema **does not** expose an `approved` parameter. Human consent
 
 | Entry | Supervised tool approval | Shell medium-risk confirmation | Notes |
 |---|---|---|---|
-| **CLI** (`velaclaw agent`, one-shot) | Interactive stdin: `[Y]es / [N]o / [A]lways` | Same prompt path when policy requires human approval | `Always` persists tool to L2.5 `approval.session_allowlist` |
+| **CLI** (`velaclaw agent`, one-shot) | Interactive stdin: `🔒 Security policy requires approval...` then `[Y]es / [N]o / [A]lways` | Same prompt path when policy requires human approval; shell shows the command | `Always` persists tool to L2.5 `approval.session_allowlist` |
 | **Gateway** (Web UI) | `ApprovalHub` modal / async request | Gateway hub prompt when shell policy requires it | Requires pairing when `require_pairing = true` |
 | **Channel** (Telegram, Discord, …) | Controlled by `approval_mode` (see below) | Inline mode only; `deny` blocks interactive approval | Default: `inline` with timeout (300s) |
 

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-07-11
+
+### Added
+
+- **Manifest-driven prompt budget** ([#130](https://github.com/ailib-official/velaclaw/pull/130)): `context_window` from ai-protocol scales system-prompt char budget (~15% of context, 4k–48k clamp); `compact_context` caps at 24k.
+- **Heartbeat/Cron prompt phases** ([#131](https://github.com/ailib-official/velaclaw/pull/131)): dedicated overlays for daemon heartbeat tasks and cron agent jobs.
+
+### Changed
+
+- **CLI approval prompts** ([#131](https://github.com/ailib-official/velaclaw/pull/131)): unified `🔒 Security policy requires approval...` presentation for supervised tools.
+- **Docs**: `compact_context` and CLI approval behavior in config reference (EN/VI) and policy-approval reference.
+
 ## [0.7.2] - 2026-07-11
 
 ### Added

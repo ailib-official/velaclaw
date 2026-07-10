@@ -65,7 +65,7 @@ Lưu ý cho người dùng container:
 
 | Khóa | Mặc định | Mục đích |
 |---|---|---|
-| `compact_context` | `false` | Khi bật: bootstrap_max_chars=6000, rag_chunk_limit=2. Dùng cho model 13B trở xuống |
+| `compact_context` | `false` | Khi bật: `bootstrap_max_chars=6000`, `rag_chunk_limit=2`, và ngân sách system-prompt giới hạn ~24k ký tự (cắt pyramid ưu tiên phần ambient trước). Khi tắt, ngân sách vẫn tỷ lệ theo `context_window` từ ai-protocol nếu có (~15% context, giới hạn 4k–48k ký tự). Dùng cho cửa sổ ngữ cảnh nhỏ |
 | `max_tool_iterations` | `10` | Số vòng lặp tool-call tối đa mỗi tin nhắn trên CLI, gateway và channels |
 | `max_history_messages` | `50` | Số tin nhắn lịch sử tối đa giữ lại mỗi phiên |
 | `parallel_tools` | `false` | Bật thực thi tool song song trong một lượt |

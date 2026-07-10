@@ -12,20 +12,26 @@ pub fn format_user_prompt(style: RenderStyle) -> String {
     }
 }
 
-/// Prefix each non-empty line with highlighted `>> ` for agent turns.
+/// Prefix only the first non-empty line with highlighted `>> ` for agent turns.
 #[must_use]
 pub fn prefix_agent_lines(text: &str, style: RenderStyle) -> String {
     if text.is_empty() {
         return String::new();
     }
+    let mut prefixed_first = false;
     text.lines()
         .map(|line| {
             if line.is_empty() {
                 String::new()
-            } else if style.ansi {
-                format!("\x1b[1;92m>>\x1b[0m {line}")
+            } else if !prefixed_first {
+                prefixed_first = true;
+                if style.ansi {
+                    format!("\x1b[1;92m>>\x1b[0m {line}")
+                } else {
+                    format!(">> {line}")
+                }
             } else {
-                format!(">> {line}")
+                line.to_string()
             }
         })
         .collect::<Vec<_>>()
@@ -69,10 +75,11 @@ mod tests {
     }
 
     #[test]
-    fn agent_lines_get_double_chevron_prefix() {
+    fn agent_turn_prefixes_only_first_line() {
         let out = prefix_agent_lines("line one\nline two", ansi_on());
-        assert!(out.contains("\x1b[1;92m>>\x1b[0m line one"));
-        assert!(out.contains("\x1b[1;92m>>\x1b[0m line two"));
+        assert!(out.starts_with("\x1b[1;92m>>\x1b[0m line one"));
+        assert!(out.contains("\nline two"));
+        assert!(!out.contains("\x1b[1;92m>>\x1b[0m line two"));
     }
 
     #[test]

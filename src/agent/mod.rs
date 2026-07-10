@@ -6,6 +6,7 @@ pub mod dispatcher;
 pub mod loop_;
 pub mod memory_loader;
 pub mod prompt;
+pub mod prompt_composer;
 pub mod tool_batch;
 
 #[cfg(test)]

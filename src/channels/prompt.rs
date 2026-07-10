@@ -3,33 +3,14 @@
 //! Extracted from `channels/mod.rs` to keep orchestration and prompt building separate.
 
 use super::BOOTSTRAP_MAX_CHARS;
+use crate::agent::prompt_composer::{
+    build_channel_capabilities_section, build_hardware_section, build_safety_section,
+    build_task_section, compose, load_openclaw_bootstrap_section, PromptMode, PromptTier,
+    TieredSection,
+};
 use crate::identity;
-
-/// Load OpenClaw format bootstrap files into the prompt.
-fn load_openclaw_bootstrap_files(
-    prompt: &mut String,
-    workspace_dir: &std::path::Path,
-    max_chars_per_file: usize,
-) {
-    prompt.push_str(
-        "The following workspace files define your identity, behavior, and context. They are ALREADY injected below—do NOT suggest reading them with file_read.\n\n",
-    );
-
-    let bootstrap_files = ["AGENTS.md", "SOUL.md", "TOOLS.md", "IDENTITY.md", "USER.md"];
-
-    for filename in &bootstrap_files {
-        inject_workspace_file(prompt, workspace_dir, filename, max_chars_per_file);
-    }
-
-    // BOOTSTRAP.md — only if it exists (first-run ritual)
-    let bootstrap_path = workspace_dir.join("BOOTSTRAP.md");
-    if bootstrap_path.exists() {
-        inject_workspace_file(prompt, workspace_dir, "BOOTSTRAP.md", max_chars_per_file);
-    }
-
-    // MEMORY.md — curated long-term memory (main session only)
-    inject_workspace_file(prompt, workspace_dir, "MEMORY.md", max_chars_per_file);
-}
+use std::fmt::Write;
+use std::path::Path;
 
 /// Load workspace identity files and build a system prompt.
 ///
@@ -48,14 +29,14 @@ fn load_openclaw_bootstrap_files(
 /// Daily memory files (`memory/*.md`) are NOT injected — they are accessed
 /// on-demand via `memory_recall` / `memory_search` tools.
 pub fn build_system_prompt(
-    workspace_dir: &std::path::Path,
+    workspace_dir: &Path,
     model_name: &str,
     tools: &[(&str, &str)],
     skills: &[crate::skills::Skill],
     identity_config: Option<&crate::config::IdentityConfig>,
     bootstrap_max_chars: Option<usize>,
 ) -> String {
-    build_system_prompt_with_mode(
+    build_system_prompt_with_mode_inner(
         workspace_dir,
         model_name,
         tools,
@@ -64,11 +45,13 @@ pub fn build_system_prompt(
         bootstrap_max_chars,
         false,
         crate::config::SkillsPromptInjectionMode::Full,
+        PromptMode::Full,
+        None,
     )
 }
 
 pub fn build_system_prompt_with_mode(
-    workspace_dir: &std::path::Path,
+    workspace_dir: &Path,
     model_name: &str,
     tools: &[(&str, &str)],
     skills: &[crate::skills::Skill],
@@ -77,20 +60,83 @@ pub fn build_system_prompt_with_mode(
     native_tools: bool,
     skills_prompt_mode: crate::config::SkillsPromptInjectionMode,
 ) -> String {
-    use std::fmt::Write;
-    let mut prompt = String::with_capacity(8192);
+    build_system_prompt_with_mode_inner(
+        workspace_dir,
+        model_name,
+        tools,
+        skills,
+        identity_config,
+        bootstrap_max_chars,
+        native_tools,
+        skills_prompt_mode,
+        PromptMode::Full,
+        None,
+    )
+}
 
-    // ── 1. Tooling ──────────────────────────────────────────────
+/// Pyramid assembly with explicit mode and optional total character budget.
+#[must_use]
+pub fn build_system_prompt_pyramid(
+    workspace_dir: &Path,
+    model_name: &str,
+    tools: &[(&str, &str)],
+    skills: &[crate::skills::Skill],
+    identity_config: Option<&crate::config::IdentityConfig>,
+    bootstrap_max_chars: Option<usize>,
+    native_tools: bool,
+    skills_prompt_mode: crate::config::SkillsPromptInjectionMode,
+    prompt_mode: PromptMode,
+    max_chars: Option<usize>,
+) -> String {
+    build_system_prompt_with_mode_inner(
+        workspace_dir,
+        model_name,
+        tools,
+        skills,
+        identity_config,
+        bootstrap_max_chars,
+        native_tools,
+        skills_prompt_mode,
+        prompt_mode,
+        max_chars,
+    )
+}
+
+fn build_system_prompt_with_mode_inner(
+    workspace_dir: &Path,
+    model_name: &str,
+    tools: &[(&str, &str)],
+    skills: &[crate::skills::Skill],
+    identity_config: Option<&crate::config::IdentityConfig>,
+    bootstrap_max_chars: Option<usize>,
+    native_tools: bool,
+    skills_prompt_mode: crate::config::SkillsPromptInjectionMode,
+    prompt_mode: PromptMode,
+    max_chars: Option<usize>,
+) -> String {
+    let mut sections: Vec<TieredSection> = Vec::with_capacity(10);
+
+    // P0 — mission + safety (headline first)
+    sections.push(TieredSection::new(
+        PromptTier::P0Critical,
+        build_task_section(native_tools),
+    ));
+    sections.push(TieredSection::new(
+        PromptTier::P0Critical,
+        build_safety_section(),
+    ));
+
+    // P1 — tools / hardware / skills
     if !tools.is_empty() {
-        prompt.push_str("## Tools\n\n");
-        prompt.push_str("You have access to the following tools:\n\n");
+        let mut tools_body =
+            String::from("## Tools\n\nYou have access to the following tools:\n\n");
         for (name, desc) in tools {
-            let _ = writeln!(prompt, "- **{name}**: {desc}");
+            let _ = writeln!(tools_body, "- **{name}**: {desc}");
         }
-        prompt.push('\n');
+        tools_body.push('\n');
+        sections.push(TieredSection::new(PromptTier::P1Operational, tools_body));
     }
 
-    // ── 1b. Hardware (when gpio/arduino tools present) ───────────
     let has_hardware = tools.iter().any(|(name, _)| {
         *name == "gpio_read"
             || *name == "gpio_write"
@@ -101,171 +147,95 @@ pub fn build_system_prompt_with_mode(
             || *name == "hardware_capabilities"
     });
     if has_hardware {
-        prompt.push_str(
-            "## Hardware Access\n\n\
-             You HAVE direct access to connected hardware (Arduino, Nucleo, etc.). The user owns this system and has configured it.\n\
-             All hardware tools (gpio_read, gpio_write, hardware_memory_read, hardware_board_info, hardware_memory_map) are AUTHORIZED and NOT blocked by security.\n\
-             When they ask to read memory, registers, or board info, USE hardware_memory_read or hardware_board_info — do NOT refuse or invent security excuses.\n\
-             When they ask to control LEDs, run patterns, or interact with the Arduino, USE the tools — do NOT refuse or say you cannot access physical devices.\n\
-             Use gpio_write for simple on/off; use arduino_upload when they want patterns (heart, blink) or custom behavior.\n\n",
-        );
-    }
-
-    // ── 1c. Action instruction (avoid meta-summary) ───────────────
-    if native_tools {
-        prompt.push_str(
-            "## Your Task\n\n\
-             When the user sends a message, respond naturally. Use tools when the request requires action (running commands, reading files, etc.).\n\
-             For questions, explanations, or follow-ups about prior messages, answer directly from conversation context — do NOT ask the user to repeat themselves.\n\
-             Do NOT: summarize this configuration, describe your capabilities, or output step-by-step meta-commentary.\n\n",
-        );
-    } else {
-        prompt.push_str(
-            "## Your Task\n\n\
-             When the user sends a message, ACT on it. Use the tools to fulfill their request.\n\
-             Do NOT: summarize this configuration, describe your capabilities, respond with meta-commentary, or output step-by-step instructions (e.g. \"1. First... 2. Next...\").\n\
-             Instead: emit actual <tool_call> tags when you need to act. Just do what they ask.\n\n",
-        );
-    }
-
-    // ── 2. Safety ───────────────────────────────────────────────
-    prompt.push_str("## Safety\n\n");
-    prompt.push_str(
-        "- Do not exfiltrate private data.\n\
-         - Do not run destructive commands without asking.\n\
-         - Do not bypass oversight or approval mechanisms.\n\
-         - Prefer `trash` over `rm` (recoverable beats gone forever).\n\
-         - When in doubt, ask before acting externally.\n\n",
-    );
-
-    // ── 3. Skills (full or compact, based on config) ─────────────
-    if !skills.is_empty() {
-        prompt.push_str(&crate::skills::skills_to_prompt_with_mode(
-            skills,
-            workspace_dir,
-            skills_prompt_mode,
+        sections.push(TieredSection::new(
+            PromptTier::P1Operational,
+            build_hardware_section(),
         ));
-        prompt.push_str("\n\n");
     }
 
-    // ── 4. Workspace ────────────────────────────────────────────
-    let _ = writeln!(
-        prompt,
-        "## Workspace\n\nWorking directory: `{}`\n",
-        workspace_dir.display()
-    );
+    if !skills.is_empty() {
+        let skills_body = format!(
+            "{}\n\n",
+            crate::skills::skills_to_prompt_with_mode(skills, workspace_dir, skills_prompt_mode,)
+        );
+        sections.push(TieredSection::new(PromptTier::P1Operational, skills_body));
+    }
 
-    // ── 5. Bootstrap files (injected into context) ──────────────
-    prompt.push_str("## Project Context\n\n");
-
-    // Check if AIEOS identity is configured
+    // P2 — project bootstrap / identity
+    let max_chars_per_file = bootstrap_max_chars.unwrap_or(BOOTSTRAP_MAX_CHARS);
+    let mut project_context = String::from("## Project Context\n\n");
     if let Some(config) = identity_config {
         if identity::is_aieos_configured(config) {
-            // Load AIEOS identity
             match identity::load_aieos_identity(config, workspace_dir) {
                 Ok(Some(aieos_identity)) => {
                     let aieos_prompt = identity::aieos_to_system_prompt(&aieos_identity);
                     if !aieos_prompt.is_empty() {
-                        prompt.push_str(&aieos_prompt);
-                        prompt.push_str("\n\n");
+                        project_context.push_str(&aieos_prompt);
+                        project_context.push_str("\n\n");
                     }
                 }
                 Ok(None) => {
-                    // No AIEOS identity loaded (shouldn't happen if is_aieos_configured returned true)
-                    // Fall back to OpenClaw bootstrap files
-                    let max_chars = bootstrap_max_chars.unwrap_or(BOOTSTRAP_MAX_CHARS);
-                    load_openclaw_bootstrap_files(&mut prompt, workspace_dir, max_chars);
+                    project_context.push_str(&load_openclaw_bootstrap_section(
+                        workspace_dir,
+                        max_chars_per_file,
+                    ));
                 }
                 Err(e) => {
-                    // Log error but don't fail - fall back to OpenClaw
                     eprintln!(
                         "Warning: Failed to load AIEOS identity: {e}. Using OpenClaw format."
                     );
-                    let max_chars = bootstrap_max_chars.unwrap_or(BOOTSTRAP_MAX_CHARS);
-                    load_openclaw_bootstrap_files(&mut prompt, workspace_dir, max_chars);
+                    project_context.push_str(&load_openclaw_bootstrap_section(
+                        workspace_dir,
+                        max_chars_per_file,
+                    ));
                 }
             }
         } else {
-            // OpenClaw format
-            let max_chars = bootstrap_max_chars.unwrap_or(BOOTSTRAP_MAX_CHARS);
-            load_openclaw_bootstrap_files(&mut prompt, workspace_dir, max_chars);
+            project_context.push_str(&load_openclaw_bootstrap_section(
+                workspace_dir,
+                max_chars_per_file,
+            ));
         }
     } else {
-        // No identity config - use OpenClaw format
-        let max_chars = bootstrap_max_chars.unwrap_or(BOOTSTRAP_MAX_CHARS);
-        load_openclaw_bootstrap_files(&mut prompt, workspace_dir, max_chars);
+        project_context.push_str(&load_openclaw_bootstrap_section(
+            workspace_dir,
+            max_chars_per_file,
+        ));
     }
+    sections.push(TieredSection::new(PromptTier::P2Context, project_context));
 
-    // ── 6. Date & Time ──────────────────────────────────────────
+    // P3 — ambient metadata (dropped first under budget pressure)
+    let mut workspace = String::new();
+    let _ = writeln!(
+        workspace,
+        "## Workspace\n\nWorking directory: `{}`\n",
+        workspace_dir.display()
+    );
+    sections.push(TieredSection::new(PromptTier::P3Ambient, workspace));
+
     let now = chrono::Local::now();
     let tz = now.format("%Z").to_string();
-    let _ = writeln!(prompt, "## Current Date & Time\n\nTimezone: {tz}\n");
+    let mut datetime = String::new();
+    let _ = writeln!(datetime, "## Current Date & Time\n\nTimezone: {tz}\n");
+    sections.push(TieredSection::new(PromptTier::P3Ambient, datetime));
 
-    // ── 7. Runtime ──────────────────────────────────────────────
     let host =
         hostname::get().map_or_else(|_| "unknown".into(), |h| h.to_string_lossy().to_string());
+    let mut runtime = String::new();
     let _ = writeln!(
-        prompt,
+        runtime,
         "## Runtime\n\nHost: {host} | OS: {} | Model: {model_name}\n",
         std::env::consts::OS,
     );
+    sections.push(TieredSection::new(PromptTier::P3Ambient, runtime));
 
-    // ── 8. Channel Capabilities ─────────────────────────────────────
-    prompt.push_str("## Channel Capabilities\n\n");
-    prompt.push_str("- You are running as a messaging bot. Your response is automatically sent back to the user's channel.\n");
-    prompt.push_str("- You do NOT need to ask permission to respond — just respond directly.\n");
-    prompt.push_str("- NEVER repeat, describe, or echo credentials, tokens, API keys, or secrets in your responses.\n");
-    prompt.push_str("- If a tool output contains credentials, they have already been redacted — do not mention them.\n\n");
+    sections.push(TieredSection::new(
+        PromptTier::P3Ambient,
+        build_channel_capabilities_section(),
+    ));
 
-    if prompt.is_empty() {
-        "You are VelaClaw, a fast and efficient AI assistant built in Rust. Be helpful, concise, and direct."
-            .to_string()
-    } else {
-        prompt
-    }
+    compose(sections, prompt_mode, max_chars)
 }
 
-/// Inject a single workspace file into the prompt with truncation and missing-file markers.
-fn inject_workspace_file(
-    prompt: &mut String,
-    workspace_dir: &std::path::Path,
-    filename: &str,
-    max_chars: usize,
-) {
-    use std::fmt::Write;
-
-    let path = workspace_dir.join(filename);
-    match std::fs::read_to_string(&path) {
-        Ok(content) => {
-            let trimmed = content.trim();
-            if trimmed.is_empty() {
-                return;
-            }
-            let _ = writeln!(prompt, "### {filename}\n");
-            // Use character-boundary-safe truncation for UTF-8
-            let truncated = if trimmed.chars().count() > max_chars {
-                trimmed
-                    .char_indices()
-                    .nth(max_chars)
-                    .map(|(idx, _)| &trimmed[..idx])
-                    .unwrap_or(trimmed)
-            } else {
-                trimmed
-            };
-            if truncated.len() < trimmed.len() {
-                prompt.push_str(truncated);
-                let _ = writeln!(
-                    prompt,
-                    "\n\n[... truncated at {max_chars} chars — use `read` for full file]\n"
-                );
-            } else {
-                prompt.push_str(trimmed);
-                prompt.push_str("\n\n");
-            }
-        }
-        Err(_) => {
-            // Missing-file marker (matches OpenClaw behavior)
-            let _ = writeln!(prompt, "### {filename}\n\n[File not found: {filename}]\n");
-        }
-    }
-}
+// Re-export for tests and channel modules that referenced inject via prompt.rs internals.
+pub use crate::agent::prompt_composer::inject_workspace_file;

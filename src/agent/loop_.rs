@@ -1790,8 +1790,10 @@ pub async fn run(
     } else {
         None
     };
-    let prompt_budget =
-        crate::agent::prompt_composer::system_prompt_char_budget(config.agent.compact_context);
+    let prompt_budget = crate::agent::prompt_composer::system_prompt_char_budget(
+        config.agent.compact_context,
+        &model_name,
+    );
     let native_tools = provider.supports_native_tools();
     let mut system_prompt = crate::channels::build_system_prompt_pyramid(
         &config.workspace_dir,
@@ -2283,8 +2285,10 @@ pub async fn process_message(config: Config, message: &str) -> Result<String> {
     } else {
         None
     };
-    let prompt_budget =
-        crate::agent::prompt_composer::system_prompt_char_budget(config.agent.compact_context);
+    let prompt_budget = crate::agent::prompt_composer::system_prompt_char_budget(
+        config.agent.compact_context,
+        &model_name,
+    );
     let native_tools = provider.supports_native_tools();
     let mut system_prompt = crate::channels::build_system_prompt_pyramid(
         &config.workspace_dir,

@@ -154,8 +154,10 @@ pub async fn start_channels(config: Config) -> Result<()> {
     } else {
         None
     };
-    let prompt_budget =
-        crate::agent::prompt_composer::system_prompt_char_budget(config.agent.compact_context);
+    let prompt_budget = crate::agent::prompt_composer::system_prompt_char_budget(
+        config.agent.compact_context,
+        &model,
+    );
     let native_tools = provider.supports_native_tools();
     let mut system_prompt = crate::channels::build_system_prompt_pyramid(
         &workspace,

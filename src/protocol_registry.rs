@@ -96,6 +96,8 @@ pub struct ProtocolModelInfo {
     pub logical_id: String,
     pub provider: String,
     pub source_file: PathBuf,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -105,9 +107,120 @@ pub struct ProtocolRegistrySnapshot {
     pub models: Vec<ProtocolModelInfo>,
 }
 
+fn context_window_from_meta(meta: &serde_json::Value) -> Option<u32> {
+    meta.get("context_window")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|n| u32::try_from(n).ok())
+}
+
+fn load_manifest_value(path: &Path) -> anyhow::Result<serde_json::Value> {
+    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+    let bytes = std::fs::read(path)?;
+    if ext.eq_ignore_ascii_case("json") {
+        return Ok(serde_json::from_slice(&bytes)?);
+    }
+    if ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml") {
+        let s = String::from_utf8_lossy(&bytes);
+        let v: serde_yaml::Value = serde_yaml::from_str(&s)?;
+        return Ok(serde_json::to_value(v)?);
+    }
+    anyhow::bail!("unsupported provider manifest extension: {ext}");
+}
+
+fn upsert_model(models: &mut Vec<ProtocolModelInfo>, entry: ProtocolModelInfo) {
+    if let Some(existing) = models.iter_mut().find(|m| m.logical_id == entry.logical_id) {
+        if existing.context_window.is_none() {
+            existing.context_window = entry.context_window;
+        }
+        return;
+    }
+    models.push(entry);
+}
+
+fn ingest_provider_metadata_models(
+    models: &mut Vec<ProtocolModelInfo>,
+    provider_id: &str,
+    path: &Path,
+) {
+    let Ok(raw) = load_manifest_value(path) else {
+        return;
+    };
+    let Some(metadata_models) = raw
+        .get("metadata")
+        .and_then(|m| m.get("models"))
+        .and_then(serde_json::Value::as_object)
+    else {
+        return;
+    };
+    for (model_key, meta) in metadata_models {
+        let logical_id = if model_key.contains('/') {
+            model_key.clone()
+        } else {
+            format!("{provider_id}/{model_key}")
+        };
+        upsert_model(
+            models,
+            ProtocolModelInfo {
+                logical_id,
+                provider: provider_id.to_string(),
+                source_file: path.to_path_buf(),
+                context_window: context_window_from_meta(meta),
+            },
+        );
+    }
+}
+
+impl ProtocolRegistrySnapshot {
+    /// Resolve `context_window` tokens for a logical model id (exact or suffix match).
+    #[must_use]
+    pub fn context_window_for(&self, model_id: &str) -> Option<u32> {
+        let model_id = model_id.trim();
+        if model_id.is_empty() {
+            return None;
+        }
+        if let Some(found) = self
+            .models
+            .iter()
+            .find(|m| m.logical_id == model_id)
+            .and_then(|m| m.context_window)
+        {
+            return Some(found);
+        }
+        let suffix = model_id.rsplit('/').next().unwrap_or(model_id);
+        self.models
+            .iter()
+            .filter(|m| {
+                m.logical_id == suffix
+                    || m.logical_id.ends_with(&format!("/{suffix}"))
+                    || m.logical_id == format!("{}/{}", m.provider, suffix)
+            })
+            .find_map(|m| m.context_window)
+    }
+}
+
+/// Lookup `context_window` for a model from the local ai-protocol registry cache.
+#[must_use]
+pub fn lookup_context_window(model_id: &str) -> Option<u32> {
+    #[cfg(feature = "ai-protocol")]
+    {
+        use std::sync::OnceLock;
+        static CACHE: OnceLock<Option<ProtocolRegistrySnapshot>> = OnceLock::new();
+        let snap = CACHE.get_or_init(|| {
+            resolve_local_protocol_root().and_then(|root| scan_protocol_root(&root).ok())
+        });
+        snap.as_ref()?.context_window_for(model_id)
+    }
+    #[cfg(not(feature = "ai-protocol"))]
+    {
+        let _ = model_id;
+        None
+    }
+}
+
 /// Scan provider manifests under `root` and model registries under `v1/models` / `dist/v1/models`.
 pub fn scan_protocol_root(root: &Path) -> anyhow::Result<ProtocolRegistrySnapshot> {
     let mut providers = Vec::new();
+    let mut models = Vec::new();
     for path in collect_provider_files(root) {
         let Some(id) = provider_id_from_path(&path) else {
             continue;
@@ -131,15 +244,15 @@ pub fn scan_protocol_root(root: &Path) -> anyhow::Result<ProtocolRegistrySnapsho
             manifest.id.clone()
         };
         providers.push(ProtocolProviderInfo {
-            id: resolved_id,
-            manifest_path: path,
+            id: resolved_id.clone(),
+            manifest_path: path.clone(),
             required_envs,
             available,
         });
+        ingest_provider_metadata_models(&mut models, &resolved_id, &path);
     }
     providers.sort_by(|a, b| a.id.cmp(&b.id));
 
-    let mut models = Vec::new();
     for base in [
         root.join("dist").join("v1").join("models"),
         root.join("v1").join("models"),
@@ -200,11 +313,15 @@ pub fn scan_protocol_root(root: &Path) -> anyhow::Result<ProtocolRegistrySnapsho
                     .and_then(|x| x.as_str())
                     .unwrap_or("")
                     .to_string();
-                models.push(ProtocolModelInfo {
-                    logical_id,
-                    provider,
-                    source_file: path.clone(),
-                });
+                upsert_model(
+                    &mut models,
+                    ProtocolModelInfo {
+                        logical_id,
+                        provider,
+                        source_file: path.clone(),
+                        context_window: context_window_from_meta(&meta),
+                    },
+                );
             }
         }
     }
@@ -353,5 +470,16 @@ endpoint:
             .expect("provider");
         assert_eq!(provider.required_envs, vec!["VELACLAW_PT074_MISSING_TOKEN"]);
         assert!(provider.available);
+    }
+
+    #[test]
+    fn scan_provider_metadata_models_extracts_context_window() {
+        let fixture =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/ai-protocol-min");
+        let snap = scan_protocol_root(&fixture).expect("scan fixture");
+        let cw = snap
+            .context_window_for("openai/gpt-5.3-codex-spark")
+            .or_else(|| snap.context_window_for("gpt-5.3-codex-spark"));
+        assert_eq!(cw, Some(128_000));
     }
 }

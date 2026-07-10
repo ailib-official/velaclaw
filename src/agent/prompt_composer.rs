@@ -295,14 +295,34 @@ pub fn append_phase_sections(prompt: &mut String, phases: &[PromptPhase]) {
     }
 }
 
-/// Optional total character budget when `compact_context` is enabled.
+/// Optional total character budget derived from model context window and/or `compact_context`.
 #[must_use]
-pub fn system_prompt_char_budget(compact_context: bool) -> Option<usize> {
-    if compact_context {
-        Some(24_000)
-    } else {
-        None
+pub fn system_prompt_char_budget(compact_context: bool, model_name: &str) -> Option<usize> {
+    const COMPACT_CONTEXT_CHAR_CAP: usize = 24_000;
+
+    let from_manifest = crate::protocol_registry::lookup_context_window(model_name)
+        .map(context_window_to_char_budget);
+
+    match (from_manifest, compact_context) {
+        (Some(budget), true) => Some(budget.min(COMPACT_CONTEXT_CHAR_CAP)),
+        (Some(budget), false) => Some(budget),
+        (None, true) => Some(COMPACT_CONTEXT_CHAR_CAP),
+        (None, false) => None,
     }
+}
+
+fn context_window_to_char_budget(tokens: u32) -> usize {
+    const CHARS_PER_TOKEN_ESTIMATE: usize = 4;
+    const SYSTEM_PROMPT_CONTEXT_FRACTION_PCT: usize = 15;
+    const MIN_SYSTEM_PROMPT_BUDGET: usize = 4_000;
+    const MAX_SYSTEM_PROMPT_BUDGET: usize = 48_000;
+
+    let tokens = tokens.max(1) as usize;
+    let raw = tokens
+        .saturating_mul(CHARS_PER_TOKEN_ESTIMATE)
+        .saturating_mul(SYSTEM_PROMPT_CONTEXT_FRACTION_PCT)
+        / 100;
+    raw.clamp(MIN_SYSTEM_PROMPT_BUDGET, MAX_SYSTEM_PROMPT_BUDGET)
 }
 
 /// Inject a single workspace file with truncation and missing-file markers.
@@ -402,6 +422,19 @@ mod tests {
         let out = build_delegate_subagent_prompt(&["shell", "file_read"], true);
         assert!(out.contains("Delegated Sub-agent"));
         assert!(out.contains("shell, file_read"));
+    }
+
+    #[test]
+    fn context_window_to_char_budget_scales_and_clamps() {
+        assert_eq!(context_window_to_char_budget(8_000), 4_800);
+        assert_eq!(context_window_to_char_budget(128_000), 48_000);
+        assert_eq!(context_window_to_char_budget(1), 4_000);
+    }
+
+    #[test]
+    fn system_prompt_char_budget_uses_compact_cap() {
+        let budget = system_prompt_char_budget(true, "unknown/model");
+        assert_eq!(budget, Some(24_000));
     }
 
     #[test]

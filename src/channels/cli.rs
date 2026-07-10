@@ -1,9 +1,10 @@
 use super::traits::{Channel, ChannelMessage, SendMessage};
 use async_trait::async_trait;
+use std::io::Write as IoWrite;
 use tokio::io::{self, AsyncBufReadExt, BufReader};
 use uuid::Uuid;
 
-use crate::cli_render::RenderOpts;
+use crate::cli_render::{format_user_prompt, prefix_agent_lines, RenderOpts};
 
 /// CLI channel — stdin/stdout, always available, zero deps
 pub struct CliChannel {
@@ -44,7 +45,8 @@ impl Channel for CliChannel {
 
     async fn send(&self, message: &SendMessage) -> anyhow::Result<()> {
         let rendered = self.render_opts.render(&message.content);
-        println!("{rendered}");
+        let prefixed = prefix_agent_lines(&rendered, self.render_opts.style);
+        println!("{prefixed}");
         Ok(())
     }
 
@@ -53,7 +55,15 @@ impl Channel for CliChannel {
         let reader = BufReader::new(stdin);
         let mut lines = reader.lines();
 
-        while let Ok(Some(line)) = lines.next_line().await {
+        loop {
+            print!("{}", format_user_prompt(self.render_opts.style));
+            let _ = std::io::stdout().flush();
+
+            let line = match lines.next_line().await {
+                Ok(Some(line)) => line,
+                Ok(None) | Err(_) => break,
+            };
+
             let line = line.trim().to_string();
             if line.is_empty() {
                 continue;

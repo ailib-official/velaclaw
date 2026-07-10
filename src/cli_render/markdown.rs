@@ -118,9 +118,6 @@ fn render_inline_line(line: &str, style: RenderStyle) -> String {
     if let Some(text) = line.strip_prefix("> ") {
         return render_blockquote(text, style);
     }
-    if let Some(text) = line.strip_prefix(">> ") {
-        return render_blockquote(&format!("> {text}"), style);
-    }
     if let Some(item) = parse_list_item(line) {
         return render_list_item(item.depth, item.marker, &item.text, style);
     }
@@ -288,6 +285,13 @@ fn is_table_row(line: &str) -> bool {
     t.starts_with('|') && t.ends_with('|')
 }
 
+fn is_separator_row(cells: &[String]) -> bool {
+    cells.iter().all(|c| {
+        let t = c.trim();
+        !t.is_empty() && t.chars().all(|ch| ch == '-' || ch == ':' || ch == ' ')
+    })
+}
+
 fn render_table(rows: &[String], style: RenderStyle) -> String {
     let parsed: Vec<Vec<String>> = rows
         .iter()
@@ -307,45 +311,63 @@ fn render_table(rows: &[String], style: RenderStyle) -> String {
     if n_cols == 0 {
         return String::new();
     }
+
+    let sep_idx = parsed.iter().position(|r| is_separator_row(r));
+    let header = &parsed[0];
+    let body: Vec<&Vec<String>> = if let Some(si) = sep_idx {
+        parsed.iter().skip(si + 1).collect()
+    } else {
+        parsed.iter().skip(1).collect()
+    };
+
     let mut col_widths = vec![0usize; n_cols];
-    let body_rows: Vec<&Vec<String>> = parsed
-        .iter()
-        .enumerate()
-        // The `|---|` separator row at index 1 carries no cell text — exclude it.
-        .filter(|(i, _)| *i != 1)
-        .map(|(_, r)| r)
-        .collect();
-    for r in &body_rows {
+    for r in std::iter::once(header).chain(body.iter().copied()) {
         for (i, cell) in r.iter().enumerate().take(n_cols) {
             col_widths[i] = col_widths[i].max(display_width(cell));
         }
     }
-    let pad = |cells: &Vec<String>| -> String {
-        cells
-            .iter()
-            .enumerate()
-            .map(|(i, c)| pad_to_width(c, col_widths[i.min(col_widths.len() - 1)]))
-            .collect::<Vec<_>>()
-            .join(" | ")
+
+    let pad_cell = |cell: &str, width: usize| format!(" {} ", pad_to_width(cell, width));
+
+    let format_row = |cells: &Vec<String>| -> String {
+        let mut out = String::from("│");
+        for (i, w) in col_widths.iter().enumerate() {
+            let cell = cells.get(i).map(String::as_str).unwrap_or("");
+            out.push_str(&pad_cell(cell, *w));
+            out.push('│');
+        }
+        out
     };
-    let header = pad(&parsed[0]);
-    let sep = col_widths
+
+    let border = |left: char, mid: char, right: char| -> String {
+        let mut out = String::new();
+        out.push(left);
+        for (i, w) in col_widths.iter().enumerate() {
+            if i > 0 {
+                out.push(mid);
+            }
+            out.push_str(&"─".repeat(w + 2));
+        }
+        out.push(right);
+        out
+    };
+
+    let top = border('┌', '┬', '┐');
+    let mid = border('├', '┼', '┤');
+    let bottom = border('└', '┴', '┘');
+    let header_row = format_row(header);
+    let body_rows: String = body
         .iter()
-        .map(|w| "─".repeat(*w))
-        .collect::<Vec<_>>()
-        .join("─┼─");
-    let body: String = parsed
-        .iter()
-        .enumerate()
-        .filter(|(i, _)| *i >= 2)
-        .map(|(_, r)| pad(r))
+        .map(|r| format_row(r))
         .collect::<Vec<_>>()
         .join("\n");
-    let out = if body.is_empty() {
-        format!("┌─{header}─┐\n├─{sep}─┤")
+
+    let out = if body_rows.is_empty() {
+        format!("{top}\n{header_row}\n{mid}\n{bottom}")
     } else {
-        format!("┌─{header}─┐\n├─{sep}─┤\n{body}")
+        format!("{top}\n{header_row}\n{mid}\n{body_rows}\n{bottom}")
     };
+
     if style.ansi {
         format!("\x1b[2m{out}\x1b[0m")
     } else {
@@ -447,7 +469,7 @@ fn render_fence(lang: Option<&str>, block: &str, style: RenderStyle) -> String {
     };
     let indented = block
         .split('\n')
-        .map(|l| format!("  {l}"))
+        .map(|l| format!("    {l}"))
         .collect::<Vec<_>>()
         .join("\n");
     if !style.ansi {
@@ -587,7 +609,7 @@ mod tests {
     fn markdown_renders_fenced_code_with_dim_outline() {
         let out = render("```rust\nfn main() {}\n```", with_ansi());
         assert!(out.contains("── code: rust ──"));
-        assert!(out.contains("  fn main() {}"));
+        assert!(out.contains("    fn main() {}"));
         assert!(out.contains("─────"));
         assert!(out.contains("\x1b[2m"));
     }
@@ -642,9 +664,13 @@ mod tests {
     fn markdown_renders_table_box_drawing_aligned() {
         let md = "| 名称 | 值 |\n|---|---|\n| 甲 | 1 |\n| 乙xyz | 234 |\n";
         let out = render(md, with_ansi());
-        assert!(out.contains("┌─"));
-        assert!(out.contains("├─"));
-        assert!(out.contains("─┼─"));
+        assert!(out.contains("┌"));
+        assert!(out.contains("├"));
+        assert!(out.contains("└"));
+        assert!(out.contains("│"));
+        assert!(out.contains("┬"));
+        assert!(out.contains("┼"));
+        assert!(out.contains("┴"));
         // Header & body cells present
         assert!(out.contains("名称"));
         assert!(out.contains("甲"));
@@ -654,10 +680,16 @@ mod tests {
         // We assert position invariance: the body row "甲 | 1" and "乙xyz | 234"
         // both render with the | separator in the same column index.
         let lines: Vec<&str> = out.lines().collect();
-        let body_a = lines[2];
-        let body_b = lines[3];
-        let sep_a = body_a.find('|').unwrap_or(0);
-        let sep_b = body_b.find('|').unwrap_or(0);
+        let body_a = lines
+            .iter()
+            .find(|l| l.contains('甲'))
+            .expect("row with 甲");
+        let body_b = lines
+            .iter()
+            .find(|l| l.contains("乙xyz"))
+            .expect("row with 乙xyz");
+        let sep_a = body_a.find('│').unwrap_or(0);
+        let sep_b = body_b.find('│').unwrap_or(0);
         assert_eq!(
             sep_a, sep_b,
             "cell separator columns must align across rows"

@@ -11,11 +11,13 @@
 
 pub mod collapse;
 pub mod markdown;
+pub mod speaker;
 pub mod tty;
 pub mod width;
 
 pub use collapse::fold;
 pub use markdown::{render, RenderStyle};
+pub use speaker::{format_user_prompt, indent_lines, prefix_agent_lines};
 
 use crate::config::CliRenderConfig;
 

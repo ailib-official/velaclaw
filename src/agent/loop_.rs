@@ -1,6 +1,8 @@
 use crate::agent::tool_batch::{self, ParsedToolCall};
 use crate::approval::{ApprovalManager, ChannelApprovalSession};
-use crate::cli_render::{RenderOpts, RenderStyle};
+use crate::cli_render::{
+    format_user_prompt, indent_lines, prefix_agent_lines, RenderOpts, RenderStyle,
+};
 use crate::config::Config;
 #[cfg(not(feature = "ai-protocol"))]
 use crate::config::DEFAULT_PROTOCOL_MODEL_ID;
@@ -44,10 +46,11 @@ fn print_tool_result_block(
 ) {
     let rendered = render_opts.render(result);
     let total_lines = rendered.split('\n').count();
+    let body = indent_lines(&rendered, 2);
     let should_fold =
         render_opts.fold_enabled && fold_cache.is_some() && total_lines > render_opts.fold_lines;
     if !should_fold {
-        println!("\n── tool:{tool_name} ──\n{rendered}\n");
+        println!("\n── tool:{tool_name} ──\n{body}\n");
         return;
     }
     let cache = fold_cache.expect("fold_cache checked above");
@@ -57,6 +60,7 @@ fn print_tool_result_block(
         .take(render_opts.fold_lines)
         .collect::<Vec<_>>()
         .join("\n");
+    let head = indent_lines(&head, 2);
     println!(
         "\n── tool:{tool_name} (前 {} 行 / 共 {total_lines} 行) ──\n{head}\n─────\n用 /expand {id} 展开全部\n",
         render_opts.fold_lines
@@ -1359,7 +1363,8 @@ pub(crate) async fn run_tool_call_loop(
         let visible_text = crate::util::strip_tool_call_markup(&display_text);
         if !silent && !visible_text.is_empty() {
             let rendered = render_opts.render(&visible_text);
-            print!("{rendered}");
+            let prefixed = prefix_agent_lines(&rendered, render_opts.style);
+            print!("{prefixed}");
             let _ = std::io::stdout().flush();
         }
 
@@ -1892,7 +1897,7 @@ pub async fn run(
         .await?;
         final_output = response.clone();
         let rendered = render_opts.render(&response);
-        println!("{rendered}");
+        println!("{}", prefix_agent_lines(&rendered, render_opts.style));
         observer.record_event(&ObserverEvent::TurnComplete);
     } else {
         println!("🦀 VelaClaw Interactive Mode");
@@ -1905,7 +1910,7 @@ pub async fn run(
         let session_provider = provider_name.to_string();
 
         loop {
-            print!("> ");
+            print!("{}", format_user_prompt(render_opts.style));
             let _ = std::io::stdout().flush();
 
             let mut input = String::new();

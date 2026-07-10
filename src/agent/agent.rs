@@ -4,6 +4,7 @@ use crate::agent::dispatcher::{ParsedToolCall, ToolDispatcher, ToolExecutionResu
 use crate::agent::memory_loader::{DefaultMemoryLoader, MemoryLoader};
 use crate::agent::prompt::{PromptContext, SystemPromptBuilder};
 use crate::approval::{ApprovalGate, ApprovalHub, ApprovalManager, GateDecision};
+use crate::cli_render::{prefix_agent_lines, RenderOpts};
 use crate::config::{Config, DEFAULT_PROTOCOL_MODEL_ID};
 use crate::memory::{Memory, MemoryCategory};
 use crate::observability::{Observer, ObserverEvent};
@@ -41,6 +42,8 @@ pub struct Agent {
     available_hints: Vec<String>,
     security: PolicyHandle,
     gateway_approval: Option<(ApprovalManager, Arc<ApprovalHub>)>,
+    /// When set, `turn` / `run_interactive` render Markdown and prefix agent lines for CLI.
+    cli_render: Option<RenderOpts>,
 }
 
 pub struct AgentBuilder {
@@ -242,6 +245,7 @@ impl AgentBuilder {
                 .security
                 .ok_or_else(|| anyhow::anyhow!("security is required"))?,
             gateway_approval: None,
+            cli_render: None,
         })
     }
 }
@@ -257,6 +261,31 @@ impl Agent {
 
     pub fn clear_history(&mut self) {
         self.history.clear();
+    }
+
+    /// Enable CLI Markdown rendering and `>>` speaker prefixes for this agent session.
+    pub fn set_cli_render(&mut self, opts: RenderOpts) {
+        self.cli_render = Some(opts);
+    }
+
+    fn print_agent_stdout(&self, text: &str) {
+        if let Some(render_opts) = self.cli_render {
+            let rendered = render_opts.render(text);
+            let prefixed = prefix_agent_lines(&rendered, render_opts.style);
+            print!("{prefixed}");
+        } else {
+            print!("{text}");
+        }
+        let _ = std::io::stdout().flush();
+    }
+
+    fn format_agent_output(&self, text: &str) -> String {
+        if let Some(render_opts) = self.cli_render {
+            let rendered = render_opts.render(text);
+            prefix_agent_lines(&rendered, render_opts.style)
+        } else {
+            text.to_string()
+        }
     }
 
     /// Enable interactive tool approval for gateway/Web chat (`VL-UI-004`).
@@ -581,8 +610,7 @@ impl Agent {
                     .push(ConversationMessage::Chat(ChatMessage::assistant(
                         text.clone(),
                     )));
-                print!("{text}");
-                let _ = std::io::stdout().flush();
+                self.print_agent_stdout(&text);
             }
 
             self.history.push(ConversationMessage::AssistantToolCalls {
@@ -607,11 +635,16 @@ impl Agent {
     }
 
     pub async fn run_interactive(&mut self) -> Result<()> {
+        let render_opts = self
+            .cli_render
+            .unwrap_or_else(RenderOpts::interactive_default);
+        self.cli_render = Some(render_opts);
+
         println!("🦀 VelaClaw Interactive Mode");
         println!("Type /quit to exit.\n");
 
         let (tx, mut rx) = tokio::sync::mpsc::channel(32);
-        let cli = crate::channels::CliChannel::new();
+        let cli = crate::channels::CliChannel::with_render_opts(render_opts);
 
         let listen_handle = tokio::spawn(async move {
             let _ = crate::channels::Channel::listen(&cli, tx).await;
@@ -625,7 +658,8 @@ impl Agent {
                     continue;
                 }
             };
-            println!("\n{response}\n");
+            let formatted = self.format_agent_output(&response);
+            println!("\n{formatted}\n");
         }
 
         listen_handle.abort();
@@ -669,9 +703,17 @@ pub async fn run(
         model: model_name.clone(),
     });
 
+    let render_opts = RenderOpts::from_config(
+        effective_config.cli_render.as_ref(),
+        false,
+        false,
+        message.is_none(),
+    );
+    agent.set_cli_render(render_opts);
+
     if let Some(msg) = message {
         let response = agent.run_single(&msg).await?;
-        println!("{response}");
+        println!("{}", agent.format_agent_output(&response));
     } else {
         agent.run_interactive().await?;
     }
@@ -844,5 +886,42 @@ mod tests {
             .history()
             .iter()
             .any(|msg| matches!(msg, ConversationMessage::ToolResults(_))));
+    }
+
+    #[test]
+    fn format_agent_output_prefixes_lines_when_cli_render_set() {
+        let provider = Box::new(MockProvider {
+            responses: Mutex::new(vec![]),
+        });
+        let memory_cfg = crate::config::MemoryConfig {
+            backend: "none".into(),
+            ..crate::config::MemoryConfig::default()
+        };
+        let mem: Arc<dyn Memory> = Arc::from(
+            crate::memory::create_memory(&memory_cfg, std::path::Path::new("/tmp"), None)
+                .expect("memory"),
+        );
+        let observer: Arc<dyn Observer> = Arc::from(crate::observability::NoopObserver {});
+        let mut agent = Agent::builder()
+            .provider(provider)
+            .tools(vec![Box::new(MockTool)])
+            .memory(mem)
+            .observer(observer)
+            .tool_dispatcher(Box::new(XmlToolDispatcher::default()))
+            .workspace_dir(std::path::PathBuf::from("/tmp"))
+            .security(test_security())
+            .build()
+            .expect("agent");
+        agent.set_cli_render(RenderOpts {
+            style: crate::cli_render::RenderStyle {
+                ansi: false,
+                markdown: false,
+            },
+            fold_lines: 10,
+            fold_enabled: false,
+        });
+        let out = agent.format_agent_output("line one\nline two");
+        assert!(out.contains(">> line one"));
+        assert!(out.contains(">> line two"));
     }
 }

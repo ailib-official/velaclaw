@@ -66,7 +66,7 @@ pub use linq::LinqChannel;
 pub use matrix::MatrixChannel;
 pub use mattermost::MattermostChannel;
 pub use nextcloud_talk::NextcloudTalkChannel;
-pub use prompt::{build_system_prompt, build_system_prompt_with_mode};
+pub use prompt::{build_system_prompt, build_system_prompt_pyramid, build_system_prompt_with_mode};
 pub use qq::QQChannel;
 pub use signal::SignalChannel;
 pub use slack::SlackChannel;

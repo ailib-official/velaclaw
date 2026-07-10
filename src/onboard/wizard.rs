@@ -4516,6 +4516,10 @@ fn scaffold_workspace(workspace_dir: &Path, ctx: &ProjectContext) -> Result<()> 
 
     let agents = format!(
         "# AGENTS.md — {agent} Personal Assistant\n\n\
+         ## Built-in vs Workspace Rules\n\n\
+         VelaClaw already injects mission, safety, and tool guidance in the system prompt \
+         (headline-first / pyramid order). Use this file for **project-specific** behavior — \
+         workflows, conventions, and local policies. Do not repeat global safety rules here.\n\n\
          ## Every Session (required)\n\n\
          Before doing anything else:\n\n\
          1. Read `SOUL.md` — this is who you are\n\
@@ -4573,6 +4577,7 @@ fn scaffold_workspace(workspace_dir: &Path, ctx: &ProjectContext) -> Result<()> 
 
     let soul = format!(
         "# SOUL.md — Who You Are\n\n\
+         *Persona and tone live here. Task execution rules are in the built-in system prompt.*\n\n\
          *You're not a chatbot. You're becoming someone.*\n\n\
          ## Core Truths\n\n\
          **Be genuinely helpful, not performatively helpful.**\n\
@@ -4628,6 +4633,8 @@ fn scaffold_workspace(workspace_dir: &Path, ctx: &ProjectContext) -> Result<()> 
 
     let tools = "\
          # TOOLS.md — Local Notes\n\n\
+         Tool names and schemas are injected in the system prompt. This file is for \
+         environment-specific notes only — not to duplicate built-in tool documentation.\n\n\
          Skills define HOW tools work. This file is for YOUR specifics —\n\
          the stuff that's unique to your setup.\n\n\
          ## What Goes Here\n\n\

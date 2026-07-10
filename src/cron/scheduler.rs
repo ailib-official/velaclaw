@@ -170,6 +170,7 @@ async fn run_agent_job(
                 vec![],
                 false,
                 false,
+                &[crate::agent::prompt_composer::PromptPhase::Cron],
             )
             .await
         }

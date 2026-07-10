@@ -227,8 +227,20 @@ impl ApprovalManager {
 fn prompt_cli_interactive(request: &ApprovalRequest) -> ApprovalResponse {
     let summary = summarize_args(&request.arguments);
     eprintln!();
-    eprintln!("🔧 Agent wants to execute: {}", request.tool_name);
-    eprintln!("   {summary}");
+    if request.tool_name == "shell" {
+        eprintln!("🔒 Security policy requires approval for shell command:");
+        if let Some(cmd) = request.arguments.get("command").and_then(|v| v.as_str()) {
+            eprintln!("   {cmd}");
+        } else {
+            eprintln!("   {summary}");
+        }
+    } else {
+        eprintln!(
+            "🔒 Security policy requires approval for tool: {}",
+            request.tool_name
+        );
+        eprintln!("   {summary}");
+    }
     eprint!("   [Y]es / [N]o / [A]lways for {}: ", request.tool_name);
     let _ = io::stderr().flush();
 

@@ -176,6 +176,7 @@ pub async fn dispatch_configured_command(command: Commands, config: Config) -> R
             peripheral,
             no_color,
             no_fold,
+            &[],
         )
         .await
         .map(|_| ()),

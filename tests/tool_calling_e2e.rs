@@ -400,7 +400,7 @@ mod tool_execution {
             .await
             .unwrap();
         assert!(!result.success, "ReadOnly autonomy should block shell");
-        assert!(result.error.unwrap().contains("not allowed"));
+        assert!(result.error.unwrap().contains("read-only mode"));
     }
 
     // ── File read tool ───────────────────────────────────────────────────
@@ -1594,7 +1594,7 @@ mod security_enforcement {
             .await
             .unwrap();
         assert!(!result.success);
-        assert!(result.error.unwrap().contains("not allowed"));
+        assert!(result.error.unwrap().contains("read-only mode"));
     }
 
     #[tokio::test]
@@ -1615,7 +1615,9 @@ mod security_enforcement {
         assert!(!result.success);
         let error = result.error.unwrap();
         assert!(
-            error.contains("not allowed") || error.contains("high-risk"),
+            error.contains("not allowed")
+                || error.contains("high-risk")
+                || error.contains("requires explicit human approval"),
             "Expected block message, got: {}",
             error
         );

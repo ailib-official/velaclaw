@@ -249,7 +249,7 @@ mod tests {
             .error
             .as_ref()
             .expect("error field should be present for blocked command")
-            .contains("not allowed"));
+            .contains("read-only mode"));
     }
 
     #[tokio::test]
@@ -395,7 +395,7 @@ mod tests {
             .error
             .as_deref()
             .unwrap_or("")
-            .contains("explicit approval"));
+            .contains("requires explicit human approval"));
 
         let allowed = tool
             .execute(

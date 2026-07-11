@@ -701,7 +701,7 @@ mod tests {
             .error
             .as_deref()
             .unwrap_or_default()
-            .contains("explicit approval"));
+            .contains("requires explicit human approval"));
 
         let approved = tool
             .execute(

@@ -231,9 +231,15 @@ fn prompt_cli_interactive(request: &ApprovalRequest) -> ApprovalResponse {
         eprintln!("🔒 Security policy requires approval for shell command:");
         if let Some(cmd) = request.arguments.get("command").and_then(|v| v.as_str()) {
             eprintln!("   {cmd}");
+            if crate::security::policy::command_requires_privilege_hint(cmd) {
+                eprintln!(
+                    "   Privilege note: sudo/su needs the binary in [autonomy].allowed_commands and your approval."
+                );
+            }
         } else {
             eprintln!("   {summary}");
         }
+        eprintln!("   [Y]es = once, [A]lways = allow shell this session, [N]o = deny");
     } else {
         eprintln!(
             "🔒 Security policy requires approval for tool: {}",

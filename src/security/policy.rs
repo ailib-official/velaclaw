@@ -513,6 +513,16 @@ fn contains_unquoted_unsafe_redirect(command: &str) -> bool {
     false
 }
 
+pub(crate) fn command_requires_privilege_hint(command: &str) -> bool {
+    let lower = command.to_ascii_lowercase();
+    lower.contains("sudo")
+        || lower.contains(" su ")
+        || lower.starts_with("su ")
+        || lower.contains("runuser")
+        || lower.contains("/root/")
+        || lower.contains(" pkexec")
+}
+
 impl SecurityPolicy {
     // ── Risk Classification ──────────────────────────────────────────────
     // Risk is assessed per-segment (split on shell operators), and the
@@ -641,24 +651,41 @@ impl SecurityPolicy {
         command: &str,
         approved: bool,
     ) -> Result<CommandRiskLevel, String> {
-        if !self.is_command_allowed(command) {
-            return Err(format!(
-                "Command not allowed by security policy: {command}. Allowed shell commands: {}. To enable, add the executable name to [autonomy].allowed_commands in config.toml.",
-                self.allowed_commands.join(", ")
+        if self.autonomy == AutonomyLevel::ReadOnly {
+            return Err(self.format_command_policy_error(
+                "Security policy: read-only mode blocks shell execution.",
+                command,
+                false,
+            ));
+        }
+
+        if !self.passes_shell_safety_gates(command) {
+            return Err(self.format_command_policy_error(
+                "Command blocked: unsafe shell construct (injection, redirect, or dangerous args).",
+                command,
+                false,
+            ));
+        }
+
+        if !self.segments_are_allowlisted(command) && !approved {
+            return Err(self.format_command_policy_error(
+                "Command not allowed by security policy (not in allowed_commands).",
+                command,
+                true,
             ));
         }
 
         let risk = self.command_risk_level(command);
 
         if risk == CommandRiskLevel::High {
-            if self.block_high_risk_commands {
-                return Err("Command blocked: high-risk command is disallowed by policy".into());
-            }
-            if self.autonomy == AutonomyLevel::Supervised && !approved {
-                return Err(
-                    "Command requires explicit approval (approved=true): high-risk operation"
-                        .into(),
-                );
+            let needs_prompt = self.autonomy == AutonomyLevel::Supervised
+                && (!approved || self.block_high_risk_commands);
+            if needs_prompt && !approved {
+                return Err(self.format_command_policy_error(
+                    "Command requires explicit human approval: high-risk operation.",
+                    command,
+                    true,
+                ));
             }
         }
 
@@ -667,9 +694,11 @@ impl SecurityPolicy {
             && self.require_approval_for_medium_risk
             && !approved
         {
-            return Err(
-                "Command requires explicit approval (approved=true): medium-risk operation".into(),
-            );
+            return Err(self.format_command_policy_error(
+                "Command requires explicit human approval: medium-risk operation.",
+                command,
+                true,
+            ));
         }
 
         Ok(risk)
@@ -690,12 +719,15 @@ impl SecurityPolicy {
     /// - Blocks output redirections (`>`, `>>`) that could write outside workspace
     /// - Blocks dangerous arguments (e.g. `find -exec`, `git config`)
     pub fn is_command_allowed(&self, command: &str) -> bool {
+        self.passes_shell_safety_gates(command) && self.segments_are_allowlisted(command)
+    }
+
+    /// Hard shell gates that human approval cannot override (injection, redirects, etc.).
+    pub fn passes_shell_safety_gates(&self, command: &str) -> bool {
         if self.autonomy == AutonomyLevel::ReadOnly {
             return false;
         }
 
-        // Block subshell/expansion operators — these allow hiding arbitrary
-        // commands inside an allowed command (e.g. `echo $(rm -rf /)`)
         if command.contains('`')
             || command.contains("$(")
             || command.contains("${")
@@ -705,14 +737,10 @@ impl SecurityPolicy {
             return false;
         }
 
-        // Block output redirections to files (`>`, `>>`). Allow safe stderr sinks
-        // (`2>/dev/null`, `2>&1`) so routine diagnostics work for non-programmers.
         if contains_unquoted_unsafe_redirect(command) {
             return false;
         }
 
-        // Block `tee` — it can write to arbitrary files, bypassing the
-        // redirect check above (e.g. `echo secret | tee /etc/crontab`)
         if command
             .split_whitespace()
             .any(|w| w == "tee" || w.ends_with("/tee"))
@@ -720,18 +748,37 @@ impl SecurityPolicy {
             return false;
         }
 
-        // Block background command chaining (`&`), which can hide extra
-        // sub-commands and outlive timeout expectations. Keep `&&` allowed.
         if contains_unquoted_single_ampersand(command) {
             return false;
         }
 
-        // Split on unquoted command separators and validate each sub-command.
         let segments = split_unquoted_segments(command);
         for segment in &segments {
-            // Strip leading env var assignments (e.g. FOO=bar cmd)
             let cmd_part = skip_env_assignments(segment);
+            let mut words = cmd_part.split_whitespace();
+            let base_raw = words.next().unwrap_or("");
+            let base_cmd = base_raw.rsplit('/').next().unwrap_or("");
 
+            if base_cmd.is_empty() {
+                continue;
+            }
+
+            let args: Vec<String> = words.map(|w| w.to_ascii_lowercase()).collect();
+            if !self.is_args_safe(base_cmd, &args) {
+                return false;
+            }
+        }
+
+        segments.iter().any(|s| {
+            let s = skip_env_assignments(s.trim());
+            s.split_whitespace().next().is_some_and(|w| !w.is_empty())
+        })
+    }
+
+    fn segments_are_allowlisted(&self, command: &str) -> bool {
+        let segments = split_unquoted_segments(command);
+        for segment in &segments {
+            let cmd_part = skip_env_assignments(segment);
             let mut words = cmd_part.split_whitespace();
             let base_raw = words.next().unwrap_or("");
             let base_cmd = base_raw.rsplit('/').next().unwrap_or("");
@@ -747,21 +794,39 @@ impl SecurityPolicy {
             {
                 return false;
             }
-
-            // Validate arguments for the command
-            let args: Vec<String> = words.map(|w| w.to_ascii_lowercase()).collect();
-            if !self.is_args_safe(base_cmd, &args) {
-                return false;
-            }
         }
 
-        // At least one command must be present
-        let has_cmd = segments.iter().any(|s| {
+        segments.iter().any(|s| {
             let s = skip_env_assignments(s.trim());
             s.split_whitespace().next().is_some_and(|w| !w.is_empty())
-        });
+        })
+    }
 
-        has_cmd
+    fn format_command_policy_error(
+        &self,
+        headline: &str,
+        command: &str,
+        approval_eligible: bool,
+    ) -> String {
+        let mut msg = format!("{headline}\n   Command: {command}");
+        if approval_eligible {
+            msg.push_str(
+                "\n\n   Interactive approval: [Y]es = run once, [A]lways = allow shell this session, [N]o = deny.",
+            );
+            use std::fmt::Write as _;
+            let _ = write!(
+                msg,
+                "\n   Config: add executable names to [autonomy].allowed_commands (current: {}).",
+                self.allowed_commands.join(", ")
+            );
+        }
+        if command_requires_privilege_hint(command) {
+            msg.push_str(
+                "\n\n   Privilege note: sudo/su/run-as-root needs the binary in allowed_commands plus your approval, \
+                 or run the host action yourself and retry a non-privileged command.",
+            );
+        }
+        msg
     }
 
     /// Check for dangerous arguments that allow sub-command execution.
@@ -1266,10 +1331,32 @@ mod tests {
 
         let denied = p.validate_command_execution("touch test.txt", false);
         assert!(denied.is_err());
-        assert!(denied.unwrap_err().contains("requires explicit approval"),);
+        assert!(denied
+            .unwrap_err()
+            .contains("requires explicit human approval"));
 
         let allowed = p.validate_command_execution("touch test.txt", true);
         assert_eq!(allowed.unwrap(), CommandRiskLevel::Medium);
+    }
+
+    fn validate_command_allows_high_risk_when_human_approved() {
+        let p = SecurityPolicy {
+            autonomy: AutonomyLevel::Supervised,
+            allowed_commands: vec!["rm".into()],
+            ..SecurityPolicy::default()
+        };
+
+        let result = p.validate_command_execution("rm -rf /tmp/test", true);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn validate_command_allowlist_bypass_when_human_approved() {
+        let p = default_policy();
+        let denied = p.validate_command_execution("python3 -c 'print(1)'", false);
+        assert!(denied.is_err());
+        let allowed = p.validate_command_execution("python3 -c 'print(1)'", true);
+        assert!(allowed.is_ok());
     }
 
     #[test]
@@ -1280,7 +1367,7 @@ mod tests {
             ..SecurityPolicy::default()
         };
 
-        let result = p.validate_command_execution("rm -rf /tmp/test", true);
+        let result = p.validate_command_execution("rm -rf /tmp/test", false);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("high-risk"));
     }
@@ -1350,7 +1437,7 @@ mod tests {
         let p = default_policy();
         let result = p.validate_command_execution("ls & python3 -c 'print(1)'", false);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("not allowed"));
+        assert!(result.unwrap_err().contains("unsafe shell construct"));
     }
 
     // ── is_path_allowed ─────────────────────────────────────

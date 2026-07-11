@@ -16,7 +16,7 @@ ai-protocol = ["dep:ai-lib-rust", "dep:serde_yaml"]
 serde = { version = "1.0", default-features = false, features = ["derive"] }
 anyhow = "1.0"
 toml = "1.0"
-ai-lib-rust = { version = "1.0.1", git = "https://github.com/ailib-official/ai-lib-rust", rev = "fcd5a7b", optional = true }
+ai-lib-rust = { version = "1.1.0", git = "https://github.com/ailib-official/ai-lib-rust", rev = "8cfd64721c6bd72458bce3ffa70c45e438167a29", optional = true }
 serde_yaml = { version = "0.9", optional = true }
 
 [dev-dependencies]

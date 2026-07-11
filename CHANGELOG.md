@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-07-11
+
+### Changed
+
+- **Supervised shell approval**: allowlist and medium/high-risk blocks now support interactive Y / A / N approval on CLI; injection-style constructs remain hard-denied.
+- **Privilege hints**: sudo/su/root commands show config and approval guidance in CLI prompts and policy errors.
+- **Protocol registry**: leniently index `metadata.models` from manifests missing strict V2 fields (e.g. azure v1); dedupe provider stems by priority.
+- **Dependencies**: bump `ai-lib-rust` 1.0.1 → 1.1.0.
+
 ## [0.7.3] - 2026-07-11
 
 ### Added

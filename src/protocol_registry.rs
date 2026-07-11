@@ -35,31 +35,35 @@ pub fn resolve_local_protocol_root() -> Option<PathBuf> {
 }
 
 fn collect_provider_files(root: &Path) -> Vec<PathBuf> {
-    let mut out = Vec::new();
+    // Higher-priority directories first; one manifest per provider stem.
     let candidates = [
         root.join("dist").join("v2").join("providers"),
         root.join("v2").join("providers"),
         root.join("dist").join("v1").join("providers"),
         root.join("v1").join("providers"),
     ];
+    let mut by_stem: BTreeMap<String, PathBuf> = BTreeMap::new();
     for dir in candidates {
         if !dir.is_dir() {
             continue;
         }
-        if let Ok(rd) = std::fs::read_dir(&dir) {
-            for ent in rd.flatten() {
-                let path = ent.path();
-                let ext = path.extension().and_then(|s| s.to_str());
-                let ok = path.is_file() && matches!(ext, Some("json" | "yaml" | "yml"));
-                if ok {
-                    out.push(path);
-                }
+        let Ok(rd) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for ent in rd.flatten() {
+            let path = ent.path();
+            let ext = path.extension().and_then(|s| s.to_str());
+            let ok = path.is_file() && matches!(ext, Some("json" | "yaml" | "yml"));
+            if !ok {
+                continue;
             }
+            let Some(stem) = provider_id_from_path(&path) else {
+                continue;
+            };
+            by_stem.entry(stem).or_insert(path);
         }
     }
-    out.sort();
-    out.dedup();
-    out
+    by_stem.into_values().collect()
 }
 
 fn provider_id_from_path(path: &Path) -> Option<String> {
@@ -141,16 +145,16 @@ fn ingest_provider_metadata_models(
     models: &mut Vec<ProtocolModelInfo>,
     provider_id: &str,
     path: &Path,
-) {
+) -> bool {
     let Ok(raw) = load_manifest_value(path) else {
-        return;
+        return false;
     };
     let Some(metadata_models) = raw
         .get("metadata")
         .and_then(|m| m.get("models"))
         .and_then(serde_json::Value::as_object)
     else {
-        return;
+        return false;
     };
     for (model_key, meta) in metadata_models {
         let logical_id = if model_key.contains('/') {
@@ -168,6 +172,16 @@ fn ingest_provider_metadata_models(
             },
         );
     }
+    true
+}
+
+fn provider_id_from_manifest_value(raw: &serde_json::Value, stem: &str) -> String {
+    raw.get("id")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(stem)
+        .to_string()
 }
 
 impl ProtocolRegistrySnapshot {
@@ -222,34 +236,48 @@ pub fn scan_protocol_root(root: &Path) -> anyhow::Result<ProtocolRegistrySnapsho
     let mut providers = Vec::new();
     let mut models = Vec::new();
     for path in collect_provider_files(root) {
-        let Some(id) = provider_id_from_path(&path) else {
+        let Some(stem_id) = provider_id_from_path(&path) else {
             continue;
         };
-        let manifest = match load_provider_manifest(&path) {
-            Ok(m) => m,
-            Err(e) => {
-                tracing::warn!(path = %path.display(), "skip invalid provider manifest: {e}");
-                continue;
+        match load_provider_manifest(&path) {
+            Ok(manifest) => {
+                let required_envs = ai_lib_rust::credentials::required_envs(&manifest);
+                let has_auth = ai_lib_rust::credentials::primary_auth(&manifest).is_some();
+                let available = !has_auth
+                    || ai_lib_rust::credentials::resolve_credential(&manifest, None)
+                        .secret()
+                        .is_some();
+                let resolved_id = if manifest.id.trim().is_empty() {
+                    stem_id.clone()
+                } else {
+                    manifest.id.clone()
+                };
+                providers.push(ProtocolProviderInfo {
+                    id: resolved_id.clone(),
+                    manifest_path: path.clone(),
+                    required_envs,
+                    available,
+                });
+                ingest_provider_metadata_models(&mut models, &resolved_id, &path);
             }
-        };
-        let required_envs = ai_lib_rust::credentials::required_envs(&manifest);
-        let has_auth = ai_lib_rust::credentials::primary_auth(&manifest).is_some();
-        let available = !has_auth
-            || ai_lib_rust::credentials::resolve_credential(&manifest, None)
-                .secret()
-                .is_some();
-        let resolved_id = if manifest.id.trim().is_empty() {
-            id
-        } else {
-            manifest.id.clone()
-        };
-        providers.push(ProtocolProviderInfo {
-            id: resolved_id.clone(),
-            manifest_path: path.clone(),
-            required_envs,
-            available,
-        });
-        ingest_provider_metadata_models(&mut models, &resolved_id, &path);
+            Err(e) => {
+                let Ok(raw) = load_manifest_value(&path) else {
+                    tracing::warn!(path = %path.display(), "skip invalid provider manifest: {e}");
+                    continue;
+                };
+                let resolved_id = provider_id_from_manifest_value(&raw, &stem_id);
+                if ingest_provider_metadata_models(&mut models, &resolved_id, &path) {
+                    tracing::debug!(
+                        path = %path.display(),
+                        provider = %resolved_id,
+                        error = %e,
+                        "provider manifest skipped strict validation; indexed metadata.models only"
+                    );
+                } else {
+                    tracing::warn!(path = %path.display(), "skip invalid provider manifest: {e}");
+                }
+            }
+        }
     }
     providers.sort_by(|a, b| a.id.cmp(&b.id));
 
@@ -470,6 +498,32 @@ endpoint:
             .expect("provider");
         assert_eq!(provider.required_envs, vec!["VELACLAW_PT074_MISSING_TOKEN"]);
         assert!(provider.available);
+    }
+
+    #[test]
+    fn scan_lenient_manifest_without_status_indexes_metadata_models() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let providers = dir.path().join("v2").join("providers");
+        fs::create_dir_all(&providers).expect("provider dir");
+        fs::write(
+            providers.join("azure.yaml"),
+            r#"
+id: azure
+name: Azure
+metadata:
+  models:
+    gpt-4o:
+      context_window: 128000
+"#,
+        )
+        .expect("manifest");
+
+        let snap = scan_protocol_root(dir.path()).expect("scan");
+        assert!(
+            snap.providers.is_empty(),
+            "strict parse should skip provider entry without status"
+        );
+        assert_eq!(snap.context_window_for("azure/gpt-4o"), Some(128_000));
     }
 
     #[test]

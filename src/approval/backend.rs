@@ -131,7 +131,18 @@ impl HumanApprovalBackend for ManagerApprovalBackend<'_> {
     }
 
     fn approve_shell_command_sync(&self, command: &str) -> bool {
-        prompt_shell_security_approval(command)
+        let request = ApprovalRequest {
+            tool_name: "shell".into(),
+            arguments: serde_json::json!({"command": command}),
+        };
+        let decision = if self.channel == "cli" {
+            self.manager.prompt_cli(&request)
+        } else {
+            ApprovalResponse::No
+        };
+        self.manager
+            .record_decision("shell", &request.arguments, decision, self.channel);
+        decision != ApprovalResponse::No
     }
 
     async fn approve_shell_command_async(&self, command: &str) -> bool {
@@ -214,23 +225,6 @@ impl ShellPolicyHook for SecurityPolicyShellHook<'_> {
             .validate_command_execution(command, human_approved)
             .map(|_| ())
     }
-}
-
-fn prompt_shell_security_approval(command: &str) -> bool {
-    use std::io::{self, BufRead, Write};
-    eprintln!();
-    eprintln!("🔒 Security policy requires approval for shell command:");
-    eprintln!("   {command}");
-    eprint!("   Approve this command? [Y/n]: ");
-    let _ = io::stderr().flush();
-
-    let stdin = io::stdin();
-    let mut line = String::new();
-    if stdin.lock().read_line(&mut line).is_err() {
-        return false;
-    }
-
-    matches!(line.trim().to_ascii_lowercase().as_str(), "y" | "yes" | "")
 }
 
 pub(crate) fn summarize_args_for_backend(args: &serde_json::Value) -> String {

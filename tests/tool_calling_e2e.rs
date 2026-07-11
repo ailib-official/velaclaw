@@ -1615,7 +1615,9 @@ mod security_enforcement {
         assert!(!result.success);
         let error = result.error.unwrap();
         assert!(
-            error.contains("not allowed") || error.contains("high-risk"),
+            error.contains("not allowed")
+                || error.contains("high-risk")
+                || error.contains("requires explicit human approval"),
             "Expected block message, got: {}",
             error
         );
@@ -1635,7 +1637,7 @@ mod security_enforcement {
             .await
             .unwrap();
         assert!(!result.success);
-        assert!(result.error.unwrap().contains("read-only mode"));
+        assert!(result.error.unwrap().contains("not allowed"));
     }
 
     #[tokio::test]

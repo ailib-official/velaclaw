@@ -1664,6 +1664,12 @@ pub async fn run(
         .split_once('/')
         .map_or(model_name.as_str(), |(provider, _)| provider);
 
+    let available_hints: Vec<String> = config
+        .model_routes
+        .iter()
+        .map(|route| route.hint.clone())
+        .collect();
+
     observer.record_event(&ObserverEvent::AgentStart {
         provider: model_name
             .split_once('/')
@@ -1895,13 +1901,20 @@ pub async fn run(
             ChatMessage::user(&enriched),
         ];
 
+        let turn_model = crate::agent::classifier::resolve_model_for_message(
+            &config.query_classification,
+            &available_hints,
+            &model_name,
+            &msg,
+        );
+
         let response = run_tool_call_loop(
             provider.as_ref(),
             &mut history,
             &tools_registry,
             observer.as_ref(),
             provider_name,
-            &model_name,
+            &turn_model,
             temperature,
             false,
             Some(&approval_manager),
@@ -2077,13 +2090,20 @@ pub async fn run(
 
             history.push(ChatMessage::user(&enriched));
 
+            let turn_model = crate::agent::classifier::resolve_model_for_message(
+                &config.query_classification,
+                &available_hints,
+                &session_model,
+                &user_input,
+            );
+
             let response = match run_tool_call_loop(
                 provider.as_ref(),
                 &mut history,
                 &tools_registry,
                 observer.as_ref(),
                 provider_name,
-                &session_model,
+                &turn_model,
                 temperature,
                 false,
                 Some(&approval_manager),
@@ -2233,6 +2253,11 @@ pub async fn process_message(config: Config, message: &str) -> Result<String> {
     let provider_name = model_name
         .split_once('/')
         .map_or(model_name.as_str(), |(provider, _)| provider);
+    let available_hints: Vec<String> = config
+        .model_routes
+        .iter()
+        .map(|route| route.hint.clone())
+        .collect();
 
     let hardware_rag: Option<crate::rag::HardwareRag> = config
         .peripherals
@@ -2342,13 +2367,20 @@ pub async fn process_message(config: Config, message: &str) -> Result<String> {
         ChatMessage::user(&enriched),
     ];
 
+    let turn_model = crate::agent::classifier::resolve_model_for_message(
+        &config.query_classification,
+        &available_hints,
+        &model_name,
+        message,
+    );
+
     agent_turn(
         provider.as_ref(),
         &mut history,
         &tools_registry,
         observer.as_ref(),
         provider_name,
-        &model_name,
+        &turn_model,
         config.default_temperature,
         true,
         &config.multimodal,

@@ -48,8 +48,11 @@ Preflight:
 ```bash
 export AI_PROTOCOL_DIR=/path/to/ai-protocol
 velaclaw doctor
+velaclaw doctor maintenance   # built-in config-vs-rebuild guide
 velaclaw models protocol-providers
 ```
+
+`velaclaw doctor` ends with a short `[maintenance]` hint. `velaclaw doctor maintenance` prints the full operator guide (same contract as this page).
 
 Doctor checks that the protocol root exists, the default provider is indexed, and the manifest exposes `endpoints.chat` or `endpoints.chat_openai`.
 

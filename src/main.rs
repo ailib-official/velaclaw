@@ -224,6 +224,15 @@ Examples:
     },
 
     /// Run diagnostics for daemon/scheduler/channel freshness
+    #[command(long_about = "\
+Run diagnostics for config, protocol registry, workspace, daemon, and environment.
+
+After the report, a short [maintenance] section explains what can change without \
+rebuilding the binary versus when `cargo build` / `cargo install` is required.
+
+Subcommands:
+  maintenance  Full operator guide (config, policy, protocol vs rebuild)
+  models       Probe live model catalogs across providers")]
     Doctor {
         #[command(subcommand)]
         doctor_command: Option<DoctorCommands>,
@@ -530,6 +539,9 @@ enum ModelCommands {
 
 #[derive(Subcommand, Debug)]
 enum DoctorCommands {
+    /// Operator guide: config/policy/protocol changes vs binary rebuild
+    Maintenance,
+
     /// Probe model catalogs across providers and report availability
     Models {
         /// Probe a specific provider only (default: all known providers)
@@ -565,6 +577,15 @@ async fn main() -> Result<()> {
     if let Commands::Completions { shell } = &cli.command {
         let mut stdout = std::io::stdout().lock();
         write_shell_completion(*shell, &mut stdout)?;
+        return Ok(());
+    }
+
+    // Maintenance guide is self-help text: work even when config is missing/broken.
+    if let Commands::Doctor {
+        doctor_command: Some(DoctorCommands::Maintenance),
+    } = &cli.command
+    {
+        velaclaw::doctor::print_maintenance_guide();
         return Ok(());
     }
 

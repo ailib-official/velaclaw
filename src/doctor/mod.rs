@@ -1,6 +1,10 @@
+mod maintenance;
+
 use crate::config::Config;
 use anyhow::Result;
+
 use chrono::{DateTime, Utc};
+pub use maintenance::{print_maintenance_footer, print_maintenance_guide};
 use std::io::Write;
 use std::path::Path;
 
@@ -96,6 +100,8 @@ pub fn run(config: &Config) -> Result<()> {
     if errors > 0 {
         println!("  💡 Fix the errors above, then run `velaclaw doctor` again.");
     }
+
+    print_maintenance_footer();
 
     Ok(())
 }

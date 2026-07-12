@@ -2,7 +2,7 @@
 
 This reference is derived from the current CLI surface (`velaclaw --help`).
 
-Last verified: **February 20, 2026**.
+Last verified: **July 12, 2026**.
 
 ## Top-Level Commands
 
@@ -13,7 +13,7 @@ Last verified: **February 20, 2026**.
 | `gateway` | Start webhook and WhatsApp HTTP gateway |
 | `daemon` | Start supervised runtime (gateway + channels + optional heartbeat/scheduler) |
 | `service` | Manage user-level OS service lifecycle |
-| `doctor` | Run diagnostics and freshness checks |
+| `doctor` | Run diagnostics and freshness checks; includes config-vs-rebuild hints |
 | `status` | Print current configuration and system summary |
 | `cron` | Manage scheduled tasks |
 | `models` | Refresh provider model catalogs |
@@ -76,6 +76,14 @@ See `[cli_render]` in [config-reference.md](config-reference.md).
 - `velaclaw service status`
 - `velaclaw service uninstall`
 
+### `doctor`
+
+- `velaclaw doctor` — config, protocol, workspace, daemon, and environment checks; ends with a short `[maintenance]` hint (config vs rebuild)
+- `velaclaw doctor maintenance` — full operator guide (layers, hot-reload, preflight, when to rebuild)
+- `velaclaw doctor models [--provider <ID>] [--use-cache]`
+
+See [config-externalization.md](config-externalization.md) for the canonical operator contract.
+
 ### `cron`
 
 - `velaclaw cron list`
@@ -122,6 +130,7 @@ Channel runtime also watches `config.toml` and hot-applies updates to:
 - `default_temperature`
 - `api_key` / `api_url` (for the default provider)
 - `reliability.*` provider retry settings
+- `[agent].max_tool_iterations`
 
 `add/remove` currently route you back to managed setup/manual config paths (not full declarative mutators yet).
 

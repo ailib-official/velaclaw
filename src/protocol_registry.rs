@@ -252,10 +252,7 @@ pub fn manifest_has_chat_endpoint(path: &Path) -> Option<bool> {
 #[must_use]
 pub fn provider_id_from_logical(raw: &str) -> &str {
     let raw = raw.trim();
-    let raw = raw
-        .strip_prefix("protocol:")
-        .map(str::trim)
-        .unwrap_or(raw);
+    let raw = raw.strip_prefix("protocol:").map(str::trim).unwrap_or(raw);
     raw.split_once('/').map(|(p, _)| p).unwrap_or(raw)
 }
 

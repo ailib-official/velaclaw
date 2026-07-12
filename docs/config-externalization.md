@@ -76,7 +76,12 @@ hint = "reasoning"
 keywords = ["explain", "analyze", "why"]
 ```
 
-Automatic multi-provider routing via `routing_mvp` / prism policy remains a follow-up (plans: `VL-RT-001`, `VL-RT-002`).
+Automatic multi-provider routing via `routing_mvp` / prism policy remains optional.
+With `[[model_routes]]` + `[query_classification]` enabled, CLI / `Agent::turn` /
+`process_message` resolve matching hints to `hint:<name>` for `RouterProvider`
+(see VL-RT-002). Keep `reliability.fallback_providers` for failover.
+
+Requires a rebuild when upgrading the pinned `ai-lib-rust` revision (VL-RT-001).
 
 ## When you must rebuild / release
 

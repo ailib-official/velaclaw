@@ -521,13 +521,12 @@ impl Agent {
     }
 
     fn classify_model(&self, user_message: &str) -> String {
-        if let Some(hint) = super::classifier::classify(&self.classification_config, user_message) {
-            if self.available_hints.contains(&hint) {
-                tracing::info!(hint = hint.as_str(), "Auto-classified query");
-                return format!("hint:{hint}");
-            }
-        }
-        self.model_name.clone()
+        super::classifier::resolve_model_for_message(
+            &self.classification_config,
+            &self.available_hints,
+            &self.model_name,
+            user_message,
+        )
     }
 
     pub async fn turn(&mut self, user_message: &str) -> Result<String> {

@@ -158,7 +158,7 @@ opentelemetry-otlp = { version = "0.31", default-features = false, features = ["
 tokio-serial = { version = "5", default-features = false, optional = true }
 
 # ai-lib-rust — git pin for dev; version required for crates.io publish (resolved from registry at publish time)
-ai-lib-rust = { version = "1.1.0", git = "https://github.com/ailib-official/ai-lib-rust", rev = "8cfd64721c6bd72458bce3ffa70c45e438167a29", optional = true }
+ai-lib-rust = { version = "1.1.0", git = "https://github.com/ailib-official/ai-lib-rust", rev = "6203a842ec7108e76a4143c5cf64b7e069be7e46", optional = true }
 async-stream = { version = "0.3", optional = true }
 serde_yaml = { version = "0.9", optional = true }
 

@@ -47,6 +47,30 @@ pub fn classify(config: &QueryClassificationConfig, message: &str) -> Option<Str
     None
 }
 
+/// Resolve the model id for one user turn.
+///
+/// When classification is enabled and the matched hint exists in
+/// `available_hints` (from `[[model_routes]]`), returns `hint:<name>` for
+/// [`crate::providers::router::RouterProvider`]. Otherwise returns `default_model`.
+pub fn resolve_model_for_message(
+    classification: &QueryClassificationConfig,
+    available_hints: &[String],
+    default_model: &str,
+    user_message: &str,
+) -> String {
+    if let Some(hint) = classify(classification, user_message) {
+        if available_hints.iter().any(|h| h == &hint) {
+            tracing::info!(hint = hint.as_str(), "Auto-classified query");
+            return format!("hint:{hint}");
+        }
+        tracing::debug!(
+            hint = hint.as_str(),
+            "Classification hint has no matching model_routes entry; using default model"
+        );
+    }
+    default_model.to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -168,5 +192,65 @@ mod tests {
             }],
         );
         assert_eq!(classify(&config, "something completely different"), None);
+    }
+
+    #[test]
+    fn resolve_model_uses_hint_when_route_exists() {
+        let config = make_config(
+            true,
+            vec![ClassificationRule {
+                hint: "reasoning".into(),
+                keywords: vec!["explain".into()],
+                ..Default::default()
+            }],
+        );
+        let hints = vec!["reasoning".into(), "fast".into()];
+        assert_eq!(
+            resolve_model_for_message(
+                &config,
+                &hints,
+                "deepseek/deepseek-v4-flash",
+                "please explain"
+            ),
+            "hint:reasoning"
+        );
+    }
+
+    #[test]
+    fn resolve_model_falls_back_when_hint_missing_from_routes() {
+        let config = make_config(
+            true,
+            vec![ClassificationRule {
+                hint: "reasoning".into(),
+                keywords: vec!["explain".into()],
+                ..Default::default()
+            }],
+        );
+        let hints: Vec<String> = vec!["fast".into()];
+        assert_eq!(
+            resolve_model_for_message(
+                &config,
+                &hints,
+                "deepseek/deepseek-v4-flash",
+                "please explain"
+            ),
+            "deepseek/deepseek-v4-flash"
+        );
+    }
+
+    #[test]
+    fn resolve_model_keeps_default_when_disabled() {
+        let config = make_config(
+            false,
+            vec![ClassificationRule {
+                hint: "fast".into(),
+                keywords: vec!["hello".into()],
+                ..Default::default()
+            }],
+        );
+        assert_eq!(
+            resolve_model_for_message(&config, &["fast".into()], "default-model", "hello"),
+            "default-model"
+        );
     }
 }

@@ -12,7 +12,7 @@ VelaClaw is **pre-1.0**; treat minors as potentially breaking until 1.0.
 
 | Area | Policy |
 |------|--------|
-| `ai-lib-rust` (crates.io; ZS-ML-012) | Pin **0.9.6+** within the same minor; run `cargo test --features ai-protocol --locked` after any bump; BYOK credential chain uses `ai_lib_rust::credentials`. Local debugging may use `[patch.crates-io]` toward a git checkout — do not ship that patch in canonical releases unless policy explicitly allows it. |
+| `ai-lib-rust` (crates.io; ZS-ML-012) | Prefer published **1.1.0+** when available; VelaClaw currently pins git `rev = "6203a842…"` (see Version matrix). Run `cargo test --features ai-protocol --locked` after any bump; BYOK credential chain uses `ai_lib_rust::credentials`. Local debugging may use `[patch.crates-io]` toward a git checkout — do not ship that patch in canonical releases unless policy explicitly allows it. |
 | `ai-protocol` (Git) | Pin a **tag or commit** for reproducible QA; document the pin in your team runbook. Between tags, expect manifest schema drift — re-run protocol smoke tests when moving pins. |
 | VelaClaw releases | Until 1.0, follow `CHANGELOG.md` [Unreleased]. ZS-ML-015 removed `legacy-providers`; chat providers now use `ai-protocol` manifests only. |
 
@@ -20,10 +20,12 @@ VelaClaw is **pre-1.0**; treat minors as potentially breaking until 1.0.
 
 | Component | Recommended | Notes |
 |-----------|-------------|--------|
-| `ai-lib-rust` (crates.io) | **0.9.6+** | Workspace facade over `ai-lib-core` + policy layers; CI uses `--locked` against the published crate (ZS-ML-012). |
+| `ai-lib-rust` (git pin) | **`6203a842`** (1.1.0 + chat→`chat_openai` fallback, PR #40) | Cargo.toml `rev` in root + `velaclaw-config` + `velaclaw-agent-runtime`. Includes endpoint alias fallback so providers that only declare `endpoints.chat_openai` still resolve operation `"chat"`. |
 | `ai-protocol` (Git) | tag or commit documented in team runbook | Manifest YAML + JSON Schema; set `AI_PROTOCOL_DIR` to a checkout root. |
 
-Patch bumps (0.9.x) should stay semver-compatible; re-run `cargo test --features ai-protocol` after any bump.
+Previous pin: `8cfd647` / resolved `4dd60c77` (1.1.0 release without chat endpoint fallback).
+
+Patch bumps (0.9.x / 1.1.x) should stay semver-compatible within the declared major.minor; re-run `cargo test --features ai-protocol` after any bump.
 
 ## Environment
 

@@ -362,8 +362,9 @@ pub(crate) async fn process_channel_message(
         Cancelled,
     }
 
+    let max_tool_iterations = runtime_defaults.max_tool_iterations;
     let timeout_budget_secs =
-        channel_message_timeout_budget_secs(ctx.message_timeout_secs, ctx.max_tool_iterations);
+        channel_message_timeout_budget_secs(ctx.message_timeout_secs, max_tool_iterations);
     let llm_result = tokio::select! {
         () = cancellation_token.cancelled() => LlmExecutionResult::Cancelled,
         result = tokio::time::timeout(
@@ -380,7 +381,7 @@ pub(crate) async fn process_channel_message(
                 Some(approval_manager.as_ref()),
                 msg.channel.as_str(),
                 &ctx.multimodal,
-                ctx.max_tool_iterations,
+                max_tool_iterations,
                 Some(cancellation_token.clone()),
                 delta_tx,
                 {
@@ -570,7 +571,7 @@ pub(crate) async fn process_channel_message(
         LlmExecutionResult::Completed(Err(_)) => {
             let timeout_msg = format!(
                 "LLM response timed out after {}s (base={}s, max_tool_iterations={})",
-                timeout_budget_secs, ctx.message_timeout_secs, ctx.max_tool_iterations
+                timeout_budget_secs, ctx.message_timeout_secs, max_tool_iterations
             );
             eprintln!(
                 "  ❌ {} (elapsed: {}ms)",

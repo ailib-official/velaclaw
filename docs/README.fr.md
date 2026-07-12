@@ -14,6 +14,7 @@ Hubs localisés : [简体中文](README.zh-CN.md) · [日本語](README.ja.md) �
 | Bootstrap en une seule commande                                     | [one-click-bootstrap.md](one-click-bootstrap.md)                               |
 | Trouver des commandes par tâche                                     | [commands-reference.md](commands-reference.md)                                 |
 | Vérifier rapidement les valeurs par défaut et clés de config        | [config-reference.md](config-reference.md)                                     |
+| Changer config/policy sans recompiler                               | [config-externalization.md](config-externalization.md)                         |
 | Configurer des fournisseurs/endpoints personnalisés                 | [custom-providers.md](custom-providers.md)                                     |
 | Configurer le fournisseur Z.AI / GLM                                | [zai-glm-setup.md](zai-glm-setup.md)                                           |
 | Utiliser les modèles d'intégration LangGraph                        | [langgraph-integration.md](langgraph-integration.md)                           |

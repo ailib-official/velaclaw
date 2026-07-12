@@ -1107,6 +1107,7 @@ async fn process_channel_message_uses_runtime_default_model_from_store() {
                     api_key: None,
                     api_url: None,
                     reliability: crate::config::ReliabilityConfig::default(),
+                    max_tool_iterations: 10,
                 },
                 last_applied_stamp: None,
             },
@@ -1185,6 +1186,110 @@ async fn process_channel_message_uses_runtime_default_model_from_store() {
             .as_slice(),
         &["hot-reloaded-model".to_string()]
     );
+}
+
+#[tokio::test]
+async fn process_channel_message_uses_runtime_max_tool_iterations_from_store() {
+    let channel_impl = Arc::new(RecordingChannel::default());
+    let channel: Arc<dyn Channel> = channel_impl.clone();
+
+    let mut channels_by_name = HashMap::new();
+    channels_by_name.insert(channel.name().to_string(), channel);
+
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let config_path = temp.path().join("config.toml");
+
+    {
+        let mut store = runtime_config_store()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        store.insert(
+            config_path.clone(),
+            RuntimeConfigState {
+                defaults: ChannelRuntimeDefaults {
+                    default_provider: "test-provider".to_string(),
+                    model: "test-model".to_string(),
+                    temperature: 0.0,
+                    api_key: None,
+                    api_url: None,
+                    reliability: crate::config::ReliabilityConfig::default(),
+                    // Startup ctx below uses 3; store raises the limit so 11 iterations succeed.
+                    max_tool_iterations: 12,
+                },
+                last_applied_stamp: None,
+            },
+        );
+    }
+
+    let runtime_ctx = Arc::new(ChannelRuntimeContext {
+        channels_by_name: Arc::new(channels_by_name),
+        provider: Arc::new(IterativeToolProvider {
+            required_tool_iterations: 11,
+        }),
+        default_provider: Arc::new("test-provider".to_string()),
+        memory: Arc::new(NoopMemory),
+        tools_registry: Arc::new(vec![Box::new(MockPriceTool)]),
+        observer: Arc::new(NoopObserver),
+        system_prompt: Arc::new("test-system-prompt".to_string()),
+        model: Arc::new("test-model".to_string()),
+        temperature: 0.0,
+        auto_save_memory: false,
+        max_tool_iterations: 3,
+        min_relevance_score: 0.0,
+        conversation_histories: Arc::new(Mutex::new(HashMap::new())),
+        provider_cache: Arc::new(Mutex::new(HashMap::new())),
+        route_overrides: Arc::new(Mutex::new(HashMap::new())),
+        api_key: None,
+        api_url: None,
+        reliability: Arc::new(crate::config::ReliabilityConfig::default()),
+        provider_runtime_options: providers::ProviderRuntimeOptions {
+            velaclaw_dir: Some(temp.path().to_path_buf()),
+            ..providers::ProviderRuntimeOptions::default()
+        },
+        workspace_dir: Arc::new(std::env::temp_dir()),
+        message_timeout_secs: CHANNEL_MESSAGE_TIMEOUT_SECS,
+        interrupt_on_new_message: false,
+        multimodal: crate::config::MultimodalConfig::default(),
+        #[cfg(feature = "ai-protocol")]
+        tool_dispatcher_choice: Arc::new("auto".to_string()),
+        #[cfg(feature = "ai-protocol")]
+        workspace_tool_dispatcher: Arc::new(None),
+        #[cfg(feature = "ai-protocol")]
+        tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
+        security: test_channel_approval_runtime_fields().0,
+        channel_approval_hub: test_channel_approval_runtime_fields().1,
+        approval_managers: test_channel_approval_runtime_fields().2,
+        autonomy_config: test_channel_approval_runtime_fields().3,
+        approval_wiring: test_channel_approval_runtime_fields().4,
+        telegram_approval: test_channel_approval_runtime_fields().5,
+    });
+
+    process_channel_message(
+        runtime_ctx,
+        traits::ChannelMessage {
+            id: "msg-hot-iter".to_string(),
+            sender: "alice".to_string(),
+            reply_target: "chat-hot-iter".to_string(),
+            content: "Loop until done".to_string(),
+            channel: "test-channel".to_string(),
+            timestamp: 1,
+            thread_ts: None,
+        },
+        CancellationToken::new(),
+    )
+    .await;
+
+    {
+        let mut store = runtime_config_store()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        store.remove(&config_path);
+    }
+
+    let sent_messages = channel_impl.sent_messages.lock().await;
+    assert_eq!(sent_messages.len(), 1);
+    assert!(sent_messages[0].contains("Completed after 11 tool iterations."));
+    assert!(!sent_messages[0].contains("⚠️ Error:"));
 }
 
 #[tokio::test]

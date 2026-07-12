@@ -14,6 +14,7 @@
 | Установить одной командой | [one-click-bootstrap.md](one-click-bootstrap.md) |
 | Найти команды по задаче | [commands-reference.md](commands-reference.md) |
 | Проверить ключи конфигурации и дефолты | [config-reference.md](config-reference.md) |
+| Менять config/policy без пересборки | [config-externalization.md](config-externalization.md) |
 | Контракт политики / одобрений (0.7.0+) | [policy-approval-reference.md](policy-approval-reference.md) |
 | Миграция политики на 0.7.0 | [migration-policy-v0.7.0.md](migration-policy-v0.7.0.md) |
 | Рендер CLI-терминала (Markdown / свёртка) | [cli-render.md](cli-render.md) |

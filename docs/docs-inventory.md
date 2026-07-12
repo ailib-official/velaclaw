@@ -49,6 +49,7 @@ Last reviewed: **February 18, 2026**.
 | `docs/channels-reference.md` | Current Reference | users/operators |
 | `docs/nextcloud-talk-setup.md` | Current Guide | operators |
 | `docs/config-reference.md` | Current Reference | operators |
+| `docs/config-externalization.md` | Current Guide | operators |
 | `docs/policy-approval-reference.md` | Current Reference | operators |
 | `docs/migration-policy-v0.7.0.md` | Current Guide | operators |
 | `docs/cli-render.md` | Current Reference | users/operators |

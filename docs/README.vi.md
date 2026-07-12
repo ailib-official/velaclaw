@@ -14,6 +14,7 @@ Trang này là điểm vào tiếng Việt cho hệ thống tài liệu.
 | Cài đặt bằng một lệnh | [one-click-bootstrap.md](one-click-bootstrap.md) |
 | Tìm lệnh theo tác vụ | [commands-reference.md](commands-reference.md) |
 | Kiểm tra giá trị mặc định và khóa cấu hình | [config-reference.md](config-reference.md) |
+| Đổi config/policy không cần rebuild | [config-externalization.md](config-externalization.md) |
 | Kết nối provider / endpoint tùy chỉnh | [custom-providers.md](custom-providers.md) |
 | Cấu hình Z.AI / GLM provider | [zai-glm-setup.md](zai-glm-setup.md) |
 | Sử dụng tích hợp LangGraph | [langgraph-integration.md](langgraph-integration.md) |

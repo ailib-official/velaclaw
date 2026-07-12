@@ -14,6 +14,7 @@
 | ワンコマンドで導入したい | [one-click-bootstrap.md](one-click-bootstrap.md) |
 | コマンドを用途別に確認したい | [commands-reference.md](commands-reference.md) |
 | 設定キーと既定値を確認したい | [config-reference.md](config-reference.md) |
+| 再ビルドせず設定/ポリシーを変えたい | [config-externalization.md](config-externalization.md) |
 | ポリシー / 承認ランタイム契約（0.7.0+） | [policy-approval-reference.md](policy-approval-reference.md) |
 | 0.7.0 ポリシーへのアップグレード | [migration-policy-v0.7.0.md](migration-policy-v0.7.0.md) |
 | CLI 端末レンダリング（Markdown / 折りたたみ） | [cli-render.md](cli-render.md) |

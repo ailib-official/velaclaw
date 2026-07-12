@@ -5,6 +5,7 @@ Dành cho operator vận hành VelaClaw liên tục hoặc trên production.
 ## Vận hành cốt lõi
 
 - Sổ tay Day-2: [../operations-runbook.md](../operations-runbook.md)
+- Hợp đồng config vs rebuild: [../config-externalization.md](../config-externalization.md)
 - Sổ tay Release: [../release-process.md](../release-process.md)
 - Ma trận xử lý sự cố: [../troubleshooting.md](../troubleshooting.md)
 - Triển khai mạng/gateway an toàn: [../network-deployment.md](../network-deployment.md)

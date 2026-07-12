@@ -14,6 +14,7 @@
 | 一键安装与初始化 | [one-click-bootstrap.md](one-click-bootstrap.md) |
 | 按任务找命令 | [commands-reference.md](commands-reference.md) |
 | 快速查看配置默认值与关键项 | [config-reference.md](config-reference.md) |
+| 不重编译改配置/策略 | [config-externalization.md](config-externalization.md) |
 | 策略与批准运行时合同（0.7.0+） | [policy-approval-reference.md](policy-approval-reference.md) |
 | 升级至 0.7.0 策略行为 | [migration-policy-v0.7.0.md](migration-policy-v0.7.0.md) |
 | CLI 终端渲染（Markdown / 折叠） | [cli-render.md](cli-render.md) |

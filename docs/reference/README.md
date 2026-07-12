@@ -8,6 +8,7 @@ Structured reference index for commands, providers, channels, config, and integr
 - Provider IDs / aliases / env vars: [../providers-reference.md](../providers-reference.md)
 - Channel setup + allowlists: [../channels-reference.md](../channels-reference.md)
 - Config defaults and keys: [../config-reference.md](../config-reference.md)
+- Config/policy externalization contract: [../config-externalization.md](../config-externalization.md)
 - CLI terminal render (Markdown / fold): [../cli-render.md](../cli-render.md)
 - Policy & approval runtime contract: [../policy-approval-reference.md](../policy-approval-reference.md)
 - Policy upgrade (0.7.0): [../migration-policy-v0.7.0.md](../migration-policy-v0.7.0.md)

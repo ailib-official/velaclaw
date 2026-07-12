@@ -157,7 +157,11 @@ pub async fn run_onboard_command(
 /// Dispatch a configured CLI command (config already loaded).
 pub async fn dispatch_configured_command(command: Commands, config: Config) -> Result<()> {
     match command {
-        Commands::Onboard { .. } | Commands::Completions { .. } => unreachable!(),
+        Commands::Onboard { .. }
+        | Commands::Completions { .. }
+        | Commands::Doctor {
+            doctor_command: Some(DoctorCommands::Maintenance),
+        } => unreachable!("handled before config load"),
 
         Commands::Agent {
             message,
@@ -220,6 +224,7 @@ pub async fn dispatch_configured_command(command: Commands, config: Config) -> R
         }
 
         Commands::Doctor { doctor_command } => match doctor_command {
+            Some(DoctorCommands::Maintenance) => unreachable!("handled before config load"),
             Some(DoctorCommands::Models {
                 provider,
                 use_cache,

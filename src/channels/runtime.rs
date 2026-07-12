@@ -95,6 +95,16 @@ pub(crate) struct ChannelRuntimeDefaults {
     pub(crate) api_key: Option<String>,
     pub(crate) api_url: Option<String>,
     pub(crate) reliability: crate::config::ReliabilityConfig,
+    /// Hot-applied from `[agent].max_tool_iterations` (0 normalizes to 10).
+    pub(crate) max_tool_iterations: usize,
+}
+
+fn normalize_max_tool_iterations(value: usize) -> usize {
+    if value == 0 {
+        10
+    } else {
+        value
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -405,6 +415,7 @@ pub(crate) fn runtime_defaults_from_config(config: &Config) -> ChannelRuntimeDef
         api_key: config.api_key.clone(),
         api_url: config.api_url.clone(),
         reliability: config.reliability.clone(),
+        max_tool_iterations: normalize_max_tool_iterations(config.agent.max_tool_iterations),
     }
 }
 
@@ -432,6 +443,7 @@ pub(crate) fn runtime_defaults_snapshot(ctx: &ChannelRuntimeContext) -> ChannelR
         api_key: ctx.api_key.clone(),
         api_url: ctx.api_url.clone(),
         reliability: (*ctx.reliability).clone(),
+        max_tool_iterations: normalize_max_tool_iterations(ctx.max_tool_iterations),
     }
 }
 
@@ -545,6 +557,7 @@ pub(crate) async fn maybe_apply_runtime_config_update(ctx: &ChannelRuntimeContex
         provider = %next_defaults.default_provider,
         model = %next_defaults.model,
         temperature = next_defaults.temperature,
+        max_tool_iterations = next_defaults.max_tool_iterations,
         "Applied updated channel runtime config from disk"
     );
 

@@ -8,6 +8,7 @@ Tra cứu lệnh, provider, channel, config và tích hợp.
 - ID provider / alias / biến môi trường: [../providers-reference.md](../providers-reference.md)
 - Thiết lập channel + allowlist: [../channels-reference.md](../channels-reference.md)
 - Giá trị mặc định và khóa config: [../config-reference.md](../config-reference.md)
+- Hợp đồng externalization config/policy: [../config-externalization.md](../config-externalization.md)
 
 ## Mở rộng provider và tích hợp
 

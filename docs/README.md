@@ -14,6 +14,7 @@ Localized hubs: [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · 
 | Bootstrap in one command | [one-click-bootstrap.md](one-click-bootstrap.md) |
 | Find commands by task | [commands-reference.md](commands-reference.md) |
 | Check config defaults and keys quickly | [config-reference.md](config-reference.md) |
+| Change config/policy without rebuild | [config-externalization.md](config-externalization.md) |
 | Understand policy / approval (0.7.0+) | [policy-approval-reference.md](policy-approval-reference.md) |
 | Upgrade policy behavior to 0.7.0 | [migration-policy-v0.7.0.md](migration-policy-v0.7.0.md) |
 | Format CLI terminal output (Markdown / fold) | [cli-render.md](cli-render.md) |

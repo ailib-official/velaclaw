@@ -62,6 +62,7 @@ pub fn run(config: &Config) -> Result<()> {
     let mut items: Vec<DiagItem> = Vec::new();
 
     check_config_semantics(config, &mut items);
+    check_protocol_registry(config, &mut items);
     check_workspace(config, &mut items);
     check_daemon_state(config, &mut items);
     check_environment(&mut items);
@@ -471,6 +472,148 @@ fn embedding_provider_validation_error(name: &str) -> Option<String> {
             parsed.scheme()
         )),
         Err(err) => Some(format!("invalid custom provider URL: {err}")),
+    }
+}
+
+// ── Protocol registry (ai-protocol) ──────────────────────────────
+
+fn check_protocol_registry(config: &Config, items: &mut Vec<DiagItem>) {
+    let cat = "protocol";
+
+    #[cfg(not(feature = "ai-protocol"))]
+    {
+        let _ = config;
+        items.push(DiagItem::warn(
+            cat,
+            "ai-protocol feature disabled — skip registry checks",
+        ));
+        return;
+    }
+
+    #[cfg(feature = "ai-protocol")]
+    {
+        use crate::protocol_registry::{
+            manifest_has_chat_endpoint, provider_id_from_logical, resolve_local_protocol_root,
+            scan_protocol_root,
+        };
+
+        let Some(root) = resolve_local_protocol_root() else {
+            items.push(DiagItem::error(
+                cat,
+                "AI_PROTOCOL_DIR / AI_PROTOCOL_PATH unset or not a local directory",
+            ));
+            return;
+        };
+
+        items.push(DiagItem::ok(
+            cat,
+            format!("protocol root: {}", root.display()),
+        ));
+
+        let snap = match scan_protocol_root(&root) {
+            Ok(s) => s,
+            Err(err) => {
+                items.push(DiagItem::error(
+                    cat,
+                    format!("failed to scan protocol root: {err}"),
+                ));
+                return;
+            }
+        };
+
+        items.push(DiagItem::ok(
+            cat,
+            format!(
+                "registry: {} providers, {} models",
+                snap.providers.len(),
+                snap.models.len()
+            ),
+        ));
+
+        let provider_raw = config.default_provider.as_deref().unwrap_or("").trim();
+        if provider_raw.is_empty() {
+            items.push(DiagItem::warn(
+                cat,
+                "default_provider empty — skip provider match",
+            ));
+        } else {
+            let provider_id = provider_id_from_logical(provider_raw);
+            match snap.provider_by_id(provider_id) {
+                Some(info) => {
+                    items.push(DiagItem::ok(
+                        cat,
+                        format!(
+                            "default provider \"{provider_id}\" found ({})",
+                            info.manifest_path.display()
+                        ),
+                    ));
+                    match manifest_has_chat_endpoint(&info.manifest_path) {
+                        Some(true) => items.push(DiagItem::ok(
+                            cat,
+                            format!("provider \"{provider_id}\" exposes endpoints.chat or endpoints.chat_openai"),
+                        )),
+                        Some(false) => items.push(DiagItem::error(
+                            cat,
+                            format!(
+                                "provider \"{provider_id}\" manifest missing endpoints.chat / endpoints.chat_openai \
+                                 (AiClient chat op will fail)"
+                            ),
+                        )),
+                        None => items.push(DiagItem::warn(
+                            cat,
+                            format!(
+                                "could not inspect endpoints map in {}",
+                                info.manifest_path.display()
+                            ),
+                        )),
+                    }
+                    if !info.available {
+                        items.push(DiagItem::warn(
+                            cat,
+                            format!(
+                                "provider \"{provider_id}\" credentials not resolved (check env: {})",
+                                info.required_envs.join(", ")
+                            ),
+                        ));
+                    }
+                }
+                None => items.push(DiagItem::error(
+                    cat,
+                    format!(
+                        "default provider \"{provider_id}\" not found under {}",
+                        root.display()
+                    ),
+                )),
+            }
+        }
+
+        if let Some(model) = config
+            .default_model
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            let logical = if model.contains('/') {
+                model.to_string()
+            } else if !provider_raw.is_empty() {
+                format!("{}/{model}", provider_id_from_logical(provider_raw))
+            } else {
+                model.to_string()
+            };
+            match snap.model_by_logical_id(&logical) {
+                Some(info) => items.push(DiagItem::ok(
+                    cat,
+                    format!("default model \"{}\" indexed", info.logical_id),
+                )),
+                None => items.push(DiagItem::warn(
+                    cat,
+                    format!(
+                        "default model \"{logical}\" not in protocol model index \
+                         (may still work if provider accepts arbitrary ids)"
+                    ),
+                )),
+            }
+        }
     }
 }
 

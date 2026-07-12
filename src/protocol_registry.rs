@@ -210,6 +210,49 @@ impl ProtocolRegistrySnapshot {
             })
             .find_map(|m| m.context_window)
     }
+
+    /// Find a provider by id (case-sensitive exact match).
+    #[must_use]
+    pub fn provider_by_id(&self, provider_id: &str) -> Option<&ProtocolProviderInfo> {
+        let provider_id = provider_id.trim();
+        self.providers.iter().find(|p| p.id == provider_id)
+    }
+
+    /// Resolve a logical model id (exact, or `provider/model` suffix forms).
+    #[must_use]
+    pub fn model_by_logical_id(&self, model_id: &str) -> Option<&ProtocolModelInfo> {
+        let model_id = model_id.trim();
+        if model_id.is_empty() {
+            return None;
+        }
+        if let Some(found) = self.models.iter().find(|m| m.logical_id == model_id) {
+            return Some(found);
+        }
+        let suffix = model_id.rsplit('/').next().unwrap_or(model_id);
+        self.models.iter().find(|m| {
+            m.logical_id == suffix
+                || m.logical_id.ends_with(&format!("/{suffix}"))
+                || m.logical_id == format!("{}/{}", m.provider, suffix)
+        })
+    }
+}
+
+/// Whether a provider manifest exposes a chat-capable endpoint key.
+///
+/// Accepts `endpoints.chat` or `endpoints.chat_openai` (ai-lib chat op aliases).
+/// Returns `None` when the file cannot be parsed or has no `endpoints` map.
+#[must_use]
+pub fn manifest_has_chat_endpoint(path: &Path) -> Option<bool> {
+    let raw = load_manifest_value(path).ok()?;
+    let endpoints = raw.get("endpoints")?.as_object()?;
+    Some(endpoints.contains_key("chat") || endpoints.contains_key("chat_openai"))
+}
+
+/// Provider id segment from `provider`, `provider/model`, or bare model strings.
+#[must_use]
+pub fn provider_id_from_logical(raw: &str) -> &str {
+    let raw = raw.trim();
+    raw.split_once('/').map(|(p, _)| p).unwrap_or(raw)
 }
 
 /// Lookup `context_window` for a model from the local ai-protocol registry cache.
@@ -535,5 +578,42 @@ metadata:
             .context_window_for("openai/gpt-5.3-codex-spark")
             .or_else(|| snap.context_window_for("gpt-5.3-codex-spark"));
         assert_eq!(cw, Some(128_000));
+    }
+
+    #[test]
+    fn provider_and_model_lookup_helpers() {
+        let fixture =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/ai-protocol-min");
+        let snap = scan_protocol_root(&fixture).expect("scan fixture");
+        assert!(snap.provider_by_id("openai").is_some());
+        assert!(snap
+            .model_by_logical_id("openai/gpt-5.3-codex-spark")
+            .is_some());
+        assert_eq!(
+            provider_id_from_logical("deepseek/deepseek-v4-flash"),
+            "deepseek"
+        );
+        assert_eq!(provider_id_from_logical("deepseek"), "deepseek");
+    }
+
+    #[test]
+    fn manifest_has_chat_endpoint_detects_chat_keys() {
+        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/ai-protocol-min/v2/providers/openai.yaml");
+        assert_eq!(manifest_has_chat_endpoint(&fixture), Some(true));
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("nochat.yaml");
+        fs::write(
+            &path,
+            r#"
+id: nochat
+endpoints:
+  embeddings:
+    path: /v1/embeddings
+"#,
+        )
+        .expect("write");
+        assert_eq!(manifest_has_chat_endpoint(&path), Some(false));
     }
 }

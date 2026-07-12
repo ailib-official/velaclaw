@@ -577,13 +577,28 @@ fn check_protocol_registry(config: &Config, items: &mut Vec<DiagItem>) {
                         ));
                     }
                 }
-                None => items.push(DiagItem::error(
-                    cat,
-                    format!(
-                        "default provider \"{provider_id}\" not found under {}",
-                        root.display()
-                    ),
-                )),
+                None => {
+                    // Alias ids (e.g. glm-cn) may construct at runtime but not match
+                    // the manifest stem; warn when create_provider succeeds, else error.
+                    if provider_validation_error(provider_raw).is_none() {
+                        items.push(DiagItem::warn(
+                            cat,
+                            format!(
+                                "default provider \"{provider_id}\" not indexed under {} \
+                                 (runtime alias may still work; prefer canonical manifest id)",
+                                root.display()
+                            ),
+                        ));
+                    } else {
+                        items.push(DiagItem::error(
+                            cat,
+                            format!(
+                                "default provider \"{provider_id}\" not found under {}",
+                                root.display()
+                            ),
+                        ));
+                    }
+                }
             }
         }
 

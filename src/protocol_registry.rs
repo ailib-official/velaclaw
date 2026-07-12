@@ -248,10 +248,14 @@ pub fn manifest_has_chat_endpoint(path: &Path) -> Option<bool> {
     Some(endpoints.contains_key("chat") || endpoints.contains_key("chat_openai"))
 }
 
-/// Provider id segment from `provider`, `provider/model`, or bare model strings.
+/// Provider id segment from `provider`, `provider/model`, or `protocol:provider/model`.
 #[must_use]
 pub fn provider_id_from_logical(raw: &str) -> &str {
     let raw = raw.trim();
+    let raw = raw
+        .strip_prefix("protocol:")
+        .map(str::trim)
+        .unwrap_or(raw);
     raw.split_once('/').map(|(p, _)| p).unwrap_or(raw)
 }
 
@@ -594,6 +598,11 @@ metadata:
             "deepseek"
         );
         assert_eq!(provider_id_from_logical("deepseek"), "deepseek");
+        assert_eq!(
+            provider_id_from_logical("protocol:openai/gpt-5.2"),
+            "openai"
+        );
+        assert_eq!(provider_id_from_logical("protocol:deepseek"), "deepseek");
     }
 
     #[test]

@@ -201,6 +201,31 @@ mod tests {
     }
 
     #[test]
+    fn logical_model_prefers_provider_segment_when_not_slashed() {
+        let mut config = Config::default();
+        // Correct shape after CLI `-p deepseek --model deepseek-v4-flash` / config fix.
+        config.default_provider = Some("deepseek".into());
+        config.default_model = Some("deepseek-v4-flash".into());
+        assert_eq!(
+            logical_model_id_from_config(&config),
+            "deepseek/deepseek-v4-flash"
+        );
+    }
+
+    #[test]
+    fn logical_model_keeps_slashed_provider_as_full_id() {
+        // Misconfigured `default_provider = "deepseek/deepseek-chat"` previously
+        // short-circuited model selection; document current resolution contract.
+        let mut config = Config::default();
+        config.default_provider = Some("deepseek/deepseek-chat".into());
+        config.default_model = Some("deepseek-v4-flash".into());
+        assert_eq!(
+            logical_model_id_from_config(&config),
+            "deepseek/deepseek-chat"
+        );
+    }
+
+    #[test]
     fn byok_mode_selected_by_default() {
         let config = Config::default();
         assert_eq!(config.routing.provider_mode, ProviderRoutingMode::Byok);

@@ -1517,7 +1517,7 @@ fn self_adjust_prompt_fields(config: &Config) -> (Vec<String>, Vec<String>) {
 
 #[allow(clippy::too_many_lines)]
 pub async fn run(
-    config: Config,
+    mut config: Config,
     message: Option<String>,
     provider_override: Option<String>,
     model_override: Option<String>,
@@ -1527,8 +1527,20 @@ pub async fn run(
     no_fold: bool,
     extra_prompt_phases: &[crate::agent::prompt_composer::PromptPhase],
 ) -> Result<String> {
-    #[cfg(feature = "ai-protocol")]
-    let _ = (&provider_override, &model_override);
+    // CLI `-p/--model` must win over config for both protocol and legacy paths.
+    // (Previously the ai-protocol branch discarded these and always used config.)
+    if let Some(provider) = provider_override {
+        let provider = provider.trim();
+        if !provider.is_empty() {
+            config.default_provider = Some(provider.to_string());
+        }
+    }
+    if let Some(model) = model_override {
+        let model = model.trim();
+        if !model.is_empty() {
+            config.default_model = Some(model.to_string());
+        }
+    }
 
     let interactive = message.is_none();
     let render_opts =
@@ -1626,13 +1638,13 @@ pub async fn run(
 
     #[cfg(not(feature = "ai-protocol"))]
     let (provider, model_name, tool_dispatcher, text_tool_result_history) = {
-        let provider_name = provider_override
+        let provider_name = config
+            .default_provider
             .as_deref()
-            .or(config.default_provider.as_deref())
             .unwrap_or(DEFAULT_PROTOCOL_MODEL_ID);
-        let model_name = model_override
+        let model_name = config
+            .default_model
             .as_deref()
-            .or(config.default_model.as_deref())
             .unwrap_or(DEFAULT_PROTOCOL_MODEL_ID)
             .to_string();
         let provider = providers::create_routed_provider_with_options(

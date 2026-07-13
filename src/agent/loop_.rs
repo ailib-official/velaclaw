@@ -133,7 +133,7 @@ async fn auto_compact_history(
     model: &str,
     max_history: usize,
 ) -> Result<bool> {
-    let has_system = history.first().map_or(false, |m| m.role == "system");
+    let has_system = history.first().is_some_and(|m| m.role == "system");
     let non_system_count = if has_system {
         history.len().saturating_sub(1)
     } else {

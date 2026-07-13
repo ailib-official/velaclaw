@@ -56,7 +56,7 @@ pub fn tools_to_openai_format(tools_registry: &[Box<dyn Tool>]) -> Vec<serde_jso
 /// Preserves the system prompt (first message if role=system) and the most recent messages.
 pub fn trim_history(history: &mut Vec<ChatMessage>, max_history: usize) {
     // Nothing to trim if within limit
-    let has_system = history.first().map_or(false, |m| m.role == "system");
+    let has_system = history.first().is_some_and(|m| m.role == "system");
     let non_system_count = if has_system {
         history.len() - 1
     } else {

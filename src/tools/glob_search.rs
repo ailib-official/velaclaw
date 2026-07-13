@@ -122,7 +122,7 @@ impl Tool for GlobSearchTool {
                 Err(_) => continue, // skip unreadable entries
             };
 
-            // Workspace-anchored globs may traverse symlinks (e.g. ai-lib-plans → ~/ai-lib-plans).
+            // Workspace-anchored globs may traverse symlinks (e.g. tools → ~/ext-tools).
             // List logical workspace-relative paths; file_read still canonicalizes before read.
             let under_workspace =
                 path.starts_with(&workspace) || path.starts_with(&workspace_canon);
@@ -406,21 +406,21 @@ mod tests {
         let workspace = root.path().join("workspace");
         let external = root.path().join("external_repo");
         std::fs::create_dir_all(&workspace).unwrap();
-        std::fs::create_dir_all(external.join("tools")).unwrap();
-        std::fs::write(external.join("tools/hk_vps_ssh.sh"), "#!/bin/sh").unwrap();
-        symlink(&external, workspace.join("ai-lib-plans")).unwrap();
+        std::fs::create_dir_all(external.join("bin")).unwrap();
+        std::fs::write(external.join("bin/ops_helper.sh"), "#!/bin/sh").unwrap();
+        symlink(&external, workspace.join("ext-tools")).unwrap();
 
         let tool = GlobSearchTool::new(test_security(workspace));
         let result = tool
             .execute(
-                json!({"pattern": "ai-lib-plans/tools/hk_vps*.sh"}),
+                json!({"pattern": "ext-tools/bin/ops_helper*.sh"}),
                 &ToolExecutionContext::default(),
             )
             .await
             .unwrap();
 
         assert!(result.success);
-        assert!(result.output.contains("ai-lib-plans/tools/hk_vps_ssh.sh"));
+        assert!(result.output.contains("ext-tools/bin/ops_helper.sh"));
     }
 
     #[tokio::test]

@@ -14,6 +14,7 @@
 - [ ] `AI_PROTOCOL_DIR` points to a local `ailib-official/ai-protocol` checkout
 - [ ] A protocol model id such as `openai/gpt-5.2` can be configured through onboarding or `config.toml`
 - [ ] A deprecated chat key such as `openrouter`, `custom:https://...`, or `anthropic-custom:https://...` returns a migration error with `provider/model`, `AI_PROTOCOL_DIR`, and `docs/migration-legacy-to-protocol.md`
+- [ ] Public privacy gate passes: `bash scripts/ci/public_doc_privacy_gate.sh` (no private maintainer repo paths or archived-org GitHub URLs)
 
 ## Risk and Rollback
 

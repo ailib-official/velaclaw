@@ -1074,7 +1074,7 @@ impl SecurityPolicy {
              - NEVER claim a command or path is blocked without a real `<tool_result>` error from an attempted tool call.\n\
              - If a tool fails, quote the exact error to the user in plain language and say what to change in `config.toml` — do not ask the user to edit source code.\n\
              - For files outside the workspace, use `shell` with `find`, `ls`, or `cat` when those commands are allowed.\n\
-             - Known local tool catalog: workspace `ai-lib-plans/tools/` when the symlink is present.\n\n",
+             - Optional local tool catalog: a workspace `tools/` directory (or symlink) when present.\n\n",
         );
     }
 
@@ -1721,7 +1721,7 @@ mod tests {
         let p = default_policy();
         assert!(p.is_command_allowed("ls -la 2>/dev/null"));
         assert!(p.is_command_allowed("ls 2>&1"));
-        assert!(p.is_command_allowed("ls -la ai-lib-plans/tools/ 2>/dev/null || echo missing"));
+        assert!(p.is_command_allowed("ls -la tools/ 2>/dev/null || echo missing"));
     }
 
     #[test]

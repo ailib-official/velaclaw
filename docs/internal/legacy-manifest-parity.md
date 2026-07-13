@@ -24,6 +24,6 @@
 - Automated: integration test **`protocol_fixture_resolves_openai_without_legacy`** (see `tests/protocol_manifest_parity.rs`) sets `AI_PROTOCOL_DIR` to the checked-in minimal fixture (`tests/fixtures/ai-protocol-min`) and asserts `create_provider(\"openai/gpt-5.2\", …)` succeeds **without enabling `legacy-providers`**.
 - Human: maintainer acknowledgment that rows marked *TBD* are either migrated or consciously **unsupported**.
 
-**Related plans**
+**Related milestones**
 
-- `ai-lib-plans`: `ZS-ML-015` removes `legacy-providers`; `ZS-ML-016` updates user-facing deprecation/migration wording.
+- `ZS-ML-015` removed `legacy-providers`; `ZS-ML-016` updated user-facing deprecation/migration wording (see public migration docs in this repo).

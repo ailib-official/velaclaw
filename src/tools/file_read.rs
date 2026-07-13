@@ -669,12 +669,12 @@ mod tests {
         tokio::fs::write(external.join("tools/INDEX.md"), "tool index")
             .await
             .unwrap();
-        symlink(&external, workspace.join("ai-lib-plans")).unwrap();
+        symlink(&external, workspace.join("ext-tools")).unwrap();
 
         let tool = FileReadTool::new(test_security_with(workspace, AutonomyLevel::Full, 20));
         let result = tool
             .execute(
-                json!({"path": "ai-lib-plans/tools/INDEX.md"}),
+                json!({"path": "ext-tools/tools/INDEX.md"}),
                 &ToolExecutionContext::default(),
             )
             .await

@@ -1,10 +1,10 @@
 # VelaClaw ↔ ai-lib-rust / ai-protocol migration
 
-English summary + 中文：本页固定 **版本矩阵** 与本地开发方式，对应 `VELACLAW_AI_LIB_MIGRATION_PLAN.md` Phase 0。
+English summary + 中文：本页固定 **版本矩阵** 与本地开发方式（协议迁移 Phase 0）。
 
 **User-facing migration** from built-in HTTP shorthands to `provider/model` + `AI_PROTOCOL_DIR`: see **`docs/migration-legacy-to-protocol.md`**.
 
-**Clone / Git remote hygiene:** canonical development remote is **`ailib-official/velaclaw`**; do not leave `main` tracking an archived hiddenpath default (see **`CONTRIBUTING.md`** § “Canonical Git remote”).
+**Clone / Git remote hygiene:** canonical development remote is **`ailib-official/velaclaw`**; do not leave `main` tracking an archived organization default (see **`CONTRIBUTING.md`** § “Canonical Git remote”).
 
 ## Compatibility window (Phase 6)
 
@@ -145,4 +145,4 @@ VelaClaw layers **two** independent mechanisms; keep them from overlapping in co
 ## Next steps
 
 - `docs/migration-legacy-to-protocol.md` — legacy shorthands, `AI_PROTOCOL_DIR`, and build/test matrix.
-- `active/projects/velaclaw/VELACLAW_AI_LIB_MIGRATION_PLAN.md` in **ai-lib-plans** for phased PRs.
+- Migration phases and PR sequencing are maintainer-owned; use this repo’s public docs (`docs/ai-lib-migration.md`, `docs/migration-legacy-to-protocol.md`) as the contributor source of truth.

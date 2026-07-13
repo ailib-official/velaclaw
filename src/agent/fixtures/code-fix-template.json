@@ -1,0 +1,56 @@
+{
+  "schema_version": "0.1.0",
+  "id": "code-fix-template",
+  "description": "Handwritten linear template: locate issue → patch → verify.",
+  "entry": "locate",
+  "max_steps": 6,
+  "timeout_secs": 900,
+  "nodes": [
+    {
+      "id": "locate",
+      "task_type": "code-fix",
+      "model_selector": {
+        "capabilities": ["coding", "tool_calling"]
+      },
+      "context_requirements": {
+        "layers": [0, 1, 2],
+        "retrieve": [
+          {
+            "kind": "workspace",
+            "query": "relevant source for reported defect"
+          }
+        ]
+      },
+      "next": "patch"
+    },
+    {
+      "id": "patch",
+      "task_type": "code-fix",
+      "model_selector": {
+        "capabilities": ["coding", "tool_calling"]
+      },
+      "context_requirements": {
+        "layers": [0, 1, 2, 3]
+      },
+      "max_steps": 8,
+      "next": "verify"
+    },
+    {
+      "id": "verify",
+      "task_type": "code-fix",
+      "model_selector": {
+        "capabilities": ["coding", "speed"]
+      },
+      "context_requirements": {
+        "layers": [0, 1, 3],
+        "retrieve": [
+          {
+            "kind": "tool_result",
+            "alias": "last_test_output"
+          }
+        ]
+      },
+      "next": null
+    }
+  ]
+}

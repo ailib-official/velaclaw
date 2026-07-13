@@ -84,8 +84,10 @@ With `[[model_routes]]` + `[query_classification]` enabled, CLI / `Agent::turn` 
 `process_message` resolve matching hints to `hint:<name>` for `RouterProvider`
 (see VL-RT-002). Keep `reliability.fallback_providers` for failover.
 
-Capability Tag vocabulary (Hint ↔ Tag, including `document_understanding`) lives in
-the plans repo: `docs/architecture/capability-mapping.md` (ADR-2026-07 L0).
+Capability routing uses operator-facing **hints** (for example `reasoning`, `fast`)
+configured in `[[model_routes]]` / `[query_classification]` above. Tag vocabulary
+and maintainer ADR notes are not required for a public checkout — configure hints
+here and keep manifests under `AI_PROTOCOL_DIR`.
 
 Requires a rebuild when upgrading the pinned `ai-lib-rust` revision (VL-RT-001).
 

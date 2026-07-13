@@ -4,12 +4,23 @@ Thanks for your interest in contributing. This guide will help you get started. 
 
 ## Canonical Git remote (ZS-ML-011 / Phase 7)
 
-Development and PRs use **`https://github.com/ailib-official/velaclaw`**. Older clones sometimes still use `origin -> github.com/hiddenpath/velaclaw` with `main` tracking that archived remote — fix by either:
+Development and PRs use **`https://github.com/ailib-official/velaclaw`**. Older clones sometimes still use `origin` pointing at an **archived** GitHub organization remote with `main` tracking that remote — fix by either:
 
-- renaming remotes (`ailib-official` → `origin`, archive remote renamed), **or**
-- keeping both remotes and running `git branch --set-upstream-to=ailib-official/main main` so `git pull`/`git status` reflect the canonical default branch only.
+- renaming remotes (canonical `ailib-official` remote → `origin`, archive remote renamed), **or**
+- keeping both remotes and running `git branch --set-upstream-to=<canonical-remote>/main main` so `git pull`/`git status` reflect the canonical default branch only.
 
-Verification: `git remote -v`, `git branch -vv`, and `git rev-parse main` equals `git rev-parse ailib-official/main` when synced.
+Verification: `git remote -v`, `git branch -vv`, and `git rev-parse main` equals `git rev-parse <canonical-remote>/main` when synced.
+
+## Public repository privacy (DOC-002 / TEST-002)
+
+This repository is **public**. Do **not** commit:
+
+- Paths or clone instructions for private maintainer planning/governance trees
+- Internal task-tracker YAML paths from private maintainer trackers
+- Archived-organization GitHub URLs as default remotes or fetch endpoints
+- Secrets, private hostnames, or LAN infrastructure runbooks
+
+Prefer public docs in this tree and [`ailib-official/ai-protocol`](https://github.com/ailib-official/ai-protocol). CI runs `scripts/ci/public_doc_privacy_gate.sh` on every PR.
 
 ## VelaClaw: ai-protocol checkout and `AI_PROTOCOL_DIR`
 
@@ -33,7 +44,7 @@ ZS-ML-015 removed the old built-in HTTP provider factory. New provider support b
 ## Development Setup
 
 ```bash
-# Clone the canonical repo (avoid hiddenpath as default upstream)
+# Clone the canonical repo (do not use archived org remotes as default upstream)
 git clone https://github.com/ailib-official/velaclaw.git
 cd velaclaw
 

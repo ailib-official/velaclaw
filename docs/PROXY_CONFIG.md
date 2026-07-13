@@ -54,4 +54,4 @@ Option B (config → AiClient) deferred — risks double-proxy and priority ambi
 
 - Cross-runtime policy: [ai-protocol `docs/TRANSPORT_PROXY_POLICY.md`](https://github.com/ailib-official/ai-protocol/blob/main/docs/TRANSPORT_PROXY_POLICY.md)
 - Playbook: [proxy-agent-playbook.md](./proxy-agent-playbook.md)
-- Task: `ai-lib-plans/active/projects/velaclaw/tasks/VLC-TRN-001-proxy-config-gap.yaml`
+- Decision id: `VLC-TRN-001` (maintainer record; Option A accepted above)

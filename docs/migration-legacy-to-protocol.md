@@ -73,7 +73,7 @@ documented no-duplicate-counter boundary.
 
 - `docs/ai-lib-migration.md` — version matrix, feature flags, build commands.
 - `CONTRIBUTING.md` — clone layout and `AI_PROTOCOL_DIR` for contributors.
-- `active/projects/velaclaw/VELACLAW_AI_LIB_MIGRATION_PLAN.md` in **ai-lib-plans** — phases and PR list.
+- Maintainer migration sequencing stays out of this public tree; follow the docs above for contributor-facing steps.
 
 ## 7. Embedded Prism routing (optional)
 

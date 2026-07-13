@@ -7904,6 +7904,7 @@ dependencies = [
  "ai-lib-rust",
  "anyhow",
  "async-trait",
+ "regex",
  "serde",
  "serde_json",
  "tokio",

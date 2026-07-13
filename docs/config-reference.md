@@ -70,6 +70,7 @@ Operational note for container users:
 | `max_history_messages` | `50` | Maximum conversation history messages retained per session |
 | `parallel_tools` | `false` | Enable parallel tool execution within a single iteration |
 | `tool_dispatcher` | `auto` | Tool dispatch strategy |
+| `envelope_assemble` | `false` | **CR-L1 pilot (opt-in):** on `velaclaw agent` only, run ai-lib `assemble_layered` before each turn. HardBudgetViolation fails the turn explicitly. Requires `--features ai-protocol`. Channels/gateway unchanged. |
 
 `tool_dispatcher` values:
 

@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Luqiang Wang"]
 license = "MIT OR Apache-2.0"
-description = "VelaClaw agent runtime — tool dispatcher, BYOK, loop parse helpers (VL-ARCH-007/008)"
+description = "VelaClaw agent runtime — dispatcher, BYOK, loop parse/prompt/scrub helpers (VL-ARCH-007/008/010)"
 repository = "https://github.com/ailib-official/velaclaw"
 rust-version = "1.87"
 

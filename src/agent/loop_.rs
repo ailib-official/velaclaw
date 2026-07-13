@@ -30,7 +30,9 @@ use velaclaw_agent_runtime::loop_parse::{
     COMPACTION_KEEP_RECENT_MESSAGES, COMPACTION_MAX_SUMMARY_CHARS, DEFAULT_MAX_TOOL_ITERATIONS,
 };
 
-pub(crate) use velaclaw_agent_runtime::loop_parse::is_tool_loop_cancelled;
+pub(crate) use velaclaw_agent_runtime::loop_parse::{
+    build_tool_instructions, is_tool_loop_cancelled,
+};
 
 /// Session-scoped store for folded CLI payloads (`/expand <id>`).
 type FoldCache = Arc<Mutex<HashMap<u64, String>>>;
@@ -632,36 +634,6 @@ pub(crate) async fn run_tool_call_loop(
     }
 
     anyhow::bail!("Agent exceeded maximum tool iterations ({max_iterations})")
-}
-
-/// Build the tool instruction block for the system prompt so the LLM knows
-/// how to invoke tools.
-pub(crate) fn build_tool_instructions(tools_registry: &[Box<dyn Tool>]) -> String {
-    let mut instructions = String::new();
-    instructions.push_str("\n## Tool Use Protocol\n\n");
-    instructions.push_str("To use a tool, wrap a JSON object in <tool_call></tool_call> tags:\n\n");
-    instructions.push_str("```\n<tool_call>\n{\"name\": \"tool_name\", \"arguments\": {\"param\": \"value\"}}\n</tool_call>\n```\n\n");
-    instructions.push_str(
-        "CRITICAL: Output actual <tool_call> tags—never describe steps or give examples.\n\n",
-    );
-    instructions.push_str("Example: User says \"what's the date?\". You MUST respond with:\n<tool_call>\n{\"name\":\"shell\",\"arguments\":{\"command\":\"date\"}}\n</tool_call>\n\n");
-    instructions.push_str("You may use multiple tool calls in a single response. ");
-    instructions.push_str("After tool execution, results appear in <tool_result> tags. ");
-    instructions
-        .push_str("Continue reasoning with the results until you can give a final answer.\n\n");
-    instructions.push_str("### Available Tools\n\n");
-
-    for tool in tools_registry {
-        let _ = writeln!(
-            instructions,
-            "**{}**: {}\nParameters: `{}`\n",
-            tool.name(),
-            tool.description(),
-            tool.parameters_schema()
-        );
-    }
-
-    instructions
 }
 
 /// Surface configured autonomy/shell/path policy in the system prompt.

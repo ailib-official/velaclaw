@@ -7,10 +7,11 @@ use crate::observability::{Observer, ObserverEvent};
 use crate::security::PolicyHandle;
 use crate::tools::{Tool, ToolExecutionContext};
 use anyhow::Result;
-use regex::{Regex, RegexSet};
-use std::sync::LazyLock;
 use std::time::Instant;
 use tokio_util::sync::CancellationToken;
+use velaclaw_agent_runtime::normalize_tool_arguments;
+
+pub(crate) use velaclaw_agent_runtime::scrub_credentials;
 
 /// Parsed tool call from LLM output (loop-local shape without provider tool_call_id).
 #[derive(Debug, Clone)]
@@ -19,26 +20,6 @@ pub(crate) struct ParsedToolCall {
     pub arguments: serde_json::Value,
 }
 
-static SENSITIVE_KEY_PATTERNS: LazyLock<RegexSet> = LazyLock::new(|| {
-    RegexSet::new([
-        r"(?i)token",
-        r"(?i)api[_-]?key",
-        r"(?i)password",
-        r"(?i)secret",
-        r"(?i)user[_-]?key",
-        r"(?i)bearer",
-        r"(?i)credential",
-    ])
-    .unwrap()
-});
-
-static SENSITIVE_KV_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r#"(?i)(token|api[_-]?key|password|secret|user[_-]?key|bearer|credential)["']?\s*[:=]\s*(?:"([^"]{8,})"|'([^']{8,})'|([a-zA-Z0-9_\-\.]{8,}))"#,
-    )
-    .unwrap()
-});
-
 /// Output of one tool invocation in a batch.
 #[derive(Debug, Clone)]
 pub struct ToolBatchResult {
@@ -46,67 +27,8 @@ pub struct ToolBatchResult {
     pub success: bool,
 }
 
-/// Scrub credentials from tool output to prevent accidental exfiltration.
-pub(crate) fn scrub_credentials(input: &str) -> String {
-    let _ = &SENSITIVE_KEY_PATTERNS;
-    SENSITIVE_KV_REGEX
-        .replace_all(input, |caps: &regex::Captures| {
-            let full_match = &caps[0];
-            let key = &caps[1];
-            let val = caps
-                .get(2)
-                .or(caps.get(3))
-                .or(caps.get(4))
-                .map(|m| m.as_str())
-                .unwrap_or("");
-
-            let prefix = if val.len() > 4 { &val[..4] } else { "" };
-
-            if full_match.contains(':') {
-                if full_match.contains('"') {
-                    format!("\"{}\": \"{}*[REDACTED]\"", key, prefix)
-                } else {
-                    format!("{}: {}*[REDACTED]", key, prefix)
-                }
-            } else if full_match.contains('=') {
-                if full_match.contains('"') {
-                    format!("{}=\"{}*[REDACTED]\"", key, prefix)
-                } else {
-                    format!("{}={}*[REDACTED]", key, prefix)
-                }
-            } else {
-                format!("{}: {}*[REDACTED]", key, prefix)
-            }
-        })
-        .to_string()
-}
-
 fn find_tool<'a>(tools: &'a [Box<dyn Tool>], name: &str) -> Option<&'a dyn Tool> {
     tools.iter().find(|t| t.name() == name).map(|t| t.as_ref())
-}
-
-/// Map common DSML / model parameter aliases to tool schema keys.
-pub(crate) fn normalize_tool_arguments(
-    tool_name: &str,
-    mut args: serde_json::Value,
-) -> serde_json::Value {
-    let Some(obj) = args.as_object_mut() else {
-        return args;
-    };
-    match tool_name {
-        "file_read" | "file_write" if !obj.contains_key("path") => {
-            if let Some(path) = obj.remove("file_path") {
-                obj.insert("path".to_string(), path);
-            }
-        }
-        "shell" if !obj.contains_key("command") => {
-            if let Some(cmd) = obj.remove("cmd") {
-                obj.insert("command".to_string(), cmd);
-            }
-        }
-        _ => {}
-    }
-    args
 }
 
 async fn execute_one_tool(

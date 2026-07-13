@@ -56,6 +56,8 @@ Last verified: **July 12, 2026**.
 
 Opt-in context Envelope pilot (CR-L1): set `[agent].envelope_assemble = true` in `config.toml` (requires `--features ai-protocol`). Applies only to this CLI path; see [config-reference.md](config-reference.md).
 
+Opt-in template DAG shell (CR-L2): set `[agent].template_dag = true` to use `agent::dag_runner` APIs (handwritten DAG walk + per-node Envelope assemble; no AI-generated DAGs). See [config-reference.md](config-reference.md).
+
 Interactive REPL extras:
 
 - `/expand <id>` — replay a folded long tool/code block from the current session

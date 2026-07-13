@@ -357,6 +357,7 @@ impl Default for HardwareConfig {
 
 /// Agent orchestration configuration (`[agent]` section).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct AgentConfig {
     /// When true: bootstrap_max_chars=6000, rag_chunk_limit=2. Use for 13B or smaller models.
     #[serde(default)]
@@ -378,6 +379,10 @@ pub struct AgentConfig {
     /// Default: `false` (opt-in). Requires `--features ai-protocol`.
     #[serde(default)]
     pub envelope_assemble: bool,
+    /// CR-L2 template DAG shell (`agent::dag_runner`): opt-in structural runner.
+    /// Default: `false`. Requires `--features ai-protocol`. No AI-generated DAGs.
+    #[serde(default)]
+    pub template_dag: bool,
 }
 
 fn default_agent_max_tool_iterations() -> usize {
@@ -401,6 +406,7 @@ impl Default for AgentConfig {
             parallel_tools: false,
             tool_dispatcher: default_agent_tool_dispatcher(),
             envelope_assemble: false,
+            template_dag: false,
         }
     }
 }

@@ -2,6 +2,8 @@
 #[allow(clippy::module_inception)]
 pub mod agent;
 pub mod classifier;
+#[cfg(feature = "ai-protocol")]
+pub mod dag_runner;
 pub mod dispatcher;
 #[cfg(feature = "ai-protocol")]
 pub mod envelope_pilot;

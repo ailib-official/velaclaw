@@ -26,9 +26,8 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 use velaclaw_agent_runtime::loop_parse::{
     self, apply_compaction_summary, build_assistant_history_with_tool_calls,
-    build_compaction_transcript, build_native_assistant_history, tools_to_openai_format,
-    trim_history, ToolLoopCancelled, COMPACTION_KEEP_RECENT_MESSAGES, COMPACTION_MAX_SUMMARY_CHARS,
-    DEFAULT_MAX_HISTORY_MESSAGES, DEFAULT_MAX_TOOL_ITERATIONS,
+    build_compaction_transcript, build_native_assistant_history, trim_history, ToolLoopCancelled,
+    COMPACTION_KEEP_RECENT_MESSAGES, COMPACTION_MAX_SUMMARY_CHARS, DEFAULT_MAX_TOOL_ITERATIONS,
 };
 
 pub(crate) use velaclaw_agent_runtime::loop_parse::is_tool_loop_cancelled;
@@ -1614,6 +1613,9 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
+    use velaclaw_agent_runtime::loop_parse::{
+        tools_to_openai_format, DEFAULT_MAX_HISTORY_MESSAGES,
+    };
 
     #[test]
     fn test_scrub_credentials() {

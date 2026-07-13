@@ -84,6 +84,9 @@ With `[[model_routes]]` + `[query_classification]` enabled, CLI / `Agent::turn` 
 `process_message` resolve matching hints to `hint:<name>` for `RouterProvider`
 (see VL-RT-002). Keep `reliability.fallback_providers` for failover.
 
+Capability Tag vocabulary (Hint ↔ Tag, including `document_understanding`) lives in
+the plans repo: `docs/architecture/capability-mapping.md` (ADR-2026-07 L0).
+
 Requires a rebuild when upgrading the pinned `ai-lib-rust` revision (VL-RT-001).
 
 ## When you must rebuild / release

@@ -374,6 +374,10 @@ pub struct AgentConfig {
     /// Tool dispatch strategy (e.g. `"auto"`). Default: `"auto"`.
     #[serde(default = "default_agent_tool_dispatcher")]
     pub tool_dispatcher: String,
+    /// CR-L1 pilot: run `assemble_layered` on the CLI `velaclaw agent` path before each turn.
+    /// Default: `false` (opt-in). Requires `--features ai-protocol`.
+    #[serde(default)]
+    pub envelope_assemble: bool,
 }
 
 fn default_agent_max_tool_iterations() -> usize {
@@ -396,6 +400,7 @@ impl Default for AgentConfig {
             max_history_messages: default_agent_max_history_messages(),
             parallel_tools: false,
             tool_dispatcher: default_agent_tool_dispatcher(),
+            envelope_assemble: false,
         }
     }
 }

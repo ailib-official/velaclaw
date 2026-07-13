@@ -54,6 +54,8 @@ Last verified: **July 12, 2026**.
 - `velaclaw agent --no-color`
 - `velaclaw agent --no-fold`
 
+Opt-in context Envelope pilot (CR-L1): set `[agent].envelope_assemble = true` in `config.toml` (requires `--features ai-protocol`). Applies only to this CLI path; see [config-reference.md](config-reference.md).
+
 Interactive REPL extras:
 
 - `/expand <id>` — replay a folded long tool/code block from the current session

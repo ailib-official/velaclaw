@@ -3,6 +3,8 @@
 pub mod agent;
 pub mod classifier;
 pub mod dispatcher;
+#[cfg(feature = "ai-protocol")]
+pub mod envelope_pilot;
 pub mod loop_;
 pub mod memory_loader;
 pub mod prompt;

@@ -520,6 +520,11 @@ pub async fn start_channels(config: Config) -> Result<()> {
         workspace_tool_dispatcher,
         #[cfg(feature = "ai-protocol")]
         tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
+        #[cfg(feature = "ai-protocol")]
+        envelope_pilot: EnvelopePilotConfig {
+            enabled: config.agent.envelope_assemble,
+            compact_context: config.agent.compact_context,
+        },
         security: security.clone(),
         channel_approval_hub,
         approval_managers: Arc::new(Mutex::new(HashMap::new())),

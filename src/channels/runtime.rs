@@ -160,12 +160,23 @@ pub(crate) struct ChannelRuntimeContext {
     pub(crate) workspace_tool_dispatcher: Arc<Option<String>>,
     #[cfg(feature = "ai-protocol")]
     pub(crate) tool_dispatcher_cache: ToolDispatcherCacheMap,
+    /// CR-L2-005: opt-in Envelope assemble on channel turns.
+    #[cfg(feature = "ai-protocol")]
+    pub(crate) envelope_pilot: EnvelopePilotConfig,
     pub(crate) security: PolicyHandle,
     pub(crate) channel_approval_hub: Arc<ChannelApprovalHub>,
     pub(crate) approval_managers: Arc<Mutex<HashMap<String, Arc<ApprovalManager>>>>,
     pub(crate) autonomy_config: Arc<crate::config::AutonomyConfig>,
     pub(crate) approval_wiring: Arc<crate::config::ApprovalManagerWiring>,
     pub(crate) telegram_approval: Option<(ChannelApprovalMode, u64)>,
+}
+
+/// Bundled CR-L1/L2 Envelope pilot knobs for channel dispatch (keeps bool count low).
+#[cfg(feature = "ai-protocol")]
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct EnvelopePilotConfig {
+    pub(crate) enabled: bool,
+    pub(crate) compact_context: bool,
 }
 
 #[derive(Clone)]

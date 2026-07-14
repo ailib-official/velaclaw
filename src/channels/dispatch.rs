@@ -236,6 +236,47 @@ pub(crate) async fn process_channel_message(
     let system_prompt = build_channel_system_prompt(ctx.system_prompt.as_str(), &msg.channel);
     let mut history = vec![ChatMessage::system(system_prompt)];
     history.extend(prior_turns);
+
+    #[cfg(feature = "ai-protocol")]
+    {
+        if let Err(err) = crate::agent::envelope_pilot::apply_envelope_pilot(
+            &mut history,
+            ctx.envelope_pilot.enabled,
+            ctx.envelope_pilot.compact_context,
+        ) {
+            tracing::warn!(
+                channel = %msg.channel,
+                sender = %msg.sender,
+                "Envelope assemble failed (fail-closed): {err}"
+            );
+            // Undo the user turn we appended before assemble so the next message
+            // does not see an orphan user turn without an assistant reply.
+            if let Some(turns) = ctx
+                .conversation_histories
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get_mut(&history_key)
+            {
+                let _ = turns.pop();
+            }
+            if let Some(channel) = target_channel.as_ref() {
+                let reply = format!(
+                    "⚠️ Context envelope assembly failed. Message not processed.\nDetails: {err}"
+                );
+                if let Err(send_err) = channel
+                    .send(
+                        &SendMessage::new(&reply, &msg.reply_target)
+                            .in_thread(msg.thread_ts.clone()),
+                    )
+                    .await
+                {
+                    eprintln!("  ❌ Failed to reply on {}: {send_err}", channel.name());
+                }
+            }
+            return;
+        }
+    }
+
     let use_streaming = target_channel
         .as_ref()
         .is_some_and(|ch| ch.supports_draft_updates());

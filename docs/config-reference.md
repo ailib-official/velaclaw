@@ -71,7 +71,7 @@ Operational note for container users:
 | `parallel_tools` | `false` | Enable parallel tool execution within a single iteration |
 | `tool_dispatcher` | `auto` | Tool dispatch strategy |
 | `envelope_assemble` | `false` | **CR-L1 pilot (opt-in):** on `velaclaw agent` only, run ai-lib `assemble_layered` before each turn. HardBudgetViolation fails the turn explicitly. Requires `--features ai-protocol`. Channels/gateway unchanged. |
-| `template_dag` | `false` | **CR-L2 shell (opt-in):** enables template DAG runner APIs (`agent::dag_runner`) that walk handwritten DAGs and assemble Envelope per node. Fail-closed on max_steps / HardBudget. No LLM DAG generation. Requires `--features ai-protocol`. |
+| `template_dag` | `false` | **CR-L2 shell (opt-in):** enables template DAG runner APIs (`agent::dag_runner`) that walk handwritten DAGs and assemble Envelope per node. Fail-closed on max_steps / HardBudget. No LLM DAG generation. Requires `--features ai-protocol`. Operators can validate fixtures without enabling this flag via `velaclaw doctor template-dag --fixture <path>` (see [commands-reference.md](commands-reference.md)). |
 
 `tool_dispatcher` values:
 

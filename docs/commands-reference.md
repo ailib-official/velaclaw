@@ -85,6 +85,7 @@ See `[cli_render]` in [config-reference.md](config-reference.md).
 - `velaclaw doctor` — config, protocol, workspace, daemon, and environment checks; ends with a short `[maintenance]` hint (config vs rebuild)
 - `velaclaw doctor maintenance` — full operator guide (layers, hot-reload, preflight, when to rebuild)
 - `velaclaw doctor models [--provider <ID>] [--use-cache]`
+- `velaclaw doctor template-dag --fixture <path> [--message <text>] [--compact]` — validate a handwritten CR-L2 template DAG JSON (walk + Envelope assemble only; no LLM). Fail-closed on `max_steps` / HardBudget / invalid graph. Requires `--features ai-protocol`. Independent of `[agent].template_dag` (that flag gates future runtime wiring; default remains `false`).
 
 See [config-externalization.md](config-externalization.md) for the canonical operator contract.
 

@@ -1,4 +1,6 @@
 mod maintenance;
+#[cfg(feature = "ai-protocol")]
+mod template_dag;
 
 use crate::config::Config;
 use anyhow::Result;
@@ -7,6 +9,8 @@ use chrono::{DateTime, Utc};
 pub use maintenance::{print_maintenance_footer, print_maintenance_guide};
 use std::io::Write;
 use std::path::Path;
+#[cfg(feature = "ai-protocol")]
+pub use template_dag::run_template_dag_fixture;
 
 const DAEMON_STALE_SECONDS: i64 = 30;
 const SCHEDULER_STALE_SECONDS: i64 = 120;

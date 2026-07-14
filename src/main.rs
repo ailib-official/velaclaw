@@ -231,8 +231,9 @@ After the report, a short [maintenance] section explains what can change without
 rebuilding the binary versus when `cargo build` / `cargo install` is required.
 
 Subcommands:
-  maintenance  Full operator guide (config, policy, protocol vs rebuild)
-  models       Probe live model catalogs across providers")]
+  maintenance   Full operator guide (config, policy, protocol vs rebuild)
+  models        Probe live model catalogs across providers
+  template-dag  Validate a handwritten CR-L2 template DAG fixture (no LLM)")]
     Doctor {
         #[command(subcommand)]
         doctor_command: Option<DoctorCommands>,
@@ -551,6 +552,21 @@ enum DoctorCommands {
         /// Prefer cached catalogs when available (skip forced live refresh)
         #[arg(long)]
         use_cache: bool,
+    },
+
+    /// Validate a handwritten CR-L2 template DAG fixture (assemble-only; no LLM)
+    TemplateDag {
+        /// Path to a schema_version 0.1.0 template DAG JSON fixture
+        #[arg(long)]
+        fixture: String,
+
+        /// Seed user message passed into each node assemble (diagnostic only)
+        #[arg(long, default_value = "doctor template-dag probe")]
+        message: String,
+
+        /// Use compact ContextBudget (matches `[agent].compact_context` intent)
+        #[arg(long, default_value_t = false)]
+        compact: bool,
     },
 }
 

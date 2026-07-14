@@ -236,6 +236,25 @@ pub async fn dispatch_configured_command(command: Commands, config: Config) -> R
                 .await
                 .map_err(|e| anyhow::anyhow!("doctor models task failed: {e}"))?
             }
+            Some(DoctorCommands::TemplateDag {
+                fixture,
+                message,
+                compact,
+            }) => {
+                #[cfg(feature = "ai-protocol")]
+                {
+                    let _ = config;
+                    let path = std::path::PathBuf::from(fixture);
+                    doctor::run_template_dag_fixture(&path, &message, compact).map(|_| ())
+                }
+                #[cfg(not(feature = "ai-protocol"))]
+                {
+                    let _ = (config, fixture, message, compact);
+                    anyhow::bail!(
+                        "`velaclaw doctor template-dag` requires the `ai-protocol` Cargo feature"
+                    )
+                }
+            }
             None => doctor::run(&config),
         },
 

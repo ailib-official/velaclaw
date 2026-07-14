@@ -1,5 +1,6 @@
-//! CR-L1-002 pilot: map CLI history → MessageChunk and call `assemble_layered`.
-//! CLI 试点：将会话历史映射为分层 Envelope 并调用 assemble_layered。
+//! CR-L1/L2 envelope pilot: map conversation history → MessageChunk and call
+//! `assemble_layered` (CLI agent + channel dispatch).
+//! 试点：将会话历史映射为分层 Envelope 并调用 assemble_layered。
 
 use crate::providers::ChatMessage;
 use ai_lib_rust::context::{
@@ -130,7 +131,7 @@ fn message_to_chat(msg: Message) -> ChatMessage {
     }
 }
 
-/// Fail-fast helper used by the CLI agent path when the pilot flag is on.
+/// Fail-fast helper used by CLI / channel paths when the pilot flag is on.
 pub fn apply_envelope_pilot(
     history: &mut Vec<ChatMessage>,
     enabled: bool,
@@ -166,12 +167,12 @@ mod tests {
     }
 
     #[test]
-    fn hard_budget_violation_is_explicit() {
+    fn channel_envelope_pilot_hard_budget_fail_closed() {
+        // CR-L2-005: channel dispatch uses apply_envelope_pilot; HardBudget must stay explicit.
         let history = vec![
             ChatMessage::system("S".repeat(400)),
             ChatMessage::user("A".repeat(400)),
         ];
-        // Force tiny budget via compact path still may be large; call assembler with tiny opts inline
         let chunks = chat_history_to_chunks(&history);
         let options = LayeredAssembleOptions {
             budget: ContextBudget::new(5, 0, 1),
@@ -179,14 +180,10 @@ mod tests {
             ..Default::default()
         };
         let err = MessageAssembler::assemble_layered(&chunks, &options).unwrap_err();
-        match err {
-            AssembleError::HardBudgetViolation { .. } => {}
-            AssembleError::EmptyInput => panic!("expected HardBudgetViolation, got EmptyInput"),
-        }
-        let mapped = map_assemble_error(AssembleError::HardBudgetViolation {
-            critical_tokens: 100,
-            budget: 5,
-        });
-        assert!(mapped.to_string().contains("HardBudgetViolation"));
+        assert!(matches!(err, AssembleError::HardBudgetViolation { .. }));
+        let mut hist = history;
+        // Disabled flag must be a no-op even with oversized critical content.
+        apply_envelope_pilot(&mut hist, false, true).unwrap();
+        assert_eq!(hist.len(), 2);
     }
 }

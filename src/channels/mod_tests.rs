@@ -190,6 +190,8 @@ fn compact_sender_history_keeps_recent_truncated_messages() {
         workspace_tool_dispatcher: Arc::new(None),
         #[cfg(feature = "ai-protocol")]
         tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
+        #[cfg(feature = "ai-protocol")]
+        envelope_pilot: EnvelopePilotConfig::default(),
         security: test_channel_approval_runtime_fields().0,
         channel_approval_hub: test_channel_approval_runtime_fields().1,
         approval_managers: test_channel_approval_runtime_fields().2,
@@ -652,6 +654,8 @@ async fn process_channel_message_executes_tool_calls_instead_of_sending_raw_json
         workspace_tool_dispatcher: Arc::new(None),
         #[cfg(feature = "ai-protocol")]
         tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
+        #[cfg(feature = "ai-protocol")]
+        envelope_pilot: EnvelopePilotConfig::default(),
         security: test_channel_approval_runtime_fields().0,
         channel_approval_hub: test_channel_approval_runtime_fields().1,
         approval_managers: test_channel_approval_runtime_fields().2,
@@ -721,6 +725,8 @@ async fn process_channel_message_strips_unexecuted_tool_json_artifacts_from_repl
         workspace_tool_dispatcher: Arc::new(None),
         #[cfg(feature = "ai-protocol")]
         tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
+        #[cfg(feature = "ai-protocol")]
+        envelope_pilot: EnvelopePilotConfig::default(),
         security: test_channel_approval_runtime_fields().0,
         channel_approval_hub: test_channel_approval_runtime_fields().1,
         approval_managers: test_channel_approval_runtime_fields().2,
@@ -790,6 +796,8 @@ async fn process_channel_message_executes_tool_calls_with_alias_tags() {
         workspace_tool_dispatcher: Arc::new(None),
         #[cfg(feature = "ai-protocol")]
         tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
+        #[cfg(feature = "ai-protocol")]
+        envelope_pilot: EnvelopePilotConfig::default(),
         security: test_channel_approval_runtime_fields().0,
         channel_approval_hub: test_channel_approval_runtime_fields().1,
         approval_managers: test_channel_approval_runtime_fields().2,
@@ -868,6 +876,8 @@ async fn process_channel_message_handles_models_command_without_llm_call() {
         workspace_tool_dispatcher: Arc::new(None),
         #[cfg(feature = "ai-protocol")]
         tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
+        #[cfg(feature = "ai-protocol")]
+        envelope_pilot: EnvelopePilotConfig::default(),
         security: test_channel_approval_runtime_fields().0,
         channel_approval_hub: test_channel_approval_runtime_fields().1,
         approval_managers: test_channel_approval_runtime_fields().2,
@@ -969,6 +979,8 @@ async fn process_channel_message_uses_route_override_provider_and_model() {
         workspace_tool_dispatcher: Arc::new(None),
         #[cfg(feature = "ai-protocol")]
         tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
+        #[cfg(feature = "ai-protocol")]
+        envelope_pilot: EnvelopePilotConfig::default(),
         security: test_channel_approval_runtime_fields().0,
         channel_approval_hub: test_channel_approval_runtime_fields().1,
         approval_managers: test_channel_approval_runtime_fields().2,
@@ -1050,6 +1062,8 @@ async fn process_channel_message_prefers_cached_default_provider_instance() {
         workspace_tool_dispatcher: Arc::new(None),
         #[cfg(feature = "ai-protocol")]
         tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
+        #[cfg(feature = "ai-protocol")]
+        envelope_pilot: EnvelopePilotConfig::default(),
         security: test_channel_approval_runtime_fields().0,
         channel_approval_hub: test_channel_approval_runtime_fields().1,
         approval_managers: test_channel_approval_runtime_fields().2,
@@ -1147,6 +1161,8 @@ async fn process_channel_message_uses_runtime_default_model_from_store() {
         workspace_tool_dispatcher: Arc::new(None),
         #[cfg(feature = "ai-protocol")]
         tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
+        #[cfg(feature = "ai-protocol")]
+        envelope_pilot: EnvelopePilotConfig::default(),
         security: test_channel_approval_runtime_fields().0,
         channel_approval_hub: test_channel_approval_runtime_fields().1,
         approval_managers: test_channel_approval_runtime_fields().2,
@@ -1256,6 +1272,8 @@ async fn process_channel_message_uses_runtime_max_tool_iterations_from_store() {
         workspace_tool_dispatcher: Arc::new(None),
         #[cfg(feature = "ai-protocol")]
         tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
+        #[cfg(feature = "ai-protocol")]
+        envelope_pilot: EnvelopePilotConfig::default(),
         security: test_channel_approval_runtime_fields().0,
         channel_approval_hub: test_channel_approval_runtime_fields().1,
         approval_managers: test_channel_approval_runtime_fields().2,
@@ -1332,6 +1350,8 @@ async fn process_channel_message_respects_configured_max_tool_iterations_above_d
         workspace_tool_dispatcher: Arc::new(None),
         #[cfg(feature = "ai-protocol")]
         tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
+        #[cfg(feature = "ai-protocol")]
+        envelope_pilot: EnvelopePilotConfig::default(),
         security: test_channel_approval_runtime_fields().0,
         channel_approval_hub: test_channel_approval_runtime_fields().1,
         approval_managers: test_channel_approval_runtime_fields().2,
@@ -1402,6 +1422,8 @@ async fn process_channel_message_reports_configured_max_tool_iterations_limit() 
         workspace_tool_dispatcher: Arc::new(None),
         #[cfg(feature = "ai-protocol")]
         tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
+        #[cfg(feature = "ai-protocol")]
+        envelope_pilot: EnvelopePilotConfig::default(),
         security: test_channel_approval_runtime_fields().0,
         channel_approval_hub: test_channel_approval_runtime_fields().1,
         approval_managers: test_channel_approval_runtime_fields().2,
@@ -1583,6 +1605,8 @@ async fn message_dispatch_processes_messages_in_parallel() {
         workspace_tool_dispatcher: Arc::new(None),
         #[cfg(feature = "ai-protocol")]
         tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
+        #[cfg(feature = "ai-protocol")]
+        envelope_pilot: EnvelopePilotConfig::default(),
         security: test_channel_approval_runtime_fields().0,
         channel_approval_hub: test_channel_approval_runtime_fields().1,
         approval_managers: test_channel_approval_runtime_fields().2,
@@ -1673,6 +1697,8 @@ async fn message_dispatch_interrupts_in_flight_telegram_request_and_preserves_co
         workspace_tool_dispatcher: Arc::new(None),
         #[cfg(feature = "ai-protocol")]
         tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
+        #[cfg(feature = "ai-protocol")]
+        envelope_pilot: EnvelopePilotConfig::default(),
         security: test_channel_approval_runtime_fields().0,
         channel_approval_hub: test_channel_approval_runtime_fields().1,
         approval_managers: test_channel_approval_runtime_fields().2,
@@ -1775,6 +1801,8 @@ async fn message_dispatch_interrupt_scope_is_same_sender_same_chat() {
         workspace_tool_dispatcher: Arc::new(None),
         #[cfg(feature = "ai-protocol")]
         tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
+        #[cfg(feature = "ai-protocol")]
+        envelope_pilot: EnvelopePilotConfig::default(),
         security: test_channel_approval_runtime_fields().0,
         channel_approval_hub: test_channel_approval_runtime_fields().1,
         approval_managers: test_channel_approval_runtime_fields().2,
@@ -1859,6 +1887,8 @@ async fn process_channel_message_cancels_scoped_typing_task() {
         workspace_tool_dispatcher: Arc::new(None),
         #[cfg(feature = "ai-protocol")]
         tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
+        #[cfg(feature = "ai-protocol")]
+        envelope_pilot: EnvelopePilotConfig::default(),
         security: test_channel_approval_runtime_fields().0,
         channel_approval_hub: test_channel_approval_runtime_fields().1,
         approval_managers: test_channel_approval_runtime_fields().2,
@@ -2382,6 +2412,8 @@ async fn process_channel_message_restores_per_sender_history_on_follow_ups() {
         workspace_tool_dispatcher: Arc::new(None),
         #[cfg(feature = "ai-protocol")]
         tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
+        #[cfg(feature = "ai-protocol")]
+        envelope_pilot: EnvelopePilotConfig::default(),
         security: test_channel_approval_runtime_fields().0,
         channel_approval_hub: test_channel_approval_runtime_fields().1,
         approval_managers: test_channel_approval_runtime_fields().2,
@@ -2477,6 +2509,8 @@ async fn process_channel_message_enriches_current_turn_without_persisting_contex
         workspace_tool_dispatcher: Arc::new(None),
         #[cfg(feature = "ai-protocol")]
         tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
+        #[cfg(feature = "ai-protocol")]
+        envelope_pilot: EnvelopePilotConfig::default(),
         security: test_channel_approval_runtime_fields().0,
         channel_approval_hub: test_channel_approval_runtime_fields().1,
         approval_managers: test_channel_approval_runtime_fields().2,
@@ -2572,6 +2606,8 @@ async fn process_channel_message_telegram_keeps_system_instruction_at_top_only()
         workspace_tool_dispatcher: Arc::new(None),
         #[cfg(feature = "ai-protocol")]
         tool_dispatcher_cache: Arc::new(Mutex::new(HashMap::new())),
+        #[cfg(feature = "ai-protocol")]
+        envelope_pilot: EnvelopePilotConfig::default(),
         security: test_channel_approval_runtime_fields().0,
         channel_approval_hub: test_channel_approval_runtime_fields().1,
         approval_managers: test_channel_approval_runtime_fields().2,

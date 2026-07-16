@@ -71,7 +71,8 @@ Operational note for container users:
 | `parallel_tools` | `false` | Enable parallel tool execution within a single iteration |
 | `tool_dispatcher` | `auto` | Tool dispatch strategy |
 | `envelope_assemble` | `false` | **CR-L1/L2 pilot (opt-in):** run ai-lib `assemble_layered` before each turn on `velaclaw agent` **and** channel dispatch (`channels/dispatch`). HardBudgetViolation fails the turn explicitly (channels reply with an error and drop the pending user turn). Requires `--features ai-protocol`. Default remains off. |
-| `template_dag` | `false` | **CR-L2 shell (opt-in):** enables template DAG runner APIs (`agent::dag_runner`) that walk handwritten DAGs and assemble Envelope per node. Fail-closed on max_steps / HardBudget. No LLM DAG generation. Requires `--features ai-protocol`. Operators can validate fixtures without enabling this flag via `velaclaw doctor template-dag --fixture <path>` (see [commands-reference.md](commands-reference.md)). |
+| `envelope_assemble_async` | `false` | **CR-L3-003 (opt-in):** when `envelope_assemble` is true, schedule assemble via ai-lib `AssemblePool` / `assemble_layered_async` (bounded concurrency + timeout; fail-closed on QueueFull/Timeout/HardBudget). Default remains **off** (sync path). Does **not** promote Experimental Envelope/Tag to a stable Facade. Requires `--features ai-protocol`. |
+| `template_dag` | `false` | **CR-L2 shell (opt-in):** enables template DAG runner APIs (`agent::dag_runner`) that walk handwritten DAGs and assemble Envelope per node. Fail-closed on max_steps / HardBudget. No LLM DAG generation. Requires `--features ai-protocol`. Operators can validate fixtures without enabling this flag via `velaclaw doctor template-dag --fixture <path>` (see [commands-reference.md](commands-reference.md)). Doctor / template shell keep **sync** assemble (same algorithm); async schedule applies to live Envelope pilot paths above. |
 
 `tool_dispatcher` values:
 

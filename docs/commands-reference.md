@@ -56,6 +56,8 @@ Last verified: **July 12, 2026**.
 
 Opt-in context Envelope pilot (CR-L1/L2): set `[agent].envelope_assemble = true` in `config.toml` (requires `--features ai-protocol`). Applies to `velaclaw agent` **and** channel message dispatch; HardBudget fails the turn (channel replies with an error). See [config-reference.md](config-reference.md).
 
+CR-L3-003 async schedule façade (opt-in, default off): set `[agent].envelope_assemble_async = true` **in addition to** `envelope_assemble = true` to use ai-lib `AssemblePool` (same assemble algorithm; bounded concurrency / timeout; fail-closed). Sync remains the default path.
+
 Opt-in template DAG shell (CR-L2): set `[agent].template_dag = true` to use `agent::dag_runner` APIs (handwritten DAG walk + per-node Envelope assemble; no AI-generated DAGs). See [config-reference.md](config-reference.md).
 
 Interactive REPL extras:

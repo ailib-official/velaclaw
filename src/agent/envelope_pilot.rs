@@ -1,16 +1,25 @@
-//! CR-L1/L2 envelope pilot: map conversation history → MessageChunk and call
-//! `assemble_layered` (CLI agent + channel dispatch).
-//! 试点：将会话历史映射为分层 Envelope 并调用 assemble_layered。
+//! CR-L1/L2 envelope pilot + CR-L3-003 opt-in async schedule façade.
+//! Map conversation history → MessageChunk and call `assemble_layered`
+//! (sync) or `AssemblePool` / `assemble_layered_async` (opt-in).
+//! 试点：将会话历史映射为分层 Envelope；默认同步装配，可选异步调度 façade。
+
+use std::sync::OnceLock;
 
 use crate::providers::ChatMessage;
 use ai_lib_rust::context::{
-    AssembleError, AssembleStrategy, ContextBudget, ContextLayer, LayeredAssembleOptions,
-    MessageAssembler, MessageChunk, ModelCapacity,
+    AssembleError, AssemblePool, AssemblePoolConfig, AssembleStrategy, ContextBudget, ContextLayer,
+    LayeredAssembleOptions, MessageAssembler, MessageChunk, ModelCapacity,
 };
 use ai_lib_rust::types::message::Message;
 use anyhow::{bail, Context, Result};
 
-/// Apply layered assembly to a CLI conversation history.
+/// Shared bounded pool for CR-L3-003 async Envelope assemble (host opt-in only).
+fn assemble_pool() -> &'static AssemblePool {
+    static POOL: OnceLock<AssemblePool> = OnceLock::new();
+    POOL.get_or_init(|| AssemblePool::new(AssemblePoolConfig::default()))
+}
+
+/// Apply layered assembly to a CLI conversation history (sync algorithm truth).
 ///
 /// Minimal layer mapping (pilot):
 /// - `system` → System (critical)
@@ -28,17 +37,7 @@ pub fn assemble_history_layered(
     }
 
     let chunks = chat_history_to_chunks(history);
-    let budget = if compact_context {
-        ContextBudget::new(8_192, 0, 1)
-    } else {
-        ContextBudget::from_capacity(ModelCapacity::UNKNOWN, 2)
-    };
-    let options = LayeredAssembleOptions {
-        budget,
-        strategy: AssembleStrategy::Chat,
-        ..Default::default()
-    };
-
+    let options = layered_options(compact_context);
     let report =
         MessageAssembler::assemble_layered(&chunks, &options).map_err(map_assemble_error)?;
 
@@ -52,6 +51,45 @@ pub fn assemble_history_layered(
     Ok(report.messages.into_iter().map(message_to_chat).collect())
 }
 
+/// CR-L3-003: same assemble semantics as [`assemble_history_layered`], scheduled via
+/// [`AssemblePool`] (bounded concurrency + per-job timeout; fail-closed).
+pub async fn assemble_history_layered_async(
+    history: &[ChatMessage],
+    compact_context: bool,
+) -> Result<Vec<ChatMessage>> {
+    if history.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let chunks = chat_history_to_chunks(history);
+    let options = layered_options(compact_context);
+    let report = MessageAssembler::assemble_layered_async(chunks, options, assemble_pool())
+        .await
+        .map_err(map_assemble_error)?;
+
+    tracing::debug!(
+        dropped_chunks = report.dropped_prefix,
+        folded_tool_segments = report.folded_tool_segments,
+        kept = report.messages.len(),
+        "envelope pilot assemble_layered_async"
+    );
+
+    Ok(report.messages.into_iter().map(message_to_chat).collect())
+}
+
+fn layered_options(compact_context: bool) -> LayeredAssembleOptions {
+    let budget = if compact_context {
+        ContextBudget::new(8_192, 0, 1)
+    } else {
+        ContextBudget::from_capacity(ModelCapacity::UNKNOWN, 2)
+    };
+    LayeredAssembleOptions {
+        budget,
+        strategy: AssembleStrategy::Chat,
+        ..Default::default()
+    }
+}
+
 fn map_assemble_error(err: AssembleError) -> anyhow::Error {
     match err {
         AssembleError::HardBudgetViolation {
@@ -61,6 +99,15 @@ fn map_assemble_error(err: AssembleError) -> anyhow::Error {
             "envelope HardBudgetViolation: critical layers need {critical_tokens} tokens but budget is {budget} (refusing to strip System/Active)"
         ),
         AssembleError::EmptyInput => anyhow::anyhow!("envelope assemble: empty input"),
+        AssembleError::QueueFull { max_in_flight } => anyhow::anyhow!(
+            "envelope assemble queue full (max_in_flight={max_in_flight}; fail-closed)"
+        ),
+        AssembleError::Timeout { timeout_ms } => {
+            anyhow::anyhow!("envelope assemble timed out after {timeout_ms}ms (fail-closed)")
+        }
+        AssembleError::WorkerFailed => {
+            anyhow::anyhow!("envelope assemble worker failed (fail-closed)")
+        }
     }
 }
 
@@ -131,7 +178,7 @@ fn message_to_chat(msg: Message) -> ChatMessage {
     }
 }
 
-/// Fail-fast helper used by CLI / channel paths when the pilot flag is on.
+/// Fail-fast helper used by sync tests / callers when the pilot flag is on.
 pub fn apply_envelope_pilot(
     history: &mut Vec<ChatMessage>,
     enabled: bool,
@@ -142,6 +189,35 @@ pub fn apply_envelope_pilot(
     }
     let assembled = assemble_history_layered(history, compact_context)
         .with_context(|| "CR-L1 envelope pilot assemble_layered")?;
+    if assembled.is_empty() {
+        bail!("envelope pilot produced empty history");
+    }
+    *history = assembled;
+    Ok(())
+}
+
+/// Host path for CLI / channel dispatch (CR-L3-003).
+///
+/// - `enabled=false` → no-op (default).
+/// - `enabled=true`, `use_async_pool=false` → sync `assemble_layered` (CR-L1/L2).
+/// - `enabled=true`, `use_async_pool=true` → `AssemblePool` schedule façade (same algorithm).
+pub async fn apply_envelope_pilot_async(
+    history: &mut Vec<ChatMessage>,
+    enabled: bool,
+    compact_context: bool,
+    use_async_pool: bool,
+) -> Result<()> {
+    if !enabled || history.is_empty() {
+        return Ok(());
+    }
+    let assembled = if use_async_pool {
+        assemble_history_layered_async(history, compact_context)
+            .await
+            .with_context(|| "CR-L3-003 envelope pilot assemble_layered_async")?
+    } else {
+        assemble_history_layered(history, compact_context)
+            .with_context(|| "CR-L1 envelope pilot assemble_layered")?
+    };
     if assembled.is_empty() {
         bail!("envelope pilot produced empty history");
     }
@@ -185,5 +261,60 @@ mod tests {
         // Disabled flag must be a no-op even with oversized critical content.
         apply_envelope_pilot(&mut hist, false, true).unwrap();
         assert_eq!(hist.len(), 2);
+    }
+
+    #[test]
+    fn async_assemble_opt_in_flag_off_stays_sync_path() {
+        // CR-L3-003: use_async_pool=false keeps sync assemble (flag default).
+        let history = vec![ChatMessage::system("sys"), ChatMessage::user("ask")];
+        let sync_out = assemble_history_layered(&history, false).unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let mut hist = history.clone();
+        rt.block_on(apply_envelope_pilot_async(&mut hist, true, false, false))
+            .unwrap();
+        assert_eq!(hist.len(), sync_out.len());
+        assert_eq!(hist[0].content, sync_out[0].content);
+        assert_eq!(hist[1].content, sync_out[1].content);
+    }
+
+    #[test]
+    fn async_assemble_opt_in_flag_on_matches_sync_under_budget() {
+        // CR-L3-003: async façade must match sync algorithm under budget.
+        let history = vec![
+            ChatMessage::system("sys"),
+            ChatMessage::user("old"),
+            ChatMessage::assistant("reply"),
+            ChatMessage::user("ask"),
+        ];
+        let sync_out = assemble_history_layered(&history, false).unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let async_out = rt
+            .block_on(assemble_history_layered_async(&history, false))
+            .unwrap();
+        assert_eq!(sync_out.len(), async_out.len());
+        for (s, a) in sync_out.iter().zip(async_out.iter()) {
+            assert_eq!(s.role, a.role);
+            assert_eq!(s.content, a.content);
+        }
+    }
+
+    #[test]
+    fn async_assemble_opt_in_disabled_is_noop() {
+        let mut hist = vec![ChatMessage::system("sys"), ChatMessage::user("ask")];
+        let before = hist.clone();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(apply_envelope_pilot_async(&mut hist, false, false, true))
+            .unwrap();
+        assert_eq!(hist.len(), before.len());
+        assert_eq!(hist[0].content, before[0].content);
     }
 }

@@ -384,6 +384,15 @@ fn map_assemble_error(err: AssembleError) -> anyhow::Error {
             "envelope HardBudgetViolation: critical layers need {critical_tokens} tokens but budget is {budget} (refusing to strip System/Active)"
         ),
         AssembleError::EmptyInput => anyhow::anyhow!("envelope assemble: empty input"),
+        AssembleError::QueueFull { max_in_flight } => anyhow::anyhow!(
+            "envelope assemble queue full (max_in_flight={max_in_flight}; fail-closed)"
+        ),
+        AssembleError::Timeout { timeout_ms } => {
+            anyhow::anyhow!("envelope assemble timed out after {timeout_ms}ms (fail-closed)")
+        }
+        AssembleError::WorkerFailed => {
+            anyhow::anyhow!("envelope assemble worker failed (fail-closed)")
+        }
     }
 }
 

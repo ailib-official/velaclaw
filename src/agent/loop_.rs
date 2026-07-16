@@ -1089,11 +1089,13 @@ pub async fn run(
         ];
 
         #[cfg(feature = "ai-protocol")]
-        crate::agent::envelope_pilot::apply_envelope_pilot(
+        crate::agent::envelope_pilot::apply_envelope_pilot_async(
             &mut history,
             config.agent.envelope_assemble,
             config.agent.compact_context,
-        )?;
+            config.agent.envelope_assemble_async,
+        )
+        .await?;
 
         let turn_model = crate::agent::classifier::resolve_model_for_message(
             &config.query_classification,
@@ -1285,11 +1287,13 @@ pub async fn run(
             history.push(ChatMessage::user(&enriched));
 
             #[cfg(feature = "ai-protocol")]
-            crate::agent::envelope_pilot::apply_envelope_pilot(
+            crate::agent::envelope_pilot::apply_envelope_pilot_async(
                 &mut history,
                 config.agent.envelope_assemble,
                 config.agent.compact_context,
-            )?;
+                config.agent.envelope_assemble_async,
+            )
+            .await?;
 
             let turn_model = crate::agent::classifier::resolve_model_for_message(
                 &config.query_classification,

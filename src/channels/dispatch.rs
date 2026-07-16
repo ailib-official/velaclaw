@@ -239,11 +239,14 @@ pub(crate) async fn process_channel_message(
 
     #[cfg(feature = "ai-protocol")]
     {
-        if let Err(err) = crate::agent::envelope_pilot::apply_envelope_pilot(
+        if let Err(err) = crate::agent::envelope_pilot::apply_envelope_pilot_async(
             &mut history,
             ctx.envelope_pilot.enabled,
             ctx.envelope_pilot.compact_context,
-        ) {
+            ctx.envelope_pilot.use_async_pool,
+        )
+        .await
+        {
             tracing::warn!(
                 channel = %msg.channel,
                 sender = %msg.sender,

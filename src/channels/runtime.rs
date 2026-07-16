@@ -171,11 +171,13 @@ pub(crate) struct ChannelRuntimeContext {
     pub(crate) telegram_approval: Option<(ChannelApprovalMode, u64)>,
 }
 
-/// Bundled CR-L1/L2 Envelope pilot knobs for channel dispatch (keeps bool count low).
+/// Bundled CR-L1/L2/L3 Envelope pilot knobs for channel dispatch (keeps bool count low).
 #[cfg(feature = "ai-protocol")]
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct EnvelopePilotConfig {
     pub(crate) enabled: bool,
+    /// CR-L3-003: use `AssemblePool` when `enabled` (default false → sync assemble).
+    pub(crate) use_async_pool: bool,
     pub(crate) compact_context: bool,
 }
 

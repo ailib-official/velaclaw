@@ -379,6 +379,12 @@ pub struct AgentConfig {
     /// Default: `false` (opt-in). Requires `--features ai-protocol`.
     #[serde(default)]
     pub envelope_assemble: bool,
+    /// CR-L3-003: when `envelope_assemble` is on, schedule via ai-lib `AssemblePool`
+    /// (`assemble_layered_async`) instead of sync `assemble_layered`.
+    /// Default: `false` (opt-in). Sync remains the default algorithm path.
+    /// Requires `--features ai-protocol`. Does not promote Experimental Envelope to stable Facade.
+    #[serde(default)]
+    pub envelope_assemble_async: bool,
     /// CR-L2 template DAG shell (`agent::dag_runner`): opt-in structural runner.
     /// Default: `false`. Requires `--features ai-protocol`. No AI-generated DAGs.
     #[serde(default)]
@@ -406,6 +412,7 @@ impl Default for AgentConfig {
             parallel_tools: false,
             tool_dispatcher: default_agent_tool_dispatcher(),
             envelope_assemble: false,
+            envelope_assemble_async: false,
             template_dag: false,
         }
     }

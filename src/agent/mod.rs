@@ -9,6 +9,8 @@ pub mod dag_runner;
 pub mod dispatcher;
 #[cfg(feature = "ai-protocol")]
 pub mod envelope_pilot;
+#[cfg(feature = "ai-protocol")]
+pub mod intent_route;
 pub mod loop_;
 pub mod memory_loader;
 pub mod prompt;

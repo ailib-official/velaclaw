@@ -398,6 +398,12 @@ pub struct AgentConfig {
     /// CR-L4-003: optional stagnation limit forwarded to candidate shadow runs (`0` = off).
     #[serde(default)]
     pub candidate_dag_stagnation_limit: u32,
+    /// CR-CAP-003: opt-in intent→Tag→capability-index→constraints model route.
+    /// Default: `false`. When false, prior `query_classification` / `hint:` path is unchanged.
+    /// When true, empty Tag candidate sets fail closed (no silent `default_model`).
+    /// Requires `--features ai-protocol`. Does not write into public ai-protocol manifests.
+    #[serde(default)]
+    pub intent_capability_route: bool,
 }
 
 fn default_agent_max_tool_iterations() -> usize {
@@ -425,6 +431,7 @@ impl Default for AgentConfig {
             template_dag: false,
             candidate_dag_shadow: false,
             candidate_dag_stagnation_limit: 0,
+            intent_capability_route: false,
         }
     }
 }

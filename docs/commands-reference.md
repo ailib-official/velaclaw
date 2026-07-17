@@ -60,6 +60,8 @@ CR-L3-003 async schedule façade (opt-in, default off): set `[agent].envelope_as
 
 Opt-in template DAG shell (CR-L2): set `[agent].template_dag = true` to use `agent::dag_runner` APIs (handwritten DAG walk + per-node Envelope assemble; no AI-generated DAGs). See [config-reference.md](config-reference.md).
 
+CR-L4-002 library (not live-wired): `agent::candidate_dag::{validate_candidate_dag_json, run_candidate_or_fallback}` — schema/capability fail or run abort can fall back to a handwritten L2 template; optional output-hash stagnation via `TemplateRunOptions`. Default host path unchanged until CR-L4-003.
+
 Interactive REPL extras:
 
 - `/expand <id>` — replay a folded long tool/code block from the current session

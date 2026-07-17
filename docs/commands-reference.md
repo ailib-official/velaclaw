@@ -60,7 +60,13 @@ CR-L3-003 async schedule façade (opt-in, default off): set `[agent].envelope_as
 
 Opt-in template DAG shell (CR-L2): set `[agent].template_dag = true` to use `agent::dag_runner` APIs (handwritten DAG walk + per-node Envelope assemble; no AI-generated DAGs). See [config-reference.md](config-reference.md).
 
-CR-L4-002 library (not live-wired): `agent::candidate_dag::{validate_candidate_dag_json, run_candidate_or_fallback}` — schema/capability fail or run abort can fall back to a handwritten L2 template; optional output-hash stagnation via `TemplateRunOptions`. Default host path unchanged until CR-L4-003.
+CR-L4-002 library: `agent::candidate_dag::{validate_candidate_dag_json, run_candidate_or_fallback}` — schema/capability fail or run abort can fall back to a handwritten L2 template; optional output-hash stagnation via `TemplateRunOptions`.
+
+CR-L4-003 shadow host (default-off): set `[agent].candidate_dag_shadow = true` to allow `maybe_run_candidate_shadow`. Live agent chat loop stays unchanged. Observe anytime with:
+
+```bash
+velaclaw doctor candidate-dag --candidate <path> [--fallback <path>] [--message <text>] [--compact] [--stagnation-limit N]
+```
 
 Interactive REPL extras:
 
@@ -90,6 +96,7 @@ See `[cli_render]` in [config-reference.md](config-reference.md).
 - `velaclaw doctor maintenance` — full operator guide (layers, hot-reload, preflight, when to rebuild)
 - `velaclaw doctor models [--provider <ID>] [--use-cache]`
 - `velaclaw doctor template-dag --fixture <path> [--message <text>] [--compact]` — validate a handwritten CR-L2 template DAG JSON (walk + Envelope assemble only; no LLM). Fail-closed on `max_steps` / HardBudget / invalid graph. Requires `--features ai-protocol`. Independent of `[agent].template_dag` (that flag gates future runtime wiring; default remains `false`).
+- `velaclaw doctor candidate-dag --candidate <path> [--fallback <path>] [--message <text>] [--compact] [--stagnation-limit N]` — CR-L4-003 shadow observe: validate candidate DAG + optional L2 fallback (assemble-only; no LLM). Independent of `[agent].candidate_dag_shadow` (default `false`). Requires `--features ai-protocol`.
 
 See [config-externalization.md](config-externalization.md) for the canonical operator contract.
 

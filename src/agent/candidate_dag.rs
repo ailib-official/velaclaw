@@ -293,10 +293,61 @@ fn emit_l4_fallback(category: CandidateFailCategory, reason: &str) {
     );
 }
 
+/// CR-L4-003: host knobs for the opt-in shadow path (default-off).
+#[derive(Debug, Clone)]
+pub struct CandidateShadowHost {
+    pub enabled: bool,
+    pub compact_context: bool,
+    pub stagnation_limit: u32,
+}
+
+impl CandidateShadowHost {
+    pub fn from_agent_config(agent: &crate::config::AgentConfig) -> Self {
+        Self {
+            enabled: agent.candidate_dag_shadow,
+            compact_context: agent.compact_context,
+            stagnation_limit: agent.candidate_dag_stagnation_limit,
+        }
+    }
+}
+
+/// Run candidate→fallback when `[agent].candidate_dag_shadow` is true; otherwise `Ok(None)`.
+///
+/// Does not enable a default-on live agent loop. Callers (future CR-L4 host wire /
+/// doctor probes that opt in) must pass candidate + fallback JSON explicitly.
+pub fn maybe_run_candidate_shadow(
+    host: &CandidateShadowHost,
+    candidate_json: &str,
+    fallback_template_json: &str,
+    seed_user_message: &str,
+) -> Result<Option<CandidateRunReport>> {
+    if !host.enabled {
+        tracing::debug!("candidate_dag_shadow disabled; skipping shadow run");
+        return Ok(None);
+    }
+    let options = CandidateRunOptions {
+        seed_user_message: seed_user_message.to_string(),
+        compact_context: host.compact_context,
+        fallback_on_schema_fail: true,
+        fallback_on_abort: true,
+        stagnation_limit: host.stagnation_limit,
+    };
+    let report = run_candidate_or_fallback(candidate_json, fallback_template_json, &options)?;
+    tracing::info!(
+        shadow = true,
+        used_fallback = report.used_fallback,
+        dag_id = %report.run.dag_id,
+        m3d_category = report.schema_category.as_str(),
+        "candidate_dag_shadow_run"
+    );
+    Ok(Some(report))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::agent::dag_runner::CODE_FIX_TEMPLATE_JSON;
+    use crate::config::AgentConfig;
 
     const VALID_CANDIDATE: &str = r#"{
       "schema_version":"0.1.0",
@@ -427,5 +478,43 @@ mod tests {
             .contains("run_abort"));
         assert_eq!(report.run.dag_id, "code-fix-template");
         assert!(report.run.success);
+    }
+
+    #[test]
+    fn shadow_host_default_off_is_noop() {
+        let host = CandidateShadowHost::from_agent_config(&AgentConfig::default());
+        assert!(!host.enabled);
+        let out = maybe_run_candidate_shadow(&host, VALID_CANDIDATE, CODE_FIX_TEMPLATE_JSON, "x")
+            .unwrap();
+        assert!(out.is_none());
+    }
+
+    #[test]
+    fn shadow_host_opt_in_runs_candidate() {
+        let mut agent = AgentConfig::default();
+        agent.candidate_dag_shadow = true;
+        let host = CandidateShadowHost::from_agent_config(&agent);
+        let out = maybe_run_candidate_shadow(
+            &host,
+            VALID_CANDIDATE,
+            CODE_FIX_TEMPLATE_JSON,
+            "review patch",
+        )
+        .unwrap()
+        .expect("shadow enabled");
+        assert!(!out.used_fallback);
+        assert_eq!(out.run.dag_id, "candidate-linear-review");
+    }
+
+    #[test]
+    fn shadow_host_opt_in_falls_back_on_bad_candidate() {
+        let mut agent = AgentConfig::default();
+        agent.candidate_dag_shadow = true;
+        let host = CandidateShadowHost::from_agent_config(&agent);
+        let out = maybe_run_candidate_shadow(&host, BAD_CAP, CODE_FIX_TEMPLATE_JSON, "x")
+            .unwrap()
+            .expect("shadow enabled");
+        assert!(out.used_fallback);
+        assert_eq!(out.run.dag_id, "code-fix-template");
     }
 }

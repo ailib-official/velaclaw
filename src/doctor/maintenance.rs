@@ -56,6 +56,9 @@ pub fn print_maintenance_guide() {
     println!(
         "  velaclaw doctor candidate-dag --candidate <path> — CR-L4 candidate shadow check (no LLM)"
     );
+    println!(
+        "  velaclaw doctor capabilities [--tag <Tag>] [--rebuild] — host Tag→candidates index"
+    );
     println!("  velaclaw providers         — list provider IDs and active default");
     println!("  velaclaw status            — current config summary");
     println!("  docs/config-externalization.md — canonical operator contract");

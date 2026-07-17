@@ -591,6 +591,17 @@ enum DoctorCommands {
         #[arg(long, default_value_t = 0)]
         stagnation_limit: u32,
     },
+
+    /// CR-CAP-002: host-local Tag → candidates inverted index (not public manifest)
+    Capabilities {
+        /// Capability Tag from capability-mapping.md (omit to list all Tag counts)
+        #[arg(long)]
+        tag: Option<String>,
+
+        /// Force rebuild of `capability-index.json` under the config dir
+        #[arg(long, default_value_t = false)]
+        rebuild: bool,
+    },
 }
 
 #[tokio::main]

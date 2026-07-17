@@ -50,6 +50,8 @@ use serde::{Deserialize, Serialize};
 pub mod agent;
 pub mod approval;
 pub mod auth;
+#[cfg(feature = "ai-protocol")]
+pub mod capability_index;
 pub mod channels;
 pub mod cli_render;
 pub mod config;

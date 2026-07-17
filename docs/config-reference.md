@@ -76,6 +76,8 @@ Operational note for container users:
 | `candidate_dag_shadow` | `false` | **CR-L4-003 (opt-in shadow):** when true, host helpers may call `agent::candidate_dag::maybe_run_candidate_shadow` (validate candidate → L2 fallback). Default remains **off**. Does **not** turn on AI-DAG in the live agent chat loop. Operators can observe without enabling this flag via `velaclaw doctor candidate-dag --candidate <path>`. Requires `--features ai-protocol`. |
 | `candidate_dag_stagnation_limit` | `0` | **CR-L4-003:** optional consecutive assemble-output hash limit for shadow runs (`0` = off). |
 
+Host-local capability discovery (CR-CAP-002, no config key): `velaclaw doctor capabilities [--tag <Tag>] [--rebuild]` builds a Tag→candidates cache at `<config_dir>/capability-index.json` from `$AI_PROTOCOL_DIR`. This is **not** written into public ai-protocol manifests and does **not** enable default-on intent routing.
+
 `tool_dispatcher` values:
 
 - `auto` (default): resolve via provider manifest `tool_calling` and `ExecutionHandle::tool_calling_policy()`. When the provider supports native tools and the manifest strategy prefers native (e.g. DeepSeek hybrid), `NativeToolDispatcher` is used; otherwise `XmlToolDispatcher`.

@@ -34,7 +34,8 @@ pub fn resolve_local_protocol_root() -> Option<PathBuf> {
     protocol_root_from_path_value(&raw)
 }
 
-fn collect_provider_files(root: &Path) -> Vec<PathBuf> {
+/// Provider manifests under `dist/v2` → `v2` → `dist/v1` → `v1` (first stem wins).
+pub(crate) fn collect_provider_files(root: &Path) -> Vec<PathBuf> {
     // Higher-priority directories first; one manifest per provider stem.
     let candidates = [
         root.join("dist").join("v2").join("providers"),
@@ -117,7 +118,7 @@ fn context_window_from_meta(meta: &serde_json::Value) -> Option<u32> {
         .and_then(|n| u32::try_from(n).ok())
 }
 
-fn load_manifest_value(path: &Path) -> anyhow::Result<serde_json::Value> {
+pub(crate) fn load_manifest_value(path: &Path) -> anyhow::Result<serde_json::Value> {
     let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
     let bytes = std::fs::read(path)?;
     if ext.eq_ignore_ascii_case("json") {

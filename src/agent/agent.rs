@@ -44,6 +44,9 @@ pub struct Agent {
     gateway_approval: Option<(ApprovalManager, Arc<ApprovalHub>)>,
     /// When set, `turn` / `run_interactive` render Markdown and prefix agent lines for CLI.
     cli_render: Option<RenderOpts>,
+    /// CR-CAP-003: opt-in intent→Tag→index route host context (default-off).
+    #[cfg(feature = "ai-protocol")]
+    intent_route_host: Option<crate::agent::intent_route::IntentRouteHost>,
 }
 
 pub struct AgentBuilder {
@@ -67,6 +70,8 @@ pub struct AgentBuilder {
     classification_config: Option<crate::config::QueryClassificationConfig>,
     available_hints: Option<Vec<String>>,
     security: Option<PolicyHandle>,
+    #[cfg(feature = "ai-protocol")]
+    intent_route_host: Option<crate::agent::intent_route::IntentRouteHost>,
 }
 
 impl AgentBuilder {
@@ -92,6 +97,8 @@ impl AgentBuilder {
             classification_config: None,
             available_hints: None,
             security: None,
+            #[cfg(feature = "ai-protocol")]
+            intent_route_host: None,
         }
     }
 
@@ -197,6 +204,15 @@ impl AgentBuilder {
         self
     }
 
+    #[cfg(feature = "ai-protocol")]
+    pub fn intent_route_host(
+        mut self,
+        intent_route_host: Option<crate::agent::intent_route::IntentRouteHost>,
+    ) -> Self {
+        self.intent_route_host = intent_route_host;
+        self
+    }
+
     pub fn build(self) -> Result<Agent> {
         let tools = self
             .tools
@@ -246,6 +262,8 @@ impl AgentBuilder {
                 .ok_or_else(|| anyhow::anyhow!("security is required"))?,
             gateway_approval: None,
             cli_render: None,
+            #[cfg(feature = "ai-protocol")]
+            intent_route_host: self.intent_route_host,
         })
     }
 }
@@ -369,7 +387,7 @@ impl Agent {
         #[cfg(not(feature = "ai-protocol"))]
         let builder = Agent::builder().provider(provider);
 
-        builder
+        let builder = builder
             .tools(tools)
             .memory(memory)
             .observer(observer)
@@ -392,8 +410,14 @@ impl Agent {
             ))
             .skills_prompt_mode(config.skills.prompt_injection_mode)
             .auto_save(config.memory.auto_save)
-            .security(security)
-            .build()
+            .security(security);
+
+        #[cfg(feature = "ai-protocol")]
+        let builder = builder.intent_route_host(Some(
+            crate::agent::intent_route::IntentRouteHost::from_config(config),
+        ));
+
+        builder.build()
     }
 
     /// BYOK execution handle when the agent was built from config (VL-EVO-001).
@@ -520,13 +544,31 @@ impl Agent {
         futures_util::future::join_all(futs).await
     }
 
-    fn classify_model(&self, user_message: &str) -> String {
-        super::classifier::resolve_model_for_message(
+    fn classify_model(&self, user_message: &str) -> Result<String> {
+        #[cfg(feature = "ai-protocol")]
+        if let Some(host) = &self.intent_route_host {
+            if host.enabled {
+                let decision = crate::agent::intent_route::resolve_for_host(
+                    host,
+                    &self.classification_config,
+                    &self.available_hints,
+                    &self.model_name,
+                    user_message,
+                    None,
+                    false,
+                )?;
+                return decision.selected_model.ok_or_else(|| {
+                    anyhow::anyhow!("intent route returned no model: {}", decision.reason)
+                });
+            }
+        }
+
+        Ok(super::classifier::resolve_model_for_message(
             &self.classification_config,
             &self.available_hints,
             &self.model_name,
             user_message,
-        )
+        ))
     }
 
     pub async fn turn(&mut self, user_message: &str) -> Result<String> {
@@ -563,7 +605,7 @@ impl Agent {
         self.history
             .push(ConversationMessage::Chat(ChatMessage::user(enriched)));
 
-        let effective_model = self.classify_model(user_message);
+        let effective_model = self.classify_model(user_message)?;
 
         for _ in 0..self.config.max_tool_iterations {
             let messages = self.tool_dispatcher.to_provider_messages(&self.history);

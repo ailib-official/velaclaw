@@ -59,6 +59,9 @@ pub fn print_maintenance_guide() {
     println!(
         "  velaclaw doctor capabilities [--tag <Tag>] [--rebuild] — host Tag→candidates index"
     );
+    println!(
+        "  velaclaw doctor intent-route [--message <text>] [--hint <hint>] [--force] — CR-CAP-003"
+    );
     println!("  velaclaw providers         — list provider IDs and active default");
     println!("  velaclaw status            — current config summary");
     println!("  docs/config-externalization.md — canonical operator contract");

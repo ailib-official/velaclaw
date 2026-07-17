@@ -2,6 +2,8 @@
 mod candidate_dag;
 #[cfg(feature = "ai-protocol")]
 mod capabilities;
+#[cfg(feature = "ai-protocol")]
+mod intent_route;
 mod maintenance;
 #[cfg(feature = "ai-protocol")]
 mod template_dag;
@@ -14,6 +16,8 @@ pub use candidate_dag::run_candidate_dag_fixture;
 #[cfg(feature = "ai-protocol")]
 pub use capabilities::run_capabilities;
 use chrono::{DateTime, Utc};
+#[cfg(feature = "ai-protocol")]
+pub use intent_route::run_intent_route;
 pub use maintenance::{print_maintenance_footer, print_maintenance_guide};
 use std::io::Write;
 use std::path::Path;

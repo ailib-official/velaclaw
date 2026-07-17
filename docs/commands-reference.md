@@ -68,6 +68,12 @@ CR-L4-003 shadow host (default-off): set `[agent].candidate_dag_shadow = true` t
 velaclaw doctor candidate-dag --candidate <path> [--fallback <path>] [--message <text>] [--compact] [--stagnation-limit N]
 ```
 
+CR-CAP-003 intent route (default-off): set `[agent].intent_capability_route = true` to resolve turn models via Hint→Tag→host capability index ∩ `[[model_routes]]`. Empty Tag sets fail closed. Observe anytime with:
+
+```bash
+velaclaw doctor intent-route [--message <text>] [--hint <hint>] [--force]
+```
+
 Interactive REPL extras:
 
 - `/expand <id>` — replay a folded long tool/code block from the current session
@@ -98,6 +104,7 @@ See `[cli_render]` in [config-reference.md](config-reference.md).
 - `velaclaw doctor template-dag --fixture <path> [--message <text>] [--compact]` — validate a handwritten CR-L2 template DAG JSON (walk + Envelope assemble only; no LLM). Fail-closed on `max_steps` / HardBudget / invalid graph. Requires `--features ai-protocol`. Independent of `[agent].template_dag` (that flag gates future runtime wiring; default remains `false`).
 - `velaclaw doctor candidate-dag --candidate <path> [--fallback <path>] [--message <text>] [--compact] [--stagnation-limit N]` — CR-L4-003 shadow observe: validate candidate DAG + optional L2 fallback (assemble-only; no LLM). Independent of `[agent].candidate_dag_shadow` (default `false`). Requires `--features ai-protocol`.
 - `velaclaw doctor capabilities [--tag <Tag>] [--rebuild]` — CR-CAP-002 host-local Tag→candidates inverted index over `$AI_PROTOCOL_DIR` (cache: `<config_dir>/capability-index.json`). Facts only; does **not** write into public ai-protocol manifests and does **not** enable intent routing (that is CR-CAP-003). Requires `--features ai-protocol`.
+- `velaclaw doctor intent-route [--message <text>] [--hint <hint>] [--rebuild] [--force]` — CR-CAP-003 observe: intent/Hint → Tag → capability index ∩ `[[model_routes]]` with an explainable decision record (no LLM). Independent of `[agent].intent_capability_route` when `--force` is set. Empty candidate sets fail closed. Requires `--features ai-protocol`.
 
 See [config-externalization.md](config-externalization.md) for the canonical operator contract.
 

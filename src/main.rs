@@ -602,6 +602,25 @@ enum DoctorCommands {
         #[arg(long, default_value_t = false)]
         rebuild: bool,
     },
+
+    /// CR-CAP-003: observe intent→Tag→index→constraints route (no LLM)
+    IntentRoute {
+        /// User message used for query_classification (optional if --hint set)
+        #[arg(long, default_value = "doctor intent-route probe")]
+        message: String,
+
+        /// Explicit hint (skips classification when set)
+        #[arg(long)]
+        hint: Option<String>,
+
+        /// Force rebuild of capability-index.json
+        #[arg(long, default_value_t = false)]
+        rebuild: bool,
+
+        /// Observe with route logic even when `[agent].intent_capability_route` is false
+        #[arg(long, default_value_t = false)]
+        force: bool,
+    },
 }
 
 #[tokio::main]

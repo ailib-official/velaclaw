@@ -1,3 +1,5 @@
+#[cfg(feature = "ai-protocol")]
+mod candidate_dag;
 mod maintenance;
 #[cfg(feature = "ai-protocol")]
 mod template_dag;
@@ -5,6 +7,8 @@ mod template_dag;
 use crate::config::Config;
 use anyhow::Result;
 
+#[cfg(feature = "ai-protocol")]
+pub use candidate_dag::run_candidate_dag_fixture;
 use chrono::{DateTime, Utc};
 pub use maintenance::{print_maintenance_footer, print_maintenance_guide};
 use std::io::Write;

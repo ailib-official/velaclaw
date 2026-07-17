@@ -568,6 +568,29 @@ enum DoctorCommands {
         #[arg(long, default_value_t = false)]
         compact: bool,
     },
+
+    /// CR-L4-003: observe candidate DAG validate + L2 fallback (assemble-only; no LLM)
+    CandidateDag {
+        /// Path to a candidate (model-shaped) DAG JSON
+        #[arg(long)]
+        candidate: String,
+
+        /// Optional handwritten L2 fallback template path (default: embedded code-fix)
+        #[arg(long)]
+        fallback: Option<String>,
+
+        /// Seed user message passed into assemble (diagnostic only)
+        #[arg(long, default_value = "doctor candidate-dag probe")]
+        message: String,
+
+        /// Use compact ContextBudget (matches `[agent].compact_context` intent)
+        #[arg(long, default_value_t = false)]
+        compact: bool,
+
+        /// Optional output-hash stagnation limit (`0` = off)
+        #[arg(long, default_value_t = 0)]
+        stagnation_limit: u32,
+    },
 }
 
 #[tokio::main]

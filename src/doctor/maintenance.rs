@@ -53,6 +53,9 @@ pub fn print_maintenance_guide() {
     println!("Related:");
     println!("  velaclaw doctor models     — live model catalog probes");
     println!("  velaclaw doctor template-dag --fixture <path> — CR-L2 DAG fixture check (no LLM)");
+    println!(
+        "  velaclaw doctor candidate-dag --candidate <path> — CR-L4 candidate shadow check (no LLM)"
+    );
     println!("  velaclaw providers         — list provider IDs and active default");
     println!("  velaclaw status            — current config summary");
     println!("  docs/config-externalization.md — canonical operator contract");

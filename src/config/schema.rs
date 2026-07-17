@@ -389,6 +389,15 @@ pub struct AgentConfig {
     /// Default: `false`. Requires `--features ai-protocol`. No AI-generated DAGs.
     #[serde(default)]
     pub template_dag: bool,
+    /// CR-L4-003: opt-in **shadow** host path for candidate DAG validate + L2 fallback.
+    /// Default: `false`. When false, [`crate::agent::candidate_dag::maybe_run_candidate_shadow`]
+    /// is a no-op. Doctor `candidate-dag` remains available for observe without enabling this flag.
+    /// Does **not** default-on AI-DAG in the live agent loop.
+    #[serde(default)]
+    pub candidate_dag_shadow: bool,
+    /// CR-L4-003: optional stagnation limit forwarded to candidate shadow runs (`0` = off).
+    #[serde(default)]
+    pub candidate_dag_stagnation_limit: u32,
 }
 
 fn default_agent_max_tool_iterations() -> usize {
@@ -414,6 +423,8 @@ impl Default for AgentConfig {
             envelope_assemble: false,
             envelope_assemble_async: false,
             template_dag: false,
+            candidate_dag_shadow: false,
+            candidate_dag_stagnation_limit: 0,
         }
     }
 }

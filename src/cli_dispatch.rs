@@ -255,6 +255,42 @@ pub async fn dispatch_configured_command(command: Commands, config: Config) -> R
                     )
                 }
             }
+            Some(DoctorCommands::CandidateDag {
+                candidate,
+                fallback,
+                message,
+                compact,
+                stagnation_limit,
+            }) => {
+                #[cfg(feature = "ai-protocol")]
+                {
+                    let _ = config;
+                    let candidate_path = std::path::PathBuf::from(candidate);
+                    let fallback_path = fallback.map(std::path::PathBuf::from);
+                    doctor::run_candidate_dag_fixture(
+                        &candidate_path,
+                        fallback_path.as_deref(),
+                        &message,
+                        compact,
+                        stagnation_limit,
+                    )
+                    .map(|_| ())
+                }
+                #[cfg(not(feature = "ai-protocol"))]
+                {
+                    let _ = (
+                        config,
+                        candidate,
+                        fallback,
+                        message,
+                        compact,
+                        stagnation_limit,
+                    );
+                    anyhow::bail!(
+                        "`velaclaw doctor candidate-dag` requires the `ai-protocol` Cargo feature"
+                    )
+                }
+            }
             None => doctor::run(&config),
         },
 

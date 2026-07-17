@@ -3,6 +3,9 @@
 //!
 //! Opt-in via `[agent].template_dag` (default false). Does not run LLM calls;
 //! model capability tags are recorded for host routing integration later.
+//!
+//! CR-L4-002 adds optional Thought Convergence guards (output-hash stagnation)
+//! via [`TemplateRunOptions`] — still no LLM repair; still default-off at host.
 
 use crate::providers::ChatMessage;
 use ai_lib_rust::context::{
@@ -12,6 +15,7 @@ use ai_lib_rust::context::{
 use ai_lib_rust::types::message::Message;
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::Instant;
@@ -77,11 +81,22 @@ pub struct RetrieveIntent {
 pub enum DagAbortReason {
     MaxSteps,
     Timeout,
-    MissingNode { id: String },
-    InvalidNext { from: String, to: String },
+    MissingNode {
+        id: String,
+    },
+    InvalidNext {
+        from: String,
+        to: String,
+    },
     HardBudget,
     Assemble(String),
-    EmptyCapabilities { node: String },
+    EmptyCapabilities {
+        node: String,
+    },
+    /// CR-L4-002: consecutive identical assemble output hashes (Thought Convergence).
+    Stagnation {
+        repeated: u32,
+    },
 }
 
 impl std::fmt::Display for DagAbortReason {
@@ -94,8 +109,17 @@ impl std::fmt::Display for DagAbortReason {
             Self::HardBudget => write!(f, "hard_budget"),
             Self::Assemble(msg) => write!(f, "assemble:{msg}"),
             Self::EmptyCapabilities { node } => write!(f, "empty_capabilities:{node}"),
+            Self::Stagnation { repeated } => write!(f, "stagnation:{repeated}"),
         }
     }
+}
+
+/// Optional guards for a template / candidate DAG walk (CR-L4-002).
+#[derive(Debug, Clone, Default)]
+pub struct TemplateRunOptions {
+    /// Abort when the same assemble-output hash repeats this many times in a row.
+    /// `0` disables (default).
+    pub stagnation_limit: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -170,6 +194,21 @@ pub fn run_template_dag(
     seed_user_message: &str,
     compact_context: bool,
 ) -> Result<DagRunReport> {
+    run_template_dag_with_options(
+        dag,
+        seed_user_message,
+        compact_context,
+        &TemplateRunOptions::default(),
+    )
+}
+
+/// Like [`run_template_dag`], with optional Thought Convergence guards.
+pub fn run_template_dag_with_options(
+    dag: &DagManifest,
+    seed_user_message: &str,
+    compact_context: bool,
+    options: &TemplateRunOptions,
+) -> Result<DagRunReport> {
     let started = Instant::now();
     let nodes: HashMap<&str, &DagNode> = dag.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
 
@@ -177,6 +216,8 @@ pub fn run_template_dag(
     let mut steps = 0u32;
     let mut current = dag.entry.as_str();
     let mut abort: Option<DagAbortReason> = None;
+    let mut last_output_hash: Option<String> = None;
+    let mut streak: u32 = 0;
 
     loop {
         if let Some(limit) = dag.timeout_secs {
@@ -209,6 +250,25 @@ pub fn run_template_dag(
         let history = seed_history_for_node(node, seed_user_message);
         match assemble_for_node(&history, node, compact_context) {
             Ok(assembled) => {
+                if options.stagnation_limit > 0 {
+                    let hash = fingerprint_assembled(&assembled);
+                    if last_output_hash.as_deref() == Some(hash.as_str()) {
+                        streak = streak.saturating_add(1);
+                    } else {
+                        streak = 1;
+                        last_output_hash = Some(hash);
+                    }
+                    if streak >= options.stagnation_limit {
+                        abort = Some(DagAbortReason::Stagnation { repeated: streak });
+                        visits.push(DagNodeVisit {
+                            node_id: node.id.clone(),
+                            task_type: node.task_type.clone(),
+                            capabilities: node.model_selector.capabilities.clone(),
+                            assembled_messages: assembled.len(),
+                        });
+                        break;
+                    }
+                }
                 visits.push(DagNodeVisit {
                     node_id: node.id.clone(),
                     task_type: node.task_type.clone(),
@@ -253,6 +313,17 @@ pub fn run_template_dag(
         );
     }
     Ok(report)
+}
+
+fn fingerprint_assembled(messages: &[ChatMessage]) -> String {
+    let mut hasher = Sha256::new();
+    for msg in messages {
+        hasher.update(msg.role.as_bytes());
+        hasher.update([0]);
+        hasher.update(msg.content.as_bytes());
+        hasher.update([0]);
+    }
+    hex::encode(hasher.finalize())
 }
 
 fn classify_assemble_abort(err: &anyhow::Error) -> DagAbortReason {
@@ -483,5 +554,29 @@ mod tests {
             classify_assemble_abort(&mapped),
             DagAbortReason::HardBudget
         ));
+    }
+
+    #[test]
+    fn stagnation_fail_closed_on_self_loop() {
+        let json = r#"{
+          "schema_version":"0.1.0",
+          "id":"loop",
+          "entry":"a",
+          "max_steps":8,
+          "nodes":[{"id":"a","task_type":"chat","model_selector":{"capabilities":["speed"]},
+            "context_requirements":{"layers":[0,1]},"next":"a"}]
+        }"#;
+        let dag = parse_dag_json(json).unwrap();
+        let err = run_template_dag_with_options(
+            &dag,
+            "same",
+            false,
+            &TemplateRunOptions {
+                stagnation_limit: 2,
+            },
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("stagnation"), "{err}");
     }
 }

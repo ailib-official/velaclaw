@@ -1,6 +1,8 @@
 //! 代理引擎模块，实现自主循环、分类与任务分发。
 #[allow(clippy::module_inception)]
 pub mod agent;
+#[cfg(feature = "ai-protocol")]
+pub mod candidate_dag;
 pub mod classifier;
 #[cfg(feature = "ai-protocol")]
 pub mod dag_runner;

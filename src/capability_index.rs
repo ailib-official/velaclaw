@@ -450,12 +450,13 @@ pub fn lookup_tag<'a>(index: &'a CapabilityIndex, tag: &str) -> Result<&'a [Capa
     Ok(index.candidates_for(tag).unwrap_or(&[]))
 }
 
+/// Shared lock for tests that mutate `AI_PROTOCOL_DIR` / `AI_PROTOCOL_PATH`.
+#[cfg(test)]
+pub(crate) static PROTOCOL_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     struct EnvGuard {
         key: &'static str,
@@ -597,7 +598,7 @@ mod tests {
         let loaded = load_index(&cache).expect("load");
         assert_eq!(loaded.by_tag, a.by_tag);
 
-        let _guard = ENV_LOCK
+        let _guard = PROTOCOL_ENV_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _env = EnvGuard::set("AI_PROTOCOL_DIR", Some(dir.path().to_str().expect("utf8")));

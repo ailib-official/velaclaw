@@ -620,6 +620,10 @@ enum DoctorCommands {
         /// Observe with route logic even when `[agent].intent_capability_route` is false
         #[arg(long, default_value_t = false)]
         force: bool,
+
+        /// Append decision JSONL under `<config_dir>/intent-route-decisions.jsonl` (opt-in)
+        #[arg(long, default_value_t = false)]
+        persist: bool,
     },
 }
 

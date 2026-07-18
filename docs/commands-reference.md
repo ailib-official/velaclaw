@@ -73,7 +73,7 @@ velaclaw doctor candidate-dag --candidate <path> [--fallback <path>] [--message 
 CR-CAP-003 intent route (default-off): set `[agent].intent_capability_route = true` to resolve turn models via Hint→Tag→host capability index ∩ `[[model_routes]]`. Empty Tag sets fail closed. Observe anytime with:
 
 ```bash
-velaclaw doctor intent-route [--message <text>] [--hint <hint>] [--force]
+velaclaw doctor intent-route [--message <text>] [--hint <hint>] [--force] [--persist] [--rebuild]
 ```
 
 Interactive REPL extras:
@@ -105,8 +105,8 @@ See `[cli_render]` in [config-reference.md](config-reference.md).
 - `velaclaw doctor models [--provider <ID>] [--use-cache]`
 - `velaclaw doctor template-dag --fixture <path> [--message <text>] [--compact]` — validate a handwritten CR-L2 template DAG JSON (walk + Envelope assemble only; no LLM). Fail-closed on `max_steps` / HardBudget / invalid graph. Requires `--features ai-protocol`. Independent of `[agent].template_dag` (that flag gates future runtime wiring; default remains `false`).
 - `velaclaw doctor candidate-dag --candidate <path> [--fallback <path>] [--message <text>] [--compact] [--stagnation-limit N]` — CR-L4-003 shadow observe: validate candidate DAG + optional L2 fallback (assemble-only; no LLM). Independent of `[agent].candidate_dag_shadow` (default `false`). Requires `--features ai-protocol`.
-- `velaclaw doctor capabilities [--tag <Tag>] [--rebuild]` — CR-CAP-002 host-local Tag→candidates inverted index over `$AI_PROTOCOL_DIR` (cache: `<config_dir>/capability-index.json`). Facts only; does **not** write into public ai-protocol manifests and does **not** enable intent routing (that is CR-CAP-003). Requires `--features ai-protocol`.
-- `velaclaw doctor intent-route [--message <text>] [--hint <hint>] [--rebuild] [--force]` — CR-CAP-003 observe: intent/Hint → Tag → capability index ∩ `[[model_routes]]` with an explainable decision record (no LLM). Independent of `[agent].intent_capability_route` when `--force` is set. Empty candidate sets fail closed. Requires `--features ai-protocol`.
+- `velaclaw doctor capabilities [--tag <Tag>] [--rebuild]` — CR-CAP-002 / CR-HOST-001 host-local Tag→candidates inverted index over `$AI_PROTOCOL_DIR` (cache: `<config_dir>/capability-index.json`). Prints Tag mapping (`why`), `cache_status`, and rebuild triggers (explicit `--rebuild`, protocol tip/root change, missing cache — **no** daily timer). Facts only; does **not** write into public ai-protocol manifests and does **not** enable intent routing (that is CR-CAP-003). Requires `--features ai-protocol`.
+- `velaclaw doctor intent-route [--message <text>] [--hint <hint>] [--rebuild] [--force] [--persist]` — CR-CAP-003 / CR-HOST-001 observe: prints step-by-step Hint→Tag→mapping→constraints and an explainable decision (no LLM). Independent of `[agent].intent_capability_route` when `--force` is set. `--persist` appends JSONL to `<config_dir>/intent-route-decisions.jsonl` (opt-in; does not enable live chat). Empty candidate sets fail closed. Requires `--features ai-protocol`.
 
 See [config-externalization.md](config-externalization.md) for the canonical operator contract.
 

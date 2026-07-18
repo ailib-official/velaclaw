@@ -62,6 +62,8 @@ Opt-in template DAG shell (CR-L2): set `[agent].template_dag = true` to use `age
 
 CR-L4-002 library: `agent::candidate_dag::{validate_candidate_dag_json, run_candidate_or_fallback}` — schema/capability fail or run abort can fall back to a handwritten L2 template; optional output-hash stagnation via `TemplateRunOptions`.
 
+CR-L4-004 structured logs (M3c/d/e): stable fields `m3c_pass`, `m3d_category`, `m3e_fallback` on events `candidate_dag_run` / `candidate_dag_fallback` / `candidate_dag_schema_fail` / `candidate_dag_shadow_run`. Logs only — no Prometheus/Grafana gate. See [l4-m3-metrics.md](l4-m3-metrics.md).
+
 CR-L4-003 shadow host (default-off): set `[agent].candidate_dag_shadow = true` to allow `maybe_run_candidate_shadow`. Live agent chat loop stays unchanged. Observe anytime with:
 
 ```bash

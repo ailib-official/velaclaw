@@ -39,6 +39,58 @@ impl std::fmt::Display for CandidateFailCategory {
     }
 }
 
+/// CR-L4-004: stable M3c/d/e structured-log contract (logs only — no Prometheus/Grafana gate).
+///
+/// Field names and M3d category strings are part of the public operator contract.
+/// See `docs/l4-m3-metrics.md`.
+pub mod m3_metrics {
+    use super::CandidateFailCategory;
+
+    /// Target name when a candidate DAG run succeeds without L2 fallback (M3c pass).
+    pub const EVENT_PASS: &str = "candidate_dag_run";
+    /// Target name when L4→L2 fallback fires (M3e) and/or schema fail is recorded (M3d).
+    pub const EVENT_FALLBACK: &str = "candidate_dag_fallback";
+    /// Target name for opt-in shadow host observe (CR-L4-003); carries the same M3 fields.
+    pub const EVENT_SHADOW: &str = "candidate_dag_shadow_run";
+    /// Target name when schema/graph validation fails and fallback is disabled (M3d only).
+    pub const EVENT_SCHEMA_FAIL: &str = "candidate_dag_schema_fail";
+
+    pub const FIELD_M3C_PASS: &str = "m3c_pass";
+    pub const FIELD_M3D_CATEGORY: &str = "m3d_category";
+    pub const FIELD_M3E_FALLBACK: &str = "m3e_fallback";
+    pub const FIELD_FALLBACK_REASON: &str = "fallback_reason";
+    pub const FIELD_DAG_ID: &str = "dag_id";
+    pub const FIELD_M2_STEPS: &str = "m2_steps";
+    pub const FIELD_SHADOW: &str = "shadow";
+
+    /// Stable M3d category vocabulary (aligned with CR-L4-001 / `CandidateFailCategory`).
+    pub const M3D_CATEGORIES: &[&str] = &[
+        "ok",
+        "parse_error",
+        "schema_validation",
+        "unknown_capability",
+        "forbidden_source",
+        "graph_integrity",
+    ];
+
+    #[must_use]
+    pub fn m3d_category_is_stable(category: &str) -> bool {
+        M3D_CATEGORIES.contains(&category)
+    }
+
+    #[must_use]
+    pub fn all_fail_categories() -> [CandidateFailCategory; 6] {
+        [
+            CandidateFailCategory::Ok,
+            CandidateFailCategory::ParseError,
+            CandidateFailCategory::SchemaValidation,
+            CandidateFailCategory::UnknownCapability,
+            CandidateFailCategory::ForbiddenSource,
+            CandidateFailCategory::GraphIntegrity,
+        ]
+    }
+}
+
 /// Capability tags allowed by L2 `dag-schema.json` v0.1.0.
 pub const ALLOWED_CAPABILITY_TAGS: &[&str] = &[
     "high-reasoning",
@@ -225,6 +277,7 @@ pub fn run_candidate_or_fallback(
                 run,
             });
         }
+        emit_l4_schema_fail(validated.category, &validated.message);
         bail!(
             "candidate DAG rejected ({}): {}",
             validated.category,
@@ -274,22 +327,39 @@ pub fn run_candidate_or_fallback(
 }
 
 fn emit_l4_pass(run: &DagRunReport) {
+    // M3c pass + explicit M3d=ok + M3e=false (CR-L4-004 field contract).
     tracing::info!(
         dag_id = %run.dag_id,
         m3c_pass = true,
+        m3d_category = CandidateFailCategory::Ok.as_str(),
         m3e_fallback = false,
         m2_steps = run.steps,
-        "candidate_dag_run"
+        "{}",
+        m3_metrics::EVENT_PASS
     );
 }
 
 fn emit_l4_fallback(category: CandidateFailCategory, reason: &str) {
+    // M3e fallback; M3d category when schema/graph caused the path (else `ok` on run_abort).
     tracing::info!(
         m3c_pass = false,
         m3d_category = category.as_str(),
         m3e_fallback = true,
         fallback_reason = reason,
-        "candidate_dag_fallback"
+        "{}",
+        m3_metrics::EVENT_FALLBACK
+    );
+}
+
+fn emit_l4_schema_fail(category: CandidateFailCategory, message: &str) {
+    // M3d-only path: validation failed and L2 fallback was not taken.
+    tracing::info!(
+        m3c_pass = false,
+        m3d_category = category.as_str(),
+        m3e_fallback = false,
+        fallback_reason = message,
+        "{}",
+        m3_metrics::EVENT_SCHEMA_FAIL
     );
 }
 
@@ -337,8 +407,12 @@ pub fn maybe_run_candidate_shadow(
         shadow = true,
         used_fallback = report.used_fallback,
         dag_id = %report.run.dag_id,
+        m3c_pass = !report.used_fallback,
         m3d_category = report.schema_category.as_str(),
-        "candidate_dag_shadow_run"
+        m3e_fallback = report.used_fallback,
+        m2_steps = report.run.steps,
+        "{}",
+        m3_metrics::EVENT_SHADOW
     );
     Ok(Some(report))
 }
@@ -406,6 +480,33 @@ mod tests {
         );
         assert!(report.run.success);
         assert_eq!(report.run.dag_id, "code-fix-template");
+    }
+
+    #[test]
+    fn m3d_category_strings_are_stable_contract() {
+        assert_eq!(
+            m3_metrics::M3D_CATEGORIES.len(),
+            m3_metrics::all_fail_categories().len()
+        );
+        for cat in m3_metrics::all_fail_categories() {
+            assert!(
+                m3_metrics::m3d_category_is_stable(cat.as_str()),
+                "unstable category string: {}",
+                cat.as_str()
+            );
+        }
+        assert_eq!(CandidateFailCategory::Ok.as_str(), "ok");
+        assert_eq!(
+            CandidateFailCategory::UnknownCapability.as_str(),
+            "unknown_capability"
+        );
+        assert_eq!(m3_metrics::EVENT_PASS, "candidate_dag_run");
+        assert_eq!(m3_metrics::EVENT_FALLBACK, "candidate_dag_fallback");
+        assert_eq!(m3_metrics::EVENT_SCHEMA_FAIL, "candidate_dag_schema_fail");
+        assert_eq!(m3_metrics::EVENT_SHADOW, "candidate_dag_shadow_run");
+        assert_eq!(m3_metrics::FIELD_M3C_PASS, "m3c_pass");
+        assert_eq!(m3_metrics::FIELD_M3D_CATEGORY, "m3d_category");
+        assert_eq!(m3_metrics::FIELD_M3E_FALLBACK, "m3e_fallback");
     }
 
     #[test]

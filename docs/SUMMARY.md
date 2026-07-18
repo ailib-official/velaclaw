@@ -28,6 +28,7 @@ Last refreshed: **February 18, 2026**.
 
 - [reference/README.md](reference/README.md)
 - [commands-reference.md](commands-reference.md)
+- [l4-m3-metrics.md](l4-m3-metrics.md) — CR-L4-004 M3c/d/e structured-log contract
 - [providers-reference.md](providers-reference.md)
 - [channels-reference.md](channels-reference.md)
 - [nextcloud-talk-setup.md](nextcloud-talk-setup.md)

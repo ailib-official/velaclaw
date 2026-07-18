@@ -5,6 +5,7 @@ Structured reference index for commands, providers, channels, config, and integr
 ## Core References
 
 - Commands by workflow: [../commands-reference.md](../commands-reference.md)
+- L4 M3c/d/e structured logs: [../l4-m3-metrics.md](../l4-m3-metrics.md)
 - Provider IDs / aliases / env vars: [../providers-reference.md](../providers-reference.md)
 - Channel setup + allowlists: [../channels-reference.md](../channels-reference.md)
 - Config defaults and keys: [../config-reference.md](../config-reference.md)

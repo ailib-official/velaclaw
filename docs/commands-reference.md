@@ -54,6 +54,8 @@ Last verified: **July 19, 2026**.
 - `velaclaw agent --no-color`
 - `velaclaw agent --no-fold`
 
+Interactive REPL (no `-m`) starts a **new memory session** each launch (VL-MEM-001). Conversation/Daily autosave is scoped to that session; prior sessions and legacy unscoped Conversation rows are not injected. Core (long-term) memories may still appear. `/new` / `/clear` clears this session's Conversation/Daily and rotates to another new session (Core preserved). Historical session resume UI is not implemented yet.
+
 BYOK default hygiene (VL-RT-003): if the configured `default_model` provider has no
 usable env API key, the agent remaps to a keyed provider (or fails with an
 actionable error) instead of calling the nvidia free-tier default without

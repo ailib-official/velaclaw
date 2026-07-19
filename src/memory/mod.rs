@@ -86,6 +86,34 @@ pub fn is_assistant_autosave_key(key: &str) -> bool {
     normalized == "assistant_resp" || normalized.starts_with("assistant_resp_")
 }
 
+/// Whether a recalled entry may be injected into the current CLI/agent session.
+///
+/// - `Core` always injects (long-term facts; matches `/new` preservation).
+/// - `Conversation` / `Daily` / `Custom` inject only when `entry.session_id`
+///   equals `current_session`.
+/// - Legacy rows with `session_id = None` are treated as other-session and
+///   excluded when a current session is active (stops cross-session bleed).
+#[must_use]
+pub fn should_inject_for_session(entry: &MemoryEntry, current_session: Option<&str>) -> bool {
+    if matches!(entry.category, MemoryCategory::Core) {
+        return true;
+    }
+    match (current_session, entry.session_id.as_deref()) {
+        (Some(current), Some(entry_sid)) => current == entry_sid,
+        // No active session filter → keep prior global behavior for callers
+        // that have not opted into session scoping.
+        (None, _) => true,
+        // Active session + legacy/other-session row → do not inject.
+        (Some(_), None) => false,
+    }
+}
+
+/// Allocate a fresh interactive / one-shot session id (VL-MEM-001).
+#[must_use]
+pub fn new_session_id() -> String {
+    uuid::Uuid::new_v4().to_string()
+}
+
 #[derive(Clone, PartialEq, Eq)]
 struct ResolvedEmbeddingConfig {
     provider: String,
@@ -383,6 +411,56 @@ mod tests {
         assert!(is_assistant_autosave_key("ASSISTANT_RESP_abcd"));
         assert!(!is_assistant_autosave_key("assistant_response"));
         assert!(!is_assistant_autosave_key("user_msg_1234"));
+    }
+
+    #[test]
+    fn should_inject_for_session_keeps_core_across_sessions() {
+        let core = MemoryEntry {
+            id: "1".into(),
+            key: "pref".into(),
+            content: "likes tea".into(),
+            category: MemoryCategory::Core,
+            timestamp: "now".into(),
+            session_id: None,
+            score: Some(1.0),
+        };
+        assert!(should_inject_for_session(&core, Some("sess-a")));
+        assert!(should_inject_for_session(&core, None));
+    }
+
+    #[test]
+    fn should_inject_for_session_excludes_other_and_legacy_conversation() {
+        let same = MemoryEntry {
+            id: "2".into(),
+            key: "user_msg_1".into(),
+            content: "echo hello".into(),
+            category: MemoryCategory::Conversation,
+            timestamp: "now".into(),
+            session_id: Some("sess-a".into()),
+            score: Some(1.0),
+        };
+        let other = MemoryEntry {
+            id: "3".into(),
+            key: "user_msg_2".into(),
+            content: "echo hello".into(),
+            category: MemoryCategory::Conversation,
+            timestamp: "now".into(),
+            session_id: Some("sess-b".into()),
+            score: Some(1.0),
+        };
+        let legacy = MemoryEntry {
+            id: "4".into(),
+            key: "user_msg_3".into(),
+            content: "echo hello".into(),
+            category: MemoryCategory::Conversation,
+            timestamp: "now".into(),
+            session_id: None,
+            score: Some(1.0),
+        };
+        assert!(should_inject_for_session(&same, Some("sess-a")));
+        assert!(!should_inject_for_session(&other, Some("sess-a")));
+        assert!(!should_inject_for_session(&legacy, Some("sess-a")));
+        assert!(should_inject_for_session(&legacy, None));
     }
 
     #[test]

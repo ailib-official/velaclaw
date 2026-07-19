@@ -11,7 +11,10 @@ pub mod prism;
 pub use byok::{
     execute_chat_with_retry, init_ai_client_sync, resolve_ai_client, split_logical_model_id,
 };
-pub use byok_hygiene::resolve_byok_logical_model_id;
+pub use byok_hygiene::{
+    detected_byok_env_names, diagnose_byok_routing, resolve_byok_logical_model_id,
+    ByokRoutingDiagnosis,
+};
 pub use handle::{hybrid_text_tool_result_history, logical_model_id_from_config, ExecutionHandle};
 
 /// Build the agent provider stack via [`ExecutionHandle`] (BYOK sole path to ai-lib-rust).

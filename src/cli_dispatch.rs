@@ -330,6 +330,19 @@ pub async fn dispatch_configured_command(command: Commands, config: Config) -> R
                     )
                 }
             }
+            Some(DoctorCommands::Routing) => {
+                #[cfg(feature = "ai-protocol")]
+                {
+                    doctor::run_routing(&config)
+                }
+                #[cfg(not(feature = "ai-protocol"))]
+                {
+                    let _ = config;
+                    anyhow::bail!(
+                        "`velaclaw doctor routing` requires the `ai-protocol` Cargo feature"
+                    )
+                }
+            }
             None => doctor::run(&config),
         },
 

@@ -309,14 +309,22 @@ pub async fn dispatch_configured_command(command: Commands, config: Config) -> R
                 hint,
                 rebuild,
                 force,
+                persist,
             }) => {
                 #[cfg(feature = "ai-protocol")]
                 {
-                    doctor::run_intent_route(&config, &message, hint.as_deref(), rebuild, force)
+                    doctor::run_intent_route(
+                        &config,
+                        &message,
+                        hint.as_deref(),
+                        rebuild,
+                        force,
+                        persist,
+                    )
                 }
                 #[cfg(not(feature = "ai-protocol"))]
                 {
-                    let _ = (config, message, hint, rebuild, force);
+                    let _ = (config, message, hint, rebuild, force, persist);
                     anyhow::bail!(
                         "`velaclaw doctor intent-route` requires the `ai-protocol` Cargo feature"
                     )

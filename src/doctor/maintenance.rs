@@ -57,10 +57,10 @@ pub fn print_maintenance_guide() {
         "  velaclaw doctor candidate-dag --candidate <path> — CR-L4 candidate shadow check (no LLM)"
     );
     println!(
-        "  velaclaw doctor capabilities [--tag <Tag>] [--rebuild] — host Tag→candidates index"
+        "  velaclaw doctor capabilities [--tag <Tag>] [--rebuild] — host Tag→candidates + rebuild triggers"
     );
     println!(
-        "  velaclaw doctor intent-route [--message <text>] [--hint <hint>] [--force] — CR-CAP-003"
+        "  velaclaw doctor intent-route [--message <text>] [--hint <hint>] [--force] [--persist] — CR-CAP-003"
     );
     println!("  velaclaw providers         — list provider IDs and active default");
     println!("  velaclaw status            — current config summary");

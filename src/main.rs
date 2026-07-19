@@ -625,6 +625,9 @@ enum DoctorCommands {
         #[arg(long, default_value_t = false)]
         persist: bool,
     },
+
+    /// VL-DR-001: explain provider_mode + BYOK effective model (no LLM; no secrets)
+    Routing,
 }
 
 #[tokio::main]

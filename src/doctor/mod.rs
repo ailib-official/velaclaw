@@ -6,6 +6,8 @@ mod capabilities;
 mod intent_route;
 mod maintenance;
 #[cfg(feature = "ai-protocol")]
+mod routing;
+#[cfg(feature = "ai-protocol")]
 mod template_dag;
 
 use crate::config::Config;
@@ -19,6 +21,8 @@ use chrono::{DateTime, Utc};
 #[cfg(feature = "ai-protocol")]
 pub use intent_route::run_intent_route;
 pub use maintenance::{print_maintenance_footer, print_maintenance_guide};
+#[cfg(feature = "ai-protocol")]
+pub use routing::run_routing;
 use std::io::Write;
 use std::path::Path;
 #[cfg(feature = "ai-protocol")]

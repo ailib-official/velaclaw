@@ -13,11 +13,32 @@ use std::collections::BTreeSet;
 /// provider that does (and warn). If none are available, return an actionable
 /// error instead of letting `AiClient` hit a remote 404.
 pub fn resolve_byok_logical_model_id(config: &Config) -> anyhow::Result<String> {
+    match diagnose_byok_routing(config).effective {
+        Ok(id) => Ok(id),
+        Err(msg) => Err(anyhow::anyhow!(msg)),
+    }
+}
+
+/// Operator-facing BYOK routing diagnosis (env names only; never secret values).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ByokRoutingDiagnosis {
+    pub configured: String,
+    /// Effective logical model id, or fail-closed message when none is usable.
+    pub effective: Result<String, String>,
+}
+
+/// Diagnose BYOK configured vs effective model (same rules as runtime init).
+///
+/// On remap, emits the same `tracing::warn!` as [`resolve_byok_logical_model_id`].
+pub fn diagnose_byok_routing(config: &Config) -> ByokRoutingDiagnosis {
     let configured = super::logical_model_id_from_config(config);
     let configured_provider = provider_segment(&configured);
 
     if provider_has_usable_key(configured_provider) {
-        return Ok(configured);
+        return ByokRoutingDiagnosis {
+            configured: configured.clone(),
+            effective: Ok(configured),
+        };
     }
 
     if let Some(remapped) = first_keyed_logical_model(config, configured_provider) {
@@ -29,10 +50,21 @@ pub fn resolve_byok_logical_model_id(config: &Config) -> anyhow::Result<String> 
             "BYOK default provider has no usable API key; remapping to a keyed provider \
              (set {hint_env} or default_model to pin the original)"
         );
-        return Ok(remapped);
+        return ByokRoutingDiagnosis {
+            configured,
+            effective: Ok(remapped),
+        };
     }
 
-    Err(missing_key_error(&configured, configured_provider, config))
+    ByokRoutingDiagnosis {
+        configured: configured.clone(),
+        effective: Err(missing_key_error(&configured, configured_provider, config).to_string()),
+    }
+}
+
+/// Detected provider credential env var *names* (never values).
+pub fn detected_byok_env_names(config: &Config) -> Vec<String> {
+    detected_provider_env_names(config).into_iter().collect()
 }
 
 fn missing_key_error(configured: &str, provider: &str, config: &Config) -> anyhow::Error {

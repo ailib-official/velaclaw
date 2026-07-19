@@ -62,6 +62,9 @@ pub fn print_maintenance_guide() {
     println!(
         "  velaclaw doctor intent-route [--message <text>] [--hint <hint>] [--force] [--persist] — CR-CAP-003"
     );
+    println!(
+        "  velaclaw doctor routing     — explain provider_mode + BYOK effective model (VL-DR-001)"
+    );
     println!("  velaclaw providers         — list provider IDs and active default");
     println!("  velaclaw status            — current config summary");
     println!("  docs/config-externalization.md — canonical operator contract");

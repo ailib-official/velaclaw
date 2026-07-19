@@ -2,7 +2,7 @@
 
 This document maps provider IDs, aliases, and credential environment variables.
 
-Last verified: **February 20, 2026**.
+Last verified: **July 19, 2026**.
 
 ## How to List Providers
 
@@ -21,6 +21,27 @@ Runtime resolution order is:
 For resilient fallback chains (`reliability.fallback_providers`), each fallback
 provider resolves credentials independently. The primary provider's explicit
 credential is not reused for fallback providers.
+
+### BYOK default model hygiene (VL-RT-003)
+
+When `routing.provider_mode = "byok"` (default), VelaClaw resolves the execution
+logical model **before** constructing `AiClient`:
+
+1. Start from `default_model` / `default_provider` (fresh installs use
+   `nvidia/nemotron-4-340b-instruct`).
+2. If that provider has a usable provider-specific env key (or is keyless local:
+   ollama / llamacpp / lmstudio), keep it.
+3. Otherwise, prefer the first provider in
+   `reliability.fallback_providers` (then a fixed common-provider scan) that
+   has a usable env key, and remap to that provider’s default model (with a
+   warning). Example: only `OPENAI_API_KEY` set → remap away from nvidia default
+   instead of HTTP 404.
+4. If no keyed provider is found, fail fast with an actionable message naming
+   the expected env vars — do not call the remote API with a missing key.
+
+Pin an explicit `default_model = "provider/model"` **and** export that
+provider’s key when you do not want remapping. Prism mode keeps its own
+`PRISM_*` key discovery and is unchanged by this hygiene path.
 
 ## Provider Catalog
 

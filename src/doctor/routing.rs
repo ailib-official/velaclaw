@@ -3,7 +3,7 @@
 
 use crate::config::{Config, ProviderRoutingMode};
 use crate::execution::{
-    diagnose_byok_routing, detected_byok_env_names, logical_model_id_from_config,
+    detected_byok_env_names, diagnose_byok_routing, logical_model_id_from_config,
 };
 use anyhow::Result;
 
@@ -25,7 +25,10 @@ pub fn run_routing(config: &Config) -> Result<()> {
     );
     println!(
         "  default_model:     {}",
-        config.default_model.as_deref().unwrap_or("(unset → protocol default)")
+        config
+            .default_model
+            .as_deref()
+            .unwrap_or("(unset → protocol default)")
     );
     println!();
 
@@ -54,13 +57,17 @@ fn print_byok(config: &Config, configured: &str) {
     println!("  [byok hygiene]");
     match diagnosis.effective {
         Ok(ref effective) if effective == configured => {
-            println!("    status:            keep configured model (provider key present or keyless)");
+            println!(
+                "    status:            keep configured model (provider key present or keyless)"
+            );
             println!("    effective_model:   {effective}");
         }
         Ok(ref effective) => {
             println!("    status:            remapped (configured provider has no usable key)");
             println!("    effective_model:   {effective}");
-            println!("    note:              set the missing provider env key or pin default_model");
+            println!(
+                "    note:              set the missing provider env key or pin default_model"
+            );
         }
         Err(ref err) => {
             println!("    status:            fail-closed (no usable provider key)");
@@ -77,7 +84,9 @@ fn print_byok(config: &Config, configured: &str) {
 fn print_prism(configured: &str) {
     println!("  [prism routing]");
     println!("    effective_model:   {configured} (no BYOK remap; prism uses this logical id)");
-    println!("    keys:              require at least one PRISM_*_API_KEY (e.g. PRISM_GROQ_API_KEY)");
+    println!(
+        "    keys:              require at least one PRISM_*_API_KEY (e.g. PRISM_GROQ_API_KEY)"
+    );
     println!("    note:              restart process after changing routing.provider_mode");
 }
 

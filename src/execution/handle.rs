@@ -29,18 +29,24 @@ pub struct ExecutionHandle {
 impl ExecutionHandle {
     /// Build an execution handle from top-level config (sync; may block on init).
     pub fn from_config(config: &Config) -> anyhow::Result<Self> {
-        let logical_model_id = logical_model_id_from_config(config);
         let routing = config.routing.clone();
         let telemetry = ByokTelemetryReporter::from_config(&config.telemetry);
 
-        let backend = match config.routing.provider_mode {
+        let (backend, logical_model_id) = match config.routing.provider_mode {
             ProviderRoutingMode::Byok => {
-                ExecutionBackend::Byok(super::byok::init_ai_client_sync(&logical_model_id)?)
+                // VL-RT-003: host-side hygiene before AiClient init (prefer keyed
+                // provider or actionable fail — do not silent-404 on nvidia default).
+                let logical_model_id = super::resolve_byok_logical_model_id(config)?;
+                let backend =
+                    ExecutionBackend::Byok(super::byok::init_ai_client_sync(&logical_model_id)?);
+                (backend, logical_model_id)
             }
             ProviderRoutingMode::Prism => {
                 #[cfg(feature = "prism-router")]
                 {
-                    ExecutionBackend::Prism(PrismRouterHandle::from_config(config)?)
+                    let logical_model_id = logical_model_id_from_config(config);
+                    let backend = ExecutionBackend::Prism(PrismRouterHandle::from_config(config)?);
+                    (backend, logical_model_id)
                 }
                 #[cfg(not(feature = "prism-router"))]
                 {

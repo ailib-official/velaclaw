@@ -146,19 +146,41 @@ impl ExecutionHandle {
 }
 
 /// Resolve the logical model id used to construct `AiClient` or prism router.
+///
+/// Composition rules (VL-RT-004):
+/// - Bare `-p nvidia` + `--model meta/llama-…` → `nvidia/meta/llama-…`
+///   (vendor-qualified NIM ids must not drop the CLI provider).
+/// - Bare `-p nvidia` + `--model nvidia/nemotron-…` → `nvidia/nemotron-…`
+///   (do not double-prefix when `--model` already starts with the provider).
+/// - `--model provider/model` alone (no bare provider pin) keeps the model id.
 pub fn logical_model_id_from_config(config: &Config) -> String {
     let model = config
         .default_model
         .as_deref()
-        .unwrap_or(DEFAULT_PROTOCOL_MODEL_ID);
-    if model.contains('/') {
-        return model.to_string();
-    }
-
+        .unwrap_or(DEFAULT_PROTOCOL_MODEL_ID)
+        .trim();
     let provider = config
         .default_provider
         .as_deref()
-        .unwrap_or(DEFAULT_PROTOCOL_MODEL_ID);
+        .unwrap_or(DEFAULT_PROTOCOL_MODEL_ID)
+        .trim();
+
+    if model.contains('/') {
+        let model_provider = model
+            .split_once('/')
+            .map(|(p, _)| p)
+            .unwrap_or(model);
+        // Bare provider pin whose first segment differs from `--model`'s first
+        // segment → treat model as vendor-qualified under that provider (E5b).
+        if !provider.contains('/')
+            && !provider.is_empty()
+            && !model_provider.eq_ignore_ascii_case(provider)
+        {
+            return format!("{provider}/{model}");
+        }
+        return model.to_string();
+    }
+
     if provider.contains('/') {
         return provider.to_string();
     }
@@ -228,6 +250,41 @@ mod tests {
         assert_eq!(
             logical_model_id_from_config(&config),
             "deepseek/deepseek-chat"
+        );
+    }
+
+    #[test]
+    fn logical_model_bare_provider_plus_vendor_qualified_model() {
+        // VL-RT-004 / E5b: `-p nvidia --model meta/llama-3.1-8b-instruct`
+        let mut config = Config::default();
+        config.default_provider = Some("nvidia".into());
+        config.default_model = Some("meta/llama-3.1-8b-instruct".into());
+        assert_eq!(
+            logical_model_id_from_config(&config),
+            "nvidia/meta/llama-3.1-8b-instruct"
+        );
+    }
+
+    #[test]
+    fn logical_model_bare_provider_plus_already_prefixed_model() {
+        let mut config = Config::default();
+        config.default_provider = Some("nvidia".into());
+        config.default_model = Some("nvidia/nemotron-mini-4b-instruct".into());
+        assert_eq!(
+            logical_model_id_from_config(&config),
+            "nvidia/nemotron-mini-4b-instruct"
+        );
+    }
+
+    #[test]
+    fn logical_model_vendor_qualified_without_bare_provider_pin() {
+        let mut config = Config::default();
+        // Slashed default_provider must not re-prefix a full `--model` id.
+        config.default_provider = Some(crate::config::DEFAULT_PROTOCOL_MODEL_ID.into());
+        config.default_model = Some("nvidia/nemotron-mini-4b-instruct".into());
+        assert_eq!(
+            logical_model_id_from_config(&config),
+            "nvidia/nemotron-mini-4b-instruct"
         );
     }
 

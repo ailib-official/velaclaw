@@ -6,6 +6,24 @@ Last verified: **February 20, 2026**.
 
 ## Installation / Bootstrap
 
+### NVIDIA NIM agent returns HTTP 404
+
+Symptoms:
+
+- Bare `curl` to `https://integrate.api.nvidia.com/v1/chat/completions` succeeds for a model
+- `velaclaw agent -p nvidia --model …` fails with HTTP 404, or remaps to OpenAI unexpectedly
+
+Checks:
+
+1. Prefer `-p nvidia --model <catalog-id>` or `--model nvidia/<catalog-id>` (VL-RT-004). A bare
+   `--model meta/…` without `-p nvidia` is treated as provider `meta`.
+2. Confirm `NVIDIA_API_KEY` is set and the model is enabled for the account
+   (`Not found for account` on the protocol default `nvidia/nemotron-4-340b-instruct` is an
+   entitlement miss, not a missing host feature).
+3. Use `velaclaw doctor routing` to see configured vs effective logical model (no secret values).
+
+See [providers-reference.md](providers-reference.md#nvidia-nim-notes).
+
 ### `cargo` not found
 
 Symptom:

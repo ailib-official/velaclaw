@@ -411,4 +411,17 @@ mod tests {
             "expected groq first via fallback_providers, got {resolved}"
         );
     }
+
+    #[test]
+    fn byok_hygiene_keeps_nvidia_vendor_qualified_model() {
+        // VL-RT-004 / E5b: bare -p nvidia + meta/… must not remap to openai.
+        let _lock = env_lock().lock().unwrap();
+        let _cleared = clear_common_keys();
+        let _nvidia = EnvGuard::set("NVIDIA_API_KEY", Some("nv-test-key"));
+        let mut config = Config::default();
+        config.default_provider = Some("nvidia".into());
+        config.default_model = Some("meta/llama-3.1-8b-instruct".into());
+        let resolved = resolve_byok_logical_model_id(&config).expect("resolve");
+        assert_eq!(resolved, "nvidia/meta/llama-3.1-8b-instruct");
+    }
 }

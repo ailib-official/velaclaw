@@ -77,7 +77,7 @@ Operational note for container users:
 | `candidate_dag_stagnation_limit` | `0` | **CR-L4-003:** optional consecutive assemble-output hash limit for shadow runs (`0` = off). |
 | `intent_capability_route` | `false` | **CR-CAP-003 (opt-in):** when true, resolve turn models via intent/Hint → Capability Tag → host capability index ∩ `[[model_routes]]` constraints. Empty candidate sets **fail closed** (no silent `default_model`). Default remains **off** (prior `query_classification` / `hint:` path). Observe anytime with `velaclaw doctor intent-route --force`. Requires `--features ai-protocol`. |
 
-Host-local capability discovery (CR-CAP-002, no config key): `velaclaw doctor capabilities [--tag <Tag>] [--rebuild]` builds a Tag→candidates cache at `<config_dir>/capability-index.json` from `$AI_PROTOCOL_DIR`. This is **not** written into public ai-protocol manifests and does **not** enable default-on intent routing (that is `intent_capability_route` above).
+Host-local capability discovery (CR-CAP-002/004, no config key): `velaclaw doctor capabilities [--tag <Tag>] [--rebuild] [--reachable-only]` builds a Tag→candidates **fact** cache at `<config_dir>/capability-index.json` from `$AI_PROTOCOL_DIR`, then applies a **query-time** reachable filter (local API keys / keyless providers — never stores secrets in the cache). This is **not** written into public ai-protocol manifests and does **not** enable live capability routing (CR-CAP-005) or default-on intent routing (`intent_capability_route`).
 
 `tool_dispatcher` values:
 

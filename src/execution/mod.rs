@@ -12,8 +12,8 @@ pub use byok::{
     execute_chat_with_retry, init_ai_client_sync, resolve_ai_client, split_logical_model_id,
 };
 pub use byok_hygiene::{
-    detected_byok_env_names, diagnose_byok_routing, resolve_byok_logical_model_id,
-    ByokRoutingDiagnosis,
+    detected_byok_env_names, diagnose_byok_routing, provider_has_usable_key,
+    resolve_byok_logical_model_id, ByokRoutingDiagnosis,
 };
 pub use handle::{hybrid_text_tool_result_history, logical_model_id_from_config, ExecutionHandle};
 

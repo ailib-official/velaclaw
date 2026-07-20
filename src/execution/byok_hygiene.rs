@@ -96,7 +96,11 @@ fn provider_segment(logical_model_id: &str) -> &str {
         .unwrap_or(logical_model_id)
 }
 
-fn provider_has_usable_key(provider: &str) -> bool {
+/// Whether this provider is callable on this host (keyless local or non-empty env key).
+///
+/// Used by BYOK hygiene and CR-CAP-004 reachable capability views. Never returns
+/// secret values — presence only.
+pub fn provider_has_usable_key(provider: &str) -> bool {
     if provider_supports_keyless(provider) {
         return true;
     }

@@ -291,14 +291,18 @@ pub async fn dispatch_configured_command(command: Commands, config: Config) -> R
                     )
                 }
             }
-            Some(DoctorCommands::Capabilities { tag, rebuild }) => {
+            Some(DoctorCommands::Capabilities {
+                tag,
+                rebuild,
+                reachable_only,
+            }) => {
                 #[cfg(feature = "ai-protocol")]
                 {
-                    doctor::run_capabilities(&config, tag.as_deref(), rebuild)
+                    doctor::run_capabilities(&config, tag.as_deref(), rebuild, reachable_only)
                 }
                 #[cfg(not(feature = "ai-protocol"))]
                 {
-                    let _ = (config, tag, rebuild);
+                    let _ = (config, tag, rebuild, reachable_only);
                     anyhow::bail!(
                         "`velaclaw doctor capabilities` requires the `ai-protocol` Cargo feature"
                     )

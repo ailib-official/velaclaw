@@ -1,10 +1,12 @@
-//! CR-CAP-002: doctor UX for the host-local capability inverted index.
+//! CR-CAP-002/004: doctor UX for the host-local capability inverted index
+//! and query-time reachable (keys ∩ declared) view.
 
 use crate::capability_index::{
-    default_cache_path, load_index, load_or_rebuild_for_config, lookup_tag, protocol_tip,
-    CAPABILITY_TAGS, TAG_MAPPING_TABLE,
+    default_cache_path, filter_reachable, load_index, load_or_rebuild_for_config, lookup_tag,
+    protocol_tip, CAPABILITY_TAGS, TAG_MAPPING_TABLE,
 };
 use crate::config::Config;
+use crate::execution::provider_has_usable_key;
 use crate::protocol_registry::resolve_local_protocol_root;
 use anyhow::Result;
 use std::path::Path;
@@ -19,7 +21,15 @@ rebuild triggers (host cache only — never writes public ai-protocol manifests)
   • not implemented: daily/timer rebuild (use --rebuild or tip change)";
 
 /// Print Tag → candidates (rebuild cache when `rebuild` is set).
-pub fn run_capabilities(config: &Config, tag: Option<&str>, rebuild: bool) -> Result<()> {
+///
+/// `reachable_only`: when set with `--tag`, list only providers with a usable
+/// local key (CR-CAP-004). Summary mode always prints declared vs reachable counts.
+pub fn run_capabilities(
+    config: &Config,
+    tag: Option<&str>,
+    rebuild: bool,
+    reachable_only: bool,
+) -> Result<()> {
     let config_dir = config
         .config_path
         .parent()
@@ -44,6 +54,7 @@ pub fn run_capabilities(config: &Config, tag: Option<&str>, rebuild: bool) -> Re
     println!("  manifests:     {}", index.meta.provider_manifest_count);
     println!("  cache:         {}", cache_path.display());
     println!("  note:          host cache only — not written to public ai-protocol");
+    println!("  reachable:     query-time keys ∩ declared (no secrets in cache)");
     println!();
     println!("{REBUILD_TRIGGERS_HELP}");
     println!();
@@ -56,7 +67,7 @@ pub fn run_capabilities(config: &Config, tag: Option<&str>, rebuild: bool) -> Re
     match tag {
         Some(tag) => {
             let candidates = lookup_tag(&index, tag)?;
-            println!("Tag `{tag}` → {} candidate(s)", candidates.len());
+            let reachable = filter_reachable(candidates, provider_has_usable_key);
             if let Some(entry) = TAG_MAPPING_TABLE.iter().find(|e| e.tag == tag) {
                 println!(
                     "  mapping: {:?} wire={:?}",
@@ -64,20 +75,40 @@ pub fn run_capabilities(config: &Config, tag: Option<&str>, rebuild: bool) -> Re
                 );
                 println!("  why:     {}", entry.drift_note);
             }
-            if candidates.is_empty() {
-                println!("  (empty — Tag is known; no local provider/model matched)");
+            println!(
+                "Tag `{tag}` → {} declared / {} reachable",
+                candidates.len(),
+                reachable.len()
+            );
+            let list = if reachable_only {
+                println!("  (showing reachable-only)");
+                reachable
             } else {
-                for c in candidates {
+                candidates.iter().collect()
+            };
+            if list.is_empty() {
+                if reachable_only {
+                    println!("  (empty — no keyed/keyless-local provider matched this Tag)");
+                } else {
+                    println!("  (empty — Tag is known; no local provider/model matched)");
+                }
+            } else {
+                for c in list {
+                    let mark = if provider_has_usable_key(&c.provider_id) {
+                        "reachable"
+                    } else {
+                        "no-key"
+                    };
                     match &c.logical_model_id {
                         Some(model) => {
                             println!(
-                                "  - {model}  ({})  [{}]  src={}",
+                                "  - [{mark}] {model}  ({})  [{}]  src={}",
                                 c.reason, c.provider_id, c.source_file
                             );
                         }
                         None => {
                             println!(
-                                "  - {}  ({})  src={}",
+                                "  - [{mark}] {}  ({})  src={}",
                                 c.provider_id, c.reason, c.source_file
                             );
                         }
@@ -86,17 +117,25 @@ pub fn run_capabilities(config: &Config, tag: Option<&str>, rebuild: bool) -> Re
             }
         }
         None => {
-            println!("Tags (capability-mapping.md + host mapping table):");
+            println!("Tags (declared = protocol facts; reachable = usable local key):");
             for t in CAPABILITY_TAGS {
-                let n = index.candidates_for(t).map_or(0, <[_]>::len);
+                let declared = index.candidates_for(t).map_or(0, <[_]>::len);
+                let reachable = index
+                    .candidates_for(t)
+                    .map(|c| filter_reachable(c, provider_has_usable_key).len())
+                    .unwrap_or(0);
                 if let Some(entry) = TAG_MAPPING_TABLE.iter().find(|e| e.tag == *t) {
-                    println!("  {t:<24} {n:>3} candidate(s)  [{:?}]", entry.relation);
+                    println!(
+                        "  {t:<24} {declared:>3} declared / {reachable:>3} reachable  [{:?}]",
+                        entry.relation
+                    );
                 } else {
-                    println!("  {t:<24} {n:>3} candidate(s)");
+                    println!("  {t:<24} {declared:>3} declared / {reachable:>3} reachable");
                 }
             }
             println!();
             println!("Hint: velaclaw doctor capabilities --tag <Tag>");
+            println!("      velaclaw doctor capabilities --tag <Tag> --reachable-only");
             println!("      velaclaw doctor capabilities --rebuild");
         }
     }
@@ -154,8 +193,9 @@ mod tests {
 
         let mut config = Config::default();
         config.config_path = cfg_dir.join("config.toml");
-        run_capabilities(&config, Some("coding"), false).expect("doctor");
-        run_capabilities(&config, None, false).expect("summary");
+        run_capabilities(&config, Some("coding"), false, false).expect("doctor");
+        run_capabilities(&config, Some("coding"), false, true).expect("reachable-only");
+        run_capabilities(&config, None, false, false).expect("summary");
         std::env::remove_var("AI_PROTOCOL_DIR");
     }
 

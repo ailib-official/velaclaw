@@ -564,6 +564,7 @@ impl Agent {
                     &self.model_name,
                     user_message,
                     None,
+                    None,
                     false,
                 )?;
                 return decision.selected_model.ok_or_else(|| {

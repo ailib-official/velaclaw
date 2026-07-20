@@ -1,4 +1,4 @@
-//! CR-CAP-003: doctor observe for intent→Tag→index route (assemble-only; no LLM).
+//! CR-CAP-003/005: doctor observe for capability-index route (assemble-only; no LLM).
 
 use crate::agent::intent_route::{
     hint_to_tag, resolve_for_host, IntentRouteDecision, IntentRouteHost,
@@ -11,16 +11,19 @@ use std::io::Write;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Print an explainable intent-route decision.
+/// Print an explainable capability-index route decision.
 ///
 /// Independent of `[agent].intent_capability_route` when `force` is true
 /// (doctor observe). When `force` is false, respects the config flag.
 /// When `persist` is true, append a JSONL decision record under the config dir
 /// (opt-in; never enables live chat routing by itself).
+///
+/// Prefer `--tag <Tag>` (explicit capability) over NL classification.
 pub fn run_intent_route(
     config: &Config,
     message: &str,
     hint: Option<&str>,
+    tag: Option<&str>,
     rebuild: bool,
     force: bool,
     persist: bool,
@@ -30,11 +33,12 @@ pub fn run_intent_route(
         host.enabled = true;
     }
 
-    println!("🩺 VelaClaw Doctor — Intent Capability Route (CR-CAP-003)");
+    println!("🩺 VelaClaw Doctor — Capability Index Route (CR-CAP-005 / CAP-003 wire)");
     println!(
         "  flag intent_capability_route: {}",
         config.agent.intent_capability_route
     );
+    println!("  (alias / narrative:          capability-index route; default-off)");
     println!("  observe force-on:          {force}");
     println!("  persist decision:          {persist}");
     println!("  config_dir:                {}", host.config_dir.display());
@@ -42,12 +46,14 @@ pub fn run_intent_route(
 
     if !host.enabled {
         println!("ℹ️  Route disabled (default-off). Prior classification/default path applies.");
-        println!("   Enable with `[agent].intent_capability_route = true`, or pass `--force`.");
-        println!("   Live chat path is unchanged unless the config flag is explicitly true.");
+        println!(
+            "   Enable with `[agent].intent_capability_route = true` (capability-index route),"
+        );
+        println!("   or pass `--force`. Live chat is unchanged unless the config flag is true.");
         return Ok(());
     }
 
-    print_resolve_steps(message, hint);
+    print_resolve_steps(message, hint, tag);
 
     let available_hints: Vec<String> = config.model_routes.iter().map(|r| r.hint.clone()).collect();
     let default_model = config
@@ -62,6 +68,7 @@ pub fn run_intent_route(
         default_model,
         message,
         hint,
+        tag,
         rebuild,
     ) {
         Ok(decision) => {
@@ -76,15 +83,16 @@ pub fn run_intent_route(
         Err(err) => {
             println!("❌ fail-closed: {err}");
             if persist {
-                // Still record fail-closed reasons when possible (structured string only).
                 let synthetic = IntentRouteDecision {
                     enabled: true,
-                    hint: hint.map(str::to_string),
-                    tags: hint
+                    hint: hint.map(str::to_string).or_else(|| tag.map(str::to_string)),
+                    tags: tag
+                        .or(hint)
                         .and_then(hint_to_tag)
                         .map(|t| vec![t.to_string()])
                         .unwrap_or_default(),
                     candidates_before: 0,
+                    reachable_before: 0,
                     candidates_after: 0,
                     truncated: Vec::new(),
                     selected_model: None,
@@ -99,30 +107,44 @@ pub fn run_intent_route(
     }
 }
 
-fn print_resolve_steps(message: &str, hint: Option<&str>) {
+fn print_resolve_steps(message: &str, hint: Option<&str>, tag: Option<&str>) {
     println!("steps:");
     println!("  1. input message: {message:?}");
-    match hint {
-        Some(h) => println!("  2. explicit hint:  {h:?} (skips classifier)"),
-        None => println!("  2. hint:            from query_classification (if any)"),
-    }
-    if let Some(h) = hint {
-        if let Some(tag) = hint_to_tag(h) {
-            println!("  3. hint→Tag:        {h:?} → {tag}");
-            if let Some(entry) = TAG_MAPPING_TABLE.iter().find(|e| e.tag == tag) {
+    if let Some(t) = tag {
+        println!("  2. explicit Tag:  {t:?} (primary; skips classifier)");
+        if let Some(mapped) = hint_to_tag(t) {
+            println!("  3. Tag:             {mapped}");
+            if let Some(entry) = TAG_MAPPING_TABLE.iter().find(|e| e.tag == mapped) {
                 println!(
                     "  4. Tag mapping:     {:?} wire={:?}",
                     entry.relation, entry.wire_capabilities
                 );
                 println!("     why:             {}", entry.drift_note);
             }
-        } else {
-            println!("  3. hint→Tag:        {h:?} → (none — fail-closed if route enabled)");
         }
     } else {
-        println!("  3. hint→Tag:        (after classification)");
+        match hint {
+            Some(h) => println!("  2. explicit hint:  {h:?} (skips classifier)"),
+            None => println!("  2. hint:            from query_classification (optional only)"),
+        }
+        if let Some(h) = hint {
+            if let Some(mapped) = hint_to_tag(h) {
+                println!("  3. hint→Tag:        {h:?} → {mapped}");
+                if let Some(entry) = TAG_MAPPING_TABLE.iter().find(|e| e.tag == mapped) {
+                    println!(
+                        "  4. Tag mapping:     {:?} wire={:?}",
+                        entry.relation, entry.wire_capabilities
+                    );
+                    println!("     why:             {}", entry.drift_note);
+                }
+            } else {
+                println!("  3. hint→Tag:        {h:?} → (none — fail-closed if route enabled)");
+            }
+        } else {
+            println!("  3. hint→Tag:        (after classification, if any)");
+        }
     }
-    println!("  5. index ∩ [[model_routes]] constraints → selected_model or fail-closed");
+    println!("  5. declared → reachable (keys) ∩ [[model_routes]] → selected_model or fail-closed");
     println!();
 }
 
@@ -131,8 +153,8 @@ fn print_decision(decision: &IntentRouteDecision) {
     println!("  hint:               {:?}", decision.hint);
     println!("  tags:               {:?}", decision.tags);
     println!(
-        "  candidates:         {} → {} (after constraints)",
-        decision.candidates_before, decision.candidates_after
+        "  candidates:         declared {} → reachable {} → after constraints {}",
+        decision.candidates_before, decision.reachable_before, decision.candidates_after
     );
     println!("  truncated:          {:?}", decision.truncated);
     println!("  selected_model:     {:?}", decision.selected_model);
@@ -176,7 +198,7 @@ mod tests {
     fn doctor_intent_route_force_off_when_disabled() {
         let mut config = Config::default();
         config.agent.intent_capability_route = false;
-        run_intent_route(&config, "hello", None, false, false, false).unwrap();
+        run_intent_route(&config, "hello", None, None, false, false, false).unwrap();
     }
 
     #[test]
@@ -199,15 +221,16 @@ mod tests {
         let mut config = Config::default();
         config.config_path = cfg_dir.join("config.toml");
         config.agent.intent_capability_route = false;
-        run_intent_route(
+        // demo has no API key → reachable may be empty → fail-closed is OK for observe.
+        let _ = run_intent_route(
             &config,
             "please refactor",
+            None,
             Some("coding"),
             false,
             true,
             true,
-        )
-        .unwrap();
+        );
         let persisted = cfg_dir.join("intent-route-decisions.jsonl");
         assert!(persisted.is_file(), "persist should write jsonl");
         let body = fs::read_to_string(&persisted).unwrap();

@@ -137,10 +137,10 @@ impl CapabilityIndex {
 /// Query-time reachable view: keep declared candidates whose `provider_id` passes
 /// `is_reachable`. Does **not** mutate the cached fact index (CR-CAP-004).
 #[must_use]
-pub fn filter_reachable<'a>(
-    candidates: &'a [CapabilityCandidate],
+pub fn filter_reachable(
+    candidates: &[CapabilityCandidate],
     is_reachable: impl Fn(&str) -> bool,
-) -> Vec<&'a CapabilityCandidate> {
+) -> Vec<&CapabilityCandidate> {
     candidates
         .iter()
         .filter(|c| is_reachable(&c.provider_id))

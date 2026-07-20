@@ -180,10 +180,20 @@ async fn auto_compact_history(
 /// Build context preamble by searching memory for relevant entries.
 /// Entries with a hybrid score below `min_relevance_score` are dropped to
 /// prevent unrelated memories from bleeding into the conversation.
-async fn build_context(mem: &dyn Memory, user_msg: &str, min_relevance_score: f64) -> String {
+///
+/// VL-MEM-001: when `session_id` is set, Conversation/Daily inject only for
+/// that session; Core always may inject; legacy `session_id=None` Conversation
+/// is excluded.
+async fn build_context(
+    mem: &dyn Memory,
+    user_msg: &str,
+    min_relevance_score: f64,
+    session_id: Option<&str>,
+) -> String {
     let mut context = String::new();
 
-    // Pull relevant memories for this message
+    // Pull relevant memories for this message (no SQL session filter so Core
+    // with session_id=None remains visible; apply inject rules below).
     if let Ok(entries) = mem.recall(user_msg, 5, None).await {
         let relevant: Vec<_> = entries
             .iter()
@@ -191,6 +201,7 @@ async fn build_context(mem: &dyn Memory, user_msg: &str, min_relevance_score: f6
                 Some(score) => score >= min_relevance_score,
                 None => true,
             })
+            .filter(|e| memory::should_inject_for_session(e, session_id))
             .collect();
 
         if !relevant.is_empty() {
@@ -1060,17 +1071,31 @@ pub async fn run(
     let mut final_output = String::new();
 
     if let Some(msg) = message {
+        // One-shot also gets an isolated session so legacy Conversation rows
+        // (session_id=None) do not bleed into -m turns.
+        let session_id = memory::new_session_id();
+
         // Auto-save user message to memory (skip short/trivial messages)
         if config.memory.auto_save && msg.chars().count() >= AUTOSAVE_MIN_MESSAGE_CHARS {
             let user_key = autosave_memory_key("user_msg");
             let _ = mem
-                .store(&user_key, &msg, MemoryCategory::Conversation, None)
+                .store(
+                    &user_key,
+                    &msg,
+                    MemoryCategory::Conversation,
+                    Some(session_id.as_str()),
+                )
                 .await;
         }
 
         // Inject memory + hardware RAG context into user message
-        let mem_context =
-            build_context(mem.as_ref(), &msg, config.memory.min_relevance_score).await;
+        let mem_context = build_context(
+            mem.as_ref(),
+            &msg,
+            config.memory.min_relevance_score,
+            Some(session_id.as_str()),
+        )
+        .await;
         let rag_limit = if config.agent.compact_context { 2 } else { 5 };
         let hw_context = hardware_rag
             .as_ref()
@@ -1140,6 +1165,8 @@ pub async fn run(
         let mut history = vec![ChatMessage::system(&system_prompt)];
         let mut session_model = model_name.clone();
         let session_provider = provider_name.to_string();
+        // VL-MEM-001: default new session unless user later resumes (no resume UI yet).
+        let mut session_id = memory::new_session_id();
 
         loop {
             print!("{}", format_user_prompt(render_opts.style));
@@ -1168,7 +1195,7 @@ pub async fn run(
                     println!("  /models      List providers (or `/models <provider>`)");
                     println!("  /model       Show/set model for this session");
                     println!("  /expand <id> Replay a folded long output by id");
-                    println!("  /clear /new  Clear conversation history");
+                    println!("  /clear /new  Start a new session (clear this session's memory)");
                     println!("  /quit /exit  Exit interactive mode\n");
                     continue;
                 }
@@ -1211,7 +1238,7 @@ pub async fn run(
                 }
                 "/clear" | "/new" => {
                     println!(
-                        "This will clear the current conversation and delete all session memory."
+                        "This will clear the current conversation and delete this session's memory."
                     );
                     println!("Core memories (long-term facts/preferences) will be preserved.");
                     print!("Continue? [y/N] ");
@@ -1228,20 +1255,26 @@ pub async fn run(
 
                     history.clear();
                     history.push(ChatMessage::system(&system_prompt));
-                    // Clear conversation and daily memory
+                    // Clear Conversation/Daily for the *current* session only.
                     let mut cleared = 0;
                     for category in [MemoryCategory::Conversation, MemoryCategory::Daily] {
-                        let entries = mem.list(Some(&category), None).await.unwrap_or_default();
+                        let entries = mem
+                            .list(Some(&category), Some(session_id.as_str()))
+                            .await
+                            .unwrap_or_default();
                         for entry in entries {
                             if mem.forget(&entry.key).await.unwrap_or(false) {
                                 cleared += 1;
                             }
                         }
                     }
+                    session_id = memory::new_session_id();
                     if cleared > 0 {
-                        println!("Conversation cleared ({cleared} memory entries removed).\n");
+                        println!(
+                            "Conversation cleared ({cleared} memory entries removed); new session started.\n"
+                        );
                     } else {
-                        println!("Conversation cleared.\n");
+                        println!("Conversation cleared; new session started.\n");
                     }
                     continue;
                 }
@@ -1265,13 +1298,23 @@ pub async fn run(
             if config.memory.auto_save && user_input.chars().count() >= AUTOSAVE_MIN_MESSAGE_CHARS {
                 let user_key = autosave_memory_key("user_msg");
                 let _ = mem
-                    .store(&user_key, &user_input, MemoryCategory::Conversation, None)
+                    .store(
+                        &user_key,
+                        &user_input,
+                        MemoryCategory::Conversation,
+                        Some(session_id.as_str()),
+                    )
                     .await;
             }
 
             // Inject memory + hardware RAG context into user message
-            let mem_context =
-                build_context(mem.as_ref(), &user_input, config.memory.min_relevance_score).await;
+            let mem_context = build_context(
+                mem.as_ref(),
+                &user_input,
+                config.memory.min_relevance_score,
+                Some(session_id.as_str()),
+            )
+            .await;
             let rag_limit = if config.agent.compact_context { 2 } else { 5 };
             let hw_context = hardware_rag
                 .as_ref()
@@ -1554,7 +1597,14 @@ pub async fn process_message(config: Config, message: &str) -> Result<String> {
         &[crate::agent::prompt_composer::PromptPhase::Approval],
     );
 
-    let mem_context = build_context(mem.as_ref(), message, config.memory.min_relevance_score).await;
+    let session_id = memory::new_session_id();
+    let mem_context = build_context(
+        mem.as_ref(),
+        message,
+        config.memory.min_relevance_score,
+        Some(session_id.as_str()),
+    )
+    .await;
     let rag_limit = if config.agent.compact_context { 2 } else { 5 };
     let hw_context = hardware_rag
         .as_ref()
@@ -2654,7 +2704,7 @@ Done."#;
             "assistant_resp_poisoned",
             "User suffered a fabricated event",
             MemoryCategory::Daily,
-            None,
+            Some("sess-a"),
         )
         .await
         .unwrap();
@@ -2662,15 +2712,66 @@ Done."#;
             "user_msg_real",
             "User asked for concise status updates",
             MemoryCategory::Conversation,
-            None,
+            Some("sess-a"),
         )
         .await
         .unwrap();
 
-        let context = build_context(&mem, "status updates", 0.0).await;
+        let context = build_context(&mem, "status updates", 0.0, Some("sess-a")).await;
         assert!(context.contains("user_msg_real"));
         assert!(!context.contains("assistant_resp_poisoned"));
         assert!(!context.contains("fabricated event"));
+    }
+
+    #[tokio::test]
+    async fn build_context_excludes_legacy_and_other_session_conversation() {
+        let tmp = TempDir::new().unwrap();
+        let mem = SqliteMemory::new(tmp.path()).unwrap();
+        // Shared keyword so FTS/hybrid recall returns all rows; inject filter decides.
+        mem.store(
+            "legacy_shell",
+            "hello: 用 shell 执行 echo hello，不要解释。",
+            MemoryCategory::Conversation,
+            None,
+        )
+        .await
+        .unwrap();
+        mem.store(
+            "other_sess",
+            "hello: previous user messages from other session",
+            MemoryCategory::Conversation,
+            Some("sess-old"),
+        )
+        .await
+        .unwrap();
+        mem.store(
+            "core_fact",
+            "hello: username is velaclaw_user",
+            MemoryCategory::Core,
+            None,
+        )
+        .await
+        .unwrap();
+        mem.store(
+            "current_note",
+            "hello: current session note about greeting",
+            MemoryCategory::Conversation,
+            Some("sess-new"),
+        )
+        .await
+        .unwrap();
+
+        let context = build_context(&mem, "hello", 0.0, Some("sess-new")).await;
+        assert!(
+            context.contains("username is velaclaw_user"),
+            "core should inject; context={context:?}"
+        );
+        assert!(
+            context.contains("current session note"),
+            "same-session conversation should inject; context={context:?}"
+        );
+        assert!(!context.contains("echo hello"));
+        assert!(!context.contains("other session"));
     }
 
     // ═══════════════════════════════════════════════════════════════════════

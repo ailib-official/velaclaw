@@ -6,7 +6,7 @@ use crate::agent::prompt::{PromptContext, SystemPromptBuilder};
 use crate::approval::{ApprovalGate, ApprovalHub, ApprovalManager, GateDecision};
 use crate::cli_render::{prefix_agent_lines, RenderOpts};
 use crate::config::{Config, DEFAULT_PROTOCOL_MODEL_ID};
-use crate::memory::{Memory, MemoryCategory};
+use crate::memory::{self, Memory, MemoryCategory};
 use crate::observability::{Observer, ObserverEvent};
 #[cfg(not(feature = "ai-protocol"))]
 use crate::providers;
@@ -37,6 +37,8 @@ pub struct Agent {
     skills: Vec<crate::skills::Skill>,
     skills_prompt_mode: crate::config::SkillsPromptInjectionMode,
     auto_save: bool,
+    /// VL-MEM-001: fresh session on agent construct; Conversation autosave/recall scoped here.
+    session_id: String,
     history: Vec<ConversationMessage>,
     classification_config: crate::config::QueryClassificationConfig,
     available_hints: Vec<String>,
@@ -254,6 +256,7 @@ impl AgentBuilder {
             skills: self.skills.unwrap_or_default(),
             skills_prompt_mode: self.skills_prompt_mode.unwrap_or_default(),
             auto_save: self.auto_save.unwrap_or(false),
+            session_id: memory::new_session_id(),
             history: Vec::new(),
             classification_config: self.classification_config.unwrap_or_default(),
             available_hints: self.available_hints.unwrap_or_default(),
@@ -278,6 +281,12 @@ impl Agent {
     }
 
     pub fn clear_history(&mut self) {
+        self.history.clear();
+    }
+
+    /// Start a fresh memory session (Conversation/Daily isolation); Core unchanged.
+    pub fn start_new_session(&mut self) {
+        self.session_id = memory::new_session_id();
         self.history.clear();
     }
 
@@ -583,7 +592,12 @@ impl Agent {
         if self.auto_save {
             if let Err(err) = self
                 .memory
-                .store("user_msg", user_message, MemoryCategory::Conversation, None)
+                .store(
+                    "user_msg",
+                    user_message,
+                    MemoryCategory::Conversation,
+                    Some(self.session_id.as_str()),
+                )
                 .await
             {
                 tracing::warn!(error = %err, "auto_save failed to store user message");
@@ -592,7 +606,11 @@ impl Agent {
 
         let context = self
             .memory_loader
-            .load_context(self.memory.as_ref(), user_message)
+            .load_context(
+                self.memory.as_ref(),
+                user_message,
+                Some(self.session_id.as_str()),
+            )
             .await
             .unwrap_or_default();
 

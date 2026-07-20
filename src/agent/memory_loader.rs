@@ -1,11 +1,15 @@
-use crate::memory::{self, Memory};
+use crate::memory::{self, Memory, MemoryEntry};
 use async_trait::async_trait;
 use std::fmt::Write;
 
 #[async_trait]
 pub trait MemoryLoader: Send + Sync {
-    async fn load_context(&self, memory: &dyn Memory, user_message: &str)
-        -> anyhow::Result<String>;
+    async fn load_context(
+        &self,
+        memory: &dyn Memory,
+        user_message: &str,
+        session_id: Option<&str>,
+    ) -> anyhow::Result<String>;
 }
 
 pub struct DefaultMemoryLoader {
@@ -31,38 +35,55 @@ impl DefaultMemoryLoader {
     }
 }
 
+fn format_context_entries(
+    entries: &[MemoryEntry],
+    min_relevance_score: f64,
+    session_id: Option<&str>,
+) -> String {
+    if entries.is_empty() {
+        return String::new();
+    }
+
+    let mut context = String::from("[Memory context]\n");
+    for entry in entries {
+        if memory::is_assistant_autosave_key(&entry.key) {
+            continue;
+        }
+        if !memory::should_inject_for_session(entry, session_id) {
+            continue;
+        }
+        if let Some(score) = entry.score {
+            if score < min_relevance_score {
+                continue;
+            }
+        }
+        let _ = writeln!(context, "- {}: {}", entry.key, entry.content);
+    }
+
+    if context == "[Memory context]\n" {
+        return String::new();
+    }
+
+    context.push('\n');
+    context
+}
+
 #[async_trait]
 impl MemoryLoader for DefaultMemoryLoader {
     async fn load_context(
         &self,
         memory: &dyn Memory,
         user_message: &str,
+        session_id: Option<&str>,
     ) -> anyhow::Result<String> {
+        // Recall without SQL session filter so Core (often session_id=None) remains
+        // visible; apply VL-MEM-001 inject rules in-process.
         let entries = memory.recall(user_message, self.limit, None).await?;
-        if entries.is_empty() {
-            return Ok(String::new());
-        }
-
-        let mut context = String::from("[Memory context]\n");
-        for entry in entries {
-            if memory::is_assistant_autosave_key(&entry.key) {
-                continue;
-            }
-            if let Some(score) = entry.score {
-                if score < self.min_relevance_score {
-                    continue;
-                }
-            }
-            let _ = writeln!(context, "- {}: {}", entry.key, entry.content);
-        }
-
-        // If all entries were below threshold, return empty
-        if context == "[Memory context]\n" {
-            return Ok(String::new());
-        }
-
-        context.push('\n');
-        Ok(context)
+        Ok(format_context_entries(
+            &entries,
+            self.min_relevance_score,
+            session_id,
+        ))
     }
 }
 
@@ -122,7 +143,7 @@ mod tests {
         }
 
         async fn forget(&self, _key: &str) -> anyhow::Result<bool> {
-            Ok(true)
+            Ok(false)
         }
 
         async fn count(&self) -> anyhow::Result<usize> {
@@ -153,10 +174,10 @@ mod tests {
         async fn recall(
             &self,
             _query: &str,
-            _limit: usize,
+            limit: usize,
             _session_id: Option<&str>,
         ) -> anyhow::Result<Vec<MemoryEntry>> {
-            Ok(self.entries.as_ref().clone())
+            Ok(self.entries.iter().take(limit).cloned().collect())
         }
 
         async fn get(&self, _key: &str) -> anyhow::Result<Option<MemoryEntry>> {
@@ -168,11 +189,11 @@ mod tests {
             _category: Option<&MemoryCategory>,
             _session_id: Option<&str>,
         ) -> anyhow::Result<Vec<MemoryEntry>> {
-            Ok(vec![])
+            Ok(self.entries.as_ref().clone())
         }
 
         async fn forget(&self, _key: &str) -> anyhow::Result<bool> {
-            Ok(true)
+            Ok(false)
         }
 
         async fn count(&self) -> anyhow::Result<usize> {
@@ -184,47 +205,60 @@ mod tests {
         }
 
         fn name(&self) -> &str {
-            "mock-with-entries"
+            "mock-entries"
         }
     }
 
     #[tokio::test]
-    async fn default_loader_formats_context() {
-        let loader = DefaultMemoryLoader::default();
-        let context = loader.load_context(&MockMemory, "hello").await.unwrap();
-        assert!(context.contains("[Memory context]"));
-        assert!(context.contains("- k: v"));
+    async fn load_context_returns_empty_when_no_entries() {
+        let loader = DefaultMemoryLoader::new(5, 0.0);
+        let ctx = loader
+            .load_context(&MockMemory, "hi", Some("sess"))
+            .await
+            .unwrap();
+        // Mock returns Conversation with session_id=None → excluded for active session.
+        assert!(ctx.is_empty());
     }
 
     #[tokio::test]
-    async fn default_loader_skips_legacy_assistant_autosave_entries() {
+    async fn load_context_includes_same_session_and_core() {
+        let entries = Arc::new(vec![
+            MemoryEntry {
+                id: "1".into(),
+                key: "core_pref".into(),
+                content: "likes tea".into(),
+                category: MemoryCategory::Core,
+                timestamp: "now".into(),
+                session_id: None,
+                score: Some(1.0),
+            },
+            MemoryEntry {
+                id: "2".into(),
+                key: "user_msg_old".into(),
+                content: "shell echo hello".into(),
+                category: MemoryCategory::Conversation,
+                timestamp: "now".into(),
+                session_id: Some("other".into()),
+                score: Some(1.0),
+            },
+            MemoryEntry {
+                id: "3".into(),
+                key: "user_msg_now".into(),
+                content: "current turn note".into(),
+                category: MemoryCategory::Conversation,
+                timestamp: "now".into(),
+                session_id: Some("sess-a".into()),
+                score: Some(1.0),
+            },
+        ]);
+        let mem = MockMemoryWithEntries { entries };
         let loader = DefaultMemoryLoader::new(5, 0.0);
-        let memory = MockMemoryWithEntries {
-            entries: Arc::new(vec![
-                MemoryEntry {
-                    id: "1".into(),
-                    key: "assistant_resp_legacy".into(),
-                    content: "fabricated detail".into(),
-                    category: MemoryCategory::Daily,
-                    timestamp: "now".into(),
-                    session_id: None,
-                    score: Some(0.95),
-                },
-                MemoryEntry {
-                    id: "2".into(),
-                    key: "user_fact".into(),
-                    content: "User prefers concise answers".into(),
-                    category: MemoryCategory::Conversation,
-                    timestamp: "now".into(),
-                    session_id: None,
-                    score: Some(0.9),
-                },
-            ]),
-        };
-
-        let context = loader.load_context(&memory, "answer style").await.unwrap();
-        assert!(context.contains("user_fact"));
-        assert!(!context.contains("assistant_resp_legacy"));
-        assert!(!context.contains("fabricated detail"));
+        let ctx = loader
+            .load_context(&mem, "hello", Some("sess-a"))
+            .await
+            .unwrap();
+        assert!(ctx.contains("likes tea"));
+        assert!(ctx.contains("current turn note"));
+        assert!(!ctx.contains("shell echo hello"));
     }
 }

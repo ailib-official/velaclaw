@@ -134,6 +134,19 @@ impl CapabilityIndex {
     }
 }
 
+/// Query-time reachable view: keep declared candidates whose `provider_id` passes
+/// `is_reachable`. Does **not** mutate the cached fact index (CR-CAP-004).
+#[must_use]
+pub fn filter_reachable(
+    candidates: &[CapabilityCandidate],
+    is_reachable: impl Fn(&str) -> bool,
+) -> Vec<&CapabilityCandidate> {
+    candidates
+        .iter()
+        .filter(|c| is_reachable(&c.provider_id))
+        .collect()
+}
+
 /// Default cache path: `<config_dir>/capability-index.json`.
 #[must_use]
 pub fn default_cache_path(config_dir: &Path) -> PathBuf {
@@ -487,6 +500,38 @@ mod tests {
         let providers = dir.join("v2").join("providers");
         fs::create_dir_all(&providers).expect("providers dir");
         fs::write(providers.join(name), body).expect("write manifest");
+    }
+
+    #[test]
+    fn filter_reachable_keeps_only_keyed_providers() {
+        let candidates = vec![
+            CapabilityCandidate {
+                provider_id: "groq".into(),
+                logical_model_id: None,
+                reason: "test".into(),
+                source_file: "a".into(),
+            },
+            CapabilityCandidate {
+                provider_id: "anthropic".into(),
+                logical_model_id: None,
+                reason: "test".into(),
+                source_file: "b".into(),
+            },
+            CapabilityCandidate {
+                provider_id: "ollama".into(),
+                logical_model_id: Some("ollama/llama3.2".into()),
+                reason: "test".into(),
+                source_file: "c".into(),
+            },
+        ];
+        let reachable = filter_reachable(&candidates, |id| id == "groq" || id == "ollama");
+        assert_eq!(reachable.len(), 2);
+        assert_eq!(reachable[0].provider_id, "groq");
+        assert_eq!(reachable[1].provider_id, "ollama");
+        // Subset of declared — never invents candidates.
+        assert!(reachable.iter().all(|c| candidates.iter().any(|d| {
+            d.provider_id == c.provider_id && d.logical_model_id == c.logical_model_id
+        })));
     }
 
     #[test]

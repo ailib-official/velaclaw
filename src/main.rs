@@ -592,7 +592,7 @@ enum DoctorCommands {
         stagnation_limit: u32,
     },
 
-    /// CR-CAP-002: host-local Tag → candidates inverted index (not public manifest)
+    /// CR-CAP-002/004: host-local Tag → candidates + reachable (keys ∩ declared)
     Capabilities {
         /// Capability Tag from capability-mapping.md (omit to list all Tag counts)
         #[arg(long)]
@@ -601,6 +601,10 @@ enum DoctorCommands {
         /// Force rebuild of `capability-index.json` under the config dir
         #[arg(long, default_value_t = false)]
         rebuild: bool,
+
+        /// With `--tag`, list only providers that have a usable local API key
+        #[arg(long, default_value_t = false)]
+        reachable_only: bool,
     },
 
     /// CR-CAP-003: observe intent→Tag→index→constraints route (no LLM)

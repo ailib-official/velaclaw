@@ -398,11 +398,12 @@ pub struct AgentConfig {
     /// CR-L4-003: optional stagnation limit forwarded to candidate shadow runs (`0` = off).
     #[serde(default)]
     pub candidate_dag_stagnation_limit: u32,
-    /// CR-CAP-003: opt-in intent→Tag→capability-index→constraints model route.
+    /// CR-CAP-003/005: opt-in capability-index route (Tag/Hint → reachable ∩ constraints).
+    /// Config key remains `intent_capability_route` (serde also accepts `capability_index_route`).
     /// Default: `false`. When false, prior `query_classification` / `hint:` path is unchanged.
-    /// When true, empty Tag candidate sets fail closed (no silent `default_model`).
-    /// Requires `--features ai-protocol`. Does not write into public ai-protocol manifests.
-    #[serde(default)]
+    /// When true, empty reachable sets fail closed (no silent `default_model`).
+    /// Prefer explicit Tag/Hint over NL classification. Requires `--features ai-protocol`.
+    #[serde(default, alias = "capability_index_route")]
     pub intent_capability_route: bool,
 }
 

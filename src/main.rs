@@ -607,15 +607,20 @@ enum DoctorCommands {
         reachable_only: bool,
     },
 
-    /// CR-CAP-003: observe intent→Tag→index→constraints route (no LLM)
+    /// CR-CAP-003/005: observe capability-index route (Tag/Hint → reachable ∩ constraints; no LLM)
+    #[command(visible_alias = "capability-route")]
     IntentRoute {
-        /// User message used for query_classification (optional if --hint set)
-        #[arg(long, default_value = "doctor intent-route probe")]
+        /// User message used for query_classification (optional if --hint/--tag set)
+        #[arg(long, default_value = "doctor capability-route probe")]
         message: String,
 
-        /// Explicit hint (skips classification when set)
+        /// Explicit hint (skips classification when set; Tag names also accepted)
         #[arg(long)]
         hint: Option<String>,
+
+        /// Explicit Capability Tag (preferred; skips classifier — CR-CAP-005)
+        #[arg(long)]
+        tag: Option<String>,
 
         /// Force rebuild of capability-index.json
         #[arg(long, default_value_t = false)]

@@ -77,10 +77,17 @@ CR-L4-003 shadow host (default-off): set `[agent].candidate_dag_shadow = true` t
 velaclaw doctor candidate-dag --candidate <path> [--fallback <path>] [--message <text>] [--compact] [--stagnation-limit N]
 ```
 
-CR-CAP-003 intent route (default-off): set `[agent].intent_capability_route = true` to resolve turn models via Hint→Tag→host capability index ∩ `[[model_routes]]`. Empty Tag sets fail closed. Observe anytime with:
+CR-CAP-005 capability-index route (default-off; CAP-003 wire): set `[agent].intent_capability_route = true` (alias `capability_index_route`) to resolve turn models via **explicit Tag / Hint** → host capability index → **reachable (local keys)** ∩ `[[model_routes]]`. NL `query_classification` is optional only. Empty reachable sets fail closed. Observe anytime with:
 
 ```bash
-velaclaw doctor intent-route [--message <text>] [--hint <hint>] [--force] [--persist] [--rebuild]
+velaclaw doctor intent-route --tag coding --force
+# alias:
+velaclaw doctor capability-route --tag coding --force
+```
+
+```bash
+velaclaw doctor intent-route [--message <text>] [--hint <hint>] [--tag <Tag>] [--force] [--persist] [--rebuild]
+# alias: doctor capability-route …
 ```
 
 Interactive REPL extras:
@@ -112,8 +119,8 @@ See `[cli_render]` in [config-reference.md](config-reference.md).
 - `velaclaw doctor models [--provider <ID>] [--use-cache]`
 - `velaclaw doctor template-dag --fixture <path> [--message <text>] [--compact]` — validate a handwritten CR-L2 template DAG JSON (walk + Envelope assemble only; no LLM). Fail-closed on `max_steps` / HardBudget / invalid graph. Requires `--features ai-protocol`. Independent of `[agent].template_dag` (that flag gates future runtime wiring; default remains `false`).
 - `velaclaw doctor candidate-dag --candidate <path> [--fallback <path>] [--message <text>] [--compact] [--stagnation-limit N]` — CR-L4-003 shadow observe: validate candidate DAG + optional L2 fallback (assemble-only; no LLM). Independent of `[agent].candidate_dag_shadow` (default `false`). Requires `--features ai-protocol`.
-- `velaclaw doctor capabilities [--tag <Tag>] [--rebuild] [--reachable-only]` — CR-CAP-002 / CR-CAP-004 / CR-HOST-001 host-local Tag→candidates inverted index over `$AI_PROTOCOL_DIR` (cache: `<config_dir>/capability-index.json`). Prints declared vs **reachable** counts (reachable = providers with a usable local API key / keyless local; query-time filter — **no secrets** in the cache). With `--tag`, each candidate is marked `[reachable]` or `[no-key]`; `--reachable-only` lists only keyed candidates. Rebuild triggers: explicit `--rebuild`, protocol tip/root change, missing cache (**no** daily timer). Facts + reachability UX only; does **not** write into public ai-protocol manifests and does **not** enable live capability routing (that is CR-CAP-005). Requires `--features ai-protocol`.
-- `velaclaw doctor intent-route [--message <text>] [--hint <hint>] [--rebuild] [--force] [--persist]` — CR-CAP-003 / CR-HOST-001 observe: prints step-by-step Hint→Tag→mapping→constraints and an explainable decision (no LLM). Independent of `[agent].intent_capability_route` when `--force` is set. `--persist` appends JSONL to `<config_dir>/intent-route-decisions.jsonl` (opt-in; does not enable live chat). Empty candidate sets fail closed. Requires `--features ai-protocol`.
+- `velaclaw doctor capabilities [--tag <Tag>] [--rebuild] [--reachable-only]` — CR-CAP-002 / CR-CAP-004 / CR-HOST-001 host-local Tag→candidates inverted index over `$AI_PROTOCOL_DIR` (cache: `<config_dir>/capability-index.json`). Prints declared vs **reachable** counts (reachable = providers with a usable local API key / keyless local; query-time filter — **no secrets** in the cache). With `--tag`, each candidate is marked `[reachable]` or `[no-key]`; `--reachable-only` lists only keyed candidates. Rebuild triggers: explicit `--rebuild`, protocol tip/root change, missing cache (**no** daily timer). Facts + reachability UX; live selection is CR-CAP-005 (`intent_capability_route`). Requires `--features ai-protocol`.
+- `velaclaw doctor intent-route` / `capability-route` `[--message <text>] [--hint <hint>] [--tag <Tag>] [--rebuild] [--force] [--persist]` — CR-CAP-005 / CAP-003 wire / CR-HOST-001 observe: Tag/Hint → declared → **reachable** ∩ constraints; explainable decision (no LLM). Prefer `--tag`. Independent of `[agent].intent_capability_route` when `--force` is set. `--persist` appends JSONL to `<config_dir>/intent-route-decisions.jsonl`. Empty reachable sets fail closed. Requires `--features ai-protocol`.
 - `velaclaw doctor routing` — VL-DR-001 / OmniRoute L-V1: explain `routing.provider_mode`, configured vs BYOK-effective logical model (VL-RT-003 hygiene), and detected credential env *names* only (never secret values). Prism mode prints logical id + `PRISM_*_API_KEY` reminder. Requires `--features ai-protocol`.
 
 See [config-externalization.md](config-externalization.md) for the canonical operator contract.

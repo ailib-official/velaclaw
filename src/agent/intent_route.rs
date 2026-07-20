@@ -1,15 +1,21 @@
-//! CR-CAP-003: opt-in intent → Tag → capability-index → constraints route.
+//! CR-CAP-003/005: opt-in capability-index route (Hint/Tag → reachable ∩ constraints).
 //!
-//! Default-off. Empty candidate sets fail closed (no silent default_model).
+//! Product narrative (CR-CAP-005 / MS-HOST-CAP-R1): **capability-index routing**, not
+//! NL "intent routing" as the main story. Tag may come from explicit Tag / Hint;
+//! `query_classification` is optional only.
+//!
+//! Default-off. Uses CR-CAP-004 query-time reachable filter (local keys / keyless).
+//! Empty reachable sets after constraints fail closed (no silent default_model).
 //! UnrelatedWire Tags (e.g. `speed`) may use an explicit `[[model_routes]]`
 //! entry when the index is empty by design — still not an arbitrary fallback.
 
 use crate::agent::classifier;
 use crate::capability_index::{
-    lookup_tag, CapabilityCandidate, CapabilityIndex, TagWireRelation, CAPABILITY_TAGS,
-    TAG_MAPPING_TABLE,
+    filter_reachable, lookup_tag, CapabilityCandidate, CapabilityIndex, TagWireRelation,
+    CAPABILITY_TAGS, TAG_MAPPING_TABLE,
 };
 use crate::config::{ModelRouteConfig, QueryClassificationConfig};
+use crate::execution::provider_has_usable_key;
 use anyhow::{bail, Result};
 use serde::Serialize;
 
@@ -29,7 +35,7 @@ const HINT_TO_TAG: &[(&str, &str)] = &[
     ("long-context", "long_context"),
 ];
 
-/// Host knobs for the opt-in intent route (default-off).
+/// Host knobs for the opt-in capability-index route (default-off).
 #[derive(Debug, Clone)]
 pub struct IntentRouteHost {
     pub enabled: bool,
@@ -52,13 +58,16 @@ impl IntentRouteHost {
     }
 }
 
-/// Explainable decision record (facts + policy reasons).
+/// Explainable decision record (facts + reachable + policy reasons).
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct IntentRouteDecision {
     pub enabled: bool,
     pub hint: Option<String>,
     pub tags: Vec<String>,
+    /// Declared CAP-002 candidates before reachable/constraint filters.
     pub candidates_before: usize,
+    /// CAP-004 reachable count (keys ∩ declared) before `[[model_routes]]` constraints.
+    pub reachable_before: usize,
     pub candidates_after: usize,
     pub truncated: Vec<String>,
     pub selected_model: Option<String>,
@@ -74,6 +83,7 @@ impl IntentRouteDecision {
             hint: None,
             tags: Vec::new(),
             candidates_before: 0,
+            reachable_before: 0,
             candidates_after: 0,
             truncated: Vec::new(),
             selected_model: Some(model.to_string()),
@@ -125,15 +135,12 @@ fn logical_model_for_candidate(
     }
     if let Some(route) = route {
         if route.provider == c.provider_id {
-            // Prefer configured model when provider matches a provider-level Tag hit.
             if route.model.contains('/') {
                 return route.model.clone();
             }
             return format!("{}/{}", route.provider, route.model);
         }
     }
-    // Provider-level hit without a concrete model — keep hint form for RouterProvider
-    // only when a route exists; otherwise provider id alone is not routable.
     if let Some(route) = route {
         if route.model.contains('/') {
             return route.model.clone();
@@ -168,7 +175,6 @@ fn apply_constraints<'a>(
         })
         .collect();
     if matched.is_empty() {
-        // Soften: provider match only when model-level intersect is empty.
         candidates
             .iter()
             .filter(|c| c.provider_id == route.provider)
@@ -179,6 +185,10 @@ fn apply_constraints<'a>(
 }
 
 /// Core resolve against a preloaded index (unit-test friendly).
+///
+/// `is_reachable`: CR-CAP-004 predicate (typically `provider_has_usable_key`).
+/// `explicit_tag`: when set, skip NL classification / hint mapping and use this Tag.
+/// `explicit_hint`: Hint or Tag name; used when `explicit_tag` is unset.
 pub fn resolve_with_index(
     index: &CapabilityIndex,
     classification: &QueryClassificationConfig,
@@ -187,40 +197,55 @@ pub fn resolve_with_index(
     default_model: &str,
     user_message: &str,
     explicit_hint: Option<&str>,
+    explicit_tag: Option<&str>,
+    is_reachable: impl Fn(&str) -> bool,
 ) -> Result<IntentRouteDecision> {
-    let hint = explicit_hint
-        .map(str::to_string)
-        .or_else(|| classifier::classify(classification, user_message));
-
-    let Some(hint) = hint else {
-        return Ok(IntentRouteDecision {
-            enabled: true,
-            hint: None,
-            tags: Vec::new(),
-            candidates_before: 0,
-            candidates_after: 0,
-            truncated: Vec::new(),
-            selected_model: Some(default_model.to_string()),
-            reason: "no intent/hint matched; using default model (not a Tag empty-set)".into(),
-            fail_closed: false,
-        });
-    };
-
-    let Some(tag) = hint_to_tag(&hint) else {
-        bail!(
-            "intent route fail-closed: hint '{hint}' has no Capability Tag mapping (capability-mapping.md)"
-        );
-    };
-
-    let route = route_for_hint(model_routes, &hint).or_else(|| route_for_hint(model_routes, tag));
-
-    // Classification without a model_routes entry is allowed when the index has
-    // candidates; available_hints only gates the legacy hint: path.
     let _ = available_hints;
 
-    let candidates = lookup_tag(index, tag)?;
-    let before = candidates.len();
-    let filtered = apply_constraints(candidates, route);
+    let (hint_label, tag) = if let Some(raw_tag) = explicit_tag {
+        let Some(tag) = hint_to_tag(raw_tag) else {
+            bail!("capability route fail-closed: unknown Tag '{raw_tag}' (capability-mapping.md)");
+        };
+        (Some(tag.to_string()), tag)
+    } else {
+        let hint = explicit_hint
+            .map(str::to_string)
+            .or_else(|| classifier::classify(classification, user_message));
+
+        let Some(hint) = hint else {
+            return Ok(IntentRouteDecision {
+                enabled: true,
+                hint: None,
+                tags: Vec::new(),
+                candidates_before: 0,
+                reachable_before: 0,
+                candidates_after: 0,
+                truncated: Vec::new(),
+                selected_model: Some(default_model.to_string()),
+                reason: "no Tag/hint matched; using default model (not a Tag empty-set)".into(),
+                fail_closed: false,
+            });
+        };
+
+        let Some(tag) = hint_to_tag(&hint) else {
+            bail!(
+                "capability route fail-closed: hint '{hint}' has no Capability Tag mapping (capability-mapping.md)"
+            );
+        };
+        (Some(hint), tag)
+    };
+
+    let route = hint_label
+        .as_deref()
+        .and_then(|h| route_for_hint(model_routes, h))
+        .or_else(|| route_for_hint(model_routes, tag));
+
+    let declared = lookup_tag(index, tag)?;
+    let declared_before = declared.len();
+    let reachable_refs = filter_reachable(declared, &is_reachable);
+    let reachable_before = reachable_refs.len();
+    let reachable: Vec<CapabilityCandidate> = reachable_refs.into_iter().cloned().collect();
+    let filtered = apply_constraints(&reachable, route);
     let after = filtered.len();
     let truncated: Vec<String> = filtered
         .iter()
@@ -238,14 +263,16 @@ pub fn resolve_with_index(
                 };
                 return Ok(IntentRouteDecision {
                     enabled: true,
-                    hint: Some(hint.clone()),
+                    hint: hint_label.clone(),
                     tags: vec![tag.to_string()],
-                    candidates_before: before,
+                    candidates_before: declared_before,
+                    reachable_before,
                     candidates_after: 0,
                     truncated: vec![selected.clone()],
                     selected_model: Some(selected),
                     reason: format!(
-                        "Tag '{tag}' is unrelated_wire (index empty by design); using [[model_routes]] for hint '{hint}'"
+                        "Tag '{tag}' is unrelated_wire (index empty by design); using [[model_routes]] for '{}'",
+                        hint_label.as_deref().unwrap_or(tag)
                     ),
                     fail_closed: false,
                 });
@@ -253,14 +280,17 @@ pub fn resolve_with_index(
         }
         return Ok(IntentRouteDecision {
             enabled: true,
-            hint: Some(hint.clone()),
+            hint: hint_label.clone(),
             tags: vec![tag.to_string()],
-            candidates_before: before,
+            candidates_before: declared_before,
+            reachable_before,
             candidates_after: 0,
             truncated: Vec::new(),
             selected_model: None,
             reason: format!(
-                "fail-closed: Tag '{tag}' yielded empty candidates after constraints (hint '{hint}')"
+                "fail-closed: Tag '{tag}' yielded empty reachable∩constraints \
+                 (declared={declared_before}, reachable={reachable_before}; hint {:?})",
+                hint_label
             ),
             fail_closed: true,
         });
@@ -270,14 +300,16 @@ pub fn resolve_with_index(
     let selected = logical_model_for_candidate(chosen, route);
     Ok(IntentRouteDecision {
         enabled: true,
-        hint: Some(hint),
+        hint: hint_label,
         tags: vec![tag.to_string()],
-        candidates_before: before,
+        candidates_before: declared_before,
+        reachable_before,
         candidates_after: after,
         truncated,
         selected_model: Some(selected),
         reason: format!(
-            "index∩constraints: Tag '{tag}' → {} (of {after} after filter; {before} before)",
+            "reachable∩constraints: Tag '{tag}' → {} (of {after} after filter; \
+             declared={declared_before}, reachable={reachable_before})",
             candidate_label(chosen)
         ),
         fail_closed: false,
@@ -292,6 +324,7 @@ pub fn resolve_for_host(
     default_model: &str,
     user_message: &str,
     explicit_hint: Option<&str>,
+    explicit_tag: Option<&str>,
     rebuild_index: bool,
 ) -> Result<IntentRouteDecision> {
     if !host.enabled {
@@ -303,7 +336,7 @@ pub fn resolve_for_host(
         );
         return Ok(IntentRouteDecision::skipped_prior_path(
             &model,
-            "intent_capability_route disabled; prior classification/default path",
+            "capability_index_route / intent_capability_route disabled; prior classification/default path",
         ));
     }
 
@@ -317,6 +350,8 @@ pub fn resolve_for_host(
         default_model,
         user_message,
         explicit_hint,
+        explicit_tag,
+        provider_has_usable_key,
     )?;
     if decision.fail_closed {
         bail!("{}", decision.reason);
@@ -325,8 +360,10 @@ pub fn resolve_for_host(
         hint = ?decision.hint,
         tags = ?decision.tags,
         selected = ?decision.selected_model,
+        declared = decision.candidates_before,
+        reachable = decision.reachable_before,
         reason = %decision.reason,
-        "intent_capability_route"
+        "capability_index_route"
     );
     Ok(decision)
 }
@@ -348,6 +385,7 @@ pub fn maybe_resolve_intent_route(
         available_hints,
         default_model,
         user_message,
+        None,
         None,
         false,
     )?))
@@ -372,17 +410,40 @@ mod tests {
             rules: vec![ClassificationRule {
                 hint: hint.into(),
                 keywords: vec![keyword.into()],
-                ..Default::default()
+                patterns: vec![],
+                min_length: None,
+                max_length: None,
+                priority: 0,
             }],
         }
     }
 
-    #[test]
-    fn hint_mapping_covers_l0_examples() {
-        assert_eq!(hint_to_tag("reasoning"), Some("high-reasoning"));
-        assert_eq!(hint_to_tag("fast"), Some("speed"));
-        assert_eq!(hint_to_tag("coding"), Some("coding"));
-        assert_eq!(hint_to_tag("nope"), None);
+    fn all_reachable(_: &str) -> bool {
+        true
+    }
+
+    fn resolve(
+        index: &CapabilityIndex,
+        class: &QueryClassificationConfig,
+        hints: &[String],
+        routes: &[ModelRouteConfig],
+        default: &str,
+        msg: &str,
+        hint: Option<&str>,
+        tag: Option<&str>,
+    ) -> IntentRouteDecision {
+        resolve_with_index(
+            index,
+            class,
+            hints,
+            routes,
+            default,
+            msg,
+            hint,
+            tag,
+            all_reachable,
+        )
+        .unwrap()
     }
 
     #[test]
@@ -402,7 +463,7 @@ mod tests {
             r#"{"id":"alpha","capabilities":{"required":["tools"],"optional":["reasoning"]},"metadata":{"models":{"big":{"context_window":200000}}}}"#,
         );
         let index = build_index(dir.path()).unwrap();
-        let decision = resolve_with_index(
+        let decision = resolve(
             &index,
             &class_cfg("coding", "refactor"),
             &["coding".into()],
@@ -410,8 +471,8 @@ mod tests {
             "openai/gpt-5.2",
             "please refactor this module",
             None,
-        )
-        .unwrap();
+            None,
+        );
         assert!(!decision.fail_closed);
         assert_eq!(decision.tags, vec!["coding"]);
         assert!(decision
@@ -420,6 +481,65 @@ mod tests {
             .unwrap()
             .starts_with("alpha/"));
         assert!(decision.candidates_after >= 1);
+        assert_eq!(decision.reachable_before, decision.candidates_before);
+    }
+
+    #[test]
+    fn explicit_tag_skips_classification() {
+        let dir = tempfile::tempdir().unwrap();
+        write_provider(
+            dir.path(),
+            "alpha.json",
+            r#"{"id":"alpha","capabilities":{"required":["tools"],"optional":[]}}"#,
+        );
+        let index = build_index(dir.path()).unwrap();
+        let decision = resolve(
+            &index,
+            &QueryClassificationConfig {
+                enabled: false,
+                rules: vec![],
+            },
+            &[],
+            &[],
+            "openai/gpt-5.2",
+            "unrelated chatter without keywords",
+            None,
+            Some("coding"),
+        );
+        assert!(!decision.fail_closed);
+        assert_eq!(decision.tags, vec!["coding"]);
+        assert!(decision
+            .selected_model
+            .as_ref()
+            .unwrap()
+            .starts_with("alpha/"));
+    }
+
+    #[test]
+    fn unreachable_providers_fail_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        write_provider(
+            dir.path(),
+            "alpha.json",
+            r#"{"id":"alpha","capabilities":{"required":["tools"],"optional":[]}}"#,
+        );
+        let index = build_index(dir.path()).unwrap();
+        let decision = resolve_with_index(
+            &index,
+            &class_cfg("coding", "refactor"),
+            &["coding".into()],
+            &[],
+            "openai/gpt-5.2",
+            "please refactor",
+            None,
+            Some("coding"),
+            |_| false,
+        )
+        .unwrap();
+        assert!(decision.fail_closed);
+        assert_eq!(decision.candidates_before, 1);
+        assert_eq!(decision.reachable_before, 0);
+        assert!(decision.selected_model.is_none());
     }
 
     #[test]
@@ -437,7 +557,7 @@ mod tests {
             model: "beta/x".into(),
             api_key: None,
         }];
-        let decision = resolve_with_index(
+        let decision = resolve(
             &index,
             &class_cfg("coding", "refactor"),
             &["coding".into()],
@@ -445,8 +565,8 @@ mod tests {
             "openai/gpt-5.2",
             "please refactor",
             None,
-        )
-        .unwrap();
+            None,
+        );
         assert!(decision.fail_closed);
         assert!(decision.selected_model.is_none());
     }
@@ -466,7 +586,7 @@ mod tests {
             model: "llama-fast".into(),
             api_key: None,
         }];
-        let decision = resolve_with_index(
+        let decision = resolve(
             &index,
             &class_cfg("fast", "quick"),
             &["fast".into()],
@@ -474,8 +594,8 @@ mod tests {
             "openai/gpt-5.2",
             "quick ping",
             None,
-        )
-        .unwrap();
+            None,
+        );
         assert!(!decision.fail_closed);
         assert_eq!(decision.selected_model.as_deref(), Some("groq/llama-fast"));
         assert!(decision.reason.contains("unrelated_wire"));
@@ -490,7 +610,7 @@ mod tests {
             r#"{"id":"alpha","capabilities":{"required":["text"],"optional":[]}}"#,
         );
         let index = build_index(dir.path()).unwrap();
-        let decision = resolve_with_index(
+        let decision = resolve(
             &index,
             &class_cfg("fast", "quick"),
             &["fast".into()],
@@ -498,8 +618,8 @@ mod tests {
             "openai/gpt-5.2",
             "quick ping",
             None,
-        )
-        .unwrap();
+            None,
+        );
         assert!(decision.fail_closed);
     }
 
@@ -515,6 +635,8 @@ mod tests {
             "openai/gpt-5.2",
             "tl;dr please",
             None,
+            None,
+            all_reachable,
         )
         .unwrap_err();
         assert!(err.to_string().contains("fail-closed"));

@@ -543,6 +543,17 @@ enum DoctorCommands {
     /// Operator guide: config/policy/protocol changes vs binary rebuild
     Maintenance,
 
+    /// CR-HOST-002: aggregate L4 M3c/d/e fields from local logs (observe-only)
+    L4ShadowSummary {
+        /// Path to a log file (`-` = stdin). Required.
+        #[arg(long)]
+        log: String,
+
+        /// Emit JSON aggregate instead of a human table
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+
     /// Probe model catalogs across providers and report availability
     Models {
         /// Probe a specific provider only (default: all known providers)
@@ -672,6 +683,19 @@ async fn main() -> Result<()> {
     {
         velaclaw::doctor::print_maintenance_guide();
         return Ok(());
+    }
+
+    // L4 shadow aggregate is observe-only over an explicit log path — no config needed.
+    if let Commands::Doctor {
+        doctor_command: Some(DoctorCommands::L4ShadowSummary { log, json }),
+    } = &cli.command
+    {
+        let path = if log == "-" {
+            std::path::PathBuf::from("-")
+        } else {
+            std::path::PathBuf::from(log)
+        };
+        return velaclaw::doctor::run_l4_shadow_summary(Some(path.as_path()), *json);
     }
 
     // Initialize logging - respects RUST_LOG env var, defaults to INFO

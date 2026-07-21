@@ -176,6 +176,24 @@ Prefer a single install location early on `PATH` (common: `$HOME/bin`). Compare
 `this_process` vs `first_on_PATH` in the maintenance guide. Do not `sudo` remove
 binaries unless you understand ownership — reinstall or adjust `PATH` order.
 
+### L4 shadow M3 fields with no Grafana (CR-HOST-002)
+
+Symptoms:
+
+- Need pass / schema-fail / L4→L2 fallback counts from local shadow traffic
+- No Prometheus/Grafana available (and none required)
+
+Checks (observe-only; does **not** enable default-on L4):
+
+```bash
+RUST_LOG=info velaclaw doctor candidate-dag --candidate <path> 2>shadow.log
+velaclaw doctor l4-shadow-summary --log shadow.log
+# or: … --json
+```
+
+Fields aggregated: `m3c_pass`, `m3d_category`, `m3e_fallback` on
+`candidate_dag_*` events. `[agent].candidate_dag_shadow` remains default `false`.
+
 ## Runtime / Gateway
 
 ### Gateway unreachable

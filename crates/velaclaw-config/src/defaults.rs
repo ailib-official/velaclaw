@@ -1,12 +1,13 @@
 //! Default values shared across onboarding, config, and CLI fallbacks.
 
 /// Canonical `provider/model` id for fresh installs (upstream ai-protocol naming).
-/// Uses NVIDIA NIM's free-tier Nemotron model — publicly available without payment.
+/// Uses NVIDIA NIM Nemotron Mini — catalog-listed and broadly entitled; avoids
+/// entitlement-gated 340B 404s on many accounts (VL-RT-006; pairs with VL-RT-005 E5c).
 /// Must stay in sync with `defaults.toml` (`default_provider` / `default_model`).
-pub const DEFAULT_PROTOCOL_MODEL_ID: &str = "nvidia/nemotron-4-340b-instruct";
+pub const DEFAULT_PROTOCOL_MODEL_ID: &str = "nvidia/nemotron-mini-4b-instruct";
 
 /// Human-readable label for [`DEFAULT_PROTOCOL_MODEL_ID`] in onboarding and CLI lists.
-pub const DEFAULT_PROTOCOL_MODEL_LABEL: &str = "NVIDIA Nemotron 340B Instruct (free tier default)";
+pub const DEFAULT_PROTOCOL_MODEL_LABEL: &str = "NVIDIA Nemotron Mini 4B Instruct (default)";
 
 #[cfg(test)]
 mod tests {

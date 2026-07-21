@@ -225,6 +225,9 @@ pub async fn dispatch_configured_command(command: Commands, config: Config) -> R
 
         Commands::Doctor { doctor_command } => match doctor_command {
             Some(DoctorCommands::Maintenance) => unreachable!("handled before config load"),
+            Some(DoctorCommands::L4ShadowSummary { .. }) => {
+                unreachable!("handled before config load")
+            }
             Some(DoctorCommands::Models {
                 provider,
                 use_cache,

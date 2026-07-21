@@ -82,6 +82,9 @@ CR-L4-003 shadow host (default-off): set `[agent].candidate_dag_shadow = true` t
 
 ```bash
 velaclaw doctor candidate-dag --candidate <path> [--fallback <path>] [--message <text>] [--compact] [--stagnation-limit N]
+# Local M3 aggregate (CR-HOST-002; no Grafana):
+RUST_LOG=info velaclaw doctor candidate-dag --candidate <path> 2>shadow.log
+velaclaw doctor l4-shadow-summary --log shadow.log
 ```
 
 CR-CAP-005 capability-index route (default-off; CAP-003 wire): set `[agent].intent_capability_route = true` (alias `capability_index_route`) to resolve turn models via **explicit Tag / Hint** → host capability index → **reachable (local keys)** ∩ `[[model_routes]]`. NL `query_classification` is optional only. Empty reachable sets fail closed.
@@ -134,6 +137,7 @@ See `[cli_render]` in [config-reference.md](config-reference.md).
 
 - `velaclaw doctor` — config, protocol, workspace, daemon, and environment checks; ends with a short `[maintenance]` hint (config vs rebuild)
 - `velaclaw doctor maintenance` — full operator guide (layers, hot-reload, preflight, when to rebuild) plus **VL-OPS-001** PATH/install binary hygiene (which `velaclaw` is first on PATH vs this process; warns on multiple known installs — observe-only)
+- `velaclaw doctor l4-shadow-summary --log <path>|'-' [--json]` — **CR-HOST-002** local aggregate of L4 M3c/d/e fields (`m3c_pass` / `m3d_category` / `m3e_fallback`) from tracing or JSONL logs. Observe-only; does **not** enable `[agent].candidate_dag_shadow`; Prometheus/Grafana are **not** an entry gate. Tip: `RUST_LOG=info velaclaw doctor candidate-dag --candidate <path> 2>shadow.log` then summarize that file.
 - `velaclaw doctor models [--provider <ID>] [--use-cache]`
 - `velaclaw doctor template-dag --fixture <path> [--message <text>] [--compact]` — validate a handwritten CR-L2 template DAG JSON (walk + Envelope assemble only; no LLM). Fail-closed on `max_steps` / HardBudget / invalid graph. Requires `--features ai-protocol`. Independent of `[agent].template_dag` (that flag gates future runtime wiring; default remains `false`).
 - `velaclaw doctor candidate-dag --candidate <path> [--fallback <path>] [--message <text>] [--compact] [--stagnation-limit N]` — CR-L4-003 shadow observe: validate candidate DAG + optional L2 fallback (assemble-only; no LLM). Independent of `[agent].candidate_dag_shadow` (default `false`). Requires `--features ai-protocol`.

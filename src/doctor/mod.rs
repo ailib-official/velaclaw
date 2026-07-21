@@ -6,6 +6,7 @@ mod cap_pipeline;
 mod capabilities;
 #[cfg(feature = "ai-protocol")]
 mod intent_route;
+mod l4_shadow_summary;
 mod maintenance;
 #[cfg(feature = "ai-protocol")]
 mod routing;
@@ -22,6 +23,7 @@ pub use capabilities::run_capabilities;
 use chrono::{DateTime, Utc};
 #[cfg(feature = "ai-protocol")]
 pub use intent_route::run_intent_route;
+pub use l4_shadow_summary::run_l4_shadow_summary;
 pub use maintenance::{print_maintenance_footer, print_maintenance_guide};
 #[cfg(feature = "ai-protocol")]
 pub use routing::run_routing;

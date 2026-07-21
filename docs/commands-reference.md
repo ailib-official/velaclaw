@@ -133,7 +133,7 @@ See `[cli_render]` in [config-reference.md](config-reference.md).
 ### `doctor`
 
 - `velaclaw doctor` — config, protocol, workspace, daemon, and environment checks; ends with a short `[maintenance]` hint (config vs rebuild)
-- `velaclaw doctor maintenance` — full operator guide (layers, hot-reload, preflight, when to rebuild)
+- `velaclaw doctor maintenance` — full operator guide (layers, hot-reload, preflight, when to rebuild) plus **VL-OPS-001** PATH/install binary hygiene (which `velaclaw` is first on PATH vs this process; warns on multiple known installs — observe-only)
 - `velaclaw doctor models [--provider <ID>] [--use-cache]`
 - `velaclaw doctor template-dag --fixture <path> [--message <text>] [--compact]` — validate a handwritten CR-L2 template DAG JSON (walk + Envelope assemble only; no LLM). Fail-closed on `max_steps` / HardBudget / invalid graph. Requires `--features ai-protocol`. Independent of `[agent].template_dag` (that flag gates future runtime wiring; default remains `false`).
 - `velaclaw doctor candidate-dag --candidate <path> [--fallback <path>] [--message <text>] [--compact] [--stagnation-limit N]` — CR-L4-003 shadow observe: validate candidate DAG + optional L2 fallback (assemble-only; no LLM). Independent of `[agent].candidate_dag_shadow` (default `false`). Requires `--features ai-protocol`.

@@ -42,7 +42,8 @@ impl ProtocolBackedProvider {
     /// Factory helper for `create_provider` — builds client via execution layer.
     pub fn from_logical_model(provider_id: &str, model_id: &str) -> anyhow::Result<Self> {
         let logical = format!("{provider_id}/{model_id}");
-        let client = crate::execution::init_ai_client_sync(&logical)?;
+        let init = crate::execution::nvidia_byok_ai_client_logical_id(&logical);
+        let client = crate::execution::init_ai_client_sync(&init)?;
         Self::from_client(client, &logical, None)
     }
 

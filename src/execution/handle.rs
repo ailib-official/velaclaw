@@ -37,8 +37,17 @@ impl ExecutionHandle {
                 // VL-RT-003: host-side hygiene before AiClient init (prefer keyed
                 // provider or actionable fail — do not silent-404 on nvidia default).
                 let logical_model_id = super::resolve_byok_logical_model_id(config)?;
+                // VL-RT-005 / E5c: nvidia-org NIM ids need `nvidia/` on the wire.
+                let init_logical = nvidia_byok_ai_client_logical_id(&logical_model_id);
+                if init_logical != logical_model_id {
+                    tracing::debug!(
+                        logical = %logical_model_id,
+                        ai_client_logical = %init_logical,
+                        "NVIDIA E5c: expanding single-segment model for NIM wire id"
+                    );
+                }
                 let backend =
-                    ExecutionBackend::Byok(super::byok::init_ai_client_sync(&logical_model_id)?);
+                    ExecutionBackend::Byok(super::byok::init_ai_client_sync(&init_logical)?);
                 (backend, logical_model_id)
             }
             ProviderRoutingMode::Prism => {
@@ -185,10 +194,42 @@ pub fn logical_model_id_from_config(config: &Config) -> String {
     format!("{provider}/{model}")
 }
 
+/// Map a BYOK logical id to the id passed into `AiClient::new` (VL-RT-005 / E5c).
+///
+/// ai-lib strips the first `provider/` segment for the OpenAI-compatible `model`
+/// body field. NIM catalog ids for nvidia-org models are themselves `nvidia/…`,
+/// so logical `nvidia/nemotron-mini-…` must be initialized as
+/// `nvidia/nvidia/nemotron-mini-…` to wire `nvidia/nemotron-mini-…`.
+///
+/// Org-qualified catalog ids (`nvidia/meta/…`, `nvidia/mistralai/…`) already
+/// strip correctly and are left unchanged.
+#[must_use]
+pub fn nvidia_byok_ai_client_logical_id(logical_model_id: &str) -> String {
+    let trimmed = logical_model_id.trim();
+    let Some((provider, rest)) = trimmed.split_once('/') else {
+        return trimmed.to_string();
+    };
+    if provider.eq_ignore_ascii_case("nvidia") && !rest.is_empty() && !rest.contains('/') {
+        format!("nvidia/nvidia/{rest}")
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// Implied NIM wire `model` after ai-lib's provider-strip (observe/docs helper).
+#[must_use]
+pub fn nvidia_implied_wire_model_id(logical_model_id: &str) -> String {
+    let init = nvidia_byok_ai_client_logical_id(logical_model_id);
+    init.split_once('/')
+        .map(|(_, rest)| rest.to_string())
+        .unwrap_or(init)
+}
+
 /// Whether tool-loop history should use `[Tool results]` text (Hybrid manifest strategy).
 #[cfg(feature = "ai-protocol")]
 pub fn hybrid_text_tool_result_history(logical_model_id: &str) -> bool {
-    super::init_ai_client_sync(logical_model_id)
+    let init = nvidia_byok_ai_client_logical_id(logical_model_id);
+    super::init_ai_client_sync(&init)
         .ok()
         .is_some_and(|client| {
             ai_lib_rust::ToolCallingPolicy::from_tool_calling(client.manifest.tool_calling())
@@ -270,6 +311,38 @@ mod tests {
         assert_eq!(
             logical_model_id_from_config(&config),
             "nvidia/nemotron-mini-4b-instruct"
+        );
+    }
+
+    #[test]
+    fn nvidia_e5c_expands_single_segment_for_ai_client() {
+        assert_eq!(
+            nvidia_byok_ai_client_logical_id("nvidia/nemotron-mini-4b-instruct"),
+            "nvidia/nvidia/nemotron-mini-4b-instruct"
+        );
+        assert_eq!(
+            nvidia_implied_wire_model_id("nvidia/nemotron-mini-4b-instruct"),
+            "nvidia/nemotron-mini-4b-instruct"
+        );
+    }
+
+    #[test]
+    fn nvidia_e5c_keeps_org_qualified_catalog_ids() {
+        assert_eq!(
+            nvidia_byok_ai_client_logical_id("nvidia/meta/llama-3.1-8b-instruct"),
+            "nvidia/meta/llama-3.1-8b-instruct"
+        );
+        assert_eq!(
+            nvidia_implied_wire_model_id("nvidia/meta/llama-3.1-8b-instruct"),
+            "meta/llama-3.1-8b-instruct"
+        );
+    }
+
+    #[test]
+    fn nvidia_e5c_ignores_non_nvidia_providers() {
+        assert_eq!(
+            nvidia_byok_ai_client_logical_id("groq/llama-3.1-8b-instant"),
+            "groq/llama-3.1-8b-instant"
         );
     }
 

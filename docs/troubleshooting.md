@@ -17,10 +17,14 @@ Checks:
 
 1. Prefer `-p nvidia --model <catalog-id>` or `--model nvidia/<catalog-id>` (VL-RT-004). A bare
    `--model meta/…` without `-p nvidia` is treated as provider `meta`.
-2. Confirm `NVIDIA_API_KEY` is set and the model is enabled for the account
+2. For **nvidia-org** catalog ids (`nvidia/nemotron-…`, not `nvidia/meta/…`), confirm the host
+   expands the BYOK init id so the wire `model` keeps the `nvidia/` prefix (VL-RT-005 / E5c).
+   Bare wire `nemotron-mini-4b-instruct` → `404 page not found`; correct wire is
+   `nvidia/nemotron-mini-4b-instruct`.
+3. Confirm `NVIDIA_API_KEY` is set and the model is enabled for the account
    (`Not found for account` on the protocol default `nvidia/nemotron-4-340b-instruct` is an
    entitlement miss, not a missing host feature).
-3. Use `velaclaw doctor routing` to see configured vs effective logical model (no secret values).
+4. Use `velaclaw doctor routing` to see configured vs effective logical model (no secret values).
 
 See [providers-reference.md](providers-reference.md#nvidia-nim-notes).
 

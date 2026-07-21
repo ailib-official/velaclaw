@@ -15,7 +15,10 @@ pub use byok_hygiene::{
     detected_byok_env_names, diagnose_byok_routing, provider_has_usable_key,
     resolve_byok_logical_model_id, ByokRoutingDiagnosis,
 };
-pub use handle::{hybrid_text_tool_result_history, logical_model_id_from_config, ExecutionHandle};
+pub use handle::{
+    hybrid_text_tool_result_history, logical_model_id_from_config,
+    nvidia_byok_ai_client_logical_id, nvidia_implied_wire_model_id, ExecutionHandle,
+};
 
 /// Build the agent provider stack via [`ExecutionHandle`] (BYOK sole path to ai-lib-rust).
 pub fn bootstrap_routed_provider(

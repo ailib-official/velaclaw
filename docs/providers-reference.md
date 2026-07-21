@@ -169,13 +169,32 @@ provider segment.
 Protocol default `nvidia/nemotron-4-340b-instruct` may 404 for accounts that
 have not enabled that model (“Not found for account”). Prefer a keyed model
 that `GET …/v1/models` lists **and** bare `POST …/chat/completions` accepts
-for your key. If bare NIM curl succeeds but `velaclaw agent` still returns
-404, treat it as a host/protocol contract issue and open/track under VL-RT-004
-follow-up — do not silently remap to an unrelated provider.
+for your key.
+
+#### NVIDIA-org wire ids (VL-RT-005 / E5c)
+
+ai-lib strips the first `provider/` segment before sending OpenAI-compatible
+`model`. For nvidia-org catalog ids that are only one segment after `nvidia/`
+(e.g. `nvidia/nemotron-mini-4b-instruct`), VelaClaw expands the `AiClient`
+init id to `nvidia/nvidia/<name>` so the wire body keeps
+`nvidia/<name>`. Org-qualified ids (`nvidia/meta/…`) already strip correctly
+and are unchanged.
+
+```bash
+# NVIDIA-org SLM (recommended smoke id when entitled)
+velaclaw agent -p nvidia --model nemotron-mini-4b-instruct -m "pong"
+# equivalent full logical id:
+# velaclaw agent --model nvidia/nemotron-mini-4b-instruct -m "pong"
+```
+
+Do **not** use hyphenated v1-style ids such as `nvidia-nemotron-4-340b-instruct`
+as the NIM wire `model` — live catalog and docs use slash form
+`nvidia/nemotron-4-340b-instruct`.
 
 Recommended starter logical ids (use full `nvidia/…` form, or bare `-p nvidia`
 with the catalog id after the first slash):
 
+- `nvidia/nemotron-mini-4b-instruct` ≡ `-p nvidia --model nemotron-mini-4b-instruct`
 - `nvidia/meta/llama-3.1-8b-instruct` ≡ `-p nvidia --model meta/llama-3.1-8b-instruct`
 - `nvidia/meta/llama-3.3-70b-instruct`
 - `nvidia/mistralai/mistral-nemotron` (when enabled for your account)

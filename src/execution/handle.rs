@@ -166,10 +166,7 @@ pub fn logical_model_id_from_config(config: &Config) -> String {
         .trim();
 
     if model.contains('/') {
-        let model_provider = model
-            .split_once('/')
-            .map(|(p, _)| p)
-            .unwrap_or(model);
+        let model_provider = model.split_once('/').map(|(p, _)| p).unwrap_or(model);
         // Bare provider pin whose first segment differs from `--model`'s first
         // segment → treat model as vendor-qualified under that provider (E5b).
         if !provider.contains('/')

@@ -147,14 +147,41 @@ Behavior:
 - Aliases: `nvidia-nim`, `build.nvidia.com`
 - Base API URL: `https://integrate.api.nvidia.com/v1`
 - Model discovery: `velaclaw models refresh --provider nvidia`
+- Env: `NVIDIA_API_KEY`
 
-Recommended starter model IDs (verified against NVIDIA API catalog on February 18, 2026):
+#### Logical model composition (VL-RT-004)
 
-- `meta/llama-3.3-70b-instruct`
-- `deepseek-ai/deepseek-v3.2`
-- `nvidia/llama-3.3-nemotron-super-49b-v1.5`
-- `nvidia/llama-3.1-nemotron-ultra-253b-v1`
+NIM catalog ids are often vendor-qualified (`meta/…`, `mistralai/…`,
+`nvidia/…`). When pinning via CLI:
 
+```bash
+# Correct: bare -p + vendor-qualified --model → nvidia/meta/…
+velaclaw agent -p nvidia --model meta/llama-3.1-8b-instruct -m "pong"
+
+# Also correct: full logical id in --model
+velaclaw agent --model nvidia/meta/llama-3.1-8b-instruct -m "pong"
+```
+
+Do **not** expect `--model meta/…` alone (without `-p nvidia` or a
+`nvidia/…` prefix) to stay on NIM — BYOK hygiene would treat `meta` as the
+provider segment.
+
+Protocol default `nvidia/nemotron-4-340b-instruct` may 404 for accounts that
+have not enabled that model (“Not found for account”). Prefer a keyed model
+that `GET …/v1/models` lists **and** bare `POST …/chat/completions` accepts
+for your key. If bare NIM curl succeeds but `velaclaw agent` still returns
+404, treat it as a host/protocol contract issue and open/track under VL-RT-004
+follow-up — do not silently remap to an unrelated provider.
+
+Recommended starter logical ids (use full `nvidia/…` form, or bare `-p nvidia`
+with the catalog id after the first slash):
+
+- `nvidia/meta/llama-3.1-8b-instruct` ≡ `-p nvidia --model meta/llama-3.1-8b-instruct`
+- `nvidia/meta/llama-3.3-70b-instruct`
+- `nvidia/mistralai/mistral-nemotron` (when enabled for your account)
+
+Catalog-only ids such as `meta/llama-3.3-70b-instruct` are **not** standalone
+VelaClaw logical ids — always bind them under provider `nvidia`.
 ## Custom Chat Endpoints
 
 Custom chat endpoints are manifest-backed after ZS-ML-015. Add the endpoint to

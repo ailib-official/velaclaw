@@ -50,6 +50,7 @@ Last verified: **July 19, 2026**.
 - `velaclaw agent`
 - `velaclaw agent -m "Hello"`
 - `velaclaw agent --provider <ID> --model <MODEL> --temperature <0.0-2.0>`
+- `velaclaw agent -p nvidia --model meta/llama-3.1-8b-instruct -m "pong"` — VL-RT-004: bare `-p` + vendor-qualified `--model` composes to `nvidia/meta/…` (do not pass `meta/…` alone)
 - `velaclaw agent --peripheral <board:path>`
 - `velaclaw agent --no-color`
 - `velaclaw agent --no-fold`
@@ -60,6 +61,12 @@ BYOK default hygiene (VL-RT-003): if the configured `default_model` provider has
 usable env API key, the agent remaps to a keyed provider (or fails with an
 actionable error) instead of calling the nvidia free-tier default without
 `NVIDIA_API_KEY`. See [providers-reference.md](providers-reference.md#byok-default-model-hygiene-vl-rt-003).
+
+NIM / multi-segment model ids (VL-RT-004): when `-p <provider>` is a bare provider
+id and `--model` contains `/` whose first segment differs from that provider,
+VelaClaw composes `provider/model` (e.g. `nvidia` + `meta/llama-…` →
+`nvidia/meta/llama-…`). Full `--model nvidia/…` is unchanged. Details:
+[providers-reference.md](providers-reference.md#nvidia-nim-notes).
 
 Opt-in context Envelope pilot (CR-L1/L2): set `[agent].envelope_assemble = true` in `config.toml` (requires `--features ai-protocol`). Applies to `velaclaw agent` **and** channel message dispatch; HardBudget fails the turn (channel replies with an error). See [config-reference.md](config-reference.md).
 

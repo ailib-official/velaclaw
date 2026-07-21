@@ -14,7 +14,7 @@ use std::path::Path;
 /// Operator-facing rebuild triggers (CR-HOST-001). No daily timer (YAGNI).
 pub const REBUILD_TRIGGERS_HELP: &str = "\
 rebuild triggers (host cache only — never writes public ai-protocol manifests):\n\
-  • explicit:   `velaclaw doctor capabilities --rebuild` (or intent-route --rebuild)\n\
+  • explicit:   `velaclaw doctor capabilities --rebuild` (or capability-route --rebuild)\n\
   • tip change: AI_PROTOCOL_DIR git HEAD != capability-index.json protocol_tip\n\
   • root change: AI_PROTOCOL_DIR path != cached protocol_root\n\
   • missing/corrupt cache → automatic rebuild on next load\n\
@@ -46,6 +46,7 @@ pub fn run_capabilities(
     let (index, cache_path) = load_or_rebuild_for_config(config_dir, rebuild)?;
 
     println!("🩺 VelaClaw Doctor — Capability Index (host-local)");
+    println!("  {}", super::cap_pipeline::CAP_PIPELINE_LINE);
     println!("  protocol_root: {}", index.meta.protocol_root);
     println!("  protocol_tip:  {}", index.meta.protocol_tip);
     println!("  live_tip:      {live_tip}");
@@ -115,6 +116,8 @@ pub fn run_capabilities(
                     }
                 }
             }
+            println!();
+            println!("Next: velaclaw doctor capability-route --tag {tag} --force");
         }
         None => {
             println!("Tags (declared = protocol facts; reachable = usable local key):");
@@ -137,6 +140,8 @@ pub fn run_capabilities(
             println!("Hint: velaclaw doctor capabilities --tag <Tag>");
             println!("      velaclaw doctor capabilities --tag <Tag> --reachable-only");
             println!("      velaclaw doctor capabilities --rebuild");
+            println!();
+            println!("{}", super::cap_pipeline::CAP_RELATED_DOCTOR);
         }
     }
 

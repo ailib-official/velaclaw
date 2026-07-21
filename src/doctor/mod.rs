@@ -1,6 +1,8 @@
 #[cfg(feature = "ai-protocol")]
 mod candidate_dag;
 #[cfg(feature = "ai-protocol")]
+mod cap_pipeline;
+#[cfg(feature = "ai-protocol")]
 mod capabilities;
 #[cfg(feature = "ai-protocol")]
 mod intent_route;

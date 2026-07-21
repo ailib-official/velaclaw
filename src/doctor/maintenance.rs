@@ -170,10 +170,7 @@ fn ambiguous_installs(
     if known.len() > 1 {
         return true;
     }
-    match (running, first_on_path) {
-        (Some(a), Some(b)) if a != b => true,
-        _ => false,
-    }
+    matches!((running, first_on_path), (Some(a), Some(b)) if a != b)
 }
 
 fn canonicalize_soft(path: &Path) -> Option<PathBuf> {

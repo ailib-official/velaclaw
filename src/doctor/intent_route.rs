@@ -34,11 +34,12 @@ pub fn run_intent_route(
     }
 
     println!("🩺 VelaClaw Doctor — Capability Index Route (CR-CAP-005 / CAP-003 wire)");
+    println!("  {}", super::cap_pipeline::CAP_PIPELINE_LINE);
     println!(
         "  flag intent_capability_route: {}",
         config.agent.intent_capability_route
     );
-    println!("  (alias / narrative:          capability-index route; default-off)");
+    println!("  (alias / narrative:          capability_index_route; default-off)");
     println!("  observe force-on:          {force}");
     println!("  persist decision:          {persist}");
     println!("  config_dir:                {}", host.config_dir.display());
@@ -50,6 +51,8 @@ pub fn run_intent_route(
             "   Enable with `[agent].intent_capability_route = true` (capability-index route),"
         );
         println!("   or pass `--force`. Live chat is unchanged unless the config flag is true.");
+        println!();
+        println!("{}", super::cap_pipeline::CAP_RELATED_DOCTOR);
         return Ok(());
     }
 
@@ -78,6 +81,8 @@ pub fn run_intent_route(
                 println!();
                 println!("💾 persisted decision → {}", path.display());
             }
+            println!();
+            println!("{}", super::cap_pipeline::CAP_RELATED_DOCTOR);
             Ok(())
         }
         Err(err) => {
@@ -102,6 +107,8 @@ pub fn run_intent_route(
                 let path = persist_decision(&host.config_dir, &synthetic)?;
                 println!("💾 persisted fail-closed → {}", path.display());
             }
+            println!();
+            println!("{}", super::cap_pipeline::CAP_RELATED_DOCTOR);
             Err(err)
         }
     }

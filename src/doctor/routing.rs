@@ -30,6 +30,7 @@ pub fn run_routing(config: &Config) -> Result<()> {
             .as_deref()
             .unwrap_or("(unset → protocol default)")
     );
+    println!("  {}", super::cap_pipeline::CAP_PIPELINE_LINE);
     println!();
 
     match mode {
@@ -38,7 +39,9 @@ pub fn run_routing(config: &Config) -> Result<()> {
     }
 
     println!();
-    println!("Related:");
+    println!("{}", super::cap_pipeline::CAP_RELATED_DOCTOR);
+    println!();
+    println!("Also:");
     println!("  docs/providers-reference.md — BYOK hygiene (VL-RT-003)");
     println!("  velaclaw doctor maintenance — config vs rebuild");
     println!("  Non-goals: Catalog meat / default-on L4 / HOST-002 M3 aggregate");

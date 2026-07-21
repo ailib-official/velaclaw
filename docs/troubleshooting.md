@@ -158,6 +158,24 @@ which velaclaw
 
 Persist in your shell profile if needed.
 
+### Wrong / stale `velaclaw` on PATH (VL-OPS-001)
+
+Symptoms:
+
+- `velaclaw --version` or behavior does not match the binary you just built/installed
+- `~/bin/velaclaw` is current but `~/.local/bin/velaclaw` (sometimes root-owned) shadows it
+
+Checks (observe-only; does not rewrite PATH):
+
+```bash
+velaclaw doctor maintenance
+which -a velaclaw
+```
+
+Prefer a single install location early on `PATH` (common: `$HOME/bin`). Compare
+`this_process` vs `first_on_PATH` in the maintenance guide. Do not `sudo` remove
+binaries unless you understand ownership — reinstall or adjust `PATH` order.
+
 ## Runtime / Gateway
 
 ### Gateway unreachable

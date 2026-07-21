@@ -28,7 +28,7 @@ When `routing.provider_mode = "byok"` (default), VelaClaw resolves the execution
 logical model **before** constructing `AiClient`:
 
 1. Start from `default_model` / `default_provider` (fresh installs use
-   `nvidia/nemotron-4-340b-instruct`).
+   `nvidia/nemotron-mini-4b-instruct`).
 2. If that provider has a usable provider-specific env key (or is keyless local:
    ollama / llamacpp / lmstudio), keep it.
 3. Otherwise, prefer the first provider in
@@ -166,10 +166,11 @@ Do **not** expect `--model meta/…` alone (without `-p nvidia` or a
 `nvidia/…` prefix) to stay on NIM — BYOK hygiene would treat `meta` as the
 provider segment.
 
-Protocol default `nvidia/nemotron-4-340b-instruct` may 404 for accounts that
-have not enabled that model (“Not found for account”). Prefer a keyed model
-that `GET …/v1/models` lists **and** bare `POST …/chat/completions` accepts
-for your key.
+Fresh-install default is `nvidia/nemotron-mini-4b-instruct` (VL-RT-006). Larger
+catalog ids such as `nvidia/nemotron-4-340b-instruct` may still 404 as
+“Not found for account” when not entitled. Prefer a keyed model that
+`GET …/v1/models` lists **and** bare `POST …/chat/completions` accepts for
+your key.
 
 #### NVIDIA-org wire ids (VL-RT-005 / E5c)
 

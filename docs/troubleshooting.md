@@ -22,8 +22,9 @@ Checks:
    Bare wire `nemotron-mini-4b-instruct` → `404 page not found`; correct wire is
    `nvidia/nemotron-mini-4b-instruct`.
 3. Confirm `NVIDIA_API_KEY` is set and the model is enabled for the account
-   (`Not found for account` on the protocol default `nvidia/nemotron-4-340b-instruct` is an
-   entitlement miss, not a missing host feature).
+   (`Not found for account` on entitlement-gated ids such as
+   `nvidia/nemotron-4-340b-instruct` is an account miss, not a missing host feature;
+   fresh installs default to `nvidia/nemotron-mini-4b-instruct`).
 4. Use `velaclaw doctor routing` to see configured vs effective logical model (no secret values).
 
 See [providers-reference.md](providers-reference.md#nvidia-nim-notes).

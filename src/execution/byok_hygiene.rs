@@ -187,7 +187,7 @@ fn default_logical_model_for_provider(provider: &str) -> String {
         "anthropic" => "claude-sonnet-4-20250514",
         "deepseek" => "deepseek-chat",
         "groq" => "llama-3.1-8b-instant",
-        "nvidia" => "nemotron-4-340b-instruct",
+        "nvidia" => "nemotron-mini-4b-instruct",
         "mistral" => "mistral-small-latest",
         "gemini" => "gemini-2.0-flash",
         "xai" => "grok-2-latest",

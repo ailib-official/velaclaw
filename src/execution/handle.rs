@@ -196,13 +196,13 @@ pub fn logical_model_id_from_config(config: &Config) -> String {
 
 /// Map a BYOK logical id to the id passed into `AiClient::new` (VL-RT-005 / E5c).
 ///
-/// ai-lib strips the first `provider/` segment for the OpenAI-compatible `model`
-/// body field. NIM catalog ids for nvidia-org models are themselves `nvidia/…`,
-/// so logical `nvidia/nemotron-mini-…` must be initialized as
-/// `nvidia/nvidia/nemotron-mini-…` to wire `nvidia/nemotron-mini-…`.
+/// **After ALR-NIM-001** (`ai-lib-rust` ≥ `94c4f32`), `ProtocolLoader::resolve_wire_model_id`
+/// already keeps `nvidia/<single>` on the wire. This host rewrite remains as a
+/// **defensive** compatibility shim for older pins: `nvidia/<name>` → init
+/// `nvidia/nvidia/<name>` still wires `nvidia/<name>`. Safe to remove once all
+/// deployed pins are ≥ ALR-NIM-001 (tracked by MULTI-PROTO-PIN-001).
 ///
-/// Org-qualified catalog ids (`nvidia/meta/…`, `nvidia/mistralai/…`) already
-/// strip correctly and are left unchanged.
+/// Org-qualified catalog ids (`nvidia/meta/…`, `nvidia/mistralai/…`) are unchanged.
 #[must_use]
 pub fn nvidia_byok_ai_client_logical_id(logical_model_id: &str) -> String {
     let trimmed = logical_model_id.trim();

@@ -1,8 +1,10 @@
-//! Host-local Tag → candidates inverted index (CR-CAP-002).
+//! Host-local Tag → candidates inverted index (CR-CAP-002 / CR-ME-001).
 //!
 //! Built from a local `AI_PROTOCOL_DIR` checkout. Never written into public
-//! ai-protocol manifests. Answers facts only; routing stays in host strategy
-//! (CR-CAP-003).
+//! ai-protocol manifests. When `metadata.models` carries Experimental
+//! `model_capabilities` / `modalities`, prefer those per-model facts over
+//! provider `required`/`optional` ads (omit = unknown → wire fallback).
+//! Answers facts only; routing stays in host strategy (CR-CAP-003).
 
 use crate::protocol_registry::{
     collect_provider_files, load_manifest_value, resolve_local_protocol_root,
@@ -30,7 +32,8 @@ pub const CAPABILITY_TAGS: &[&str] = &[
 pub const LONG_CONTEXT_MIN_TOKENS: u32 = 128_000;
 
 const CACHE_FILE_NAME: &str = "capability-index.json";
-const INDEX_SCHEMA_VERSION: &str = "0.1.0";
+/// Bumped for CR-ME-001 model-prefer semantics (forces cache rebuild via tip/schema ops).
+const INDEX_SCHEMA_VERSION: &str = "0.1.1";
 
 /// Explicit Tag ↔ legacy wire mapping (host table; mirrors experimental
 /// `capability-tag-mapping` fixture with VC drift notes).
@@ -304,6 +307,168 @@ fn match_provider_tags(
     hits
 }
 
+/// ME-001 / CR-ME-001: omitted boolean = unknown (never coerce to false).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CapabilityKnown {
+    Yes,
+    No,
+    Unknown,
+}
+
+impl CapabilityKnown {
+    fn from_option(v: Option<bool>) -> Self {
+        match v {
+            Some(true) => Self::Yes,
+            Some(false) => Self::No,
+            None => Self::Unknown,
+        }
+    }
+
+    fn or_provider(self, provider_allows: bool) -> bool {
+        match self {
+            Self::Yes => true,
+            Self::No => false,
+            Self::Unknown => provider_allows,
+        }
+    }
+}
+
+fn models_have_capability_annotations(raw: &serde_json::Value) -> bool {
+    let Some(models) = raw
+        .pointer("/metadata/models")
+        .and_then(serde_json::Value::as_object)
+    else {
+        return false;
+    };
+    models
+        .values()
+        .any(|m| m.get("model_capabilities").is_some() || m.get("modalities").is_some())
+}
+
+fn model_bool(meta: &serde_json::Value, key: &str) -> Option<bool> {
+    meta.pointer(&format!("/model_capabilities/{key}"))
+        .and_then(serde_json::Value::as_bool)
+}
+
+fn model_document_understanding(meta: &serde_json::Value) -> CapabilityKnown {
+    if let Some(input) = meta
+        .pointer("/modalities/input")
+        .and_then(serde_json::Value::as_array)
+    {
+        let ok = input.iter().any(|v| {
+            matches!(
+                v.as_str().map(|s| s.to_ascii_lowercase()).as_deref(),
+                Some("image" | "pdf" | "video")
+            )
+        });
+        return if ok {
+            CapabilityKnown::Yes
+        } else {
+            CapabilityKnown::No
+        };
+    }
+    CapabilityKnown::from_option(model_bool(meta, "attachment"))
+}
+
+fn provider_matches_tag(
+    entry: &TagMappingEntry,
+    raw: &serde_json::Value,
+    wire: &BTreeSet<String>,
+) -> bool {
+    match entry.relation {
+        TagWireRelation::UnrelatedWire | TagWireRelation::ContextWindowHeuristic => false,
+        TagWireRelation::RequiresDistinctive => {
+            entry.wire_capabilities.iter().any(|w| wire.contains(*w))
+        }
+        TagWireRelation::RequiresAny => {
+            if entry.tag == "document_understanding" {
+                has_vision_hint(raw, wire)
+            } else {
+                entry.wire_capabilities.iter().any(|w| wire.contains(*w))
+            }
+        }
+    }
+}
+
+/// Returns reason label when this model should be indexed for `entry.tag`.
+fn model_matches_tag(
+    meta: &serde_json::Value,
+    entry: &TagMappingEntry,
+    raw: &serde_json::Value,
+    wire: &BTreeSet<String>,
+) -> Option<&'static str> {
+    let provider_ok = provider_matches_tag(entry, raw, wire);
+    let known = match entry.tag {
+        "high-reasoning" => CapabilityKnown::from_option(model_bool(meta, "reasoning")),
+        "coding" | "tool_calling" => CapabilityKnown::from_option(model_bool(meta, "tool_call")),
+        "document_understanding" => model_document_understanding(meta),
+        "speed" | "long_context" => return None,
+        _ => return None,
+    };
+    if !known.or_provider(provider_ok) {
+        return None;
+    }
+    Some(match known {
+        CapabilityKnown::Yes => "model fact",
+        CapabilityKnown::Unknown => "wire fallback",
+        CapabilityKnown::No => unreachable!("or_provider false above"),
+    })
+}
+
+/// Prefer Experimental `metadata.models` facts when annotated (CR-ME-001).
+fn match_model_capability_tags(
+    provider_id: &str,
+    path: &Path,
+    raw: &serde_json::Value,
+    wire: &BTreeSet<String>,
+) -> Vec<(String, CapabilityCandidate)> {
+    let mut hits = Vec::new();
+    let Some(models) = raw
+        .pointer("/metadata/models")
+        .and_then(serde_json::Value::as_object)
+    else {
+        return hits;
+    };
+    let source = path.display().to_string();
+    for (model_key, meta) in models {
+        let logical_id = if model_key.contains('/') {
+            model_key.clone()
+        } else {
+            format!("{provider_id}/{model_key}")
+        };
+        for entry in TAG_MAPPING_TABLE {
+            let Some(how) = model_matches_tag(meta, entry, raw, wire) else {
+                continue;
+            };
+            let provider_ok = provider_matches_tag(entry, raw, wire);
+            let reason = match (how, provider_ok) {
+                ("model fact", false) => format!(
+                    "model fact overrides empty ads ({})",
+                    entry.wire_capabilities.join("|")
+                ),
+                ("model fact", true) => {
+                    // Drift: ads claim tag but model fact is the SoT for this id.
+                    format!("model fact ({})", entry.wire_capabilities.join("|"))
+                }
+                _ => format!(
+                    "wire fallback (omit model fact): {}",
+                    entry.wire_capabilities.join("|")
+                ),
+            };
+            hits.push((
+                entry.tag.to_string(),
+                CapabilityCandidate {
+                    provider_id: provider_id.to_string(),
+                    logical_model_id: Some(logical_id.clone()),
+                    reason,
+                    source_file: source.clone(),
+                },
+            ));
+        }
+    }
+    hits
+}
+
 fn match_long_context_models(
     provider_id: &str,
     path: &Path,
@@ -357,8 +522,15 @@ pub fn build_index(protocol_root: &Path) -> Result<CapabilityIndex> {
         };
         let provider_id = provider_id_from_raw(&raw, path);
         let wire = collect_wire_capabilities(&raw);
-        for (tag, cand) in match_provider_tags(&provider_id, path, &raw, &wire) {
-            by_tag.entry(tag).or_default().push(cand);
+        if models_have_capability_annotations(&raw) {
+            // CR-ME-001: prefer per-model Experimental facts; skip coarse provider ads.
+            for (tag, cand) in match_model_capability_tags(&provider_id, path, &raw, &wire) {
+                by_tag.entry(tag).or_default().push(cand);
+            }
+        } else {
+            for (tag, cand) in match_provider_tags(&provider_id, path, &raw, &wire) {
+                by_tag.entry(tag).or_default().push(cand);
+            }
         }
         for cand in match_long_context_models(&provider_id, path, &raw) {
             by_tag.entry("long_context".into()).or_default().push(cand);
@@ -651,5 +823,90 @@ mod tests {
         let (again, path) = load_or_rebuild_for_config(&cfg, false).expect("lor");
         assert_eq!(again.by_tag.get("coding").map(|v| v.len()), Some(1));
         assert!(path.exists());
+    }
+
+    #[test]
+    fn me001_model_modalities_override_provider_vision_ads() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        write_provider(
+            dir.path(),
+            "delta.json",
+            r#"{
+              "id": "delta",
+              "capabilities": {
+                "required": ["text", "tools"],
+                "optional": ["vision"]
+              },
+              "metadata": {
+                "models": {
+                  "text-only": {
+                    "context_window": 8192,
+                    "modalities": { "input": ["text"], "output": ["text"] },
+                    "model_capabilities": { "tool_call": true, "attachment": false }
+                  },
+                  "vision-ok": {
+                    "context_window": 8192,
+                    "modalities": { "input": ["text", "image"], "output": ["text"] },
+                    "model_capabilities": { "tool_call": true, "attachment": true }
+                  }
+                }
+              }
+            }"#,
+        );
+        let index = build_index(dir.path()).expect("build");
+        let docs = lookup_tag(&index, "document_understanding").unwrap();
+        assert_eq!(
+            docs.len(),
+            1,
+            "text-only must not inherit provider vision ads"
+        );
+        assert_eq!(docs[0].logical_model_id.as_deref(), Some("delta/vision-ok"));
+
+        let coding = lookup_tag(&index, "coding").unwrap();
+        assert_eq!(coding.len(), 2);
+        assert!(coding.iter().all(|c| c.logical_model_id.is_some()));
+    }
+
+    #[test]
+    fn me001_omit_model_capabilities_falls_back_to_provider_ads() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        // Annotations present on one model (modalities) so model path is active;
+        // second model omits capability facts → wire fallback for that model.
+        write_provider(
+            dir.path(),
+            "epsilon.json",
+            r#"{
+              "id": "epsilon",
+              "capabilities": {
+                "required": ["text", "tools"],
+                "optional": ["vision"]
+              },
+              "metadata": {
+                "models": {
+                  "annotated": {
+                    "modalities": { "input": ["text"], "output": ["text"] },
+                    "model_capabilities": { "tool_call": true }
+                  },
+                  "capacity-only": {
+                    "context_window": 128000,
+                    "max_output_tokens": 4096,
+                    "status": "active"
+                  }
+                }
+              }
+            }"#,
+        );
+        let index = build_index(dir.path()).expect("build");
+        let docs = lookup_tag(&index, "document_understanding").unwrap();
+        // annotated: modalities text-only → No; capacity-only: omit → wire vision fallback
+        assert_eq!(docs.len(), 1);
+        assert_eq!(
+            docs[0].logical_model_id.as_deref(),
+            Some("epsilon/capacity-only")
+        );
+        assert!(docs[0].reason.contains("wire fallback"));
+
+        let coding = lookup_tag(&index, "coding").unwrap();
+        assert_eq!(coding.len(), 2);
     }
 }

@@ -402,7 +402,7 @@ fn model_matches_tag(
         "high-reasoning" => CapabilityKnown::from_option(model_bool(meta, "reasoning")),
         "coding" | "tool_calling" => CapabilityKnown::from_option(model_bool(meta, "tool_call")),
         "document_understanding" => model_document_understanding(meta),
-        "speed" | "long_context" => return None,
+        // speed / long_context handled elsewhere; unknown tags ignored.
         _ => return None,
     };
     if !known.or_provider(provider_ok) {

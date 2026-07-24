@@ -18,6 +18,7 @@ rebuild triggers (host cache only — never writes public ai-protocol manifests)
   • tip change: AI_PROTOCOL_DIR git HEAD != capability-index.json protocol_tip\n\
   • root change: AI_PROTOCOL_DIR path != cached protocol_root\n\
   • missing/corrupt cache → automatic rebuild on next load\n\
+  • ME-001: when `metadata.models` has model_capabilities/modalities, Tag facts are per-model (prefer model over provider ads; omit = fall back to ads)\n\
   • not implemented: daily/timer rebuild (use --rebuild or tip change)";
 
 /// Print Tag → candidates (rebuild cache when `rebuild` is set).

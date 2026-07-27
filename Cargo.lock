@@ -90,7 +90,7 @@ dependencies = [
 [[package]]
 name = "ai-lib-contact"
 version = "1.1.0"
-source = "git+https://github.com/ailib-official/ai-lib-rust?rev=94c4f32dc459190e3e651a0d84eb0e9ab75336b5#94c4f32dc459190e3e651a0d84eb0e9ab75336b5"
+source = "git+https://github.com/ailib-official/ai-lib-rust?rev=3dea247e1183fa1185500dcafcbc219972d9e18b#3dea247e1183fa1185500dcafcbc219972d9e18b"
 dependencies = [
  "ai-lib-core",
  "async-trait",
@@ -108,7 +108,7 @@ dependencies = [
 [[package]]
 name = "ai-lib-core"
 version = "1.1.0"
-source = "git+https://github.com/ailib-official/ai-lib-rust?rev=94c4f32dc459190e3e651a0d84eb0e9ab75336b5#94c4f32dc459190e3e651a0d84eb0e9ab75336b5"
+source = "git+https://github.com/ailib-official/ai-lib-rust?rev=3dea247e1183fa1185500dcafcbc219972d9e18b#3dea247e1183fa1185500dcafcbc219972d9e18b"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -141,7 +141,7 @@ dependencies = [
 [[package]]
 name = "ai-lib-rust"
 version = "1.1.0"
-source = "git+https://github.com/ailib-official/ai-lib-rust?rev=94c4f32dc459190e3e651a0d84eb0e9ab75336b5#94c4f32dc459190e3e651a0d84eb0e9ab75336b5"
+source = "git+https://github.com/ailib-official/ai-lib-rust?rev=3dea247e1183fa1185500dcafcbc219972d9e18b#3dea247e1183fa1185500dcafcbc219972d9e18b"
 dependencies = [
  "ai-lib-contact",
  "ai-lib-core",

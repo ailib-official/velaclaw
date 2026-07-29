@@ -140,6 +140,7 @@ velaclaw agent -m "Hello, VelaClaw!"
 velaclaw gateway
 
 velaclaw daemon
+# Web UI: http://127.0.0.1:8080/chat （POST /pair で bearer token 取得）
 ```
 
 ## Subscription Auth（OpenAI Codex / Claude Code）

@@ -2,7 +2,7 @@
 
 This reference is derived from the current CLI surface (`velaclaw --help`).
 
-Last verified: **July 19, 2026**.
+Last verified: **July 30, 2026**.
 
 ## Top-Level Commands
 
@@ -55,7 +55,7 @@ Last verified: **July 19, 2026**.
 - `velaclaw agent --no-color`
 - `velaclaw agent --no-fold`
 
-Interactive REPL (no `-m`) starts a **new memory session** each launch (VL-MEM-001). Conversation/Daily autosave is scoped to that session; prior sessions and legacy unscoped Conversation rows are not injected. Core (long-term) memories may still appear. `/new` / `/clear` clears this session's Conversation/Daily and rotates to another new session (Core preserved). Historical session resume UI is not implemented yet.
+Interactive REPL (no `-m`) starts a **new memory session** each launch (VL-MEM-001). Conversation/Daily autosave is scoped to that session; prior sessions and legacy unscoped Conversation rows are not injected. Core (long-term) memories may still appear. `/new` / `/clear` clears this session's Conversation/Daily and rotates to another new session (Core preserved). Resume prior chat sessions in the browser via `/chat` (Sessions tab or sidebar; deep link `?session=<id>`).
 
 BYOK default hygiene (VL-RT-003): if the configured `default_model` provider has no
 usable env API key, the agent remaps to a keyed provider (or fails with an
@@ -123,6 +123,63 @@ See `[cli_render]` in [config-reference.md](config-reference.md).
 
 - `velaclaw gateway [--host <HOST>] [--port <PORT>]`
 - `velaclaw daemon [--host <HOST>] [--port <PORT>]`
+
+Both start the HTTP gateway (REST + WebSocket + embedded Web UI). `daemon` also supervises channels, optional heartbeat, and scheduler when configured.
+
+#### Web Control UI (`/chat`)
+
+After the gateway is listening (default `http://127.0.0.1:8080`):
+
+1. Open **`GET /chat`** in a browser — Svelte SPA (Chat, Sessions, Memory, Cron, Tools, Settings).
+2. If pairing is enabled, exchange the one-time startup code via **`POST /pair`** (header `X-Pairing-Code: <code>`) to obtain a bearer token.
+3. Paste the token into the SPA toolbar and click **Save token**.
+4. Resume a saved chat session with **`/chat?session=<session-id>`** (also persisted in browser local storage).
+
+**Security (required reading):**
+
+- Treat the Control UI as a **local management plane**, not a public chat product.
+- **Do not** expose `/chat` or Local Control API routes on the public internet without additional fronting auth/TLS policy.
+- When pairing is enabled, protected routes require `Authorization: Bearer <token>` (same as `/webhook`).
+- Prefer loopback bind (`127.0.0.1`) for interactive use; non-loopback binds require explicit operator intent.
+
+#### Local Control API (gateway HTTP surface)
+
+| Route | Method | Auth | Purpose |
+|---|---|---|---|
+| `/health` | GET | Public | Liveness / paired summary |
+| `/metrics` | GET | Public | Prometheus metrics |
+| `/dashboard` | GET | Public | Legacy monitoring HTML (cost/runtime) |
+| `/api/dashboard` | GET | Public | JSON dashboard payload (health + optional cost) |
+| `/chat` | GET | Public | Web Control UI (static SPA) |
+| `/pair` | POST | Pairing code header | Exchange one-time code → bearer token |
+| `/webhook` | POST | Bearer (when pairing on) | Simple prompt webhook |
+| `/ws` | GET | Bearer query `?token=` (when pairing on) | Streaming chat WebSocket |
+| `/api/chat` | POST | Bearer | Non-streaming chat completion |
+| `/api/providers` | GET | Bearer | BYOK provider/model availability |
+| `/api/providers/{id}/test` | POST | Bearer | Provider connectivity probe |
+| `/api/sessions` | GET, POST | Bearer | List / create chat sessions |
+| `/api/sessions/{id}` | GET, DELETE | Bearer | Session detail / delete |
+| `/api/memory` | GET | Bearer | Search/list memory entries |
+| `/api/memory/{id}` | GET | Bearer | Single memory entry |
+| `/api/config` | GET, PUT | Bearer | Read/write runtime config subset |
+| `/api/config/schema` | GET | Bearer | Config schema for UI forms |
+| `/api/cron` | GET, POST | Bearer | List / create cron jobs |
+| `/api/cron/{id}` | GET, PUT, DELETE | Bearer | Cron job CRUD |
+| `/api/cron/{id}/run` | POST | Bearer | Trigger cron job once |
+| `/api/tools` | GET | Bearer | Tool catalog exposed to agent |
+| `/api/approvals/{id}/respond` | POST | Bearer | Approve/deny pending tool execution |
+
+Channel webhooks (`/whatsapp`, `/linq`, `/nextcloud-talk`) follow channel-specific verification; see [channels-reference.md](channels-reference.md).
+
+Pairing flow example:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8080/pair \
+  -H 'X-Pairing-Code: 123456'
+# → { "token": "...", "paired": true, ... }
+```
+
+See also [operations-runbook.md](operations-runbook.md) for daemon lifecycle and [troubleshooting.md](troubleshooting.md) for gateway failures.
 
 ### `service`
 

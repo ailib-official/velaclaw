@@ -11,6 +11,7 @@
 | 我想要… | 建议阅读 |
 |---|---|
 | 快速安装并运行 | [../README.zh-CN.md](../README.zh-CN.md) / [../README.md](../README.md) |
+| 用 workspace 文档塑造 agent 行为（模板草案） | [workspace-prompt-templates.zh-CN.md](workspace-prompt-templates.zh-CN.md) · [English](workspace-prompt-templates.md) |
 | 一键安装与初始化 | [one-click-bootstrap.md](one-click-bootstrap.md) |
 | 按任务找命令 | [commands-reference.md](commands-reference.md) |
 | 快速查看配置默认值与关键项 | [config-reference.md](config-reference.md) |

@@ -26,6 +26,14 @@ For first-time setup and quick orientation.
 - Ollama cloud models (`:cloud`) require a remote `api_url` and API key (for example `api_url = "https://ollama.com"`).
 - Validate environment: `velaclaw status` + `velaclaw doctor`
 
+## Workspace persona & local indexes
+
+Draft contract for Markdown templates that steer the agent (persona, tool habits, host indexes) without code changes:
+
+- English: [../workspace-prompt-templates.md](../workspace-prompt-templates.md)
+- 简体中文: [../workspace-prompt-templates.zh-CN.md](../workspace-prompt-templates.zh-CN.md)
+- Example seed pack: [../../seeds/home-lab-lan/](../../seeds/home-lab-lan/)
+
 ## Next
 
 - Runtime operations: [../operations/README.md](../operations/README.md)

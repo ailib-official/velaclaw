@@ -11,6 +11,7 @@ Localized hubs: [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · 
 | I want to… | Read this |
 |---|---|
 | Install and run VelaClaw quickly | [README.md (Quick Start)](../README.md#quick-start) |
+| Shape agent behavior via workspace docs (draft templates) | [workspace-prompt-templates.md](workspace-prompt-templates.md) · [简体中文](workspace-prompt-templates.zh-CN.md) |
 | Bootstrap in one command | [one-click-bootstrap.md](one-click-bootstrap.md) |
 | Find commands by task | [commands-reference.md](commands-reference.md) |
 | Check config defaults and keys quickly | [config-reference.md](config-reference.md) |

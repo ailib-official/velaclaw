@@ -23,6 +23,8 @@ Last refreshed: **February 18, 2026**.
 
 - [getting-started/README.md](getting-started/README.md)
 - [one-click-bootstrap.md](one-click-bootstrap.md)
+- Workspace prompt templates (draft): [workspace-prompt-templates.md](workspace-prompt-templates.md) · [zh-CN](workspace-prompt-templates.zh-CN.md)
+- Example seed packs: [../seeds/README.md](../seeds/README.md) · [home-lab-lan](../seeds/home-lab-lan/)
 
 ### 2) Command/Config References & Integrations
 

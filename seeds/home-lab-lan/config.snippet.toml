@@ -1,0 +1,19 @@
+# Optional snippet — merge into config.toml (home-lab)
+
+# Higher tool-loop / action budgets for multi-step LAN ops.
+# Review before copying into production-facing installs.
+
+[autonomy]
+# level = "full"   # uncomment if you intentionally want full autonomy
+allowed_commands = [
+    # keep your existing list, then ensure these exist when needed:
+    "curl",
+    "jq",
+    "gh",
+    "ssh",
+]
+max_actions_per_hour = 500
+max_cost_per_day_cents = 10000
+
+[agent]
+max_tool_iterations = 64

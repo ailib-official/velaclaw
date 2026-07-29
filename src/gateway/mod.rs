@@ -32,7 +32,7 @@ use axum::{
     body::Bytes,
     extract::{ConnectInfo, Query, State},
     http::{header, HeaderMap, StatusCode},
-    response::{IntoResponse, Json},
+    response::{IntoResponse, Json, Redirect},
 };
 use parking_lot::Mutex;
 use std::collections::HashMap;
@@ -530,62 +530,9 @@ async fn handle_dashboard_api(State(state): State<AppState>) -> impl IntoRespons
     Json(body)
 }
 
-/// GET /dashboard — HTML dashboard for monitoring
-async fn handle_dashboard() -> impl IntoResponse {
-    const HTML: &str = r##"<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>VelaClaw Dashboard</title>
-  <style>
-    * { box-sizing: border-box; }
-    body { font-family: system-ui, sans-serif; margin: 0; padding: 1.5rem; background: #0f172a; color: #e2e8f0; }
-    h1 { color: #38bdf8; margin-bottom: 1rem; }
-    .card { background: #1e293b; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
-    .card h2 { margin: 0 0 0.5rem; font-size: 0.9rem; color: #94a3b8; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
-    .stat { font-size: 1.5rem; font-weight: 600; color: #38bdf8; }
-    .ok { color: #4ade80; }
-    pre { overflow-x: auto; font-size: 0.8rem; }
-    @media (max-width: 600px) { .grid { grid-template-columns: 1fr; } }
-  </style>
-</head>
-<body>
-  <h1>VelaClaw Dashboard</h1>
-  <div id="content">Loading...</div>
-  <script>
-    async function load() {
-      try {
-        const r = await fetch('/api/dashboard');
-        const d = await r.json();
-        const cost = d.cost || {};
-        let html = '<div class="card"><h2>Status</h2><span class="stat ok">' + d.health.status + '</span></div>';
-        if (cost.daily_cost_usd !== undefined) {
-          html += '<div class="grid">';
-          html += '<div class="card"><h2>Session Cost</h2><span class="stat">$' + cost.session_cost_usd.toFixed(4) + '</span></div>';
-          html += '<div class="card"><h2>Daily Cost</h2><span class="stat">$' + cost.daily_cost_usd.toFixed(4) + '</span></div>';
-          html += '<div class="card"><h2>Monthly Cost</h2><span class="stat">$' + cost.monthly_cost_usd.toFixed(4) + '</span></div>';
-          html += '<div class="card"><h2>Total Tokens</h2><span class="stat">' + (cost.total_tokens || 0).toLocaleString() + '</span></div>';
-          html += '<div class="card"><h2>Requests</h2><span class="stat">' + (cost.request_count || 0) + '</span></div>';
-          html += '</div>';
-        }
-        html += '<div class="card"><h2>Runtime</h2><pre>' + JSON.stringify(d.health.runtime, null, 2) + '</pre></div>';
-        document.getElementById('content').innerHTML = html;
-      } catch (e) {
-        document.getElementById('content').innerHTML = '<div class="card"><p>Error: ' + e.message + '</p></div>';
-      }
-    }
-    load();
-    setInterval(load, 30000);
-  </script>
-</body>
-</html>"##;
-    (
-        StatusCode::OK,
-        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-        HTML,
-    )
+/// GET /dashboard — redirect to SPA Overview tab (VL-UI-006)
+async fn handle_dashboard() -> Redirect {
+    Redirect::temporary("/chat/?tab=overview")
 }
 
 /// POST /pair — exchange one-time code for bearer token

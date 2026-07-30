@@ -38,7 +38,7 @@ VelaClaw 的行为很大程度由 **文档驱动**：workspace 内短 Markdown �
 
 ## 3. 推荐模板包（分层）
 
-包要 **短**。优先「投影」（短索引），不要整库导入（`ai-lib-plans`、constitution 等）。
+包要 **短**。优先「投影」（短索引），不要整库导入（私有规划仓、治理语料库等）。
 
 ```text
 workspace/
@@ -74,7 +74,7 @@ workspace/
 不应包含：
 
 - 密码、PAT、私钥、token 提取步骤
-- `ai-lib-plans` / constitution 全文拷贝
+- 私有规划仓 / 治理语料库 全文拷贝
 - 长篇风险评估或臆测架构
 
 ## 4. 写作质量要求

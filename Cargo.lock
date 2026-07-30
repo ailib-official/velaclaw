@@ -2731,7 +2731,7 @@ dependencies = [
  "hyper 1.10.1",
  "hyper-util",
  "log",
- "rustls 0.23.42",
+ "rustls 0.23.43",
  "rustls-native-certs",
  "tokio",
  "tokio-rustls 0.26.4",
@@ -3363,7 +3363,7 @@ dependencies = [
  "nom 8.0.0",
  "percent-encoding",
  "quoted_printable",
- "rustls 0.23.42",
+ "rustls 0.23.43",
  "socket2 0.6.4",
  "tokio",
  "url",
@@ -5201,7 +5201,7 @@ dependencies = [
  "quinn-proto",
  "quinn-udp",
  "rustc-hash",
- "rustls 0.23.42",
+ "rustls 0.23.43",
  "socket2 0.6.4",
  "thiserror 2.0.19",
  "tokio",
@@ -5222,7 +5222,7 @@ dependencies = [
  "rand_pcg",
  "ring",
  "rustc-hash",
- "rustls 0.23.42",
+ "rustls 0.23.43",
  "rustls-pki-types",
  "slab",
  "thiserror 2.0.19",
@@ -5550,7 +5550,7 @@ dependencies = [
  "percent-encoding",
  "pin-project-lite",
  "quinn",
- "rustls 0.23.42",
+ "rustls 0.23.43",
  "rustls-pki-types",
  "serde",
  "serde_json",
@@ -5915,9 +5915,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.42"
+version = "0.23.43"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c54fcab019b409d04215d3a17cb438fd7fbf192ee61461f20f4fe18704bc138"
+checksum = "0283386ce02abc0151e1761d08802dfe86c173b0b494af5cbc086574e453da06"
 dependencies = [
  "aws-lc-rs",
  "log",
@@ -6916,7 +6916,7 @@ version = "0.26.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1729aa945f29d91ba541258c8df89027d5792d85a8841fb65e8bf0f4ede4ef61"
 dependencies = [
- "rustls 0.23.42",
+ "rustls 0.23.43",
  "tokio",
 ]
 
@@ -6978,7 +6978,7 @@ checksum = "17a073bfed563fa236697a068031408a93cd9522e08abf9933ead3e73411bd71"
 dependencies = [
  "futures-util",
  "log",
- "rustls 0.23.42",
+ "rustls 0.23.43",
  "rustls-pki-types",
  "tokio",
  "tokio-rustls 0.26.4",
@@ -7312,7 +7312,7 @@ dependencies = [
  "httparse",
  "log",
  "rand 0.10.2",
- "rustls 0.23.42",
+ "rustls 0.23.43",
  "rustls-pki-types",
  "sha1 0.11.0",
  "thiserror 2.0.19",
@@ -7487,7 +7487,7 @@ dependencies = [
  "cookie_store",
  "log",
  "percent-encoding",
- "rustls 0.23.42",
+ "rustls 0.23.43",
  "rustls-pki-types",
  "serde",
  "serde_json",
@@ -7627,7 +7627,7 @@ dependencies = [
  "rppal 0.22.1",
  "rusqlite",
  "rust-embed",
- "rustls 0.23.42",
+ "rustls 0.23.43",
  "rustls-pki-types",
  "schemars 1.2.2",
  "serde",
@@ -7951,7 +7951,7 @@ dependencies = [
  "futures-util",
  "http 1.4.2",
  "log",
- "rustls 0.23.42",
+ "rustls 0.23.43",
  "tokio",
  "tokio-rustls 0.26.4",
  "tokio-websockets",

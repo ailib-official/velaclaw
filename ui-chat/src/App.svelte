@@ -38,6 +38,11 @@
     type DashboardView,
   } from "./lib/dashboard";
   import type { ApprovalRequiredPayload } from "./lib/chat";
+  import {
+    formatRoutingSummary,
+    routingDiagnosticsFromConfig,
+    type RoutingDiagnosticsView,
+  } from "./lib/diagnostics";
 
   type Tab = "overview" | "chat" | "memory" | "cron" | "tools" | "settings";
 
@@ -69,6 +74,7 @@
   let providers = $state<{ id: string; available: boolean }[]>([]);
   let dashboardView = $state<DashboardView | null>(null);
   let dashboardLoading = $state(false);
+  let routingDiagnostics = $state<RoutingDiagnosticsView | null>(null);
 
   let listEl: HTMLDivElement | undefined;
 
@@ -241,6 +247,7 @@
       aiProtocolDir = String(
         (cfg as { runtime?: { ai_protocol_dir?: string } }).runtime?.ai_protocol_dir ?? "",
       );
+      routingDiagnostics = routingDiagnosticsFromConfig(cfg as Record<string, unknown>);
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e));
     }
@@ -607,6 +614,25 @@
           {/if}
         </div>
       {/if}
+      {#if routingDiagnostics?.panelVisible}
+        <div class="diagnostics-panel">
+          <strong>Capability routing diagnostics</strong>
+          <p class="hint">Read-only summary when <code>[agent].intent_capability_route</code> is enabled. No secrets are shown.</p>
+          <pre>{formatRoutingSummary(routingDiagnostics)}</pre>
+          <p class="hint">Run locally for full explain output:</p>
+          <ul class="doctor-commands">
+            {#each routingDiagnostics.doctorCommands as cmd}
+              <li><code>{cmd}</code></li>
+            {/each}
+          </ul>
+        </div>
+      {:else}
+        <p class="hint diagnostics-off">
+          Routing diagnostics are hidden by default. Enable
+          <code>[agent].intent_capability_route</code> in <code>config.toml</code>, or run
+          <code>velaclaw doctor routing</code> in a terminal.
+        </p>
+      {/if}
     </section>
   {/if}
 
@@ -961,6 +987,28 @@
   }
   .provider-row .bad {
     color: #fca5a5;
+  }
+  .diagnostics-panel {
+    margin-top: 0.75rem;
+    padding: 0.75rem;
+    background: #0f172a;
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+  .diagnostics-panel pre {
+    margin: 0;
+    font-size: 0.8rem;
+    white-space: pre-wrap;
+  }
+  .doctor-commands {
+    margin: 0;
+    padding-left: 1.25rem;
+    font-size: 0.8rem;
+  }
+  .diagnostics-off code {
+    font-size: 0.75rem;
   }
   .modal-backdrop {
     position: fixed;

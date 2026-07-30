@@ -39,12 +39,18 @@
   } from "./lib/dashboard";
   import type { ApprovalRequiredPayload } from "./lib/chat";
   import {
+    formatSessionMeta,
+    resolveInitialSessionId,
+    saveActiveSessionId,
+    syncSessionUrl,
+  } from "./lib/sessions";
+  import {
     formatRoutingSummary,
     routingDiagnosticsFromConfig,
     type RoutingDiagnosticsView,
   } from "./lib/diagnostics";
 
-  type Tab = "overview" | "chat" | "memory" | "cron" | "tools" | "settings";
+  type Tab = "overview" | "chat" | "sessions" | "memory" | "cron" | "tools" | "settings";
 
   let token = $state(loadToken());
   let tab = $state<Tab>("chat");
@@ -105,8 +111,24 @@
     }
   }
 
+  function stopStreaming() {
+    if (cancelStream) {
+      cancelStream();
+      cancelStream = null;
+    }
+    streaming = false;
+  }
+
+  function trackActiveSession(id: string | null) {
+    saveActiveSessionId(id);
+    syncSessionUrl(id);
+  }
+
   async function loadSessions() {
-    if (!token) return;
+    if (!token) {
+      sessions = [];
+      return;
+    }
     try {
       sessions = await fetchSessions(token);
     } catch (e) {
@@ -114,30 +136,58 @@
     }
   }
 
-  async function selectSession(id: string) {
+  async function selectSession(id: string, options: { switchToChat?: boolean } = {}) {
+    const { switchToChat = true } = options;
+    if (streaming && activeSessionId !== id) {
+      stopStreaming();
+    }
     try {
       const detail = await fetchSession(token, id);
       activeSessionId = detail.id;
+      trackActiveSession(detail.id);
       messages = detail.messages.map((m) => ({
         role: m.role as ChatMessage["role"],
         content: m.content,
       }));
       if (detail.model_id) selectedModel = detail.model_id;
       scrollToBottom();
+      if (switchToChat && tab !== "chat") {
+        switchTab("chat");
+      }
     } catch (e) {
+      if (resolveInitialSessionId(window.location.search) === id) {
+        trackActiveSession(null);
+      }
       showToast(e instanceof Error ? e.message : String(e));
     }
+  }
+
+  async function resumeInitialSession() {
+    if (!token) return;
+    const id = resolveInitialSessionId(window.location.search);
+    if (!id) return;
+    await selectSession(id, { switchToChat: false });
   }
 
   async function newSession() {
     try {
       const session = await createSession(token, undefined, selectedModel || undefined);
       activeSessionId = session.id;
+      trackActiveSession(session.id);
       messages = [];
       await loadSessions();
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e));
     }
+  }
+
+  async function newSessionAndOpen() {
+    await newSession();
+    switchTab("chat");
+  }
+
+  function openSessionInChat(id: string) {
+    void selectSession(id, { switchToChat: true });
   }
 
   async function removeSession(id: string) {
@@ -146,6 +196,7 @@
       if (activeSessionId === id) {
         activeSessionId = null;
         messages = [];
+        trackActiveSession(null);
       }
       await loadSessions();
     } catch (e) {
@@ -281,20 +332,25 @@
   }
 
   onMount(() => {
-    refreshMeta();
-    loadSessions();
-    const params = new URLSearchParams(window.location.search);
-    const requested = params.get("tab");
-    const tabs: Tab[] = ["overview", "chat", "memory", "cron", "tools", "settings"];
-    if (requested && tabs.includes(requested as Tab)) {
-      switchTab(requested as Tab);
-    }
+    void (async () => {
+      await refreshMeta();
+      await loadSessions();
+      const params = new URLSearchParams(window.location.search);
+      const requested = params.get("tab");
+      const tabs: Tab[] = ["overview", "chat", "sessions", "memory", "cron", "tools", "settings"];
+      if (requested && tabs.includes(requested as Tab)) {
+        switchTab(requested as Tab);
+      } else {
+        await resumeInitialSession();
+      }
+    })();
   });
 
-  function saveTokenAndRefresh() {
+  async function saveTokenAndRefresh() {
     saveToken(token);
-    refreshMeta();
-    loadSessions();
+    await refreshMeta();
+    await loadSessions();
+    await resumeInitialSession();
   }
 
   function switchTab(next: Tab) {
@@ -307,6 +363,7 @@
     }
     window.history.replaceState({}, "", `${url.pathname}${url.search}`);
     if (next === "overview") loadOverview();
+    if (next === "chat" || next === "sessions") void loadSessions();
     if (next === "memory") loadMemory();
     if (next === "cron") loadCron();
     if (next === "tools") loadTools();
@@ -389,6 +446,7 @@
     <nav class="tabs">
       <button type="button" class:active={tab === "overview"} onclick={() => switchTab("overview")}>Overview</button>
       <button type="button" class:active={tab === "chat"} onclick={() => switchTab("chat")}>Chat</button>
+      <button type="button" class:active={tab === "sessions"} onclick={() => switchTab("sessions")}>Sessions</button>
       <button type="button" class:active={tab === "memory"} onclick={() => switchTab("memory")}>Memory</button>
       <button type="button" class:active={tab === "cron"} onclick={() => switchTab("cron")}>Cron</button>
       <button type="button" class:active={tab === "tools"} onclick={() => switchTab("tools")}>Tools</button>
@@ -481,10 +539,13 @@
           {#each sessions as s}
             <li class:active={s.id === activeSessionId}>
               <button type="button" class="session-title" onclick={() => selectSession(s.id)}>
-                {s.title}
+                <span class="session-name">{s.title}</span>
+                <span class="session-meta">{formatSessionMeta(s)}</span>
               </button>
               <button type="button" class="session-del" onclick={() => removeSession(s.id)} title="Delete">×</button>
             </li>
+          {:else}
+            <li class="empty">No sessions — save token and create one.</li>
           {/each}
         </ul>
       </aside>
@@ -518,6 +579,34 @@
         </footer>
       </div>
     </div>
+  {:else if tab === "sessions"}
+    <section class="panel sessions-panel">
+      <div class="panel-head">
+        <p class="hint">List, resume, or delete chat sessions. Each session keeps an isolated message history.</p>
+        <button type="button" onclick={newSessionAndOpen}>+ New session</button>
+        <button type="button" onclick={loadSessions}>Refresh</button>
+      </div>
+      {#if !token}
+        <p class="hint">Save a bearer token to load sessions.</p>
+      {:else}
+        <ul class="session-list">
+          {#each sessions as s}
+            <li class:active={s.id === activeSessionId}>
+              <div class="session-info">
+                <strong>{s.title}</strong>
+                <span class="session-meta">{formatSessionMeta(s)}</span>
+              </div>
+              <div class="session-actions">
+                <button type="button" onclick={() => openSessionInChat(s.id)}>Open in Chat</button>
+                <button type="button" class="danger" onclick={() => removeSession(s.id)}>Delete</button>
+              </div>
+            </li>
+          {:else}
+            <li class="empty">No sessions yet.</li>
+          {/each}
+        </ul>
+      {/if}
+    </section>
   {:else if tab === "memory"}
     <section class="panel">
       <div class="panel-head">
@@ -805,6 +894,55 @@
     font-size: 0.8rem;
     background: #334155;
     padding: 0.4rem 0.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+  .session-name {
+    font-weight: 500;
+    color: #e2e8f0;
+  }
+  .session-meta {
+    font-size: 0.65rem;
+    color: #94a3b8;
+    line-height: 1.2;
+  }
+  .session-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .session-list li {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem;
+    background: #0f172a;
+    border-radius: 8px;
+  }
+  .session-list li.active {
+    outline: 1px solid #0284c7;
+  }
+  .session-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    min-width: 0;
+  }
+  .session-actions {
+    display: flex;
+    gap: 0.35rem;
+    flex-shrink: 0;
+  }
+  .session-actions button.danger {
+    background: #7f1d1d;
+  }
+  .sessions-panel .panel-head {
+    align-items: center;
   }
   .session-del {
     padding: 0.25rem 0.5rem;

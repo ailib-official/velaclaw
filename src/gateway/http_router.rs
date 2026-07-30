@@ -103,7 +103,8 @@ pub fn print_gateway_banner(
     }
     println!("  GET  /health    — health check");
     println!("  GET  /metrics   — Prometheus metrics");
-    println!("  GET  /dashboard — monitoring dashboard (cost, events, status)");
+    println!("  GET  /chat         — Web UI (Overview tab: cost, runtime, status)");
+    println!("  GET  /dashboard    — redirects to /chat/?tab=overview");
     if let Some(code) = pairing_code {
         println!();
         println!("  🔐 PAIRING REQUIRED — use this one-time code:");

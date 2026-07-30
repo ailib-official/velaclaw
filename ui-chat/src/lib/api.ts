@@ -1,3 +1,7 @@
+import type { DashboardPayload } from "./dashboard";
+
+export type { DashboardPayload } from "./dashboard";
+
 const TOKEN_KEY = "velaclaw_bearer_token";
 
 export function loadToken(): string {
@@ -40,6 +44,14 @@ export async function fetchProviders(token: string): Promise<ProvidersResponse> 
 export async function fetchHealth(): Promise<{ paired?: boolean; status?: string }> {
   const res = await fetch("/health");
   if (!res.ok) throw new Error(`health ${res.status}`);
+  return res.json();
+}
+
+export async function fetchDashboard(token: string): Promise<DashboardPayload> {
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch("/api/dashboard", { headers });
+  if (!res.ok) throw new Error(`dashboard ${res.status}: ${await res.text()}`);
   return res.json();
 }
 

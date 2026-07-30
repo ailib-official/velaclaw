@@ -72,6 +72,17 @@ cargo run --features multi-model -- --negotiate
 cargo run -- agent -m "Hello"
 ```
 
+### Web 控制台（`/chat`）
+
+```bash
+velaclaw daemon
+# 浏览器打开 http://127.0.0.1:8080/chat
+# 配对：POST /pair，请求头 X-Pairing-Code: <启动码>
+# 在 UI 中保存 bearer token；Sessions 标签或 ?session=<id> 可恢复会话
+```
+
+Local Control API 详见 [docs/commands-reference.md](docs/commands-reference.md#gateway--daemon)。**请勿将 `/chat` 暴露到公网**（除非有额外认证/TLS 策略）。
+
 ---
 
 ## 配置

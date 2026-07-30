@@ -77,8 +77,11 @@ velaclaw agent -m "Hello" --provider-mode prism
 ```bash
 velaclaw daemon
 # Open http://127.0.0.1:8080/chat
-# Pair: POST http://127.0.0.1:8080/pair with your pairing code
+# Pair: POST http://127.0.0.1:8080/pair with header X-Pairing-Code: <code>
+# Save bearer token in the UI; use Sessions tab or ?session=<id> to resume
 ```
+
+Local Control REST/WebSocket routes are documented in [docs/commands-reference.md](docs/commands-reference.md#gateway--daemon). **Do not expose `/chat` on the public internet** without additional auth/TLS policy.
 
 ---
 

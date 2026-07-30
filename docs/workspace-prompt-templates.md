@@ -38,7 +38,7 @@ On each agent session, VelaClaw loads workspace identity files into the system p
 
 ## 3. Recommended template pack (layers)
 
-Keep packs **small**. Prefer projection (short indexes) over importing whole repos (`ai-lib-plans`, constitution, etc.).
+Keep packs **small**. Prefer projection (short indexes) over importing whole repos (private planning repos, governance corpora, etc.).
 
 ```text
 workspace/
@@ -74,7 +74,7 @@ Include:
 Exclude:
 
 - Passwords, PATs, private keys, token-extraction recipes
-- Full copies of `ai-lib-plans` / constitution
+- Full copies of private planning repos or governance corpora
 - Long risk essays or speculative architecture
 
 ## 4. Writing guidelines (quality bar)

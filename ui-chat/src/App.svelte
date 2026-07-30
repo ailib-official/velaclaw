@@ -12,6 +12,7 @@
     deleteSession,
     fetchConfig,
     fetchCronJobs,
+    fetchDashboard,
     fetchHealth,
     fetchMemory,
     fetchProviders,
@@ -30,6 +31,12 @@
     type SessionSummary,
     type ToolCatalogEntry,
   } from "./lib/api";
+  import {
+    dashboardViewFromPayload,
+    formatInt,
+    formatUsd,
+    type DashboardView,
+  } from "./lib/dashboard";
   import type { ApprovalRequiredPayload } from "./lib/chat";
   import {
     formatSessionMeta,
@@ -37,8 +44,13 @@
     saveActiveSessionId,
     syncSessionUrl,
   } from "./lib/sessions";
+  import {
+    formatRoutingSummary,
+    routingDiagnosticsFromConfig,
+    type RoutingDiagnosticsView,
+  } from "./lib/diagnostics";
 
-  type Tab = "chat" | "sessions" | "memory" | "cron" | "tools" | "settings";
+  type Tab = "overview" | "chat" | "sessions" | "memory" | "cron" | "tools" | "settings";
 
   let token = $state(loadToken());
   let tab = $state<Tab>("chat");
@@ -66,6 +78,9 @@
   let pendingApproval = $state<ApprovalRequiredPayload | null>(null);
   let providerTestMsg = $state("");
   let providers = $state<{ id: string; available: boolean }[]>([]);
+  let dashboardView = $state<DashboardView | null>(null);
+  let dashboardLoading = $state(false);
+  let routingDiagnostics = $state<RoutingDiagnosticsView | null>(null);
 
   let listEl: HTMLDivElement | undefined;
 
@@ -283,6 +298,7 @@
       aiProtocolDir = String(
         (cfg as { runtime?: { ai_protocol_dir?: string } }).runtime?.ai_protocol_dir ?? "",
       );
+      routingDiagnostics = routingDiagnosticsFromConfig(cfg as Record<string, unknown>);
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e));
     }
@@ -302,11 +318,31 @@
     }
   }
 
+  async function loadOverview() {
+    dashboardLoading = true;
+    try {
+      const payload = await fetchDashboard(token);
+      dashboardView = dashboardViewFromPayload(payload);
+    } catch (e) {
+      dashboardView = null;
+      showToast(e instanceof Error ? e.message : String(e));
+    } finally {
+      dashboardLoading = false;
+    }
+  }
+
   onMount(() => {
     void (async () => {
       await refreshMeta();
       await loadSessions();
-      await resumeInitialSession();
+      const params = new URLSearchParams(window.location.search);
+      const requested = params.get("tab");
+      const tabs: Tab[] = ["overview", "chat", "sessions", "memory", "cron", "tools", "settings"];
+      if (requested && tabs.includes(requested as Tab)) {
+        switchTab(requested as Tab);
+      } else {
+        await resumeInitialSession();
+      }
     })();
   });
 
@@ -319,6 +355,14 @@
 
   function switchTab(next: Tab) {
     tab = next;
+    const url = new URL(window.location.href);
+    if (next === "chat") {
+      url.searchParams.delete("tab");
+    } else {
+      url.searchParams.set("tab", next);
+    }
+    window.history.replaceState({}, "", `${url.pathname}${url.search}`);
+    if (next === "overview") loadOverview();
     if (next === "chat" || next === "sessions") void loadSessions();
     if (next === "memory") loadMemory();
     if (next === "cron") loadCron();
@@ -400,13 +444,13 @@
   <header>
     <h1>VelaClaw</h1>
     <nav class="tabs">
+      <button type="button" class:active={tab === "overview"} onclick={() => switchTab("overview")}>Overview</button>
       <button type="button" class:active={tab === "chat"} onclick={() => switchTab("chat")}>Chat</button>
       <button type="button" class:active={tab === "sessions"} onclick={() => switchTab("sessions")}>Sessions</button>
       <button type="button" class:active={tab === "memory"} onclick={() => switchTab("memory")}>Memory</button>
       <button type="button" class:active={tab === "cron"} onclick={() => switchTab("cron")}>Cron</button>
       <button type="button" class:active={tab === "tools"} onclick={() => switchTab("tools")}>Tools</button>
       <button type="button" class:active={tab === "settings"} onclick={() => switchTab("settings")}>Settings</button>
-      <a class="dash-link" href="/dashboard" target="_blank" rel="noopener">Dashboard ↗</a>
     </nav>
     <span class="badge" class:ok={status === "online"}>{status}</span>
   </header>
@@ -433,7 +477,58 @@
     {/if}
   </section>
 
-  {#if tab === "chat"}
+  {#if tab === "overview"}
+    <section class="panel overview">
+      <div class="panel-head">
+        <p class="hint">Gateway health, runtime snapshot, and cost summary.</p>
+        <button type="button" onclick={loadOverview} disabled={dashboardLoading}>
+          {dashboardLoading ? "Refreshing…" : "Refresh"}
+        </button>
+      </div>
+      {#if dashboardLoading && !dashboardView}
+        <p class="hint">Loading dashboard…</p>
+      {:else if dashboardView}
+        <div class="overview-grid">
+          <div class="stat-card">
+            <h2>Status</h2>
+            <span class="stat ok">{dashboardView.status}</span>
+            {#if dashboardView.paired !== null}
+              <p class="hint">Paired: {dashboardView.paired ? "yes" : "no"}</p>
+            {/if}
+          </div>
+          {#if dashboardView.hasCost}
+            <div class="stat-card">
+              <h2>Session Cost</h2>
+              <span class="stat">{formatUsd(dashboardView.sessionCostUsd)}</span>
+            </div>
+            <div class="stat-card">
+              <h2>Daily Cost</h2>
+              <span class="stat">{formatUsd(dashboardView.dailyCostUsd)}</span>
+            </div>
+            <div class="stat-card">
+              <h2>Monthly Cost</h2>
+              <span class="stat">{formatUsd(dashboardView.monthlyCostUsd)}</span>
+            </div>
+            <div class="stat-card">
+              <h2>Total Tokens</h2>
+              <span class="stat">{formatInt(dashboardView.totalTokens)}</span>
+            </div>
+            <div class="stat-card">
+              <h2>Requests</h2>
+              <span class="stat">{formatInt(dashboardView.requestCount)}</span>
+            </div>
+          {/if}
+        </div>
+        <div class="stat-card runtime-card">
+          <h2>Runtime</h2>
+          <pre>{dashboardView.runtimeJson}</pre>
+        </div>
+      {:else}
+        <p class="hint">Could not load dashboard.</p>
+        <button type="button" onclick={loadOverview}>Retry</button>
+      {/if}
+    </section>
+  {:else if tab === "chat"}
     <div class="chat-grid">
       <aside class="sessions">
         <div class="sessions-head">
@@ -608,6 +703,25 @@
           {/if}
         </div>
       {/if}
+      {#if routingDiagnostics?.panelVisible}
+        <div class="diagnostics-panel">
+          <strong>Capability routing diagnostics</strong>
+          <p class="hint">Read-only summary when <code>[agent].intent_capability_route</code> is enabled. No secrets are shown.</p>
+          <pre>{formatRoutingSummary(routingDiagnostics)}</pre>
+          <p class="hint">Run locally for full explain output:</p>
+          <ul class="doctor-commands">
+            {#each routingDiagnostics.doctorCommands as cmd}
+              <li><code>{cmd}</code></li>
+            {/each}
+          </ul>
+        </div>
+      {:else}
+        <p class="hint diagnostics-off">
+          Routing diagnostics are hidden by default. Enable
+          <code>[agent].intent_capability_route</code> in <code>config.toml</code>, or run
+          <code>velaclaw doctor routing</code> in a terminal.
+        </p>
+      {/if}
     </section>
   {/if}
 
@@ -665,11 +779,36 @@
     background: #0284c7;
     color: white;
   }
-  .dash-link {
+  .overview-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+  }
+  .stat-card {
+    background: #0f172a;
+    border-radius: 8px;
+    padding: 0.75rem;
+  }
+  .stat-card h2 {
+    margin: 0 0 0.35rem;
     font-size: 0.8rem;
+    color: #94a3b8;
+    font-weight: 500;
+  }
+  .stat {
+    font-size: 1.35rem;
+    font-weight: 600;
     color: #38bdf8;
-    text-decoration: none;
-    padding: 0.35rem 0.5rem;
+  }
+  .stat.ok {
+    color: #4ade80;
+  }
+  .runtime-card pre {
+    margin: 0;
+    overflow-x: auto;
+    font-size: 0.8rem;
+    white-space: pre-wrap;
   }
   .badge {
     font-size: 0.75rem;
@@ -986,6 +1125,28 @@
   }
   .provider-row .bad {
     color: #fca5a5;
+  }
+  .diagnostics-panel {
+    margin-top: 0.75rem;
+    padding: 0.75rem;
+    background: #0f172a;
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+  .diagnostics-panel pre {
+    margin: 0;
+    font-size: 0.8rem;
+    white-space: pre-wrap;
+  }
+  .doctor-commands {
+    margin: 0;
+    padding-left: 1.25rem;
+    font-size: 0.8rem;
+  }
+  .diagnostics-off code {
+    font-size: 0.75rem;
   }
   .modal-backdrop {
     position: fixed;

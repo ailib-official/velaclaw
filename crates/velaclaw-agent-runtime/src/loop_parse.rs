@@ -1,5 +1,11 @@
 //! Loop parse + history helpers extracted from main crate (VL-ARCH-008).
 //! 从主 crate 抽出的 loop 解析与历史辅助（行为不变）。
+//!
+//! **VL-TTC-010 residual scope:** `parse_tool_calls` is a *legacy* fallback for
+//! unclosed standard tags, GLM one-liners, and markdown fences that the
+//! ai-lib `StandardTextToolParser` does not yet cover. It must **not** grow
+//! provider dialects (no DSML / shell regex here). Dialect parsing belongs in
+//! ai-lib-core; prefer dispatcher / `parse_manifest_text_tool_fallback` first.
 
 use crate::provider::{ChatMessage, ToolCall};
 use crate::tools::Tool;

@@ -155,6 +155,16 @@ pub fn text_tool_parser_from_manifest(
     text_parser::parser_from_manifest(tool_calling)
 }
 
+/// Manifest-first text fallback when a dispatcher returns no calls (VL-TTC-010).
+///
+/// Uses the same lenient `StandardTextToolParser` as Xml/Hybrid dispatchers
+/// (including DSML invoke/parameter and hybrid DSML tool_call+JSON). Does **not**
+/// call `loop_parse` — callers may chain residual `parse_tool_calls` after this.
+#[cfg(feature = "ai-protocol")]
+pub fn parse_manifest_text_tool_fallback(text: &str) -> (String, Vec<ParsedToolCall>) {
+    text_parser::parse_with_parser(&text_parser::create_parser(), text)
+}
+
 /// Build a manifest-aware tool dispatcher (VL-TTC-003/004).
 pub fn build_tool_dispatcher(
     dispatcher_choice: &str,
@@ -568,6 +578,42 @@ mod tests {
         };
         let dispatcher = XmlToolDispatcher::default();
         let (_, calls) = dispatcher.parse_response(&response);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "shell");
+    }
+
+    #[cfg(feature = "ai-protocol")]
+    #[test]
+    fn xml_dispatcher_parses_hybrid_dsml_tool_call_json() {
+        // U+FF5C DSML delimiter family (ttc-010).
+        let tag = "\u{FF5C}\u{FF5C}DSML\u{FF5C}\u{FF5C}";
+        let text = format!(
+            "Checking remote.\n<{tag}tool_call>\n\
+             {{\"name\":\"shell\",\"arguments\":{{\"command\":\"echo ok\"}}}}\n\
+             </{tag}tool_call>"
+        );
+        let response = ChatResponse {
+            text: Some(text),
+            tool_calls: vec![],
+        };
+        let dispatcher = XmlToolDispatcher::default();
+        let (remaining, calls) = dispatcher.parse_response(&response);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "shell");
+        assert_eq!(calls[0].arguments["command"], "echo ok");
+        assert_eq!(remaining, "Checking remote.");
+        assert!(!remaining.contains("DSML"));
+    }
+
+    #[cfg(feature = "ai-protocol")]
+    #[test]
+    fn manifest_text_fallback_parses_hybrid_dsml() {
+        let tag = "\u{FF5C}\u{FF5C}DSML\u{FF5C}\u{FF5C}";
+        let text = format!(
+            "<{tag}tool_call>{{\"name\":\"shell\",\"arguments\":{{\"command\":\"pwd\"}}}}</{tag}tool_call>"
+        );
+        let (remaining, calls) = parse_manifest_text_tool_fallback(&text);
+        assert!(remaining.is_empty());
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].name, "shell");
     }

@@ -231,7 +231,7 @@ mod tests {
 
     #[test]
     fn seed_prior_messages_index_excludes_last_user() {
-        let messages = vec![
+        let messages = [
             ChatMessageInput {
                 role: "user".into(),
                 content: "hi".into(),

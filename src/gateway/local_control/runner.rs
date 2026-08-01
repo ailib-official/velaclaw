@@ -5,6 +5,7 @@ use super::sessions::ChatSessionStore;
 use super::types::{ChatApiRequest, ChatApiResponse, ChatMessageInput};
 use crate::agent::agent::Agent;
 use crate::config::Config;
+use crate::providers::ChatMessage;
 use anyhow::{anyhow, Context, Result};
 use std::path::Path;
 use std::sync::Arc;
@@ -13,9 +14,12 @@ use uuid::Uuid;
 /// Apply per-request model/temperature overrides onto a config clone.
 pub fn apply_chat_overrides(mut config: Config, req: &ChatApiRequest) -> Config {
     if let Some(model_id) = &req.model_id {
-        if !model_id.trim().is_empty() {
-            config.default_model = Some(model_id.trim().to_string());
-            if let Some((provider, _)) = model_id.split_once('/') {
+        let trimmed = model_id.trim();
+        // Only honor protocol `provider/model` ids. Bare labels like `deepseek-chat`
+        // from older UI session metadata must not clobber the configured default.
+        if trimmed.contains('/') {
+            config.default_model = Some(trimmed.to_string());
+            if let Some((provider, _)) = trimmed.split_once('/') {
                 config.default_provider = Some(provider.to_string());
             }
         }
@@ -56,6 +60,8 @@ pub async fn run_agent_chat(
             .enable_gateway_approval(Arc::clone(hub), &effective_config)
             .context("wire gateway approval manager")?;
     }
+    // Seed prior turns so multi-step Web UI chat keeps context (UI sends full history).
+    seed_prior_messages(&mut agent, &req.messages)?;
     let content = agent
         .turn(&user_message)
         .await
@@ -67,6 +73,34 @@ pub async fn run_agent_chat(
         usage: None,
         cost: None,
     })
+}
+
+/// Inject all messages before the last user turn into a fresh agent (system prompt first).
+fn seed_prior_messages(agent: &mut Agent, messages: &[ChatMessageInput]) -> Result<()> {
+    let Some(last_user_idx) = messages
+        .iter()
+        .rposition(|m| m.role == "user" && !m.content.trim().is_empty())
+    else {
+        return Ok(());
+    };
+    let prior = &messages[..last_user_idx];
+    if prior.is_empty() {
+        return Ok(());
+    }
+    agent.ensure_system_prompt()?;
+    for msg in prior {
+        let content = msg.content.trim();
+        if content.is_empty() {
+            continue;
+        }
+        match msg.role.as_str() {
+            "user" => agent.push_chat_message(ChatMessage::user(content)),
+            "assistant" => agent.push_chat_message(ChatMessage::assistant(content)),
+            // Agent already owns the system prompt; ignore prior system turns.
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 /// Append the latest user turn and assistant reply to a persisted session, if `session_id` is set.
@@ -170,5 +204,52 @@ mod tests {
         );
         assert_eq!(updated.default_provider.as_deref(), Some("deepseek"));
         assert!((updated.default_temperature - 0.2).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn apply_chat_overrides_ignores_bare_model_label() {
+        let mut base = Config::default();
+        base.default_provider = Some("nvidia/nemotron-3-super-120b-a12b".into());
+        base.default_model = Some("nvidia/nemotron-3-super-120b-a12b".into());
+        let req = ChatApiRequest {
+            messages: vec![],
+            session_id: None,
+            model_id: Some("deepseek-chat".into()),
+            temperature: None,
+            max_tokens: None,
+        };
+        let updated = apply_chat_overrides(base, &req);
+        assert_eq!(
+            updated.default_model.as_deref(),
+            Some("nvidia/nemotron-3-super-120b-a12b")
+        );
+        assert_eq!(
+            updated.default_provider.as_deref(),
+            Some("nvidia/nemotron-3-super-120b-a12b")
+        );
+    }
+
+    #[test]
+    fn seed_prior_messages_index_excludes_last_user() {
+        let messages = vec![
+            ChatMessageInput {
+                role: "user".into(),
+                content: "hi".into(),
+            },
+            ChatMessageInput {
+                role: "assistant".into(),
+                content: "hello".into(),
+            },
+            ChatMessageInput {
+                role: "user".into(),
+                content: "run ls".into(),
+            },
+        ];
+        let last_user_idx = messages
+            .iter()
+            .rposition(|m| m.role == "user" && !m.content.trim().is_empty())
+            .expect("user");
+        assert_eq!(last_user_idx, 2);
+        assert_eq!(messages[..last_user_idx].len(), 2);
     }
 }

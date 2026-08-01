@@ -452,19 +452,36 @@ pub(crate) async fn run_tool_call_loop(
                         let response_text = resp.text_or_empty().to_string();
                         let (mut parsed_text, mut disp_calls) = dispatcher.parse_response(&resp);
                         if disp_calls.is_empty() {
-                            let (fallback_text, fallback_calls) = parse_tool_calls(&response_text);
-                            if !fallback_calls.is_empty() {
-                                if !fallback_text.is_empty() {
-                                    parsed_text = fallback_text;
+                            // VL-TTC-010: manifest parser before residual loop_parse.
+                            #[cfg(feature = "ai-protocol")]
+                            {
+                                let (manifest_text, manifest_calls) =
+                                    velaclaw_agent_runtime::parse_manifest_text_tool_fallback(
+                                        &response_text,
+                                    );
+                                if !manifest_calls.is_empty() {
+                                    if !manifest_text.is_empty() {
+                                        parsed_text = manifest_text;
+                                    }
+                                    disp_calls = manifest_calls;
                                 }
-                                disp_calls = fallback_calls
-                                    .into_iter()
-                                    .map(|c| crate::agent::dispatcher::ParsedToolCall {
-                                        name: c.name,
-                                        arguments: c.arguments,
-                                        tool_call_id: None,
-                                    })
-                                    .collect();
+                            }
+                            if disp_calls.is_empty() {
+                                let (fallback_text, fallback_calls) =
+                                    parse_tool_calls(&response_text);
+                                if !fallback_calls.is_empty() {
+                                    if !fallback_text.is_empty() {
+                                        parsed_text = fallback_text;
+                                    }
+                                    disp_calls = fallback_calls
+                                        .into_iter()
+                                        .map(|c| crate::agent::dispatcher::ParsedToolCall {
+                                            name: c.name,
+                                            arguments: c.arguments,
+                                            tool_call_id: None,
+                                        })
+                                        .collect();
+                                }
                             }
                         }
                         let calls: Vec<ParsedToolCall> = disp_calls

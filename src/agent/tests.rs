@@ -813,9 +813,15 @@ async fn turn_preserves_text_alongside_tool_calls() {
         "Expected non-empty final response after mixed text+tool"
     );
 
-    // The intermediate text should be in history
+    // Intermediate assistant text lives on AssistantToolCalls for the native path
+    // (text-tool path uses Chat assistant + user [Tool results]).
     let has_intermediate = agent.history().iter().any(|msg| match msg {
-        ConversationMessage::Chat(c) => c.role == "assistant" && c.content.contains("Let me check"),
+        ConversationMessage::Chat(c) => {
+            c.role == "assistant" && c.content.contains("Let me check")
+        }
+        ConversationMessage::AssistantToolCalls {
+            text: Some(t), ..
+        } => t.contains("Let me check"),
         _ => false,
     });
     assert!(has_intermediate, "Intermediate text should be in history");

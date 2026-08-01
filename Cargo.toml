@@ -157,8 +157,8 @@ opentelemetry-otlp = { version = "0.31", default-features = false, features = ["
 # Serial port for peripheral communication (STM32, etc.)
 tokio-serial = { version = "5", default-features = false, optional = true }
 
-# ai-lib-rust — git pin (MULTI-PROTO-PIN-002 / ALR-ME-001 @ 3dea247)
-ai-lib-rust = { version = "1.1.0", git = "https://github.com/ailib-official/ai-lib-rust", rev = "3dea247e1183fa1185500dcafcbc219972d9e18b", optional = true }
+# ai-lib-rust — VL-TTC-011 pin ALR-TTC-010 @ 6975d9d (rollback: 3dea247)
+ai-lib-rust = { version = "1.1.0", git = "https://github.com/ailib-official/ai-lib-rust", rev = "6975d9d74cba5a41020361679b22dc5728b81361", optional = true }
 async-stream = { version = "0.3", optional = true }
 serde_yaml = { version = "0.9", optional = true }
 

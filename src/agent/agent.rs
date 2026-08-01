@@ -14,6 +14,7 @@ use crate::providers::{ChatMessage, ChatRequest, ConversationMessage, Provider};
 use crate::security::PolicyHandle;
 use crate::tools::{Tool, ToolExecutionContext, ToolSpec};
 use anyhow::Result;
+use std::fmt::Write as _;
 use std::io::Write as IoWrite;
 use std::sync::Arc;
 use std::time::Instant;
@@ -581,7 +582,8 @@ impl Agent {
         ))
     }
 
-    pub async fn turn(&mut self, user_message: &str) -> Result<String> {
+    /// Ensure the system prompt is the first history entry (for Web UI history seeding).
+    pub fn ensure_system_prompt(&mut self) -> Result<()> {
         if self.history.is_empty() {
             let system_prompt = self.build_system_prompt()?;
             self.history
@@ -589,6 +591,16 @@ impl Agent {
                     system_prompt,
                 )));
         }
+        Ok(())
+    }
+
+    /// Append a chat message to history (used when seeding prior Web UI turns).
+    pub fn push_chat_message(&mut self, message: ChatMessage) {
+        self.history.push(ConversationMessage::Chat(message));
+    }
+
+    pub async fn turn(&mut self, user_message: &str) -> Result<String> {
+        self.ensure_system_prompt()?;
 
         if self.auto_save {
             if let Err(err) = self
@@ -648,7 +660,50 @@ impl Agent {
                 Err(err) => return Err(err),
             };
 
-            let (text, calls) = self.tool_dispatcher.parse_response(&response);
+            // Manifest XML parser requires a closing </tool_call>. Models (esp. Nemotron)
+            // often emit an opening tag + JSON without the close — same recovery as
+            // `run_tool_call_loop` so Web UI chat does not dump raw markup as the reply.
+            // VL-TTC-010: try ai-lib StandardTextToolParser before residual loop_parse
+            // (loop_parse must not grow DSML / provider dialects).
+            let (mut text, mut calls) = self.tool_dispatcher.parse_response(&response);
+            if calls.is_empty() {
+                let response_text = response.text.as_deref().unwrap_or("");
+                #[cfg(feature = "ai-protocol")]
+                {
+                    let (manifest_text, manifest_calls) =
+                        velaclaw_agent_runtime::parse_manifest_text_tool_fallback(response_text);
+                    if !manifest_calls.is_empty() {
+                        if !manifest_text.is_empty() {
+                            text = manifest_text;
+                        }
+                        calls = manifest_calls
+                            .into_iter()
+                            .map(|c| ParsedToolCall {
+                                name: c.name,
+                                arguments: c.arguments,
+                                tool_call_id: None,
+                            })
+                            .collect();
+                    }
+                }
+                if calls.is_empty() {
+                    let (fallback_text, fallback_calls) =
+                        velaclaw_agent_runtime::parse_tool_calls(response_text);
+                    if !fallback_calls.is_empty() {
+                        if !fallback_text.is_empty() {
+                            text = fallback_text;
+                        }
+                        calls = fallback_calls
+                            .into_iter()
+                            .map(|c| ParsedToolCall {
+                                name: c.name,
+                                arguments: c.arguments,
+                                tool_call_id: None,
+                            })
+                            .collect();
+                    }
+                }
+            }
             if calls.is_empty() {
                 let final_text = if text.is_empty() {
                     response.text.unwrap_or_default()
@@ -666,21 +721,48 @@ impl Agent {
             }
 
             if !text.is_empty() {
-                self.history
-                    .push(ConversationMessage::Chat(ChatMessage::assistant(
-                        text.clone(),
-                    )));
                 self.print_agent_stdout(&text);
             }
 
-            self.history.push(ConversationMessage::AssistantToolCalls {
-                text: response.text.clone(),
-                tool_calls: response.tool_calls.clone(),
-            });
-
             let results = self.execute_tools(&calls).await;
-            let formatted = self.tool_dispatcher.format_results(&results);
-            self.history.push(formatted);
+
+            // Text-tool path (XML / unclosed-tag recovery): keep history as
+            // assistant text + user "[Tool results]" — never emit role=tool without
+            // a preceding assistant tool_calls payload (DeepSeek HTTP 400).
+            // Native path: AssistantToolCalls + ToolResults with matching ids.
+            if response.tool_calls.is_empty() {
+                let assistant_content = response.text.clone().unwrap_or_else(|| text.clone());
+                self.history
+                    .push(ConversationMessage::Chat(ChatMessage::assistant(
+                        assistant_content,
+                    )));
+                let mut tool_results = String::new();
+                for result in &results {
+                    let _ = writeln!(
+                        tool_results,
+                        "<tool_result name=\"{}\">\n{}\n</tool_result>",
+                        result.name, result.output
+                    );
+                }
+                self.history
+                    .push(ConversationMessage::Chat(ChatMessage::user(format!(
+                        "[Tool results]\n{tool_results}"
+                    ))));
+            } else {
+                // Attach tool_call_ids from native response onto execution results.
+                let mut results = results;
+                for (result, native) in results.iter_mut().zip(response.tool_calls.iter()) {
+                    if result.tool_call_id.is_none() {
+                        result.tool_call_id = Some(native.id.clone());
+                    }
+                }
+                self.history.push(ConversationMessage::AssistantToolCalls {
+                    text: response.text.clone(),
+                    tool_calls: response.tool_calls.clone(),
+                });
+                let formatted = self.tool_dispatcher.format_results(&results);
+                self.history.push(formatted);
+            }
             self.trim_history();
         }
 

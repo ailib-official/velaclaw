@@ -659,7 +659,10 @@
     </section>
   {:else if tab === "tools"}
     <section class="panel">
-      <p class="hint">Tools available to the agent at runtime (from gateway config).</p>
+      <p class="hint">
+        Runtime tool catalog from the gateway. Common ops use <code>shell</code> (git/gh/ssh via
+        allowlist) and <code>git_operations</code>; there is no separate <code>gh</code> tool.
+      </p>
       <ul class="tools-list">
         {#each toolCatalog as tool}
           <li>

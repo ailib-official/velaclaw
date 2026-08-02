@@ -615,4 +615,57 @@ mod tests {
             }
         }
     }
+
+    #[tokio::test]
+    async fn web_shell_policy_approval_uses_gateway_hub() {
+        use super::gate::ApprovalGate;
+        use super::hub::ApprovalHub;
+        use crate::agent::dispatcher::ParsedToolCall;
+        use crate::config::AutonomyConfig;
+        use crate::security::{AutonomyLevel, PolicyHandle, SecurityPolicy};
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        // Shell not in always_ask, but command not allowlisted → shell-policy
+        // interactive path. Web + ApprovalHub must prompt (not sync-deny).
+        let autonomy = AutonomyConfig {
+            level: AutonomyLevel::Full,
+            always_ask: vec![],
+            ..AutonomyConfig::default()
+        };
+        let mgr = ApprovalManager::from_config(&autonomy);
+        let mut policy = SecurityPolicy::default();
+        policy.autonomy = AutonomyLevel::Full;
+        policy.allowed_commands = vec!["echo".into()];
+        let security = PolicyHandle::new(policy);
+        let hub = Arc::new(ApprovalHub::new());
+        let mut sub = hub.subscribe();
+        let gate = ApprovalGate::new(&mgr, "web", Some(security)).with_hub(Arc::clone(&hub));
+
+        let call = ParsedToolCall {
+            name: "shell".into(),
+            arguments: serde_json::json!({"command": "apt remove -y samba"}),
+            tool_call_id: None,
+        };
+
+        let hub_respond = Arc::clone(&hub);
+        let respond = tokio::spawn(async move {
+            let ev = tokio::time::timeout(Duration::from_secs(2), sub.recv())
+                .await
+                .expect("approval event timeout")
+                .expect("approval broadcast");
+            assert_eq!(ev.tool_name, "shell");
+            assert!(hub_respond.respond(&ev.id, true, false));
+        });
+
+        let decision = gate.decide_async(&call).await;
+        respond.await.expect("respond join");
+
+        match decision {
+            GateDecision::Proceed {
+                shell_human_approved: true,
+            } => {}
+            other => panic!("expected Proceed with human approval, got {other:?}"),
+        }
+    }
 }

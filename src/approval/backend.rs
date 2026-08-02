@@ -146,15 +146,24 @@ impl HumanApprovalBackend for ManagerApprovalBackend<'_> {
     }
 
     async fn approve_shell_command_async(&self, command: &str) -> bool {
+        let request = ApprovalRequest {
+            tool_name: "shell".into(),
+            arguments: serde_json::json!({"command": command}),
+        };
         if let Some(session) = &self.channel_session {
             if session.mode != ChannelApprovalMode::Inline {
                 return false;
             }
-            let request = ApprovalRequest {
-                tool_name: "shell".into(),
-                arguments: serde_json::json!({"command": command}),
-            };
             let decision = self.prompt_channel(&request, Some(command)).await;
+            self.manager
+                .record_decision("shell", &request.arguments, decision, self.channel);
+            return decision != ApprovalResponse::No;
+        }
+        // Gateway / Web UI: use ApprovalHub (same path as approve_tool_async).
+        // Previously fell through to sync, which auto-denies non-CLI channels —
+        // so Web UI recorded shell [no] without ever showing the modal.
+        if let Some(hub) = &self.hub {
+            let decision = self.manager.prompt_gateway(hub, &request).await;
             self.manager
                 .record_decision("shell", &request.arguments, decision, self.channel);
             return decision != ApprovalResponse::No;

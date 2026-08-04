@@ -697,6 +697,9 @@ impl Agent {
 
         let effective_model = self.classify_model(user_message)?;
 
+        // VL-TTC-014: at most one format-correction re-chat per turn.
+        let mut format_correction_used = false;
+
         for _ in 0..self.config.max_tool_iterations {
             let messages = self.tool_dispatcher.to_provider_messages(&self.history);
             let response = match self
@@ -725,8 +728,8 @@ impl Agent {
             // VL-TTC-010: try ai-lib StandardTextToolParser before residual loop_parse
             // (loop_parse must not grow DSML / provider dialects).
             let (mut text, mut calls) = self.tool_dispatcher.parse_response(&response);
+            let response_text = response.text.as_deref().unwrap_or("");
             if calls.is_empty() {
-                let response_text = response.text.as_deref().unwrap_or("");
                 #[cfg(feature = "ai-protocol")]
                 {
                     let (manifest_text, manifest_calls) =
@@ -764,11 +767,49 @@ impl Agent {
                 }
             }
             if calls.is_empty() {
+                let raw_for_correction = if response_text.is_empty() {
+                    text.as_str()
+                } else {
+                    response_text
+                };
+                if !format_correction_used
+                    && velaclaw_agent_runtime::needs_tool_format_correction(raw_for_correction, 0)
+                {
+                    format_correction_used = true;
+                    tracing::warn!(
+                        target: "velaclaw::agent",
+                        "tool_format_correction_retry: unparsed tool markup; requesting canonical format"
+                    );
+                    let assistant_raw = if text.is_empty() {
+                        response
+                            .text
+                            .clone()
+                            .unwrap_or_else(|| raw_for_correction.to_string())
+                    } else {
+                        text.clone()
+                    };
+                    self.history
+                        .push(ConversationMessage::Chat(ChatMessage::assistant(
+                            assistant_raw,
+                        )));
+                    self.history
+                        .push(ConversationMessage::Chat(ChatMessage::user(
+                            velaclaw_agent_runtime::tool_format_correction_message().to_string(),
+                        )));
+                    continue;
+                }
+
                 let final_text = if text.is_empty() {
                     response.text.unwrap_or_default()
                 } else {
                     text
                 };
+                if format_correction_used {
+                    tracing::warn!(
+                        target: "velaclaw::agent",
+                        "tool_format_retry_exhausted: stripping markup after corrective retry"
+                    );
+                }
                 // Defense-in-depth: never leak DSML / tool_call scaffolding to Web UI.
                 let final_text = crate::util::strip_tool_call_markup(&final_text);
 
@@ -1089,6 +1130,102 @@ mod tests {
             .history()
             .iter()
             .any(|msg| matches!(msg, ConversationMessage::ToolResults(_))));
+    }
+
+    #[tokio::test]
+    async fn turn_retries_once_on_unparsed_tool_markup() {
+        let bad = "<tool_call>\nNOT_JSON\n</tool_call>";
+        let good = "<tool_call>\n{\"name\": \"echo\", \"arguments\": {}}\n</tool_call>";
+        let provider = Box::new(MockProvider {
+            responses: Mutex::new(vec![
+                crate::providers::ChatResponse {
+                    text: Some(bad.into()),
+                    tool_calls: vec![],
+                },
+                crate::providers::ChatResponse {
+                    text: Some(good.into()),
+                    tool_calls: vec![],
+                },
+                crate::providers::ChatResponse {
+                    text: Some("done".into()),
+                    tool_calls: vec![],
+                },
+            ]),
+        });
+
+        let memory_cfg = crate::config::MemoryConfig {
+            backend: "none".into(),
+            ..crate::config::MemoryConfig::default()
+        };
+        let mem: Arc<dyn Memory> = Arc::from(
+            crate::memory::create_memory(&memory_cfg, std::path::Path::new("/tmp"), None)
+                .expect("memory creation should succeed with valid config"),
+        );
+
+        let observer: Arc<dyn Observer> = Arc::from(crate::observability::NoopObserver {});
+        let mut agent = Agent::builder()
+            .provider(provider)
+            .tools(vec![Box::new(MockTool)])
+            .memory(mem)
+            .observer(observer)
+            .tool_dispatcher(Box::new(XmlToolDispatcher::default()))
+            .workspace_dir(std::path::PathBuf::from("/tmp"))
+            .security(test_security())
+            .build()
+            .expect("agent builder should succeed with valid config");
+
+        let response = agent.turn("hi").await.unwrap();
+        assert_eq!(response, "done");
+        // Correction message must have been injected once.
+        let hist = agent.history();
+        let correction = velaclaw_agent_runtime::tool_format_correction_message();
+        assert!(hist.iter().any(|msg| matches!(
+            msg,
+            ConversationMessage::Chat(m) if m.role == "user" && m.content.contains("invalid format")
+        )));
+        let _ = correction;
+    }
+
+    #[tokio::test]
+    async fn turn_strips_markup_after_retry_exhausted() {
+        let bad = "<tool_call>\nNOT_JSON\n</tool_call>";
+        let still_bad = "<tool_call>\nSTILL_BAD\n</tool_call>";
+        let provider = Box::new(MockProvider {
+            responses: Mutex::new(vec![
+                crate::providers::ChatResponse {
+                    text: Some(bad.into()),
+                    tool_calls: vec![],
+                },
+                crate::providers::ChatResponse {
+                    text: Some(still_bad.into()),
+                    tool_calls: vec![],
+                },
+            ]),
+        });
+
+        let memory_cfg = crate::config::MemoryConfig {
+            backend: "none".into(),
+            ..crate::config::MemoryConfig::default()
+        };
+        let mem: Arc<dyn Memory> = Arc::from(
+            crate::memory::create_memory(&memory_cfg, std::path::Path::new("/tmp"), None)
+                .expect("memory"),
+        );
+        let observer: Arc<dyn Observer> = Arc::from(crate::observability::NoopObserver {});
+        let mut agent = Agent::builder()
+            .provider(provider)
+            .tools(vec![Box::new(MockTool)])
+            .memory(mem)
+            .observer(observer)
+            .tool_dispatcher(Box::new(XmlToolDispatcher::default()))
+            .workspace_dir(std::path::PathBuf::from("/tmp"))
+            .security(test_security())
+            .build()
+            .expect("agent");
+
+        let response = agent.turn("hi").await.unwrap();
+        assert!(!response.contains("<tool_call"));
+        assert!(!response.contains("NOT_JSON") || response.is_empty() || !response.contains("</"));
     }
 
     #[test]

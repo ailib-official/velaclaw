@@ -380,6 +380,9 @@ pub(crate) async fn run_tool_call_loop(
         .map(|d| d.should_send_tool_specs() && !tool_specs.is_empty())
         .unwrap_or_else(|| provider.supports_native_tools() && !tool_specs.is_empty());
 
+    // VL-TTC-014: at most one format-correction re-chat per tool loop.
+    let mut format_correction_used = false;
+
     for _iteration in 0..max_iterations {
         if cancellation_token
             .as_ref()
@@ -575,6 +578,27 @@ pub(crate) async fn run_tool_call_loop(
         };
 
         if tool_calls.is_empty() {
+            // VL-TTC-014: markup present but unparsed → one corrective retry.
+            if !format_correction_used
+                && velaclaw_agent_runtime::needs_tool_format_correction(&response_text, 0)
+            {
+                format_correction_used = true;
+                tracing::warn!(
+                    target: "velaclaw::agent",
+                    "tool_format_correction_retry: unparsed tool markup; requesting canonical format"
+                );
+                history.push(ChatMessage::assistant(response_text.clone()));
+                history.push(ChatMessage::user(
+                    velaclaw_agent_runtime::tool_format_correction_message().to_string(),
+                ));
+                continue;
+            }
+            if format_correction_used {
+                tracing::warn!(
+                    target: "velaclaw::agent",
+                    "tool_format_retry_exhausted: stripping markup after corrective retry"
+                );
+            }
             // No tool calls — this is the final response.
             // If a streaming sender is provided, relay the text in small chunks
             // so the channel can progressively update the draft message.
@@ -2198,6 +2222,73 @@ mod tests {
             idx_a < idx_b,
             "tool results should preserve input order for tool call mapping"
         );
+    }
+
+    #[tokio::test]
+    async fn run_tool_call_loop_retries_once_on_unparsed_tool_markup() {
+        let bad = "<tool_call>\nNOT_JSON\n</tool_call>";
+        let good = r#"<tool_call>
+{"name":"delay_a","arguments":{"value":"fixed"}}
+</tool_call>"#;
+        let provider = ScriptedProvider::from_text_responses(vec![bad, good, "all good"]);
+
+        let active = Arc::new(AtomicUsize::new(0));
+        let max_active = Arc::new(AtomicUsize::new(0));
+        let tools_registry: Vec<Box<dyn Tool>> = vec![Box::new(DelayTool::new(
+            "delay_a",
+            1,
+            Arc::clone(&active),
+            Arc::clone(&max_active),
+        ))];
+
+        let approval_cfg = crate::config::AutonomyConfig {
+            level: crate::security::AutonomyLevel::Full,
+            ..crate::config::AutonomyConfig::default()
+        };
+        let approval_mgr = ApprovalManager::from_config(&approval_cfg);
+
+        let mut history = vec![
+            ChatMessage::system("test-system"),
+            ChatMessage::user("run tool"),
+        ];
+        let observer = NoopObserver;
+
+        let result = run_tool_call_loop(
+            &provider,
+            &mut history,
+            &tools_registry,
+            &observer,
+            "mock-provider",
+            "mock-model",
+            0.0,
+            true,
+            Some(&approval_mgr),
+            "cli",
+            &crate::config::MultimodalConfig::default(),
+            6,
+            None,
+            None,
+            None,
+            None,
+            None,
+            false,
+            RenderOpts {
+                style: RenderStyle {
+                    ansi: false,
+                    markdown: true,
+                },
+                fold_lines: 10,
+                fold_enabled: false,
+            },
+            None,
+        )
+        .await
+        .expect("corrective retry should recover");
+
+        assert_eq!(result, "all good");
+        assert!(history
+            .iter()
+            .any(|m| m.role == "user" && m.content.contains("invalid format")));
     }
 
     #[test]

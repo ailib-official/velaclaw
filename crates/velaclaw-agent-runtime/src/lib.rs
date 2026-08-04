@@ -8,6 +8,7 @@ pub mod execution_context;
 pub mod loop_parse;
 pub mod provider;
 pub mod telemetry;
+pub mod tool_format;
 pub mod tool_util;
 pub mod tools;
 
@@ -33,5 +34,6 @@ pub use provider::{
     ChatMessage, ChatRequest, ChatResponse, ConversationMessage, NativeToolCapable, ToolCall,
     ToolResultMessage,
 };
+pub use tool_format::{needs_tool_format_correction, tool_format_correction_message};
 pub use tool_util::{normalize_tool_arguments, scrub_credentials};
 pub use tools::{Tool, ToolResult, ToolSpec};

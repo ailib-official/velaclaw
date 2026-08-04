@@ -160,9 +160,13 @@ pub fn strip_tool_call_markup(message: &str) -> String {
             }
         }
         out.push_str(rest);
-        // Orphan bare open/close tags.
-        let orphan = regex::Regex::new(&format!(r"</?{DSML_TAG}>")).expect("valid orphan dsml");
-        orphan.replace_all(&out, "").to_string()
+        // Drop orphan DSML open/close tags left by mismatched closes
+        // (e.g. open tool_call … </DSML parameter> </DSML tool_call>, or bare </DSML>).
+        let orphan = regex::Regex::new(&format!(
+            r"</?{DSML_TAG}(?:tool_calls?|invoke|parameter)?>"
+        ))
+        .expect("valid orphan dsml regex");
+        orphan.replace_all(&out, "").trim().to_string()
     }
 
     let message = strip_dsml_blocks(message);
@@ -335,6 +339,22 @@ mod tests {
         assert_eq!(out, "需要了解 obvs。");
         assert!(!out.contains("DSML"));
         assert!(!out.contains("tool_call"));
+    }
+
+    #[test]
+    fn strip_tool_call_markup_removes_dsml_parameter_mismatch_close() {
+        // DeepSeek V4 wire: open tool_call, flat args, close parameter then tool_call.
+        let tag = "\u{FF5C}\u{FF5C}DSML\u{FF5C}\u{FF5C}";
+        let input = format!(
+            "<{tag}tool_call>\n\
+             {{\"name\": \"shell\", \"command\": \"ssh piubt true\"}}\n\
+             </{tag}parameter>\n\
+             </{tag}tool_call>"
+        );
+        let out = strip_tool_call_markup(&input);
+        assert!(!out.contains("DSML"), "out={out:?}");
+        assert!(!out.contains("tool_call"), "out={out:?}");
+        assert!(!out.contains("shell"), "out={out:?}");
     }
 
     #[test]

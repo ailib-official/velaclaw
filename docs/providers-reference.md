@@ -151,8 +151,14 @@ Behavior:
 
 #### Logical model composition (VL-RT-004)
 
-NIM catalog ids are often vendor-qualified (`meta/…`, `mistralai/…`,
-`nvidia/…`). When pinning via CLI:
+NIM catalog / wire ids are often vendor-qualified (`meta/…`, `mistralai/…`,
+`deepseek-ai/…`, `nvidia/…`). Protocol YAML keeps those **wire** keys unchanged.
+VelaClaw’s registry ingest composes the **logical** id as `nvidia/<wire>` so
+`GET /api/providers`, the chat picker, and BYOK always see a real provider in
+the first path segment (same rule for other aggregators: together, siliconflow,
+etc.).
+
+When pinning via CLI:
 
 ```bash
 # Correct: bare -p + vendor-qualified --model → nvidia/meta/…
@@ -164,7 +170,8 @@ velaclaw agent --model nvidia/meta/llama-3.1-8b-instruct -m "pong"
 
 Do **not** expect `--model meta/…` alone (without `-p nvidia` or a
 `nvidia/…` prefix) to stay on NIM — BYOK hygiene would treat `meta` as the
-provider segment.
+provider segment. Legacy session ids that are bare wire slugs are remapped
+when the local protocol registry has a unique `nvidia/<wire>` match.
 
 Fresh-install default is `nvidia/nemotron-mini-4b-instruct` (VL-RT-006). Larger
 catalog ids such as `nvidia/nemotron-4-340b-instruct` may still 404 as

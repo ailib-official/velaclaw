@@ -142,6 +142,29 @@ fn upsert_model(models: &mut Vec<ProtocolModelInfo>, entry: ProtocolModelInfo) {
     models.push(entry);
 }
 
+/// Compose a host logical id from provider + protocol catalog/wire key.
+///
+/// Protocol YAML keys stay wire/catalog ids (e.g. `deepseek-ai/deepseek-v4-flash`
+/// under nvidia). Host lists and routing use `provider/wire` so the first
+/// slash segment is always a real provider id. Keys that already start with
+/// `{provider}/` are left unchanged (no double prefix).
+#[must_use]
+pub fn compose_logical_model_id(provider_id: &str, wire_or_key: &str) -> String {
+    let provider_id = provider_id.trim();
+    let wire_or_key = wire_or_key.trim();
+    if provider_id.is_empty() {
+        return wire_or_key.to_string();
+    }
+    if wire_or_key.is_empty() {
+        return provider_id.to_string();
+    }
+    if wire_or_key == provider_id || wire_or_key.starts_with(&format!("{provider_id}/")) {
+        wire_or_key.to_string()
+    } else {
+        format!("{provider_id}/{wire_or_key}")
+    }
+}
+
 fn ingest_provider_metadata_models(
     models: &mut Vec<ProtocolModelInfo>,
     provider_id: &str,
@@ -158,11 +181,7 @@ fn ingest_provider_metadata_models(
         return false;
     };
     for (model_key, meta) in metadata_models {
-        let logical_id = if model_key.contains('/') {
-            model_key.clone()
-        } else {
-            format!("{provider_id}/{model_key}")
-        };
+        let logical_id = compose_logical_model_id(provider_id, model_key);
         upsert_model(
             models,
             ProtocolModelInfo {
@@ -235,6 +254,37 @@ impl ProtocolRegistrySnapshot {
                 || m.logical_id.ends_with(&format!("/{suffix}"))
                 || m.logical_id == format!("{}/{}", m.provider, suffix)
         })
+    }
+
+    /// Resolve a picker/session model id that may be a bare aggregator wire id.
+    ///
+    /// - Exact logical id hit → that entry.
+    /// - First segment is a known provider → treat as already-composed logical.
+    /// - Otherwise unique match on `logical_id == raw` or `…/{raw}` (wire remap).
+    /// - Ambiguous / no match → `None` (caller keeps status quo).
+    #[must_use]
+    pub fn resolve_chat_model_id(&self, raw: &str) -> Option<&ProtocolModelInfo> {
+        let raw = raw.trim();
+        if raw.is_empty() {
+            return None;
+        }
+        if let Some(found) = self.models.iter().find(|m| m.logical_id == raw) {
+            return Some(found);
+        }
+        let first = provider_id_from_logical(raw);
+        if self.provider_by_id(first).is_some() {
+            return self.model_by_logical_id(raw);
+        }
+        let needle = format!("/{raw}");
+        let mut hits = self
+            .models
+            .iter()
+            .filter(|m| m.logical_id == raw || m.logical_id.ends_with(&needle));
+        let first_hit = hits.next()?;
+        if hits.next().is_some() {
+            return None;
+        }
+        Some(first_hit)
     }
 }
 
@@ -380,12 +430,23 @@ pub fn scan_protocol_root(root: &Path) -> anyhow::Result<ProtocolRegistrySnapsho
                 out
             };
 
-            for (logical_id, meta) in reg {
+            for (map_key, meta) in reg {
                 let provider = meta
                     .get("provider")
                     .and_then(|x| x.as_str())
                     .unwrap_or("")
                     .to_string();
+                let wire = meta
+                    .get("model_id")
+                    .and_then(|x| x.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or(map_key.as_str());
+                let logical_id = if provider.is_empty() {
+                    map_key
+                } else {
+                    compose_logical_model_id(&provider, wire)
+                };
                 upsert_model(
                     &mut models,
                     ProtocolModelInfo {
@@ -546,6 +607,27 @@ endpoint:
     }
 
     #[test]
+    fn compose_logical_model_id_prefixes_wire_keys() {
+        assert_eq!(
+            compose_logical_model_id("nvidia", "deepseek-ai/deepseek-v4-flash"),
+            "nvidia/deepseek-ai/deepseek-v4-flash"
+        );
+        assert_eq!(
+            compose_logical_model_id("nvidia", "nvidia/nemotron-mini-4b-instruct"),
+            "nvidia/nemotron-mini-4b-instruct"
+        );
+        assert_eq!(
+            compose_logical_model_id("openai", "gpt-4o"),
+            "openai/gpt-4o"
+        );
+        assert_eq!(
+            compose_logical_model_id("deepseek", "deepseek-v4-flash"),
+            "deepseek/deepseek-v4-flash"
+        );
+        assert_eq!(compose_logical_model_id("", "bare/wire"), "bare/wire");
+    }
+
+    #[test]
     fn scan_lenient_manifest_without_status_indexes_metadata_models() {
         let dir = tempfile::tempdir().expect("tempdir");
         let providers = dir.path().join("v2").join("providers");
@@ -569,6 +651,65 @@ metadata:
             "strict parse should skip provider entry without status"
         );
         assert_eq!(snap.context_window_for("azure/gpt-4o"), Some(128_000));
+    }
+
+    #[test]
+    fn scan_composes_org_qualified_wire_keys_under_provider() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let providers = dir.path().join("v2").join("providers");
+        fs::create_dir_all(&providers).expect("provider dir");
+        fs::write(
+            providers.join("nvidia.yaml"),
+            r#"
+id: nvidia
+name: NVIDIA
+metadata:
+  models:
+    deepseek-ai/deepseek-v4-flash:
+      context_window: 1000000
+    nvidia/nemotron-mini-4b-instruct:
+      context_window: 4096
+"#,
+        )
+        .expect("manifest");
+
+        let models_dir = dir.path().join("v1").join("models");
+        fs::create_dir_all(&models_dir).expect("models dir");
+        fs::write(
+            models_dir.join("nvidia.yaml"),
+            r#"
+models:
+  "deepseek-ai/deepseek-v4-pro":
+    provider: nvidia
+    model_id: "deepseek-ai/deepseek-v4-pro"
+    context_window: 1000000
+"#,
+        )
+        .expect("v1 registry");
+
+        let snap = scan_protocol_root(dir.path()).expect("scan");
+        assert!(snap
+            .models
+            .iter()
+            .any(|m| m.logical_id == "nvidia/deepseek-ai/deepseek-v4-flash"
+                && m.provider == "nvidia"));
+        assert!(snap
+            .models
+            .iter()
+            .any(|m| m.logical_id == "nvidia/nemotron-mini-4b-instruct"));
+        assert!(snap.models.iter().any(
+            |m| m.logical_id == "nvidia/deepseek-ai/deepseek-v4-pro" && m.provider == "nvidia"
+        ));
+        assert!(!snap
+            .models
+            .iter()
+            .any(|m| m.logical_id == "deepseek-ai/deepseek-v4-flash"));
+
+        let remapped = snap
+            .resolve_chat_model_id("deepseek-ai/deepseek-v4-flash")
+            .expect("wire remap");
+        assert_eq!(remapped.logical_id, "nvidia/deepseek-ai/deepseek-v4-flash");
+        assert_eq!(remapped.provider, "nvidia");
     }
 
     #[test]

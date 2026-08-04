@@ -669,7 +669,7 @@ fn curated_default_model_for_provider(canonical: &str) -> String {
         "gemini" => "gemini-2.5-pro".into(),
         "kimi-code" => "kimi-for-coding".into(),
         "bedrock" => "anthropic.claude-sonnet-4-5-20250929-v1:0".into(),
-        "nvidia" => "meta/llama-3.3-70b-instruct".into(),
+        "nvidia" => "nvidia/meta/llama-3.3-70b-instruct".into(),
         _ => DEFAULT_PROTOCOL_MODEL_ID.into(),
     }
 }
@@ -969,11 +969,11 @@ fn curated_models_fallback(canonical: &str) -> Vec<(String, String)> {
                 format!("{DEFAULT_PROTOCOL_MODEL_LABEL} (recommended)"),
             ),
             (
-                "meta/llama-3.3-70b-instruct".to_string(),
+                "nvidia/meta/llama-3.3-70b-instruct".to_string(),
                 "Llama 3.3 70B Instruct (balanced default)".to_string(),
             ),
             (
-                "deepseek-ai/deepseek-v3.2".to_string(),
+                "nvidia/deepseek-ai/deepseek-v3.2".to_string(),
                 "DeepSeek V3.2 (advanced reasoning + coding)".to_string(),
             ),
             (
@@ -5652,8 +5652,8 @@ mod tests {
         assert_eq!(curated("google-gemini"), "gemini-2.5-pro");
         assert_eq!(curated("venice"), "zai-org-glm-5");
         assert_eq!(curated("moonshot"), "kimi-k2.5");
-        assert_eq!(curated("nvidia"), "meta/llama-3.3-70b-instruct");
-        assert_eq!(curated("nvidia-nim"), "meta/llama-3.3-70b-instruct");
+        assert_eq!(curated("nvidia"), "nvidia/meta/llama-3.3-70b-instruct");
+        assert_eq!(curated("nvidia-nim"), "nvidia/meta/llama-3.3-70b-instruct");
         assert_eq!(curated("llamacpp"), "ggml-org/gpt-oss-20b-GGUF");
         assert_eq!(
             curated_default_model_for_provider("astrai"),
@@ -5879,8 +5879,8 @@ mod tests {
             .map(|(id, _)| id)
             .collect();
 
-        assert!(ids.contains(&"meta/llama-3.3-70b-instruct".to_string()));
-        assert!(ids.contains(&"deepseek-ai/deepseek-v3.2".to_string()));
+        assert!(ids.contains(&"nvidia/meta/llama-3.3-70b-instruct".to_string()));
+        assert!(ids.contains(&"nvidia/deepseek-ai/deepseek-v3.2".to_string()));
         assert!(ids.contains(&"nvidia/llama-3.3-nemotron-super-49b-v1.5".to_string()));
     }
 

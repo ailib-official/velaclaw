@@ -132,20 +132,19 @@ pub fn strip_tool_call_markup(message: &str) -> String {
         }
     }
 
-    /// Strip DeepSeek DSML wrappers (`<｜｜DSML｜｜tool_call>` / bare / invoke / …).
+    /// Strip DeepSeek DSML wrappers (`<｜｜DSML｜｜tool_call>` / `_call` / bare / …).
     fn strip_dsml_blocks(message: &str) -> String {
         if !message.contains(DSML_TAG) {
             return message.to_string();
         }
-        // Suffixed wrappers + bare `<DSML>…</DSML>` (open/close may disagree on singular/plural).
-        let re = regex::Regex::new(&format!(
-            r"(?s)<{DSML_TAG}(?:tool_calls?|invoke|parameter)?(?:\s+[^>]*)?>.*?</{DSML_TAG}(?:tool_calls?|invoke|parameter)?>"
-        ))
-        .expect("valid dsml strip regex");
+        // Any DSML-delimited element (tool_call, _call, invoke, parameter, bare).
+        // Open/close suffixes may disagree; treat the U+FF5C family as one unit.
+        let re = regex::Regex::new(&format!(r"(?s)<{DSML_TAG}[^>]*>.*?</{DSML_TAG}[^>]*>"))
+            .expect("valid dsml strip regex");
         let stripped = re.replace_all(message, "");
         // Unclosed hybrid: open tag + JSON body, then optional mismatched close.
-        let open_re = regex::Regex::new(&format!(r"(?s)<{DSML_TAG}(?:tool_calls?)?(?:\s+[^>]*)?>"))
-            .expect("valid dsml open regex");
+        let open_re =
+            regex::Regex::new(&format!(r"(?s)<{DSML_TAG}[^>]*>")).expect("valid dsml open regex");
         let mut out = String::new();
         let mut rest = stripped.as_ref();
         while let Some(m) = open_re.find(rest) {
@@ -160,12 +159,9 @@ pub fn strip_tool_call_markup(message: &str) -> String {
             }
         }
         out.push_str(rest);
-        // Drop orphan DSML open/close tags left by mismatched closes
-        // (e.g. open tool_call … </DSML parameter> </DSML tool_call>, or bare </DSML>).
-        let orphan = regex::Regex::new(&format!(
-            r"</?{DSML_TAG}(?:tool_calls?|invoke|parameter)?>"
-        ))
-        .expect("valid orphan dsml regex");
+        // Drop orphan DSML open/close tags left by mismatched closes.
+        let orphan =
+            regex::Regex::new(&format!(r"</?{DSML_TAG}[^>]*>")).expect("valid orphan dsml regex");
         orphan.replace_all(&out, "").trim().to_string()
     }
 
@@ -355,6 +351,20 @@ mod tests {
         assert!(!out.contains("DSML"), "out={out:?}");
         assert!(!out.contains("tool_call"), "out={out:?}");
         assert!(!out.contains("shell"), "out={out:?}");
+    }
+
+    #[test]
+    fn strip_tool_call_markup_removes_dsml_underscore_call() {
+        let tag = "\u{FF5C}\u{FF5C}DSML\u{FF5C}\u{FF5C}";
+        let input = format!(
+            "先读配置：\n<{tag}_call>\n\
+             {{\"name\": \"shell\", \"arguments\": {{\"command\": \"ssh x\"}}}}\n\
+             </{tag}_call>"
+        );
+        let out = strip_tool_call_markup(&input);
+        assert_eq!(out, "先读配置：");
+        assert!(!out.contains("DSML"), "out={out:?}");
+        assert!(!out.contains("_call"), "out={out:?}");
     }
 
     #[test]

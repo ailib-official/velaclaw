@@ -50,6 +50,7 @@ pub async fn run_agent_chat(
     config: &Config,
     req: &ChatApiRequest,
     approval_hub: Option<&Arc<crate::approval::ApprovalHub>>,
+    human_input_hub: Option<&Arc<crate::approval::HumanInputHub>>,
 ) -> Result<ChatApiResponse> {
     let user_message = extract_last_user_message(&req.messages)?;
     let effective_config = apply_chat_overrides(config.clone(), req);
@@ -59,6 +60,9 @@ pub async fn run_agent_chat(
         agent
             .enable_gateway_approval(Arc::clone(hub), &effective_config)
             .context("wire gateway approval manager")?;
+    }
+    if let Some(hub) = human_input_hub {
+        agent.enable_gateway_hitl(Arc::clone(hub));
     }
     // Seed prior turns so multi-step Web UI chat keeps context (UI sends full history).
     seed_prior_messages(&mut agent, &req.messages)?;

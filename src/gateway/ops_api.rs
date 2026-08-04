@@ -227,7 +227,7 @@ pub async fn handle_list_tools(
     } else {
         (None, None)
     };
-    let tool_list = tools::all_tools_with_runtime(
+    let (tool_list, _human_input_attach) = tools::all_tools_with_runtime(
         config_arc,
         &security,
         runtime,
@@ -276,6 +276,27 @@ pub async fn handle_respond_approval(
         (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response()
     } else {
         api_error(StatusCode::NOT_FOUND, "Unknown or expired approval id").into_response()
+    }
+}
+
+pub async fn handle_respond_human_input(
+    State(state): State<AppState>,
+    ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<crate::approval::HumanInputRespondBody>,
+) -> impl IntoResponse {
+    if let Err(e) = authorize(&state, peer_addr, &headers) {
+        return e.into_response();
+    }
+    if state.human_input_hub.respond(&id, body) {
+        (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response()
+    } else {
+        api_error(
+            StatusCode::NOT_FOUND,
+            "Unknown, expired, or invalid human-input response",
+        )
+        .into_response()
     }
 }
 

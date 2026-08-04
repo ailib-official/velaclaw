@@ -231,6 +231,24 @@ export async function respondApproval(
   if (!res.ok) throw new Error(`approval ${res.status}: ${await res.text()}`);
 }
 
+export async function respondHumanInput(
+  token: string,
+  id: string,
+  body: {
+    cancelled?: boolean;
+    selected?: string;
+    text?: string;
+    secret?: string;
+  },
+): Promise<void> {
+  const res = await fetch(`/api/human-input/${encodeURIComponent(id)}/respond`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`human-input ${res.status}: ${await res.text()}`);
+}
+
 export async function testProvider(
   token: string,
   providerId: string,

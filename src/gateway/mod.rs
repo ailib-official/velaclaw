@@ -301,6 +301,8 @@ pub struct AppState {
     pub cost_tracker: Option<Arc<crate::cost::CostTracker>>,
     /// Pending tool approvals for Web UI (VL-UI-004)
     pub approval_hub: Arc<crate::approval::ApprovalHub>,
+    /// Interactive human-input prompts (choice / text / secret / handoff).
+    pub human_input_hub: Arc<crate::approval::HumanInputHub>,
 }
 
 /// Run the HTTP gateway using axum with proper HTTP/1.1 compliance.
@@ -427,6 +429,8 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
         .map(Arc::new);
 
     let approval_hub = Arc::new(crate::approval::ApprovalHub::new());
+    let secret_slots = Arc::new(crate::approval::SecretSlotStore::new());
+    let human_input_hub = Arc::new(crate::approval::HumanInputHub::new(secret_slots));
 
     let state = AppState {
         config: config_state,
@@ -449,6 +453,7 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
         observer: boot.observer,
         cost_tracker,
         approval_hub,
+        human_input_hub,
     };
 
     let app = http_router::build_gateway_router(state);
@@ -1316,6 +1321,9 @@ mod tests {
             observer: Arc::new(crate::observability::NoopObserver),
             cost_tracker: None,
             approval_hub: Arc::new(crate::approval::ApprovalHub::new()),
+            human_input_hub: Arc::new(crate::approval::HumanInputHub::new(Arc::new(
+                crate::approval::SecretSlotStore::new(),
+            ))),
         };
 
         let response = handle_metrics(State(state)).await.into_response();
@@ -1363,6 +1371,9 @@ mod tests {
             observer,
             cost_tracker: None,
             approval_hub: Arc::new(crate::approval::ApprovalHub::new()),
+            human_input_hub: Arc::new(crate::approval::HumanInputHub::new(Arc::new(
+                crate::approval::SecretSlotStore::new(),
+            ))),
         };
 
         let response = handle_metrics(State(state)).await.into_response();
@@ -1727,6 +1738,9 @@ mod tests {
             observer: Arc::new(crate::observability::NoopObserver),
             cost_tracker: None,
             approval_hub: Arc::new(crate::approval::ApprovalHub::new()),
+            human_input_hub: Arc::new(crate::approval::HumanInputHub::new(Arc::new(
+                crate::approval::SecretSlotStore::new(),
+            ))),
         };
 
         let mut headers = HeaderMap::new();
@@ -1789,6 +1803,9 @@ mod tests {
             observer: Arc::new(crate::observability::NoopObserver),
             cost_tracker: None,
             approval_hub: Arc::new(crate::approval::ApprovalHub::new()),
+            human_input_hub: Arc::new(crate::approval::HumanInputHub::new(Arc::new(
+                crate::approval::SecretSlotStore::new(),
+            ))),
         };
 
         let headers = HeaderMap::new();
@@ -1863,6 +1880,9 @@ mod tests {
             observer: Arc::new(crate::observability::NoopObserver),
             cost_tracker: None,
             approval_hub: Arc::new(crate::approval::ApprovalHub::new()),
+            human_input_hub: Arc::new(crate::approval::HumanInputHub::new(Arc::new(
+                crate::approval::SecretSlotStore::new(),
+            ))),
         };
 
         let response = handle_webhook(
@@ -1909,6 +1929,9 @@ mod tests {
             observer: Arc::new(crate::observability::NoopObserver),
             cost_tracker: None,
             approval_hub: Arc::new(crate::approval::ApprovalHub::new()),
+            human_input_hub: Arc::new(crate::approval::HumanInputHub::new(Arc::new(
+                crate::approval::SecretSlotStore::new(),
+            ))),
         };
 
         let mut headers = HeaderMap::new();
@@ -1960,6 +1983,9 @@ mod tests {
             observer: Arc::new(crate::observability::NoopObserver),
             cost_tracker: None,
             approval_hub: Arc::new(crate::approval::ApprovalHub::new()),
+            human_input_hub: Arc::new(crate::approval::HumanInputHub::new(Arc::new(
+                crate::approval::SecretSlotStore::new(),
+            ))),
         };
 
         let mut headers = HeaderMap::new();
@@ -2016,6 +2042,9 @@ mod tests {
             observer: Arc::new(crate::observability::NoopObserver),
             cost_tracker: None,
             approval_hub: Arc::new(crate::approval::ApprovalHub::new()),
+            human_input_hub: Arc::new(crate::approval::HumanInputHub::new(Arc::new(
+                crate::approval::SecretSlotStore::new(),
+            ))),
         };
 
         let response = handle_nextcloud_talk_webhook(
@@ -2068,6 +2097,9 @@ mod tests {
             observer: Arc::new(crate::observability::NoopObserver),
             cost_tracker: None,
             approval_hub: Arc::new(crate::approval::ApprovalHub::new()),
+            human_input_hub: Arc::new(crate::approval::HumanInputHub::new(Arc::new(
+                crate::approval::SecretSlotStore::new(),
+            ))),
         };
 
         let mut headers = HeaderMap::new();

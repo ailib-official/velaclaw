@@ -607,6 +607,28 @@ mod tests {
 
     #[cfg(feature = "ai-protocol")]
     #[test]
+    fn xml_dispatcher_parses_hybrid_dsml_mismatched_close_tag() {
+        let tag = "\u{FF5C}\u{FF5C}DSML\u{FF5C}\u{FF5C}";
+        let text = format!(
+            "再看目录里的报表。\n<{tag}tool_call>\n\
+             {{\"name\": \"shell\", \"arguments\": {{\"command\": \"ssh piubt ls\"}}}}\n\
+             </{tag}tool_calls>"
+        );
+        let response = ChatResponse {
+            text: Some(text),
+            tool_calls: vec![],
+        };
+        let dispatcher = XmlToolDispatcher::default();
+        let (remaining, calls) = dispatcher.parse_response(&response);
+        assert_eq!(calls.len(), 1, "mismatched DSML close must still parse");
+        assert_eq!(calls[0].name, "shell");
+        assert_eq!(calls[0].arguments["command"], "ssh piubt ls");
+        assert_eq!(remaining, "再看目录里的报表。");
+        assert!(!remaining.contains("DSML"));
+    }
+
+    #[cfg(feature = "ai-protocol")]
+    #[test]
     fn manifest_text_fallback_parses_hybrid_dsml() {
         let tag = "\u{FF5C}\u{FF5C}DSML\u{FF5C}\u{FF5C}";
         let text = format!(

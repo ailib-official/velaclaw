@@ -3,7 +3,7 @@ use crate::agent::dispatcher::{NativeToolDispatcher, XmlToolDispatcher};
 use crate::agent::dispatcher::{ParsedToolCall, ToolDispatcher, ToolExecutionResult};
 use crate::agent::memory_loader::{DefaultMemoryLoader, MemoryLoader};
 use crate::agent::prompt::{PromptContext, SystemPromptBuilder};
-use crate::approval::{ApprovalGate, ApprovalHub, ApprovalManager, GateDecision};
+use crate::approval::{ApprovalGate, ApprovalHub, ApprovalManager, GateDecision, HumanInputHub};
 use crate::cli_render::{prefix_agent_lines, RenderOpts};
 use crate::config::{Config, DEFAULT_PROTOCOL_MODEL_ID};
 use crate::memory::{self, Memory, MemoryCategory};
@@ -12,8 +12,9 @@ use crate::observability::{Observer, ObserverEvent};
 use crate::providers;
 use crate::providers::{ChatMessage, ChatRequest, ConversationMessage, Provider};
 use crate::security::PolicyHandle;
-use crate::tools::{Tool, ToolExecutionContext, ToolSpec};
+use crate::tools::{HumanInputAttach, Tool, ToolExecutionContext, ToolSpec};
 use anyhow::Result;
+use parking_lot::Mutex;
 use std::fmt::Write as _;
 use std::io::Write as IoWrite;
 use std::sync::Arc;
@@ -45,6 +46,10 @@ pub struct Agent {
     available_hints: Vec<String>,
     security: PolicyHandle,
     gateway_approval: Option<(ApprovalManager, Arc<ApprovalHub>)>,
+    /// Shared attach slot for `request_human_input` (same Arc as the tool).
+    human_input_attach: HumanInputAttach,
+    /// Active hub when gateway HITL is enabled (for secret_slot resolution).
+    human_input_hub: Option<Arc<HumanInputHub>>,
     /// When set, `turn` / `run_interactive` render Markdown and prefix agent lines for CLI.
     cli_render: Option<RenderOpts>,
     /// CR-CAP-003: opt-in intent→Tag→index route host context (default-off).
@@ -73,6 +78,7 @@ pub struct AgentBuilder {
     classification_config: Option<crate::config::QueryClassificationConfig>,
     available_hints: Option<Vec<String>>,
     security: Option<PolicyHandle>,
+    human_input_attach: Option<HumanInputAttach>,
     #[cfg(feature = "ai-protocol")]
     intent_route_host: Option<crate::agent::intent_route::IntentRouteHost>,
 }
@@ -100,6 +106,7 @@ impl AgentBuilder {
             classification_config: None,
             available_hints: None,
             security: None,
+            human_input_attach: None,
             #[cfg(feature = "ai-protocol")]
             intent_route_host: None,
         }
@@ -207,6 +214,11 @@ impl AgentBuilder {
         self
     }
 
+    pub fn human_input_attach(mut self, attach: HumanInputAttach) -> Self {
+        self.human_input_attach = Some(attach);
+        self
+    }
+
     #[cfg(feature = "ai-protocol")]
     pub fn intent_route_host(
         mut self,
@@ -265,6 +277,10 @@ impl AgentBuilder {
                 .security
                 .ok_or_else(|| anyhow::anyhow!("security is required"))?,
             gateway_approval: None,
+            human_input_attach: self
+                .human_input_attach
+                .unwrap_or_else(|| Arc::new(Mutex::new(None))),
+            human_input_hub: None,
             cli_render: None,
             #[cfg(feature = "ai-protocol")]
             intent_route_host: self.intent_route_host,
@@ -327,6 +343,12 @@ impl Agent {
         Ok(())
     }
 
+    /// Enable interactive human-input prompts (choice / text / secret / handoff).
+    pub fn enable_gateway_hitl(&mut self, hub: Arc<HumanInputHub>) {
+        *self.human_input_attach.lock() = Some(Arc::clone(&hub));
+        self.human_input_hub = Some(hub);
+    }
+
     pub fn from_config(config: &Config) -> Result<Self> {
         let boot = crate::config::bootstrap_runtime(
             config,
@@ -338,6 +360,7 @@ impl Agent {
         let memory = boot.memory;
         let observer = boot.observer;
         let tools = boot.tools;
+        let human_input_attach = boot.human_input_attach;
         let provider_runtime_options = boot.provider_runtime_options;
 
         #[cfg(feature = "ai-protocol")]
@@ -420,7 +443,8 @@ impl Agent {
             ))
             .skills_prompt_mode(config.skills.prompt_injection_mode)
             .auto_save(config.memory.auto_save)
-            .security(security);
+            .security(security)
+            .human_input_attach(human_input_attach);
 
         #[cfg(feature = "ai-protocol")]
         let builder = builder.intent_route_host(Some(
@@ -500,10 +524,45 @@ impl Agent {
             false
         };
 
-        let ctx = ToolExecutionContext::with_shell_human_approved(shell_human_approved);
+        let mut tool_args = call.arguments.clone();
+        let mut stdin_secret = None;
+        if call.name == "shell" {
+            if let Some(slot_id) = tool_args
+                .as_object_mut()
+                .and_then(|m| m.remove("secret_slot"))
+                .and_then(|v| v.as_str().map(|s| s.to_string()))
+            {
+                let Some(hub) = &self.human_input_hub else {
+                    return ToolExecutionResult {
+                        name: call.name.clone(),
+                        output: "Error: secret_slot requires interactive gateway human input"
+                            .into(),
+                        success: false,
+                        tool_call_id: call.tool_call_id.clone(),
+                    };
+                };
+                match hub.secret_slots().take(&slot_id) {
+                    Some(secret) => stdin_secret = Some(secret),
+                    None => {
+                        return ToolExecutionResult {
+                            name: call.name.clone(),
+                            output: format!(
+                                "Error: secret_slot '{slot_id}' is missing or already consumed. \
+                                 Call request_human_input(kind=secret) again."
+                            ),
+                            success: false,
+                            tool_call_id: call.tool_call_id.clone(),
+                        };
+                    }
+                }
+            }
+        }
+
+        let ctx = ToolExecutionContext::with_shell_human_approved(shell_human_approved)
+            .with_stdin_secret(stdin_secret);
         let mut success = false;
         let result = if let Some(tool) = self.tools.iter().find(|t| t.name() == call.name) {
-            match tool.execute(call.arguments.clone(), &ctx).await {
+            match tool.execute(tool_args, &ctx).await {
                 Ok(r) => {
                     success = r.success;
                     self.observer.record_event(&ObserverEvent::ToolCall {
@@ -710,6 +769,8 @@ impl Agent {
                 } else {
                     text
                 };
+                // Defense-in-depth: never leak DSML / tool_call scaffolding to Web UI.
+                let final_text = crate::util::strip_tool_call_markup(&final_text);
 
                 self.history
                     .push(ConversationMessage::Chat(ChatMessage::assistant(

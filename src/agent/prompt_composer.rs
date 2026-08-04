@@ -156,7 +156,12 @@ pub fn build_safety_section() -> String {
      - Do not run destructive commands without asking.\n\
      - Do not bypass oversight or approval mechanisms.\n\
      - Prefer `trash` over `rm` (recoverable beats gone forever).\n\
-     - When in doubt, ask before acting externally.\n\n"
+     - When in doubt, ask before acting externally.\n\
+     - When blocked (sudo password, missing token, needs a human action), do NOT give up. \
+       Call `request_human_input` and offer options: (1) handoff with exact commands for the \
+       operator to run, (2) secret for password/token (never echo secrets; use returned \
+       `secret_slot` with shell `sudo -S` + `secret_slot`), (3) choice/text for other inputs. \
+       Keep pushing the task after the operator responds.\n\n"
         .to_string()
 }
 

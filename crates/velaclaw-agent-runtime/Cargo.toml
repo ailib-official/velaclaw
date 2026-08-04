@@ -21,5 +21,5 @@ regex = "1"
 tracing = { version = "0.1", default-features = false }
 async-trait = "0.1"
 tokio = { version = "1.50", default-features = false, features = ["rt-multi-thread", "macros", "time"] }
-# VL-TTC-014 / ALR-TTC-014: steer + correction helpers @ d5e1399 (Depends on ai-lib-rust ALR-TTC-014; rollback: e028c2a)
-ai-lib-rust = { version = "1.2.0", git = "https://github.com/ailib-official/ai-lib-rust", rev = "d5e13994c4ff28b996f591c7bd7c8731222ee4d8", optional = true }
+# VL-TTC-014 / ALR-TTC-014 @ cd47f28 (merged ai-lib#59; rollback: e3e7a0a)
+ai-lib-rust = { version = "1.2.0", git = "https://github.com/ailib-official/ai-lib-rust", rev = "cd47f28bb6bf5e6555297d595d27f04a2bf54334", optional = true }

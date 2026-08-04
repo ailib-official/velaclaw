@@ -132,19 +132,19 @@ pub fn strip_tool_call_markup(message: &str) -> String {
         }
     }
 
-    /// Strip DeepSeek DSML wrappers (`<｜｜DSML｜｜tool_call>` / invoke / …).
+    /// Strip DeepSeek DSML wrappers (`<｜｜DSML｜｜tool_call>` / bare / invoke / …).
     fn strip_dsml_blocks(message: &str) -> String {
         if !message.contains(DSML_TAG) {
             return message.to_string();
         }
-        // Open/close may disagree on singular vs plural (`tool_call` / `tool_calls`).
+        // Suffixed wrappers + bare `<DSML>…</DSML>` (open/close may disagree on singular/plural).
         let re = regex::Regex::new(&format!(
-            r"(?s)<{DSML_TAG}(?:tool_calls?|invoke|parameter)(?:\s+[^>]*)?>.*?</{DSML_TAG}(?:tool_calls?|invoke|parameter)>"
+            r"(?s)<{DSML_TAG}(?:tool_calls?|invoke|parameter)?(?:\s+[^>]*)?>.*?</{DSML_TAG}(?:tool_calls?|invoke|parameter)?>"
         ))
         .expect("valid dsml strip regex");
         let stripped = re.replace_all(message, "");
         // Unclosed hybrid: open tag + JSON body, then optional mismatched close.
-        let open_re = regex::Regex::new(&format!(r"(?s)<{DSML_TAG}tool_calls?(?:\s+[^>]*)?>"))
+        let open_re = regex::Regex::new(&format!(r"(?s)<{DSML_TAG}(?:tool_calls?)?(?:\s+[^>]*)?>"))
             .expect("valid dsml open regex");
         let mut out = String::new();
         let mut rest = stripped.as_ref();
@@ -161,7 +161,7 @@ pub fn strip_tool_call_markup(message: &str) -> String {
         }
         out.push_str(rest);
         // Drop orphan DSML open/close tags left by mismatched closes
-        // (e.g. open tool_call … </DSML parameter> </DSML tool_call>).
+        // (e.g. open tool_call … </DSML parameter> </DSML tool_call>, or bare </DSML>).
         let orphan = regex::Regex::new(&format!(
             r"</?{DSML_TAG}(?:tool_calls?|invoke|parameter)?>"
         ))
@@ -355,5 +355,14 @@ mod tests {
         assert!(!out.contains("DSML"), "out={out:?}");
         assert!(!out.contains("tool_call"), "out={out:?}");
         assert!(!out.contains("shell"), "out={out:?}");
+    }
+
+    #[test]
+    fn strip_tool_call_markup_removes_mixed_standard_dsml_close() {
+        let tag = "\u{FF5C}\u{FF5C}DSML\u{FF5C}\u{FF5C}";
+        let input =
+            format!("<tool_call>\n{{\"name\": \"shell\", \"command\": \"ssh x\"}}\n</{tag}>");
+        let out = strip_tool_call_markup(&input);
+        assert!(out.is_empty(), "out={out:?}");
     }
 }

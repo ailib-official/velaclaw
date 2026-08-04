@@ -49,4 +49,20 @@ describe("renderMarkdown", () => {
     expect(renderMarkdown("")).toBe("");
     expect(renderMarkdown("   \n")).toBe("");
   });
+
+  it("does not absorb following paragraph into a GFM table", () => {
+    const md = `| # | 时长 |
+|---|------|
+| 1 | 78 秒 |
+| 5 | 65 秒 |
+**规律**：每次开机都很短。
+- 凌晨那次`;
+    const html = renderMarkdown(md);
+    expect(html).toContain("<table>");
+    expect(html).toContain("</table>");
+    // Paragraph must be outside the table, not an extra <td>.
+    expect(html).toMatch(/<\/table>\s*<p>.*规律/);
+    expect(html).not.toMatch(/<td><strong>规律<\/strong>/);
+    expect(html).toContain("<ul>");
+  });
 });

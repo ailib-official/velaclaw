@@ -7,7 +7,8 @@
 //! Answers facts only; routing stays in host strategy (CR-CAP-003).
 
 use crate::protocol_registry::{
-    collect_provider_files, load_manifest_value, resolve_local_protocol_root,
+    collect_provider_files, compose_logical_model_id, load_manifest_value,
+    resolve_local_protocol_root,
 };
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -431,11 +432,7 @@ fn match_model_capability_tags(
     };
     let source = path.display().to_string();
     for (model_key, meta) in models {
-        let logical_id = if model_key.contains('/') {
-            model_key.clone()
-        } else {
-            format!("{provider_id}/{model_key}")
-        };
+        let logical_id = compose_logical_model_id(provider_id, model_key);
         for entry in TAG_MAPPING_TABLE {
             let Some(how) = model_matches_tag(meta, entry, raw, wire) else {
                 continue;
@@ -493,11 +490,7 @@ fn match_long_context_models(
         if window < LONG_CONTEXT_MIN_TOKENS {
             continue;
         }
-        let logical_id = if model_key.contains('/') {
-            model_key.clone()
-        } else {
-            format!("{provider_id}/{model_key}")
-        };
+        let logical_id = compose_logical_model_id(provider_id, model_key);
         out.push(CapabilityCandidate {
             provider_id: provider_id.to_string(),
             logical_model_id: Some(logical_id),

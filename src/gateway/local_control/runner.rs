@@ -5,6 +5,9 @@ use super::sessions::ChatSessionStore;
 use super::types::{ChatApiRequest, ChatApiResponse, ChatMessageInput};
 use crate::agent::agent::Agent;
 use crate::config::Config;
+use crate::protocol_registry::{
+    provider_id_from_logical, resolve_local_protocol_root, scan_protocol_root,
+};
 use crate::providers::ChatMessage;
 use anyhow::{anyhow, Context, Result};
 use std::path::Path;
@@ -18,16 +21,37 @@ pub fn apply_chat_overrides(mut config: Config, req: &ChatApiRequest) -> Config 
         // Only honor protocol `provider/model` ids. Bare labels like `deepseek-chat`
         // from older UI session metadata must not clobber the configured default.
         if trimmed.contains('/') {
-            config.default_model = Some(trimmed.to_string());
-            if let Some((provider, _)) = trimmed.split_once('/') {
-                config.default_provider = Some(provider.to_string());
-            }
+            let (logical_id, provider) = resolve_chat_model_override(trimmed);
+            config.default_model = Some(logical_id);
+            config.default_provider = Some(provider);
         }
     }
     if let Some(temp) = req.temperature {
         config.default_temperature = temp;
     }
     config
+}
+
+/// Map a chat picker/session model id to `(logical_id, provider)`.
+///
+/// Composed logical ids under a known provider stay as-is. Bare aggregator
+/// wire ids (e.g. `deepseek-ai/deepseek-v4-flash`) remap uniquely via the
+/// local protocol registry when possible.
+fn resolve_chat_model_override(raw: &str) -> (String, String) {
+    let first = provider_id_from_logical(raw).to_string();
+    let Some(root) = resolve_local_protocol_root() else {
+        return (raw.to_string(), first);
+    };
+    let Ok(snap) = scan_protocol_root(&root) else {
+        return (raw.to_string(), first);
+    };
+    if snap.provider_by_id(&first).is_some() {
+        return (raw.to_string(), first);
+    }
+    if let Some(entry) = snap.resolve_chat_model_id(raw) {
+        return (entry.logical_id.clone(), entry.provider.clone());
+    }
+    (raw.to_string(), first)
 }
 
 /// Returns the last non-empty user message from the chat history payload.
@@ -152,6 +176,35 @@ pub fn chunk_text_for_stream(text: &str, chunk_size: usize) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    struct EnvGuard {
+        key: &'static str,
+        old: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: Option<&str>) -> Self {
+            let old = std::env::var(key).ok();
+            match value {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+            Self { key, old }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match self.old.as_ref() {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
 
     #[test]
     fn extract_last_user_message_picks_latest_user() {
@@ -231,6 +284,50 @@ mod tests {
             updated.default_provider.as_deref(),
             Some("nvidia/nemotron-3-super-120b-a12b")
         );
+    }
+
+    #[test]
+    fn apply_chat_overrides_remaps_bare_aggregator_wire_id() {
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let dir = tempfile::tempdir().expect("tempdir");
+        let providers = dir.path().join("v2").join("providers");
+        fs::create_dir_all(&providers).expect("provider dir");
+        fs::write(
+            providers.join("nvidia.yaml"),
+            r#"
+id: nvidia
+name: NVIDIA
+metadata:
+  models:
+    deepseek-ai/deepseek-v4-flash:
+      context_window: 1000000
+"#,
+        )
+        .expect("manifest");
+        let _proto = EnvGuard::set(
+            "AI_PROTOCOL_DIR",
+            Some(dir.path().to_str().expect("utf8 path")),
+        );
+        let _path = EnvGuard::set("AI_PROTOCOL_PATH", None);
+
+        let mut base = Config::default();
+        base.default_provider = Some("deepseek".into());
+        base.default_model = Some("deepseek/deepseek-v4-flash".into());
+        let req = ChatApiRequest {
+            messages: vec![],
+            session_id: None,
+            model_id: Some("deepseek-ai/deepseek-v4-flash".into()),
+            temperature: None,
+            max_tokens: None,
+        };
+        let updated = apply_chat_overrides(base, &req);
+        assert_eq!(
+            updated.default_model.as_deref(),
+            Some("nvidia/deepseek-ai/deepseek-v4-flash")
+        );
+        assert_eq!(updated.default_provider.as_deref(), Some("nvidia"));
     }
 
     #[test]

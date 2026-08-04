@@ -629,6 +629,30 @@ mod tests {
 
     #[cfg(feature = "ai-protocol")]
     #[test]
+    fn xml_dispatcher_parses_mixed_standard_open_bare_dsml_close() {
+        let tag = "\u{FF5C}\u{FF5C}DSML\u{FF5C}\u{FF5C}";
+        let text = format!(
+            "<tool_call>\n\
+             {{\"name\": \"shell\", \"command\": \"ssh -o BatchMode=yes piubt 'cat /home/pishare/proxypi-ops.md'\"}}\n\
+             </{tag}>"
+        );
+        let response = ChatResponse {
+            text: Some(text),
+            tool_calls: vec![],
+        };
+        let dispatcher = XmlToolDispatcher::default();
+        let (remaining, calls) = dispatcher.parse_response(&response);
+        assert_eq!(calls.len(), 1, "mixed dialect close must parse");
+        assert_eq!(calls[0].name, "shell");
+        assert!(calls[0].arguments["command"]
+            .as_str()
+            .unwrap_or("")
+            .contains("proxypi-ops.md"));
+        assert!(remaining.is_empty(), "remaining={remaining:?}");
+    }
+
+    #[cfg(feature = "ai-protocol")]
+    #[test]
     fn manifest_text_fallback_parses_hybrid_dsml() {
         let tag = "\u{FF5C}\u{FF5C}DSML\u{FF5C}\u{FF5C}";
         let text = format!(

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-04
+
+### Added
+
+- **Tool-format recovery ladder** ([#199](https://github.com/ailib-official/velaclaw/pull/199), [#200](https://github.com/ailib-official/velaclaw/pull/200), [#201](https://github.com/ailib-official/velaclaw/pull/201)): corrective prompt → native-only reask → strip/fail-closed for unparsed tool markup; pin `ai-lib-rust` to ALR-TTC-016.
+- **Aggregator logical model IDs** ([#202](https://github.com/ailib-official/velaclaw/pull/202)): compose `provider/wire` at protocol registry ingest so NIM-style org-qualified catalog keys bind under the host provider; remap bare wire ids in chat overrides.
+- **GFM Markdown in Web Chat** ([#203](https://github.com/ailib-official/velaclaw/pull/203)): `marked` + DOMPurify for headings, tables, lists, and fenced code; terminate GFM tables before following paragraphs when models omit a blank line.
+
+### Changed
+
+- **Dependencies**: pin public `ailib-official/ai-lib-rust` to `ddee3ce` (ALR-TTC-016). Runtime protocol data continues to come from a local `AI_PROTOCOL_DIR` checkout of public [`ailib-official/ai-protocol`](https://github.com/ailib-official/ai-protocol) (not vendored into this release tag).
+
 ## [0.7.4] - 2026-07-11
 
 ### Changed

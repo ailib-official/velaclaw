@@ -21,5 +21,5 @@ regex = "1"
 tracing = { version = "0.1", default-features = false }
 async-trait = "0.1"
 tokio = { version = "1.50", default-features = false, features = ["rt-multi-thread", "macros", "time"] }
-# VL-TTC-016 / ALR-TTC-016: ToolFormatError ladder @ 2200cb1 (rollback: da5dc43)
-ai-lib-rust = { version = "1.2.0", git = "https://github.com/ailib-official/ai-lib-rust", rev = "2200cb14f526d330eb35379944ecd7eb617d949e", optional = true }
+# VL-TTC-016 / ALR-TTC-016: ToolFormatError ladder @ ddee3ce (rollback: 2200cb1)
+ai-lib-rust = { version = "1.2.0", git = "https://github.com/ailib-official/ai-lib-rust", rev = "ddee3ce93de18024424b63a93e9841b3627d0c47", optional = true }

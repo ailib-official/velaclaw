@@ -6,7 +6,7 @@ export interface ChatMessage {
 }
 
 export interface WsServerFrame {
-  type: "delta" | "done" | "error" | "approval_required";
+  type: "delta" | "done" | "error" | "approval_required" | "input_required";
   content?: string;
   message?: string;
   usage?: { input_tokens: number; output_tokens: number };
@@ -14,12 +14,24 @@ export interface WsServerFrame {
   id?: string;
   tool_name?: string;
   arguments_summary?: string;
+  kind?: string;
+  prompt?: string;
+  options?: string[];
+  risk_note?: string;
 }
 
 export interface ApprovalRequiredPayload {
   id: string;
   tool_name: string;
   arguments_summary: string;
+}
+
+export interface HumanInputRequiredPayload {
+  id: string;
+  kind: "choice" | "text" | "secret" | "handoff" | string;
+  prompt: string;
+  options: string[];
+  risk_note?: string;
 }
 
 export interface StreamChatOptions {
@@ -32,6 +44,7 @@ export interface StreamChatOptions {
   onDone: (frame: WsServerFrame) => void;
   onError: (message: string) => void;
   onApprovalRequired?: (payload: ApprovalRequiredPayload) => void;
+  onInputRequired?: (payload: HumanInputRequiredPayload) => void;
 }
 
 function wsUrl(token: string): string {
@@ -73,6 +86,14 @@ export function streamChat(opts: StreamChatOptions): () => void {
         id: frame.id,
         tool_name: frame.tool_name,
         arguments_summary: frame.arguments_summary ?? "",
+      });
+    } else if (frame.type === "input_required" && frame.id && frame.prompt) {
+      opts.onInputRequired?.({
+        id: frame.id,
+        kind: frame.kind ?? "text",
+        prompt: frame.prompt,
+        options: frame.options ?? [],
+        risk_note: frame.risk_note,
       });
     } else if (frame.type === "done") {
       opts.onDone(frame);

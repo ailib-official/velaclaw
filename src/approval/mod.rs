@@ -7,6 +7,8 @@ mod backend;
 mod channel_hub;
 mod gate;
 mod hub;
+mod human_input;
+mod secret_slots;
 
 pub use backend::{
     ChannelApprovalSession, DenyApprovalBackend, ManagerApprovalBackend, PolicyHandleShellHook,
@@ -15,6 +17,11 @@ pub use backend::{
 pub use channel_hub::ChannelApprovalHub;
 pub use gate::{ApprovalGate, GateDecision};
 pub use hub::ApprovalHub;
+pub use human_input::{
+    HumanInputHub, HumanInputKind, HumanInputOutcome, HumanInputRequest, HumanInputRequiredEvent,
+    HumanInputRespondBody,
+};
+pub use secret_slots::SecretSlotStore;
 
 use crate::config::AutonomyConfig;
 use crate::config::PolicyOverridesStore;
@@ -656,6 +663,106 @@ mod tests {
                 .expect("approval broadcast");
             assert_eq!(ev.tool_name, "shell");
             assert!(hub_respond.respond(&ev.id, true, false));
+        });
+
+        let decision = gate.decide_async(&call).await;
+        respond.await.expect("respond join");
+
+        match decision {
+            GateDecision::Proceed {
+                shell_human_approved: true,
+            } => {}
+            other => panic!("expected Proceed with human approval, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn shell_session_always_skips_repeated_shell_policy_prompt() {
+        use super::gate::ApprovalGate;
+        use super::hub::ApprovalHub;
+        use crate::agent::dispatcher::ParsedToolCall;
+        use crate::config::AutonomyConfig;
+        use crate::security::{AutonomyLevel, PolicyHandle, SecurityPolicy};
+        use std::sync::Arc;
+
+        let autonomy = AutonomyConfig {
+            level: AutonomyLevel::Full,
+            always_ask: vec![],
+            ..AutonomyConfig::default()
+        };
+        let mgr = ApprovalManager::from_config(&autonomy);
+        mgr.record_decision(
+            "shell",
+            &serde_json::json!({"command": "echo ok"}),
+            ApprovalResponse::Always,
+            "web",
+        );
+        let mut policy = SecurityPolicy::default();
+        policy.autonomy = AutonomyLevel::Full;
+        policy.allowed_commands = vec!["echo".into()];
+        let security = PolicyHandle::new(policy);
+        let hub = Arc::new(ApprovalHub::new());
+        let gate = ApprovalGate::new(&mgr, "web", Some(security)).with_hub(Arc::clone(&hub));
+
+        let call = ParsedToolCall {
+            name: "shell".into(),
+            arguments: serde_json::json!({"command": "apt remove -y samba"}),
+            tool_call_id: None,
+        };
+
+        let decision = gate.decide_async(&call).await;
+        match decision {
+            GateDecision::Proceed {
+                shell_human_approved: true,
+            } => {}
+            other => panic!("expected session-always Proceed, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn supervised_shell_with_always_ask_needs_single_prompt() {
+        use super::gate::ApprovalGate;
+        use super::hub::ApprovalHub;
+        use crate::agent::dispatcher::ParsedToolCall;
+        use crate::config::AutonomyConfig;
+        use crate::security::{AutonomyLevel, PolicyHandle, SecurityPolicy};
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        let autonomy = AutonomyConfig {
+            level: AutonomyLevel::Supervised,
+            always_ask: vec!["shell".into()],
+            ..AutonomyConfig::default()
+        };
+        let mgr = ApprovalManager::from_config(&autonomy);
+        let mut policy = SecurityPolicy::default();
+        policy.autonomy = AutonomyLevel::Supervised;
+        policy.allowed_commands = vec!["echo".into()];
+        let security = PolicyHandle::new(policy);
+        let hub = Arc::new(ApprovalHub::new());
+        let mut sub = hub.subscribe();
+        let gate = ApprovalGate::new(&mgr, "web", Some(security)).with_hub(Arc::clone(&hub));
+
+        let call = ParsedToolCall {
+            name: "shell".into(),
+            arguments: serde_json::json!({"command": "apt remove -y samba"}),
+            tool_call_id: None,
+        };
+
+        let hub_respond = Arc::clone(&hub);
+        let respond = tokio::spawn(async move {
+            let ev = tokio::time::timeout(Duration::from_secs(2), sub.recv())
+                .await
+                .expect("approval event timeout")
+                .expect("approval broadcast");
+            assert_eq!(ev.tool_name, "shell");
+            assert!(hub_respond.respond(&ev.id, true, false));
+            assert!(
+                tokio::time::timeout(Duration::from_millis(200), sub.recv())
+                    .await
+                    .is_err(),
+                "expected only one approval prompt for shell (tool-level + shell-policy collapsed)"
+            );
         });
 
         let decision = gate.decide_async(&call).await;

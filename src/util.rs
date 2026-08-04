@@ -57,10 +57,13 @@ pub fn truncate_with_ellipsis(s: &str, max_chars: usize) -> String {
 
 /// Strip internal tool-invocation markup from user-visible agent text.
 ///
-/// Removes `<tool_call>`, `<tool_request>`, and related dialect tags so CLI/channel
-/// users never see raw protocol scaffolding.
+/// Removes `<tool_call>`, `<tool_request>`, DSML wrappers, and related dialect
+/// tags so CLI/channel/Web UI users never see raw protocol scaffolding.
 #[must_use]
 pub fn strip_tool_call_markup(message: &str) -> String {
+    /// DeepSeek DSML delimiter (U+FF5C fullwidth vertical line), same as ai-lib-core.
+    const DSML_TAG: &str = "\u{FF5C}\u{FF5C}DSML\u{FF5C}\u{FF5C}";
+
     const TOOL_CALL_OPEN_TAGS: [&str; 8] = [
         "<function_calls>",
         "<function_call>",
@@ -129,8 +132,40 @@ pub fn strip_tool_call_markup(message: &str) -> String {
         }
     }
 
+    /// Strip DeepSeek DSML wrappers (`<｜｜DSML｜｜tool_call>` / invoke / …).
+    fn strip_dsml_blocks(message: &str) -> String {
+        if !message.contains(DSML_TAG) {
+            return message.to_string();
+        }
+        // Open/close may disagree on singular vs plural (`tool_call` / `tool_calls`).
+        let re = regex::Regex::new(&format!(
+            r"(?s)<{DSML_TAG}(?:tool_calls?|invoke|parameter)(?:\s+[^>]*)?>.*?</{DSML_TAG}(?:tool_calls?|invoke|parameter)>"
+        ))
+        .expect("valid dsml strip regex");
+        let stripped = re.replace_all(message, "");
+        // Unclosed hybrid: open tag + JSON body, then optional mismatched close.
+        let open_re = regex::Regex::new(&format!(r"(?s)<{DSML_TAG}tool_calls?(?:\s+[^>]*)?>"))
+            .expect("valid dsml open regex");
+        let mut out = String::new();
+        let mut rest = stripped.as_ref();
+        while let Some(m) = open_re.find(rest) {
+            out.push_str(&rest[..m.start()]);
+            let after = &rest[m.end()..];
+            if let Some(json_end) = extract_first_json_end(after) {
+                rest = strip_leading_close_tags(&after[json_end..]);
+            } else {
+                // Drop from open tag to end — better than leaking DSML to the user.
+                rest = "";
+                break;
+            }
+        }
+        out.push_str(rest);
+        out
+    }
+
+    let message = strip_dsml_blocks(message);
     let mut kept_segments = Vec::new();
-    let mut remaining = message;
+    let mut remaining = message.as_str();
 
     while let Some((start, open_tag)) = find_first_tag(remaining, &TOOL_CALL_OPEN_TAGS) {
         let before = &remaining[..start];
@@ -284,5 +319,19 @@ mod tests {
     fn strip_tool_call_markup_removes_tool_request() {
         let input = "<tool_request>\n{\"name\":\"shell\"}\n</tool_request>";
         assert_eq!(strip_tool_call_markup(input), "");
+    }
+
+    #[test]
+    fn strip_tool_call_markup_removes_mismatched_dsml_hybrid() {
+        let tag = "\u{FF5C}\u{FF5C}DSML\u{FF5C}\u{FF5C}";
+        let input = format!(
+            "需要了解 obvs。\n<{tag}tool_call>\n\
+             {{\"name\": \"shell\", \"arguments\": {{\"command\": \"ls\"}}}}\n\
+             </{tag}tool_calls>"
+        );
+        let out = strip_tool_call_markup(&input);
+        assert_eq!(out, "需要了解 obvs。");
+        assert!(!out.contains("DSML"));
+        assert!(!out.contains("tool_call"));
     }
 }

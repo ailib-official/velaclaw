@@ -53,6 +53,10 @@ pub fn build_gateway_router(state: AppState) -> Router {
             "/api/approvals/{id}/respond",
             post(ops_api::handle_respond_approval),
         )
+        .route(
+            "/api/human-input/{id}/respond",
+            post(ops_api::handle_respond_human_input),
+        )
         .route("/ws", get(chat_ws::handle_ws_chat))
         .route("/chat", get(static_embed::handle_chat_ui))
         .route("/chat/{*asset_path}", get(static_embed::handle_chat_ui))

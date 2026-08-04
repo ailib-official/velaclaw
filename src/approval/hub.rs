@@ -60,11 +60,42 @@ impl ApprovalHub {
             arguments: request.arguments.clone(),
             arguments_summary: summary.to_string(),
         };
-        let _ = self.events.send(event);
+        let receivers = self.events.receiver_count();
+        match self.events.send(event) {
+            Ok(n) => {
+                tracing::debug!(
+                    approval_id = %id,
+                    tool = %request.tool_name,
+                    delivered_to = n,
+                    "approval_required broadcast"
+                );
+            }
+            Err(_) => {
+                tracing::warn!(
+                    approval_id = %id,
+                    tool = %request.tool_name,
+                    receivers,
+                    "approval_required broadcast has no subscribers; UI will not show a modal"
+                );
+            }
+        }
 
         match tokio::time::timeout(DEFAULT_APPROVAL_TIMEOUT, rx).await {
             Ok(Ok(decision)) => decision,
-            _ => {
+            Ok(Err(_)) => {
+                tracing::warn!(
+                    approval_id = %id,
+                    "approval oneshot closed without respond (treating as deny)"
+                );
+                self.pending.lock().remove(&id);
+                ApprovalResponse::No
+            }
+            Err(_) => {
+                tracing::warn!(
+                    approval_id = %id,
+                    timeout_secs = DEFAULT_APPROVAL_TIMEOUT.as_secs(),
+                    "approval timed out waiting for UI respond"
+                );
                 self.pending.lock().remove(&id);
                 ApprovalResponse::No
             }

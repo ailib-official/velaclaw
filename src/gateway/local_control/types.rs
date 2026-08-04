@@ -94,6 +94,16 @@ pub enum WsServerMessage {
         tool_name: String,
         arguments_summary: String,
     },
+    /// Interactive human input (choice / text / secret / handoff).
+    InputRequired {
+        id: String,
+        kind: String,
+        prompt: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        options: Vec<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        risk_note: Option<String>,
+    },
 }
 
 #[cfg(test)]

@@ -49,7 +49,14 @@ pub async fn handle_post_chat(
     }
 
     let config = state.config.lock().clone();
-    match run_agent_chat(&config, &req, Some(&state.approval_hub)).await {
+    match run_agent_chat(
+        &config,
+        &req,
+        Some(&state.approval_hub),
+        Some(&state.human_input_hub),
+    )
+    .await
+    {
         Ok(resp) => {
             if let Err(e) = persist_chat_turn(
                 &config.workspace_dir,

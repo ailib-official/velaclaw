@@ -42,6 +42,7 @@ pub mod pdf_read;
 pub mod policy_patch;
 pub mod proxy_config;
 pub mod pushover;
+pub mod request_human_input;
 pub mod schedule;
 pub mod schema;
 pub mod screenshot;
@@ -78,6 +79,7 @@ pub use pdf_read::PdfReadTool;
 pub use policy_patch::PolicyPatchTool;
 pub use proxy_config::ProxyConfigTool;
 pub use pushover::PushoverTool;
+pub use request_human_input::RequestHumanInputTool;
 pub use schedule::ScheduleTool;
 #[allow(unused_imports)]
 pub use schema::{CleaningStrategy, SchemaCleanr};
@@ -93,8 +95,12 @@ use crate::memory::Memory;
 use crate::runtime::{NativeRuntime, RuntimeAdapter};
 use crate::security::PolicyHandle;
 use async_trait::async_trait;
+use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
+
+/// Handle used by gateway to attach [`crate::approval::HumanInputHub`] to the tool.
+pub type HumanInputAttach = Arc<Mutex<Option<Arc<crate::approval::HumanInputHub>>>>;
 
 #[derive(Clone)]
 struct ArcDelegatingTool {
@@ -184,9 +190,13 @@ pub fn all_tools(
         fallback_api_key,
         root_config,
     )
+    .0
 }
 
 /// Canonical tool registry including memory tools and optional Composio.
+///
+/// Returns `(tools, human_input_attach)` — call [`RequestHumanInputTool::attach_hub`]
+/// equivalent via the attach handle when wiring gateway HITL.
 #[allow(clippy::implicit_hasher, clippy::too_many_arguments)]
 pub fn all_tools_with_runtime(
     config: Arc<Config>,
@@ -201,8 +211,11 @@ pub fn all_tools_with_runtime(
     agents: &HashMap<String, DelegateAgentConfig>,
     fallback_api_key: Option<&str>,
     root_config: &crate::config::Config,
-) -> Vec<Box<dyn Tool>> {
+) -> (Vec<Box<dyn Tool>>, HumanInputAttach) {
+    let human_input = Arc::new(RequestHumanInputTool::new());
+    let human_input_attach = human_input.hub_slot();
     let mut tool_arcs: Vec<Arc<dyn Tool>> = vec![
+        human_input,
         Arc::new(ShellTool::new(security.clone(), runtime)),
         Arc::new(FileReadTool::new(security.clone())),
         Arc::new(FileWriteTool::new(security.clone())),
@@ -336,7 +349,7 @@ pub fn all_tools_with_runtime(
         }
     }
 
-    boxed_registry_from_arcs(tool_arcs)
+    (boxed_registry_from_arcs(tool_arcs), human_input_attach)
 }
 
 #[cfg(test)]

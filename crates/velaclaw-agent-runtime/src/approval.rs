@@ -33,6 +33,11 @@ pub trait HumanApprovalBackend: Send + Sync {
     async fn approve_shell_command_async(&self, command: &str) -> bool {
         self.approve_shell_command_sync(command)
     }
+
+    /// Session-scoped "always allow shell" from a prior Always response on this channel.
+    fn shell_session_always_allowed(&self) -> bool {
+        false
+    }
 }
 
 /// App-layer shell policy enforcement (`SecurityPolicy`); runtime only holds the slot.
@@ -64,17 +69,21 @@ impl<'a, B: HumanApprovalBackend + ?Sized> ApprovalGate<'a, B> {
     }
 
     pub fn decide_sync(&self, call: &ParsedToolCall) -> GateDecision {
+        let prior_tool_level =
+            is_shell_policy_tool(&call.name) && self.backend.needs_tool_approval(&call.name);
         if let Some(denied) = self.tool_level_decision_sync(call) {
             return denied;
         }
-        self.shell_policy_decision(&call.name, &call.arguments)
+        self.shell_policy_decision(&call.name, &call.arguments, prior_tool_level)
     }
 
     pub async fn decide_async(&self, call: &ParsedToolCall) -> GateDecision {
+        let prior_tool_level =
+            is_shell_policy_tool(&call.name) && self.backend.needs_tool_approval(&call.name);
         if let Some(denied) = self.tool_level_decision_async(call).await {
             return denied;
         }
-        self.shell_policy_decision_async(&call.name, &call.arguments)
+        self.shell_policy_decision_async(&call.name, &call.arguments, prior_tool_level)
             .await
     }
 
@@ -108,7 +117,12 @@ impl<'a, B: HumanApprovalBackend + ?Sized> ApprovalGate<'a, B> {
         }
     }
 
-    fn shell_policy_decision(&self, tool_name: &str, args: &Value) -> GateDecision {
+    fn shell_policy_decision(
+        &self,
+        tool_name: &str,
+        args: &Value,
+        prior_tool_level_approval: bool,
+    ) -> GateDecision {
         if !is_shell_policy_tool(tool_name) {
             return GateDecision::Proceed {
                 shell_human_approved: false,
@@ -124,6 +138,12 @@ impl<'a, B: HumanApprovalBackend + ?Sized> ApprovalGate<'a, B> {
                 shell_human_approved: false,
             };
         };
+        let pre_approved = prior_tool_level_approval || self.backend.shell_session_always_allowed();
+        if pre_approved && hook.validate_shell_command(tool_name, args, true).is_ok() {
+            return GateDecision::Proceed {
+                shell_human_approved: true,
+            };
+        }
         if hook.validate_shell_command(tool_name, args, false).is_ok() {
             return GateDecision::Proceed {
                 shell_human_approved: false,
@@ -149,7 +169,12 @@ impl<'a, B: HumanApprovalBackend + ?Sized> ApprovalGate<'a, B> {
         }
     }
 
-    async fn shell_policy_decision_async(&self, tool_name: &str, args: &Value) -> GateDecision {
+    async fn shell_policy_decision_async(
+        &self,
+        tool_name: &str,
+        args: &Value,
+        prior_tool_level_approval: bool,
+    ) -> GateDecision {
         if !is_shell_policy_tool(tool_name) {
             return GateDecision::Proceed {
                 shell_human_approved: false,
@@ -165,6 +190,12 @@ impl<'a, B: HumanApprovalBackend + ?Sized> ApprovalGate<'a, B> {
                 shell_human_approved: false,
             };
         };
+        let pre_approved = prior_tool_level_approval || self.backend.shell_session_always_allowed();
+        if pre_approved && hook.validate_shell_command(tool_name, args, true).is_ok() {
+            return GateDecision::Proceed {
+                shell_human_approved: true,
+            };
+        }
         if hook.validate_shell_command(tool_name, args, false).is_ok() {
             return GateDecision::Proceed {
                 shell_human_approved: false,

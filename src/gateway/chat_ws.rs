@@ -5,6 +5,7 @@ use super::local_control::auth::{check_pairing_auth, unauthorized_response};
 use super::local_control::runner::{chunk_text_for_stream, persist_chat_turn, run_agent_chat};
 use super::local_control::types::{ChatApiRequest, WsClientMessage, WsServerMessage};
 use super::AppState;
+use crate::approval::HumanInputKind;
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{Query, State, WebSocketUpgrade};
 use axum::http::HeaderMap;
@@ -20,6 +21,15 @@ const WS_CHUNK_SIZE: usize = 48;
 pub struct WsQuery {
     #[serde(default)]
     pub token: Option<String>,
+}
+
+fn human_input_kind_label(kind: HumanInputKind) -> &'static str {
+    match kind {
+        HumanInputKind::Choice => "choice",
+        HumanInputKind::Text => "text",
+        HumanInputKind::Secret => "secret",
+        HumanInputKind::Handoff => "handoff",
+    }
 }
 
 /// GET /ws — upgrade to WebSocket for streaming chat.
@@ -96,23 +106,63 @@ async fn handle_ws_socket(socket: WebSocket, state: AppState) {
 
         let config = state.config.lock().clone();
         let hub = state.approval_hub.clone();
+        let human_hub = state.human_input_hub.clone();
         let mut approval_sub = hub.subscribe();
+        let mut human_sub = human_hub.subscribe();
         let sock_fwd = socket.clone();
+        let sock_hitl = socket.clone();
+        // Keep forwarding even after `Lagged` (burst of approvals); only stop on closed
+        // channel or socket send failure. A bare `while let Ok` exits on Lagged and then
+        // silently drops later `approval_required` frames.
         let forwarder = tokio::spawn(async move {
-            while let Ok(ev) = approval_sub.recv().await {
-                let frame = WsServerMessage::ApprovalRequired {
-                    id: ev.id,
-                    tool_name: ev.tool_name,
-                    arguments_summary: ev.arguments_summary,
-                };
-                if send_frame(sock_fwd.clone(), &frame).await.is_err() {
-                    break;
+            loop {
+                match approval_sub.recv().await {
+                    Ok(ev) => {
+                        let frame = WsServerMessage::ApprovalRequired {
+                            id: ev.id,
+                            tool_name: ev.tool_name,
+                            arguments_summary: ev.arguments_summary,
+                        };
+                        if send_frame(sock_fwd.clone(), &frame).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::warn!(skipped = n, "approval hub subscriber lagged; continuing");
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
+        let hitl_forwarder = tokio::spawn(async move {
+            loop {
+                match human_sub.recv().await {
+                    Ok(ev) => {
+                        let frame = WsServerMessage::InputRequired {
+                            id: ev.id,
+                            kind: human_input_kind_label(ev.kind).to_string(),
+                            prompt: ev.prompt,
+                            options: ev.options,
+                            risk_note: ev.risk_note,
+                        };
+                        if send_frame(sock_hitl.clone(), &frame).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::warn!(
+                            skipped = n,
+                            "human input hub subscriber lagged; continuing"
+                        );
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
             }
         });
 
-        let chat_result = run_agent_chat(&config, &req, Some(&hub)).await;
+        let chat_result = run_agent_chat(&config, &req, Some(&hub), Some(&human_hub)).await;
         forwarder.abort();
+        hitl_forwarder.abort();
 
         match chat_result {
             Ok(resp) => {

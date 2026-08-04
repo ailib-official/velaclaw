@@ -17,6 +17,8 @@ pub struct RuntimeBootstrap {
     pub memory: Arc<dyn Memory>,
     pub observer: Arc<dyn Observer>,
     pub tools: Vec<Box<dyn Tool>>,
+    /// Attach point for gateway [`crate::approval::HumanInputHub`].
+    pub human_input_attach: tools::HumanInputAttach,
     pub provider_runtime_options: ProviderRuntimeOptions,
 }
 
@@ -67,7 +69,7 @@ pub fn bootstrap_runtime(config: &Config, options: BootstrapOptions) -> Result<R
         (None, None)
     };
 
-    let tools = tools::all_tools_with_runtime(
+    let (tools, human_input_attach) = tools::all_tools_with_runtime(
         Arc::new(config.clone()),
         &security,
         Arc::clone(&runtime),
@@ -95,6 +97,7 @@ pub fn bootstrap_runtime(config: &Config, options: BootstrapOptions) -> Result<R
         memory,
         observer,
         tools,
+        human_input_attach,
         provider_runtime_options,
     })
 }

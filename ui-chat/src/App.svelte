@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import {
     appendAssistantDelta,
     streamChat,
@@ -22,6 +22,7 @@
     loadToken,
     putConfig,
     respondApproval,
+    respondHumanInput,
     runCronJob,
     saveToken,
     testProvider,
@@ -37,7 +38,7 @@
     formatUsd,
     type DashboardView,
   } from "./lib/dashboard";
-  import type { ApprovalRequiredPayload } from "./lib/chat";
+  import type { ApprovalRequiredPayload, HumanInputRequiredPayload } from "./lib/chat";
   import {
     formatSessionMeta,
     resolveInitialSessionId,
@@ -75,7 +76,10 @@
   let cronExpression = $state("0 9 * * *");
   let cronCommand = $state("");
   let toolCatalog = $state<ToolCatalogEntry[]>([]);
-  let pendingApproval = $state<ApprovalRequiredPayload | null>(null);
+  let pendingApprovals = $state<ApprovalRequiredPayload[]>([]);
+  let pendingHumanInput = $state<HumanInputRequiredPayload | null>(null);
+  let humanInputText = $state("");
+  let humanInputSecret = $state("");
   let providerTestMsg = $state("");
   let providers = $state<{ id: string; available: boolean }[]>([]);
   let dashboardView = $state<DashboardView | null>(null);
@@ -83,6 +87,14 @@
   let routingDiagnostics = $state<RoutingDiagnosticsView | null>(null);
 
   let listEl: HTMLDivElement | undefined;
+  let inputEl: HTMLTextAreaElement | undefined;
+
+  /** Return focus to the chat composer after a turn ends (textarea was disabled while streaming). */
+  async function focusChatInput() {
+    if (tab !== "chat" || pendingApprovals.length > 0 || pendingHumanInput) return;
+    await tick();
+    inputEl?.focus();
+  }
 
   function showToast(msg: string) {
     toast = msg;
@@ -267,11 +279,85 @@
   }
 
   async function handleApproval(approved: boolean, always = false) {
-    if (!pendingApproval) return;
-    const id = pendingApproval.id;
+    const current = pendingApprovals[0];
+    if (!current) return;
+    const id = current.id;
     try {
       await respondApproval(token, id, approved, always);
-      pendingApproval = null;
+      pendingApprovals = pendingApprovals.slice(1);
+      if (!streaming && pendingApprovals.length === 0) await focusChatInput();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function clearHumanInputModal() {
+    pendingHumanInput = null;
+    humanInputText = "";
+    humanInputSecret = "";
+    if (!streaming) await focusChatInput();
+  }
+
+  async function handleHumanInputCancel() {
+    if (!pendingHumanInput) return;
+    const id = pendingHumanInput.id;
+    try {
+      await respondHumanInput(token, id, { cancelled: true });
+      await clearHumanInputModal();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function handleHumanInputChoice(selected: string) {
+    if (!pendingHumanInput) return;
+    const id = pendingHumanInput.id;
+    try {
+      await respondHumanInput(token, id, { selected });
+      await clearHumanInputModal();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function handleHumanInputTextSubmit() {
+    if (!pendingHumanInput) return;
+    const text = humanInputText.trim();
+    if (!text) {
+      showToast("Enter a value");
+      return;
+    }
+    const id = pendingHumanInput.id;
+    try {
+      await respondHumanInput(token, id, { text });
+      await clearHumanInputModal();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function handleHumanInputSecretSubmit() {
+    if (!pendingHumanInput) return;
+    const secret = humanInputSecret;
+    if (!secret) {
+      showToast("Enter a secret");
+      return;
+    }
+    const id = pendingHumanInput.id;
+    try {
+      await respondHumanInput(token, id, { secret });
+      await clearHumanInputModal();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function handleHumanInputHandoffDone() {
+    if (!pendingHumanInput) return;
+    const id = pendingHumanInput.id;
+    try {
+      await respondHumanInput(token, id, {});
+      await clearHumanInputModal();
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e));
     }
@@ -393,6 +479,10 @@
     if (!text || streaming) return;
     input = "";
     messages = [...messages, { role: "user", content: text }];
+    pendingApprovals = [];
+    pendingHumanInput = null;
+    humanInputText = "";
+    humanInputSecret = "";
     streaming = true;
     scrollToBottom();
 
@@ -402,6 +492,7 @@
     } catch (e) {
       streaming = false;
       showToast(e instanceof Error ? e.message : String(e));
+      await focusChatInput();
       return;
     }
 
@@ -420,14 +511,21 @@
         cancelStream = null;
         scrollToBottom();
         loadSessions();
+        void focusChatInput();
       },
       onError: (msg) => {
         streaming = false;
         cancelStream = null;
         showToast(msg);
+        void focusChatInput();
       },
       onApprovalRequired: (payload) => {
-        pendingApproval = payload;
+        pendingApprovals = [...pendingApprovals, payload];
+      },
+      onInputRequired: (payload) => {
+        pendingHumanInput = payload;
+        humanInputText = "";
+        humanInputSecret = "";
       },
     });
   }
@@ -569,6 +667,7 @@
 
         <footer>
           <textarea
+            bind:this={inputEl}
             rows="3"
             bind:value={input}
             onkeydown={onKeydown}
@@ -728,17 +827,70 @@
     </section>
   {/if}
 
-  {#if pendingApproval}
+  {#if pendingApprovals.length > 0}
     <div class="modal-backdrop" role="presentation">
       <div class="modal" role="dialog" aria-labelledby="approval-title">
         <h2 id="approval-title">Tool approval required</h2>
-        <p><strong>{pendingApproval.tool_name}</strong></p>
-        <pre class="approval-args">{pendingApproval.arguments_summary}</pre>
+        {#if pendingApprovals.length > 1}
+          <p class="hint">{pendingApprovals.length} approvals queued — showing the oldest first.</p>
+        {/if}
+        <p><strong>{pendingApprovals[0].tool_name}</strong></p>
+        <pre class="approval-args">{pendingApprovals[0].arguments_summary}</pre>
         <div class="modal-actions">
           <button type="button" class="danger" onclick={() => handleApproval(false)}>Deny</button>
           <button type="button" onclick={() => handleApproval(true)}>Allow once</button>
           <button type="button" onclick={() => handleApproval(true, true)}>Always allow</button>
         </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if pendingHumanInput}
+    <div class="modal-backdrop" role="presentation">
+      <div class="modal" role="dialog" aria-labelledby="human-input-title">
+        <h2 id="human-input-title">Operator input needed</h2>
+        <p class="hint">Kind: {pendingHumanInput.kind}</p>
+        <pre class="approval-args">{pendingHumanInput.prompt}</pre>
+        {#if pendingHumanInput.risk_note}
+          <p class="risk-note">{pendingHumanInput.risk_note}</p>
+        {/if}
+
+        {#if pendingHumanInput.kind === "choice"}
+          <div class="modal-actions stacked">
+            {#each pendingHumanInput.options as opt}
+              <button type="button" onclick={() => handleHumanInputChoice(opt)}>{opt}</button>
+            {/each}
+            <button type="button" class="danger" onclick={handleHumanInputCancel}>Cancel</button>
+          </div>
+        {:else if pendingHumanInput.kind === "text"}
+          <label class="modal-field">
+            Response
+            <input type="text" bind:value={humanInputText} autocomplete="off" />
+          </label>
+          <div class="modal-actions">
+            <button type="button" class="danger" onclick={handleHumanInputCancel}>Cancel</button>
+            <button type="button" onclick={handleHumanInputTextSubmit}>Submit</button>
+          </div>
+        {:else if pendingHumanInput.kind === "secret"}
+          <p class="risk-note">
+            Secret is sent only to this local daemon, stored in a one-shot memory slot, and never
+            shown to the model. Prefer handoff if you do not want to enter a password here.
+          </p>
+          <label class="modal-field">
+            Password / token
+            <input type="password" bind:value={humanInputSecret} autocomplete="off" />
+          </label>
+          <div class="modal-actions">
+            <button type="button" class="danger" onclick={handleHumanInputCancel}>Cancel</button>
+            <button type="button" onclick={handleHumanInputSecretSubmit}>Submit secret</button>
+          </div>
+        {:else}
+          <p class="hint">Complete the action above in your own terminal, then confirm.</p>
+          <div class="modal-actions">
+            <button type="button" class="danger" onclick={handleHumanInputCancel}>Cancel</button>
+            <button type="button" onclick={handleHumanInputHandoffDone}>I completed it</button>
+          </div>
+        {/if}
       </div>
     </div>
   {/if}
@@ -1185,6 +1337,30 @@
     gap: 0.5rem;
     margin-top: 1rem;
     flex-wrap: wrap;
+  }
+  .modal-actions.stacked {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .modal-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin-top: 0.75rem;
+    font-size: 0.85rem;
+  }
+  .modal-field input {
+    padding: 0.5rem 0.65rem;
+    border-radius: 6px;
+    border: 1px solid #334155;
+    background: #0f172a;
+    color: inherit;
+  }
+  .risk-note {
+    margin-top: 0.75rem;
+    color: #fbbf24;
+    font-size: 0.85rem;
+    line-height: 1.4;
   }
   .toast {
     position: fixed;

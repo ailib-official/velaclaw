@@ -45,6 +45,11 @@ impl Tool for ShellTool {
                 "command": {
                     "type": "string",
                     "description": "The shell command to execute"
+                },
+                "secret_slot": {
+                    "type": "string",
+                    "description": "Opaque one-shot slot from request_human_input (kind=secret). \
+                     Pipelines the secret to stdin (use `sudo -S ...`). Never put passwords in command."
                 }
             },
             "required": ["command"]
@@ -116,8 +121,11 @@ impl Tool for ShellTool {
             }
         }
 
-        let result =
-            tokio::time::timeout(Duration::from_secs(SHELL_TIMEOUT_SECS), cmd.output()).await;
+        let stdin_secret = ctx.stdin_secret.clone();
+        let result = tokio::time::timeout(Duration::from_secs(SHELL_TIMEOUT_SECS), async {
+            run_shell_command(cmd, stdin_secret).await
+        })
+        .await;
 
         match result {
             Ok(Ok(output)) => {
@@ -160,6 +168,32 @@ impl Tool for ShellTool {
             }),
         }
     }
+}
+
+async fn run_shell_command(
+    mut cmd: tokio::process::Command,
+    stdin_secret: Option<String>,
+) -> std::io::Result<std::process::Output> {
+    use std::process::Stdio;
+    use tokio::io::AsyncWriteExt;
+
+    if stdin_secret.is_some() {
+        cmd.stdin(Stdio::piped());
+        cmd.stdout(Stdio::piped());
+        cmd.stderr(Stdio::piped());
+        let mut child = cmd.spawn()?;
+        if let Some(mut stdin) = child.stdin.take() {
+            if let Some(secret) = stdin_secret {
+                // `sudo -S` reads a password line from stdin.
+                let _ = stdin.write_all(secret.as_bytes()).await;
+                let _ = stdin.write_all(b"\n").await;
+                let _ = stdin.shutdown().await;
+            }
+        }
+        return child.wait_with_output().await;
+    }
+
+    cmd.output().await
 }
 
 #[cfg(test)]
@@ -473,5 +507,25 @@ mod tests {
             .expect("rate-limited command should return a result");
         assert!(!result.success);
         assert!(result.error.as_deref().unwrap_or("").contains("Rate limit"));
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn shell_pipes_stdin_secret_to_command() {
+        let security = PolicyHandle::new(SecurityPolicy {
+            autonomy: AutonomyLevel::Full,
+            allowed_commands: vec!["cat".into()],
+            workspace_dir: std::env::temp_dir(),
+            ..SecurityPolicy::default()
+        });
+        let tool = ShellTool::new(security, test_runtime());
+        let ctx = ToolExecutionContext::with_shell_human_approved(true)
+            .with_stdin_secret(Some("slot-secret".into()));
+        let result = tool
+            .execute(json!({"command": "cat"}), &ctx)
+            .await
+            .expect("cat with stdin");
+        assert!(result.success, "{:?}", result.error);
+        assert!(result.output.contains("slot-secret"));
     }
 }

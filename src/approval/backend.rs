@@ -130,6 +130,10 @@ impl HumanApprovalBackend for ManagerApprovalBackend<'_> {
             .is_some_and(|s| s.mode == ChannelApprovalMode::Inline)
     }
 
+    fn shell_session_always_allowed(&self) -> bool {
+        self.manager.session_allowlist().contains("shell")
+    }
+
     fn approve_shell_command_sync(&self, command: &str) -> bool {
         let request = ApprovalRequest {
             tool_name: "shell".into(),
@@ -163,10 +167,22 @@ impl HumanApprovalBackend for ManagerApprovalBackend<'_> {
         // Previously fell through to sync, which auto-denies non-CLI channels —
         // so Web UI recorded shell [no] without ever showing the modal.
         if let Some(hub) = &self.hub {
+            tracing::info!(
+                channel = self.channel,
+                command = %command,
+                "shell-policy approval via ApprovalHub"
+            );
             let decision = self.manager.prompt_gateway(hub, &request).await;
             self.manager
                 .record_decision("shell", &request.arguments, decision, self.channel);
             return decision != ApprovalResponse::No;
+        }
+        if self.channel != "cli" {
+            tracing::warn!(
+                channel = self.channel,
+                command = %command,
+                "shell-policy approval has no hub; sync-deny (no UI modal)"
+            );
         }
         self.approve_shell_command_sync(command)
     }

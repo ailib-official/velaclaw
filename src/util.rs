@@ -64,7 +64,7 @@ pub fn strip_tool_call_markup(message: &str) -> String {
     /// DeepSeek DSML delimiter (U+FF5C fullwidth vertical line), same as ai-lib-core.
     const DSML_TAG: &str = "\u{FF5C}\u{FF5C}DSML\u{FF5C}\u{FF5C}";
 
-    const TOOL_CALL_OPEN_TAGS: [&str; 8] = [
+    const TOOL_CALL_OPEN_TAGS: [&str; 9] = [
         "<function_calls>",
         "<function_call>",
         "<tool_call>",
@@ -73,6 +73,7 @@ pub fn strip_tool_call_markup(message: &str) -> String {
         "<tool_request>",
         "<tool>",
         "<invoke>",
+        "<$call>",
     ];
 
     fn find_first_tag<'a>(haystack: &str, tags: &'a [&'a str]) -> Option<(usize, &'a str)> {
@@ -91,6 +92,7 @@ pub fn strip_tool_call_markup(message: &str) -> String {
             "<tool_request>" => Some("</tool_request>"),
             "<tool>" => Some("</tool>"),
             "<invoke>" => Some("</invoke>"),
+            "<$call>" => Some("</$call>"),
             _ => None,
         }
     }

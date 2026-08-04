@@ -697,8 +697,8 @@ impl Agent {
 
         let effective_model = self.classify_model(user_message)?;
 
-        // VL-TTC-014: at most one format-correction re-chat per turn.
-        let mut format_correction_used = false;
+        // VL-TTC-016: CorrectivePrompt → NativeOnlyReask → StripFailClosed.
+        let mut format_ladder = velaclaw_agent_runtime::ToolFormatLadder::new();
 
         for _ in 0..self.config.max_tool_iterations {
             let messages = self.tool_dispatcher.to_provider_messages(&self.history);
@@ -772,31 +772,40 @@ impl Agent {
                 } else {
                     response_text
                 };
-                if !format_correction_used
-                    && velaclaw_agent_runtime::needs_tool_format_correction(raw_for_correction, 0)
-                {
-                    format_correction_used = true;
+                if velaclaw_agent_runtime::needs_tool_format_correction(raw_for_correction, 0) {
+                    let strategy = format_ladder.next_strategy();
                     tracing::warn!(
                         target: "velaclaw::agent",
-                        "tool_format_correction_retry: unparsed tool markup; requesting canonical format"
+                        tool_format_strategy = strategy.as_str(),
+                        "tool_format_recovery: unparsed tool markup"
                     );
-                    let assistant_raw = if text.is_empty() {
-                        response
-                            .text
-                            .clone()
-                            .unwrap_or_else(|| raw_for_correction.to_string())
-                    } else {
-                        text.clone()
-                    };
-                    self.history
-                        .push(ConversationMessage::Chat(ChatMessage::assistant(
-                            assistant_raw,
-                        )));
-                    self.history
-                        .push(ConversationMessage::Chat(ChatMessage::user(
-                            velaclaw_agent_runtime::tool_format_correction_message().to_string(),
-                        )));
-                    continue;
+                    if strategy
+                        != velaclaw_agent_runtime::ToolFormatRecoveryStrategy::StripFailClosed
+                    {
+                        let assistant_raw = if text.is_empty() {
+                            response
+                                .text
+                                .clone()
+                                .unwrap_or_else(|| raw_for_correction.to_string())
+                        } else {
+                            text.clone()
+                        };
+                        self.history
+                            .push(ConversationMessage::Chat(ChatMessage::assistant(
+                                assistant_raw,
+                            )));
+                        self.history
+                            .push(ConversationMessage::Chat(ChatMessage::user(
+                                velaclaw_agent_runtime::tool_format_recovery_message(strategy)
+                                    .to_string(),
+                            )));
+                        continue;
+                    }
+                    tracing::warn!(
+                        target: "velaclaw::agent",
+                        tool_format_strategy = "StripFailClosed",
+                        "tool_format_retry_exhausted: stripping markup after recovery ladder"
+                    );
                 }
 
                 let final_text = if text.is_empty() {
@@ -804,12 +813,6 @@ impl Agent {
                 } else {
                     text
                 };
-                if format_correction_used {
-                    tracing::warn!(
-                        target: "velaclaw::agent",
-                        "tool_format_retry_exhausted: stripping markup after corrective retry"
-                    );
-                }
                 // Defense-in-depth: never leak DSML / tool_call scaffolding to Web UI.
                 let final_text = crate::util::strip_tool_call_markup(&final_text);
 
@@ -1188,8 +1191,10 @@ mod tests {
 
     #[tokio::test]
     async fn turn_strips_markup_after_retry_exhausted() {
+        // Ladder: CorrectivePrompt → NativeOnlyReask → StripFailClosed (3rd bad).
         let bad = "<tool_call>\nNOT_JSON\n</tool_call>";
         let still_bad = "<tool_call>\nSTILL_BAD\n</tool_call>";
+        let third_bad = "<$call>\nJUNK\n</$call>";
         let provider = Box::new(MockProvider {
             responses: Mutex::new(vec![
                 crate::providers::ChatResponse {
@@ -1198,6 +1203,10 @@ mod tests {
                 },
                 crate::providers::ChatResponse {
                     text: Some(still_bad.into()),
+                    tool_calls: vec![],
+                },
+                crate::providers::ChatResponse {
+                    text: Some(third_bad.into()),
                     tool_calls: vec![],
                 },
             ]),
@@ -1225,7 +1234,16 @@ mod tests {
 
         let response = agent.turn("hi").await.unwrap();
         assert!(!response.contains("<tool_call"));
-        assert!(!response.contains("NOT_JSON") || response.is_empty() || !response.contains("</"));
+        assert!(!response.contains("$call"));
+        let hist = agent.history();
+        assert!(hist.iter().any(|msg| matches!(
+            msg,
+            ConversationMessage::Chat(m) if m.role == "user" && m.content.contains("invalid format")
+        )));
+        assert!(hist.iter().any(|msg| matches!(
+            msg,
+            ConversationMessage::Chat(m) if m.role == "user" && m.content.contains("native API tool_calls")
+        )));
     }
 
     #[test]

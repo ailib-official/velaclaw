@@ -380,8 +380,8 @@ pub(crate) async fn run_tool_call_loop(
         .map(|d| d.should_send_tool_specs() && !tool_specs.is_empty())
         .unwrap_or_else(|| provider.supports_native_tools() && !tool_specs.is_empty());
 
-    // VL-TTC-014: at most one format-correction re-chat per tool loop.
-    let mut format_correction_used = false;
+    // VL-TTC-016: CorrectivePrompt → NativeOnlyReask → StripFailClosed.
+    let mut format_ladder = velaclaw_agent_runtime::ToolFormatLadder::new();
 
     for _iteration in 0..max_iterations {
         if cancellation_token
@@ -578,25 +578,25 @@ pub(crate) async fn run_tool_call_loop(
         };
 
         if tool_calls.is_empty() {
-            // VL-TTC-014: markup present but unparsed → one corrective retry.
-            if !format_correction_used
-                && velaclaw_agent_runtime::needs_tool_format_correction(&response_text, 0)
-            {
-                format_correction_used = true;
+            // VL-TTC-016: typed leakage → recovery ladder.
+            if velaclaw_agent_runtime::needs_tool_format_correction(&response_text, 0) {
+                let strategy = format_ladder.next_strategy();
                 tracing::warn!(
                     target: "velaclaw::agent",
-                    "tool_format_correction_retry: unparsed tool markup; requesting canonical format"
+                    tool_format_strategy = strategy.as_str(),
+                    "tool_format_recovery: unparsed tool markup"
                 );
-                history.push(ChatMessage::assistant(response_text.clone()));
-                history.push(ChatMessage::user(
-                    velaclaw_agent_runtime::tool_format_correction_message().to_string(),
-                ));
-                continue;
-            }
-            if format_correction_used {
+                if strategy != velaclaw_agent_runtime::ToolFormatRecoveryStrategy::StripFailClosed {
+                    history.push(ChatMessage::assistant(response_text.clone()));
+                    history.push(ChatMessage::user(
+                        velaclaw_agent_runtime::tool_format_recovery_message(strategy).to_string(),
+                    ));
+                    continue;
+                }
                 tracing::warn!(
                     target: "velaclaw::agent",
-                    "tool_format_retry_exhausted: stripping markup after corrective retry"
+                    tool_format_strategy = "StripFailClosed",
+                    "tool_format_retry_exhausted: stripping markup after recovery ladder"
                 );
             }
             // No tool calls — this is the final response.

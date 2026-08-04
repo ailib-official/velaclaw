@@ -38,6 +38,7 @@
     formatUsd,
     type DashboardView,
   } from "./lib/dashboard";
+  import { renderMarkdown } from "./lib/markdown";
   import type { ApprovalRequiredPayload, HumanInputRequiredPayload } from "./lib/chat";
   import {
     formatSessionMeta,
@@ -456,16 +457,6 @@
     if (next === "settings") loadSettings();
   }
 
-  function renderMarkdown(text: string): string {
-    return text
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-      .replace(/`([^`]+)`/g, "<code>$1</code>")
-      .replace(/\n/g, "<br/>");
-  }
-
   async function ensureSession() {
     if (activeSessionId) return activeSessionId;
     const session = await createSession(token, undefined, selectedModel || undefined);
@@ -654,7 +645,7 @@
             <article class={msg.role}>
               <div class="role">{msg.role}</div>
               {#if msg.role === "assistant"}
-                <div class="body">{@html renderMarkdown(msg.content)}</div>
+                <div class="body md">{@html renderMarkdown(msg.content)}</div>
               {:else}
                 <div class="body">{msg.content}</div>
               {/if}
@@ -1139,10 +1130,106 @@
     color: #94a3b8;
     margin-bottom: 0.25rem;
   }
+  .body {
+    line-height: 1.55;
+    overflow-wrap: anywhere;
+  }
+  .body.md :global(p) {
+    margin: 0.4rem 0;
+  }
+  .body.md :global(p:first-child) {
+    margin-top: 0;
+  }
+  .body.md :global(p:last-child) {
+    margin-bottom: 0;
+  }
+  .body.md :global(h1),
+  .body.md :global(h2),
+  .body.md :global(h3),
+  .body.md :global(h4) {
+    margin: 0.85rem 0 0.4rem;
+    line-height: 1.3;
+    font-weight: 650;
+    color: #f8fafc;
+  }
+  .body.md :global(h1) {
+    font-size: 1.25rem;
+  }
+  .body.md :global(h2) {
+    font-size: 1.1rem;
+  }
+  .body.md :global(h3),
+  .body.md :global(h4) {
+    font-size: 1rem;
+  }
+  .body.md :global(ul),
+  .body.md :global(ol) {
+    margin: 0.4rem 0;
+    padding-left: 1.35rem;
+  }
+  .body.md :global(li) {
+    margin: 0.2rem 0;
+  }
+  .body.md :global(li > ul),
+  .body.md :global(li > ol) {
+    margin: 0.15rem 0;
+  }
+  .body.md :global(blockquote) {
+    margin: 0.5rem 0;
+    padding: 0.25rem 0.75rem;
+    border-left: 3px solid #64748b;
+    color: #cbd5e1;
+  }
+  .body.md :global(hr) {
+    border: 0;
+    border-top: 1px solid #475569;
+    margin: 0.75rem 0;
+  }
+  .body.md :global(a) {
+    color: #7dd3fc;
+  }
+  .body.md :global(table) {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    border-collapse: collapse;
+    margin: 0.6rem 0;
+    font-size: 0.9rem;
+  }
+  .body.md :global(th),
+  .body.md :global(td) {
+    border: 1px solid #475569;
+    padding: 0.35rem 0.55rem;
+    text-align: left;
+    vertical-align: top;
+  }
+  .body.md :global(th) {
+    background: #1e293b;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .body.md :global(tr:nth-child(even) td) {
+    background: rgba(15, 23, 42, 0.35);
+  }
+  .body.md :global(pre) {
+    margin: 0.5rem 0;
+    padding: 0.65rem 0.75rem;
+    overflow-x: auto;
+    background: #0f172a;
+    border-radius: 6px;
+    font-size: 0.85rem;
+  }
+  .body.md :global(pre code) {
+    background: transparent;
+    padding: 0;
+    border-radius: 0;
+  }
   .body :global(code) {
     background: #0f172a;
     padding: 0.1rem 0.3rem;
     border-radius: 4px;
+    font-size: 0.9em;
   }
   footer {
     display: flex;

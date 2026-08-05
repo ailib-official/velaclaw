@@ -18,8 +18,9 @@ pub fn run_dag_emit(
     let candidate_text = fs::read_to_string(candidate)
         .with_context(|| format!("read candidate {}", candidate.display()))?;
     let fallback_owned = match fallback {
-        Some(p) => fs::read_to_string(p)
-            .with_context(|| format!("read fallback {}", p.display()))?,
+        Some(p) => {
+            fs::read_to_string(p).with_context(|| format!("read fallback {}", p.display()))?
+        }
         None => CODE_FIX_TEMPLATE_JSON.to_string(),
     };
 

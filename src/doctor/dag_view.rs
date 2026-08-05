@@ -24,8 +24,7 @@ pub fn run_dag_view(
 ) -> Result<()> {
     let raw = fs::read_to_string(fixture)
         .with_context(|| format!("read DAG fixture {}", fixture.display()))?;
-    let value: serde_json::Value =
-        serde_json::from_str(&raw).context("parse DAG JSON")?;
+    let value: serde_json::Value = serde_json::from_str(&raw).context("parse DAG JSON")?;
     let view = graph_from_value(&value);
 
     println!("🩺 VelaClaw Doctor — DAG View (ORCH-DAG-VIS-001)");
@@ -101,12 +100,7 @@ pub fn run_dag_view(
         let ok = reachable.iter().any(|c| {
             c.provider_id == provider_id
                 && c.logical_model_id.as_deref().is_some_and(|id| {
-                    id == model
-                        || id
-                            .rsplit_once('/')
-                            .map(|(_, m)| m)
-                            .unwrap_or(id)
-                            == model
+                    id == model || id.rsplit_once('/').map(|(_, m)| m).unwrap_or(id) == model
                 })
         });
         if !ok {

@@ -44,8 +44,7 @@ pub fn try_host_decide_model(
         return Ok(None);
     }
 
-    let optimize =
-        OptimizeGoal::parse(host.optimize.as_str()).unwrap_or(OptimizeGoal::Cost);
+    let optimize = OptimizeGoal::parse(host.optimize.as_str()).unwrap_or(OptimizeGoal::Cost);
 
     let (index, _) = load_or_rebuild_for_config(&host.config_dir, false)?;
 
@@ -92,8 +91,5 @@ pub fn try_host_decide_model(
         "host decide selected model"
     );
 
-    Ok(Some(format!(
-        "{}/{}",
-        decision.provider_id, decision.model
-    )))
+    Ok(Some(format!("{}/{}", decision.provider_id, decision.model)))
 }

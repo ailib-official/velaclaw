@@ -41,8 +41,8 @@ pub fn emit_or_fallback(
     fallback_template_json: &str,
     options: &CandidateRunOptions,
 ) -> Result<CandidateRunReport> {
-    let json = extract_json_object(candidate_text)
-        .unwrap_or_else(|| candidate_text.trim().to_string());
+    let json =
+        extract_json_object(candidate_text).unwrap_or_else(|| candidate_text.trim().to_string());
     run_candidate_or_fallback(&json, fallback_template_json, options)
 }
 

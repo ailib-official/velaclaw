@@ -77,8 +77,7 @@ pub fn decide_among_reachable(
             let rest: Vec<String> = reachable
                 .iter()
                 .filter(|c| {
-                    !(c.provider_id == hit.provider_id
-                        && model_id_of(c) == model_id_of(hit))
+                    !(c.provider_id == hit.provider_id && model_id_of(c) == model_id_of(hit))
                 })
                 .map(|c| c.provider_id.clone())
                 .collect();
@@ -95,9 +94,7 @@ pub fn decide_among_reachable(
     }
 
     let mut ranked: Vec<&CapabilityCandidate> = reachable.to_vec();
-    ranked.sort_by(|a, b| {
-        (&a.provider_id, model_id_of(a)).cmp(&(&b.provider_id, model_id_of(b)))
-    });
+    ranked.sort_by(|a, b| (&a.provider_id, model_id_of(a)).cmp(&(&b.provider_id, model_id_of(b))));
 
     // Latency / balanced currently share stable order until pricing health lands;
     // reason string still reflects the requested optimize goal for observability.
@@ -127,12 +124,7 @@ pub fn decide_among_reachable(
 
 fn model_id_of(c: &CapabilityCandidate) -> Option<&str> {
     let logical = c.logical_model_id.as_deref()?;
-    Some(
-        logical
-            .rsplit_once('/')
-            .map(|(_, m)| m)
-            .unwrap_or(logical),
-    )
+    Some(logical.rsplit_once('/').map(|(_, m)| m).unwrap_or(logical))
 }
 
 /// Prefer logical model id bare segment; if missing, return None (skip).

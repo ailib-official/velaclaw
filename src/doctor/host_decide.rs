@@ -32,10 +32,7 @@ pub fn run_host_decide(
     }
 
     println!("🩺 VelaClaw Doctor — Host Decide (ORCH-HOST-001)");
-    println!(
-        "  flag host_decide:           {}",
-        config.agent.host_decide
-    );
+    println!("  flag host_decide:           {}", config.agent.host_decide);
     println!("  optimize:                  {}", host.optimize);
     println!("  observe force-on:          {force}");
     println!("  session_key:               {session_key}");
@@ -65,8 +62,7 @@ pub fn run_host_decide(
         return Ok(());
     }
 
-    let optimize =
-        OptimizeGoal::parse(host.optimize.as_str()).unwrap_or(OptimizeGoal::Cost);
+    let optimize = OptimizeGoal::parse(host.optimize.as_str()).unwrap_or(OptimizeGoal::Cost);
     let (index, _) = load_or_rebuild_for_config(&host.config_dir, false)?;
 
     let declared = if let Some(t) = tag {
@@ -105,10 +101,7 @@ pub fn run_host_decide(
     let decidable = decidable_reachable(&reachable);
     let ov = session_override::get_override(session_key);
     if let Some(ref o) = ov {
-        println!(
-            "  active override:           {}/{}",
-            o.provider_id, o.model
-        );
+        println!("  active override:           {}/{}", o.provider_id, o.model);
     }
 
     match decide_among_reachable(&decidable, optimize, ov.as_ref()) {
@@ -118,10 +111,7 @@ pub fn run_host_decide(
             println!("  model:        {}", d.model);
             println!("  provider_id:  {}", d.provider_id);
             println!("  reason:       {}", d.reason);
-            println!(
-                "  est_cost/1k:  {}",
-                d.estimated_cost_per_1k_prompt_usd
-            );
+            println!("  est_cost/1k:  {}", d.estimated_cost_per_1k_prompt_usd);
             println!("  fallback:     {:?}", d.fallback_chain);
             println!("  disclaimer:   {}", d.disclaimer);
             Ok(())

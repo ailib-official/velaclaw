@@ -754,6 +754,48 @@ fn self_adjust_prompt_fields(config: &Config) -> (Vec<String>, Vec<String>) {
 // interactive REPL mode. The interactive loop manages history compaction
 // and hard trimming to keep the context window bounded.
 
+/// Shared turn-model ladder for CLI (same as Web `Agent::turn`).
+#[cfg(feature = "ai-protocol")]
+fn resolve_cli_turn_model(
+    config: &Config,
+    user_message: &str,
+    session_key: &str,
+    default_model: &str,
+    explicit_model: Option<&str>,
+    available_hints: &[String],
+) -> Result<String> {
+    let host_decide = crate::orchestration::HostDecideHost::from_config(config);
+    let intent_route = crate::agent::intent_route::IntentRouteHost::from_config(config);
+    let req = crate::orchestration::TurnModelRequest {
+        user_message,
+        session_key,
+        default_model,
+        explicit_model,
+        host_decide: Some(&host_decide),
+        intent_route: Some(&intent_route),
+        classification: &config.query_classification,
+        available_hints,
+    };
+    Ok(crate::orchestration::resolve_turn_model(&req)?.model)
+}
+
+#[cfg(not(feature = "ai-protocol"))]
+fn resolve_cli_turn_model(
+    config: &Config,
+    user_message: &str,
+    _session_key: &str,
+    default_model: &str,
+    _explicit_model: Option<&str>,
+    available_hints: &[String],
+) -> Result<String> {
+    Ok(crate::agent::classifier::resolve_model_for_message(
+        &config.query_classification,
+        available_hints,
+        default_model,
+        user_message,
+    ))
+}
+
 #[allow(clippy::too_many_lines)]
 pub async fn run(
     mut config: Config,
@@ -768,6 +810,12 @@ pub async fn run(
 ) -> Result<String> {
     // CLI `-p/--model` must win over config for both protocol and legacy paths.
     // (Previously the ai-protocol branch discarded these and always used config.)
+    let cli_explicit_flags = provider_override
+        .as_ref()
+        .is_some_and(|s| !s.trim().is_empty())
+        || model_override
+            .as_ref()
+            .is_some_and(|s| !s.trim().is_empty());
     if let Some(provider) = provider_override {
         let provider = provider.trim();
         if !provider.is_empty() {
@@ -1163,12 +1211,18 @@ pub async fn run(
         )
         .await?;
 
-        let turn_model = crate::agent::classifier::resolve_model_for_message(
-            &config.query_classification,
-            &available_hints,
-            &model_name,
+        let turn_model = resolve_cli_turn_model(
+            &config,
             &msg,
-        );
+            session_id.as_str(),
+            &model_name,
+            if cli_explicit_flags {
+                Some(model_name.as_str())
+            } else {
+                None
+            },
+            &available_hints,
+        )?;
 
         let response = run_tool_call_loop(
             provider.as_ref(),
@@ -1208,6 +1262,7 @@ pub async fn run(
         let session_provider = provider_name.to_string();
         // VL-MEM-001: default new session unless user later resumes (no resume UI yet).
         let mut session_id = memory::new_session_id();
+        let mut session_explicit = cli_explicit_flags;
 
         loop {
             print!("{}", format_user_prompt(render_opts.style));
@@ -1331,6 +1386,7 @@ pub async fn run(
                 println!("{response}\n");
                 if let Some(model) = new_model {
                     session_model = model;
+                    session_explicit = true;
                 }
                 continue;
             }
@@ -1379,12 +1435,18 @@ pub async fn run(
             )
             .await?;
 
-            let turn_model = crate::agent::classifier::resolve_model_for_message(
-                &config.query_classification,
-                &available_hints,
-                &session_model,
+            let turn_model = resolve_cli_turn_model(
+                &config,
                 &user_input,
-            );
+                session_id.as_str(),
+                &session_model,
+                if session_explicit {
+                    Some(session_model.as_str())
+                } else {
+                    None
+                },
+                &available_hints,
+            )?;
 
             let response = match run_tool_call_loop(
                 provider.as_ref(),

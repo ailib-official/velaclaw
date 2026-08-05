@@ -36,6 +36,12 @@ pub struct ChatApiResponse {
     pub usage: Option<ChatUsage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cost: Option<f64>,
+    /// Effective turn model after `resolve_turn_model` (observe / UX honesty).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selected_model: Option<String>,
+    /// Selection reason (`explicit_user_pick`, `host_decide:…`, …).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_selection_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -85,6 +91,10 @@ pub enum WsServerMessage {
         usage: Option<ChatUsage>,
         #[serde(skip_serializing_if = "Option::is_none")]
         cost: Option<f64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        selected_model: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        model_selection_reason: Option<String>,
     },
     Error {
         message: String,
@@ -127,6 +137,8 @@ mod tests {
                 output_tokens: 2,
             }),
             cost: Some(0.001),
+            selected_model: Some("deepseek/deepseek-v4-flash".into()),
+            model_selection_reason: Some("explicit_user_pick".into()),
         };
         let json = serde_json::to_string(&msg).expect("serialize");
         assert!(json.contains(r#""type":"done""#));

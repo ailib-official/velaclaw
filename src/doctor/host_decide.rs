@@ -38,6 +38,9 @@ pub fn run_host_decide(
     println!("  session_key:               {session_key}");
     println!("  config_dir:                {}", host.config_dir.display());
     println!();
+    println!("  Live ladder (CLI + Web): explicit pick → host_decide → intent_capability_route → default");
+    println!("  Channels still use route.model (not this ladder).");
+    println!();
 
     if clear_override {
         session_override::set_override(session_key, None);

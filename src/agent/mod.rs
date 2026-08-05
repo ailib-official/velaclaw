@@ -1,4 +1,10 @@
 //! 代理引擎模块，实现自主循环、分类与任务分发。
+//!
+//! ## Turn unification (ORCH cleanup)
+//! - **Shared:** [`crate::orchestration::resolve_turn_model`] (CLI `loop_` + Web
+//!   [`agent::Agent::turn`]), optional [`envelope_pilot`], L2 tool_dispatcher merge.
+//! - **Still dual:** tool-iteration body (`loop_::run_tool_call_loop` vs `Agent::turn`
+//!   inline loop) and approval backends (stdin vs ApprovalHub). Do not add a third path.
 #[allow(clippy::module_inception)]
 pub mod agent;
 #[cfg(feature = "ai-protocol")]

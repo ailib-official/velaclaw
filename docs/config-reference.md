@@ -63,6 +63,26 @@ Operational note for container users:
 
 ## `[agent]`
 
+### Turn-model wiring matrix
+
+Same `[agent]` keys must not silently mean different things on different shells. Turn model resolution for **CLI** (`velaclaw agent`) and **Web** (`Agent::turn` via `/chat`, `/api/chat`, `/ws`) shares one ladder (`orchestration::resolve_turn_model`):
+
+1. **Explicit user pick** — CLI `-p` / `--model`, Web `model_id`, or process session override (must be CAP-reachable when the index is available; otherwise fail closed)
+2. **`host_decide`** (if enabled) — CAP reachable ∩ embedded CostRouter-shaped pricing
+3. **`intent_capability_route`** (if enabled) — Tag/Hint → CAP reachable ∩ `[[model_routes]]`
+4. **`query_classification`** / configured **`default_model`**
+
+| Surface | Uses `resolve_turn_model` | Notes |
+|---|---|---|
+| CLI `velaclaw agent` | Yes | `-p/--model` counts as explicit |
+| Web Local Control / `/chat` | Yes | Picker `model_id` counts as explicit (beats `host_decide`) |
+| Channels (Telegram/Discord/…) | No | Use channel `route.model` only (documented; not ORCH parity yet) |
+| Doctor observe | Independent | `--force` bypasses live flags |
+
+**Shared pre-turn (CLI + Web):** `resolve_turn_model`, optional `envelope_assemble*`, and L2 `agent-policy.yaml` tool_dispatcher merge. **Still dual:** the tool-call iteration body (`run_tool_call_loop` vs `Agent::turn` inline loop) and approval backends (stdin vs ApprovalHub) remain separate; further merge is a follow-up.
+
+DAG-related keys below are **library / doctor** surfaces. Enabling them does **not** change live chat behavior (AI-DAG remains frozen off the default turn path).
+
 | Key | Default | Purpose |
 |---|---|---|
 | `compact_context` | `false` | When true: `bootstrap_max_chars=6000`, `rag_chunk_limit=2`, and system-prompt budget capped at ~24k chars (pyramid truncation drops ambient sections first). When false, budget still scales from ai-protocol `context_window` when available (~15% of context, clamped 4k–48k chars). Use for smaller context windows |
@@ -70,17 +90,17 @@ Operational note for container users:
 | `max_history_messages` | `50` | Maximum conversation history messages retained per session |
 | `parallel_tools` | `false` | Enable parallel tool execution within a single iteration |
 | `tool_dispatcher` | `auto` | Tool dispatch strategy |
-| `envelope_assemble` | `false` | **CR-L1/L2 pilot (opt-in):** run ai-lib `assemble_layered` before each turn on `velaclaw agent` **and** channel dispatch (`channels/dispatch`). HardBudgetViolation fails the turn explicitly (channels reply with an error and drop the pending user turn). Requires `--features ai-protocol`. Default remains off. |
+| `envelope_assemble` | `false` | **CR-L1/L2 pilot (opt-in):** run ai-lib `assemble_layered` before each turn on `velaclaw agent`, Web `Agent::turn`, **and** channel dispatch (`channels/dispatch`). HardBudgetViolation fails the turn explicitly (channels reply with an error and drop the pending user turn). Requires `--features ai-protocol`. Default remains off. |
 | `envelope_assemble_async` | `false` | **CR-L3-003 (opt-in):** when `envelope_assemble` is true, schedule assemble via ai-lib `AssemblePool` / `assemble_layered_async` (bounded concurrency + timeout; fail-closed on QueueFull/Timeout/HardBudget). Default remains **off** (sync path). Does **not** promote Experimental Envelope/Tag to a stable Facade. Requires `--features ai-protocol`. |
-| `template_dag` | `false` | **CR-L2 shell (opt-in):** enables template DAG runner APIs (`agent::dag_runner`) that walk handwritten DAGs and assemble Envelope per node. Fail-closed on max_steps / HardBudget. No LLM DAG generation. Requires `--features ai-protocol`. Operators can validate fixtures without enabling this flag via `velaclaw doctor template-dag --fixture <path>` (see [commands-reference.md](commands-reference.md)). Doctor / template shell keep **sync** assemble (same algorithm); async schedule applies to live Envelope pilot paths above. |
-| `candidate_dag_shadow` | `false` | **CR-L4-003 (opt-in shadow):** when true, host helpers may call `agent::candidate_dag::maybe_run_candidate_shadow` (validate candidate → L2 fallback). Default remains **off**. Does **not** turn on AI-DAG in the live agent chat loop. Operators can observe without enabling this flag via `velaclaw doctor candidate-dag --candidate <path>`. Requires `--features ai-protocol`. |
-| `candidate_dag_stagnation_limit` | `0` | **CR-L4-003:** optional consecutive assemble-output hash limit for shadow runs (`0` = off). |
-| `intent_capability_route` | `false` | **CR-CAP-005 (opt-in; CAP-003 wire):** when true, resolve turn models via Tag/Hint → host capability index → **reachable (local keys)** ∩ `[[model_routes]]`. Serde alias: `capability_index_route`. Empty reachable sets **fail closed**. Prefer explicit Tag (`doctor capability-route --tag …`) over NL classification. Default **off**. Observe pipeline (CR-CAP-007): `doctor capabilities` → `doctor capability-route --tag <Tag> --force` → `doctor routing`. Requires `--features ai-protocol`. |
-| `host_decide` | `false` | **ORCH-HOST-001/002 (opt-in):** when true, select turn model via CAP reachable ∩ host Decide (embedded pricing table mirroring CostRouter; stub if unavailable). Default **off**. Optimize via `host_decide_optimize`. Observe: `velaclaw doctor host-decide --force` (prints `used_cost_router`). Requires `--features ai-protocol`. |
+| `template_dag` | `false` | **Reserved / unused live gate.** CR-L2 `agent::dag_runner` APIs exist for library + doctor; this bool is **not read** by CLI/Web/channel turns. Observe with `velaclaw doctor template-dag --fixture <path>`. No LLM DAG generation. Requires `--features ai-protocol`. |
+| `candidate_dag_shadow` | `false` | **Library/doctor gate (CR-L4-003).** When true, `maybe_run_candidate_shadow` may run for callers that invoke it. **Not wired** into live chat. Observe anytime via `velaclaw doctor candidate-dag`. Requires `--features ai-protocol`. |
+| `candidate_dag_stagnation_limit` | `0` | **CR-L4-003:** optional consecutive assemble-output hash limit for shadow library runs (`0` = off). |
+| `intent_capability_route` | `false` | **CR-CAP-005 (opt-in; CAP-003 wire):** live on CLI + Web via `resolve_turn_model` (after explicit pick / `host_decide`). Tag/Hint → host capability index → **reachable (local keys)** ∩ `[[model_routes]]`. Serde alias: `capability_index_route`. Empty reachable sets **fail closed**. Channels remain route-table only. Observe: `doctor capabilities` → `doctor capability-route --tag <Tag> --force`. Requires `--features ai-protocol`. |
+| `host_decide` | `false` | **ORCH-HOST-001/002 (opt-in):** live on CLI + Web via `resolve_turn_model`. CAP reachable ∩ host Decide (embedded pricing; stub if unavailable). **Explicit user picks beat Decide.** Optimize via `host_decide_optimize`. Observe: `velaclaw doctor host-decide --force` (prints `used_cost_router`). Requires `--features ai-protocol`. |
 | `host_decide_optimize` | `cost` | Optimize goal used when `host_decide` is enabled. |
-| `candidate_dag_emit` | `false` | **ORCH-DAG-EMIT-001/002 (opt-in):** when true, host helpers may call schema-strict candidate emit / **LLM plan→emit** (`orchestration::dag_emit::plan_emit_or_fallback`). Default **off**. Does **not** turn on AI-DAG in the live agent chat loop. Observe: `velaclaw doctor dag-emit` / `velaclaw doctor dag-plan --force`. Requires `--features ai-protocol`. |
+| `candidate_dag_emit` | `false` | **Library/doctor gate (ORCH-DAG-EMIT-001/002).** Schema-strict / LLM plan→emit helpers. **Not wired** into live chat. Observe: `velaclaw doctor dag-emit` / `velaclaw doctor dag-plan --force`. Requires `--features ai-protocol`. |
 
-Host-local capability discovery (CR-CAP-002/004, no config key): `velaclaw doctor capabilities [--tag <Tag>] [--rebuild] [--reachable-only]` builds a Tag→candidates **fact** cache at `<config_dir>/capability-index.json` from `$AI_PROTOCOL_DIR`, then applies a **query-time** reachable filter (local API keys / keyless providers — never stores secrets in the cache). This is **not** written into public ai-protocol manifests. Live selection uses the same reachable view when `[agent].intent_capability_route` is enabled (CR-CAP-005). Operator narrative: **capability-index routing** (not intent-product); CAP-003 remains trial wire.
+Host-local capability discovery (CR-CAP-002/004, no config key): `velaclaw doctor capabilities [--tag <Tag>] [--rebuild] [--reachable-only]` builds a Tag→candidates **fact** cache at `<config_dir>/capability-index.json` from `$AI_PROTOCOL_DIR`, then applies a **query-time** reachable filter (local API keys / keyless providers — never stores secrets in the cache). This is **not** written into public ai-protocol manifests. Live selection uses the same reachable view when `[agent].host_decide` or `[agent].intent_capability_route` is enabled. Operator narrative: **capability-index routing** (not intent-product); CAP-003 remains trial wire.
 
 `tool_dispatcher` values:
 
@@ -168,7 +188,7 @@ Notes:
 - Setting `max_tool_iterations = 0` falls back to safe default `10`.
 - If a channel message exceeds this value, the runtime returns: `Agent exceeded maximum tool iterations (<value>)`.
 - In CLI, gateway, and channel tool loops, multiple independent tool calls are executed concurrently by default when the pending calls do not require approval gating; result order remains stable.
-- `parallel_tools` applies to the `Agent::turn()` API surface. It does not gate the runtime loop used by CLI, gateway, or channel handlers.
+- `parallel_tools` applies to the `Agent::turn()` API surface (Web Local Control). CLI and channel handlers use their own concurrent batching when calls do not require approval gating.
 
 ## `[agents.<name>]`
 

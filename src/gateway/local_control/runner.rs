@@ -69,6 +69,19 @@ pub fn extract_last_user_message(messages: &[ChatMessageInput]) -> Result<String
     ))
 }
 
+/// Extract explicit Web picker model id (`provider/model` only).
+pub fn explicit_model_from_request(req: &ChatApiRequest) -> Option<String> {
+    req.model_id.as_ref().and_then(|raw| {
+        let trimmed = raw.trim();
+        if trimmed.contains('/') {
+            let (logical_id, _) = resolve_chat_model_override(trimmed);
+            Some(logical_id)
+        } else {
+            None
+        }
+    })
+}
+
 /// Run a single agent turn via `Agent::from_config` + `turn` (full tool loop).
 pub async fn run_agent_chat(
     config: &Config,
@@ -77,9 +90,20 @@ pub async fn run_agent_chat(
     human_input_hub: Option<&Arc<crate::approval::HumanInputHub>>,
 ) -> Result<ChatApiResponse> {
     let user_message = extract_last_user_message(&req.messages)?;
+    let explicit_model = explicit_model_from_request(req);
+    // Still apply overrides for provider bootstrap when picker is set.
     let effective_config = apply_chat_overrides(config.clone(), req);
 
     let mut agent = Agent::from_config(&effective_config).context("failed to build agent")?;
+    if let Some(sid) = req
+        .session_id
+        .as_ref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
+        agent.set_session_id(sid.to_string());
+    }
+    agent.set_explicit_model(explicit_model);
     if let Some(hub) = approval_hub {
         agent
             .enable_gateway_approval(Arc::clone(hub), &effective_config)
@@ -95,11 +119,21 @@ pub async fn run_agent_chat(
         .await
         .context("agent turn failed")?;
 
+    #[cfg(feature = "ai-protocol")]
+    let (selected_model, model_selection_reason) = match agent.last_turn_model() {
+        Some(d) => (Some(d.model.clone()), Some(d.reason.clone())),
+        None => (None, None),
+    };
+    #[cfg(not(feature = "ai-protocol"))]
+    let (selected_model, model_selection_reason) = (None, None);
+
     Ok(ChatApiResponse {
         id: format!("chat_{}", Uuid::new_v4()),
         content,
         usage: None,
         cost: None,
+        selected_model,
+        model_selection_reason,
     })
 }
 

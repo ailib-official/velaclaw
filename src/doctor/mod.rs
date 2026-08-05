@@ -5,6 +5,12 @@ mod cap_pipeline;
 #[cfg(feature = "ai-protocol")]
 mod capabilities;
 #[cfg(feature = "ai-protocol")]
+mod dag_emit;
+#[cfg(feature = "ai-protocol")]
+mod dag_view;
+#[cfg(feature = "ai-protocol")]
+mod host_decide;
+#[cfg(feature = "ai-protocol")]
 mod intent_route;
 mod l4_shadow_summary;
 mod maintenance;
@@ -21,6 +27,12 @@ pub use candidate_dag::run_candidate_dag_fixture;
 #[cfg(feature = "ai-protocol")]
 pub use capabilities::run_capabilities;
 use chrono::{DateTime, Utc};
+#[cfg(feature = "ai-protocol")]
+pub use dag_emit::run_dag_emit;
+#[cfg(feature = "ai-protocol")]
+pub use dag_view::run_dag_view;
+#[cfg(feature = "ai-protocol")]
+pub use host_decide::run_host_decide;
 #[cfg(feature = "ai-protocol")]
 pub use intent_route::run_intent_route;
 pub use l4_shadow_summary::run_l4_shadow_summary;

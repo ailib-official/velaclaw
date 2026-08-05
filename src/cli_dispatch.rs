@@ -352,6 +352,94 @@ pub async fn dispatch_configured_command(command: Commands, config: Config) -> R
                     )
                 }
             }
+            Some(DoctorCommands::HostDecide {
+                message,
+                tag,
+                force,
+                set_override,
+                clear_override,
+                session_key,
+            }) => {
+                #[cfg(feature = "ai-protocol")]
+                {
+                    doctor::run_host_decide(
+                        &config,
+                        &message,
+                        tag.as_deref(),
+                        force,
+                        set_override.as_deref(),
+                        clear_override,
+                        &session_key,
+                    )
+                }
+                #[cfg(not(feature = "ai-protocol"))]
+                {
+                    let _ = (
+                        config,
+                        message,
+                        tag,
+                        force,
+                        set_override,
+                        clear_override,
+                        session_key,
+                    );
+                    anyhow::bail!(
+                        "`velaclaw doctor host-decide` requires the `ai-protocol` Cargo feature"
+                    )
+                }
+            }
+            Some(DoctorCommands::DagView {
+                fixture,
+                tag,
+                set_override,
+                session_key,
+            }) => {
+                #[cfg(feature = "ai-protocol")]
+                {
+                    let path = std::path::PathBuf::from(fixture);
+                    doctor::run_dag_view(
+                        &config,
+                        &path,
+                        tag.as_deref(),
+                        set_override.as_deref(),
+                        &session_key,
+                    )
+                }
+                #[cfg(not(feature = "ai-protocol"))]
+                {
+                    let _ = (config, fixture, tag, set_override, session_key);
+                    anyhow::bail!(
+                        "`velaclaw doctor dag-view` requires the `ai-protocol` Cargo feature"
+                    )
+                }
+            }
+            Some(DoctorCommands::DagEmit {
+                candidate,
+                fallback,
+                message,
+                compact,
+                stagnation_limit,
+            }) => {
+                #[cfg(feature = "ai-protocol")]
+                {
+                    let candidate_path = std::path::PathBuf::from(candidate);
+                    let fallback_path = fallback.map(std::path::PathBuf::from);
+                    doctor::run_dag_emit(
+                        &candidate_path,
+                        fallback_path.as_deref(),
+                        &message,
+                        compact,
+                        stagnation_limit,
+                    )
+                }
+                #[cfg(not(feature = "ai-protocol"))]
+                {
+                    let _ = (candidate, fallback, message, compact, stagnation_limit);
+                    anyhow::bail!(
+                        "`velaclaw doctor dag-emit` requires the `ai-protocol` Cargo feature"
+                    )
+                }
+            }
             None => doctor::run(&config),
         },
 

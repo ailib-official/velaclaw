@@ -55,6 +55,9 @@ pub struct Agent {
     /// CR-CAP-003: opt-in intent→Tag→index route host context (default-off).
     #[cfg(feature = "ai-protocol")]
     intent_route_host: Option<crate::agent::intent_route::IntentRouteHost>,
+    /// ORCH-HOST-001: opt-in host Decide context (default-off).
+    #[cfg(feature = "ai-protocol")]
+    host_decide_host: Option<crate::orchestration::HostDecideHost>,
 }
 
 pub struct AgentBuilder {
@@ -81,6 +84,8 @@ pub struct AgentBuilder {
     human_input_attach: Option<HumanInputAttach>,
     #[cfg(feature = "ai-protocol")]
     intent_route_host: Option<crate::agent::intent_route::IntentRouteHost>,
+    #[cfg(feature = "ai-protocol")]
+    host_decide_host: Option<crate::orchestration::HostDecideHost>,
 }
 
 impl AgentBuilder {
@@ -109,6 +114,8 @@ impl AgentBuilder {
             human_input_attach: None,
             #[cfg(feature = "ai-protocol")]
             intent_route_host: None,
+            #[cfg(feature = "ai-protocol")]
+            host_decide_host: None,
         }
     }
 
@@ -228,6 +235,15 @@ impl AgentBuilder {
         self
     }
 
+    #[cfg(feature = "ai-protocol")]
+    pub fn host_decide_host(
+        mut self,
+        host_decide_host: Option<crate::orchestration::HostDecideHost>,
+    ) -> Self {
+        self.host_decide_host = host_decide_host;
+        self
+    }
+
     pub fn build(self) -> Result<Agent> {
         let tools = self
             .tools
@@ -284,6 +300,8 @@ impl AgentBuilder {
             cli_render: None,
             #[cfg(feature = "ai-protocol")]
             intent_route_host: self.intent_route_host,
+            #[cfg(feature = "ai-protocol")]
+            host_decide_host: self.host_decide_host,
         })
     }
 }
@@ -451,6 +469,11 @@ impl Agent {
             crate::agent::intent_route::IntentRouteHost::from_config(config),
         ));
 
+        #[cfg(feature = "ai-protocol")]
+        let builder = builder.host_decide_host(Some(
+            crate::orchestration::HostDecideHost::from_config(config),
+        ));
+
         builder.build()
     }
 
@@ -614,6 +637,17 @@ impl Agent {
     }
 
     fn classify_model(&self, user_message: &str) -> Result<String> {
+        #[cfg(feature = "ai-protocol")]
+        if let Some(host) = &self.host_decide_host {
+            if let Some(selected) = crate::orchestration::try_host_decide_model(
+                host,
+                user_message,
+                self.session_id.as_str(),
+            )? {
+                return Ok(selected);
+            }
+        }
+
         #[cfg(feature = "ai-protocol")]
         if let Some(host) = &self.intent_route_host {
             if host.enabled {

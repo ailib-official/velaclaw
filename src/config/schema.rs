@@ -405,6 +405,21 @@ pub struct AgentConfig {
     /// Prefer explicit Tag/Hint over NL classification. Requires `--features ai-protocol`.
     #[serde(default, alias = "capability_index_route")]
     pub intent_capability_route: bool,
+    /// ORCH-HOST-001: opt-in host Decide over CAP reachable set (BYOK embed).
+    /// Default: `false`. When false, explicit configured model path is unchanged.
+    #[serde(default)]
+    pub host_decide: bool,
+    /// Optimize goal when `host_decide` is true: `cost` | `latency` | `balanced`.
+    #[serde(default = "default_host_decide_optimize")]
+    pub host_decide_optimize: String,
+    /// ORCH-DAG-EMIT-001: opt-in schema-strict candidate DAG emit (default-off).
+    /// Does **not** default-on AI-DAG in the live chat loop.
+    #[serde(default)]
+    pub candidate_dag_emit: bool,
+}
+
+fn default_host_decide_optimize() -> String {
+    "cost".into()
 }
 
 fn default_agent_max_tool_iterations() -> usize {
@@ -433,6 +448,9 @@ impl Default for AgentConfig {
             candidate_dag_shadow: false,
             candidate_dag_stagnation_limit: 0,
             intent_capability_route: false,
+            host_decide: false,
+            host_decide_optimize: default_host_decide_optimize(),
+            candidate_dag_emit: false,
         }
     }
 }

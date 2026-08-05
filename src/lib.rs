@@ -72,6 +72,8 @@ pub mod migration;
 pub mod multimodal;
 pub mod observability;
 pub mod onboard;
+#[cfg(feature = "ai-protocol")]
+pub mod orchestration;
 pub mod peripherals;
 #[cfg(feature = "ai-protocol")]
 pub mod protocol_registry;

@@ -648,6 +648,72 @@ enum DoctorCommands {
 
     /// VL-DR-001: explain provider_mode + BYOK effective model (no LLM; no secrets)
     Routing,
+
+    /// ORCH-HOST-001: CAP reachable ∩ host Decide (observe; no LLM)
+    HostDecide {
+        /// User message used only for Tag preference heuristics
+        #[arg(long, default_value = "doctor host-decide probe")]
+        message: String,
+
+        /// Explicit Capability Tag (preferred)
+        #[arg(long)]
+        tag: Option<String>,
+
+        /// Observe with decide logic even when `[agent].host_decide` is false
+        #[arg(long, default_value_t = false)]
+        force: bool,
+
+        /// Set process-local session override `provider/model`
+        #[arg(long)]
+        set_override: Option<String>,
+
+        /// Clear process-local session override
+        #[arg(long, default_value_t = false)]
+        clear_override: bool,
+
+        /// Session key for override store (default empty = global)
+        #[arg(long, default_value = "")]
+        session_key: String,
+    },
+
+    /// ORCH-DAG-VIS-001: render DAG fixture + list CAP reachable picker options
+    DagView {
+        /// Path to L2 template or L4 candidate DAG JSON
+        #[arg(long)]
+        fixture: String,
+
+        /// Capability Tag used for picker reachable listing
+        #[arg(long)]
+        tag: Option<String>,
+
+        /// Set session override if id is in reachable set (`provider/model`)
+        #[arg(long)]
+        set_override: Option<String>,
+
+        /// Session key for override store
+        #[arg(long, default_value = "")]
+        session_key: String,
+    },
+
+    /// ORCH-DAG-EMIT-001: schema-strict candidate emit path (validate → L2; no LLM)
+    DagEmit {
+        /// Candidate DAG JSON or model-shaped text containing a JSON object
+        #[arg(long)]
+        candidate: String,
+
+        /// Optional L2 fallback template path
+        #[arg(long)]
+        fallback: Option<String>,
+
+        #[arg(long, default_value = "doctor dag-emit probe")]
+        message: String,
+
+        #[arg(long, default_value_t = false)]
+        compact: bool,
+
+        #[arg(long, default_value_t = 0)]
+        stagnation_limit: u32,
+    },
 }
 
 #[tokio::main]

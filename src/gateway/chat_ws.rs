@@ -185,6 +185,8 @@ async fn handle_ws_socket(socket: WebSocket, state: AppState) {
                 let done = WsServerMessage::Done {
                     usage: resp.usage,
                     cost: resp.cost,
+                    selected_model: resp.selected_model,
+                    model_selection_reason: resp.model_selection_reason,
                 };
                 if send_frame(socket.clone(), &done).await.is_err() {
                     return;

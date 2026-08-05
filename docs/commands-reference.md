@@ -68,17 +68,21 @@ VelaClaw composes `provider/model` (e.g. `nvidia` + `meta/llama-…` →
 `nvidia/meta/llama-…`). Full `--model nvidia/…` is unchanged. Details:
 [providers-reference.md](providers-reference.md#nvidia-nim-notes).
 
-Opt-in context Envelope pilot (CR-L1/L2): set `[agent].envelope_assemble = true` in `config.toml` (requires `--features ai-protocol`). Applies to `velaclaw agent` **and** channel message dispatch; HardBudget fails the turn (channel replies with an error). See [config-reference.md](config-reference.md).
+Opt-in context Envelope pilot (CR-L1/L2): set `[agent].envelope_assemble = true` in `config.toml` (requires `--features ai-protocol`). Applies to `velaclaw agent`, Web `Agent::turn`, **and** channel message dispatch; HardBudget fails the turn (channel replies with an error). See [config-reference.md](config-reference.md).
 
 CR-L3-003 async schedule façade (opt-in, default off): set `[agent].envelope_assemble_async = true` **in addition to** `envelope_assemble = true` to use ai-lib `AssemblePool` (same assemble algorithm; bounded concurrency / timeout; fail-closed). Sync remains the default path.
 
-Opt-in template DAG shell (CR-L2): set `[agent].template_dag = true` to use `agent::dag_runner` APIs (handwritten DAG walk + per-node Envelope assemble; no AI-generated DAGs). See [config-reference.md](config-reference.md).
+Turn model selection (CLI + Web) shares `orchestration::resolve_turn_model`: explicit user pick → `host_decide` → `intent_capability_route` → `query_classification` / `default_model`. Channels still use `route.model` only. See the wiring matrix in [config-reference.md](config-reference.md#agent).
+
+DAG flags (`template_dag`, `candidate_dag_shadow`, `candidate_dag_emit`) are **library/doctor** gates — they do **not** change live chat. Observe with doctor commands below.
+
+Opt-in template DAG shell (CR-L2 library): `agent::dag_runner` walks handwritten DAGs. The `[agent].template_dag` bool is reserved/unused on live turns. Observe with `velaclaw doctor template-dag --fixture <path>`.
 
 CR-L4-002 library: `agent::candidate_dag::{validate_candidate_dag_json, run_candidate_or_fallback}` — schema/capability fail or run abort can fall back to a handwritten L2 template; optional output-hash stagnation via `TemplateRunOptions`.
 
 CR-L4-004 structured logs (M3c/d/e): stable fields `m3c_pass`, `m3d_category`, `m3e_fallback` on events `candidate_dag_run` / `candidate_dag_fallback` / `candidate_dag_schema_fail` / `candidate_dag_shadow_run`. Logs only — no Prometheus/Grafana gate. See [l4-m3-metrics.md](l4-m3-metrics.md).
 
-CR-L4-003 shadow host (default-off): set `[agent].candidate_dag_shadow = true` to allow `maybe_run_candidate_shadow`. Live agent chat loop stays unchanged. Observe anytime with:
+CR-L4-003 shadow host (default-off library/doctor): set `[agent].candidate_dag_shadow = true` to allow `maybe_run_candidate_shadow` for callers that invoke it. Live agent chat loop stays unchanged. Observe anytime with:
 
 ```bash
 velaclaw doctor candidate-dag --candidate <path> [--fallback <path>] [--message <text>] [--compact] [--stagnation-limit N]
@@ -87,7 +91,7 @@ RUST_LOG=info velaclaw doctor candidate-dag --candidate <path> 2>shadow.log
 velaclaw doctor l4-shadow-summary --log shadow.log
 ```
 
-CR-CAP-005 capability-index route (default-off; CAP-003 wire): set `[agent].intent_capability_route = true` (alias `capability_index_route`) to resolve turn models via **explicit Tag / Hint** → host capability index → **reachable (local keys)** ∩ `[[model_routes]]`. NL `query_classification` is optional only. Empty reachable sets fail closed.
+CR-CAP-005 capability-index route (default-off; CAP-003 wire): set `[agent].intent_capability_route = true` (alias `capability_index_route`) to resolve turn models via **explicit Tag / Hint** → host capability index → **reachable (local keys)** ∩ `[[model_routes]]` on CLI + Web (after explicit pick / `host_decide`). NL `query_classification` is optional only. Empty reachable sets fail closed.
 
 **Operator pipeline (CR-CAP-007)** — same story across doctor surfaces; live chat stays off unless the flag is true:
 

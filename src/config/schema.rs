@@ -385,35 +385,39 @@ pub struct AgentConfig {
     /// Requires `--features ai-protocol`. Does not promote Experimental Envelope to stable Facade.
     #[serde(default)]
     pub envelope_assemble_async: bool,
-    /// CR-L2 template DAG shell (`agent::dag_runner`): opt-in structural runner.
-    /// Default: `false`. Requires `--features ai-protocol`. No AI-generated DAGs.
+    /// Reserved / unused live gate for CR-L2 `agent::dag_runner`.
+    /// Default: `false`. The bool is **not read** by CLI, Web, or channel turn paths.
+    /// Doctor `template-dag` observes fixtures without this flag. Prefer doctor over
+    /// expecting chat behavior. Requires `--features ai-protocol`. No AI-generated DAGs.
     #[serde(default)]
     pub template_dag: bool,
-    /// CR-L4-003: opt-in **shadow** host path for candidate DAG validate + L2 fallback.
-    /// Default: `false`. When false, [`crate::agent::candidate_dag::maybe_run_candidate_shadow`]
-    /// is a no-op. Doctor `candidate-dag` remains available for observe without enabling this flag.
-    /// Does **not** default-on AI-DAG in the live agent loop.
+    /// CR-L4-003: library/doctor gate for [`crate::agent::candidate_dag::maybe_run_candidate_shadow`].
+    /// Default: `false`. **Not wired** into live CLI/Web/channel chat. Doctor `candidate-dag`
+    /// observes without enabling this flag. Does **not** default-on AI-DAG in the live loop.
     #[serde(default)]
     pub candidate_dag_shadow: bool,
-    /// CR-L4-003: optional stagnation limit forwarded to candidate shadow runs (`0` = off).
+    /// CR-L4-003: optional stagnation limit for candidate shadow library runs (`0` = off).
+    /// Only applies when a caller invokes shadow helpers (doctor/tests); not live chat.
     #[serde(default)]
     pub candidate_dag_stagnation_limit: u32,
     /// CR-CAP-003/005: opt-in capability-index route (Tag/Hint → reachable ∩ constraints).
     /// Config key remains `intent_capability_route` (serde also accepts `capability_index_route`).
-    /// Default: `false`. When false, prior `query_classification` / `hint:` path is unchanged.
-    /// When true, empty reachable sets fail closed (no silent `default_model`).
+    /// Default: `false`. Live on CLI + Web via `resolve_turn_model` (after explicit pick /
+    /// host_decide). Channels remain route-table only. Empty reachable sets fail closed.
     /// Prefer explicit Tag/Hint over NL classification. Requires `--features ai-protocol`.
     #[serde(default, alias = "capability_index_route")]
     pub intent_capability_route: bool,
     /// ORCH-HOST-001: opt-in host Decide over CAP reachable set (BYOK embed).
-    /// Default: `false`. When false, explicit configured model path is unchanged.
+    /// Default: `false`. Live on CLI + Web via `resolve_turn_model`. Explicit user picks
+    /// (CLI `-p/--model`, Web `model_id`) win over Decide. Channels remain route-table only.
     #[serde(default)]
     pub host_decide: bool,
     /// Optimize goal when `host_decide` is true: `cost` | `latency` | `balanced`.
     #[serde(default = "default_host_decide_optimize")]
     pub host_decide_optimize: String,
-    /// ORCH-DAG-EMIT-001: opt-in schema-strict candidate DAG emit (default-off).
-    /// Does **not** default-on AI-DAG in the live chat loop.
+    /// ORCH-DAG-EMIT-001/002: library/doctor gate for schema-strict / LLM plan emit.
+    /// Default: `false`. **Not wired** into live chat. Observe: `doctor dag-emit` /
+    /// `doctor dag-plan`. Does **not** default-on AI-DAG in the live chat loop.
     #[serde(default)]
     pub candidate_dag_emit: bool,
 }

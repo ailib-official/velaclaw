@@ -13,7 +13,7 @@ use crate::providers;
 use crate::providers::{ChatMessage, ChatRequest, ConversationMessage, Provider};
 use crate::security::PolicyHandle;
 use crate::tools::{HumanInputAttach, Tool, ToolExecutionContext, ToolSpec};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use parking_lot::Mutex;
 use std::fmt::Write as _;
 use std::io::Write as IoWrite;
@@ -58,6 +58,11 @@ pub struct Agent {
     /// ORCH-HOST-001: opt-in host Decide context (default-off).
     #[cfg(feature = "ai-protocol")]
     host_decide_host: Option<crate::orchestration::HostDecideHost>,
+    /// Explicit user pick (Web `model_id` / CLI `-p/--model`); beats host_decide.
+    explicit_model: Option<String>,
+    /// Last turn's model decision (observe / UX honesty).
+    #[cfg(feature = "ai-protocol")]
+    last_turn_model: Option<crate::orchestration::TurnModelDecision>,
 }
 
 pub struct AgentBuilder {
@@ -86,6 +91,7 @@ pub struct AgentBuilder {
     intent_route_host: Option<crate::agent::intent_route::IntentRouteHost>,
     #[cfg(feature = "ai-protocol")]
     host_decide_host: Option<crate::orchestration::HostDecideHost>,
+    explicit_model: Option<String>,
 }
 
 impl AgentBuilder {
@@ -116,6 +122,7 @@ impl AgentBuilder {
             intent_route_host: None,
             #[cfg(feature = "ai-protocol")]
             host_decide_host: None,
+            explicit_model: None,
         }
     }
 
@@ -244,6 +251,11 @@ impl AgentBuilder {
         self
     }
 
+    pub fn explicit_model(mut self, explicit_model: Option<String>) -> Self {
+        self.explicit_model = explicit_model;
+        self
+    }
+
     pub fn build(self) -> Result<Agent> {
         let tools = self
             .tools
@@ -302,6 +314,9 @@ impl AgentBuilder {
             intent_route_host: self.intent_route_host,
             #[cfg(feature = "ai-protocol")]
             host_decide_host: self.host_decide_host,
+            explicit_model: self.explicit_model,
+            #[cfg(feature = "ai-protocol")]
+            last_turn_model: None,
         })
     }
 }
@@ -323,6 +338,28 @@ impl Agent {
     pub fn start_new_session(&mut self) {
         self.session_id = memory::new_session_id();
         self.history.clear();
+    }
+
+    /// Align Agent memory / host_decide session key with an external session id (Web chat).
+    pub fn set_session_id(&mut self, session_id: impl Into<String>) {
+        let id = session_id.into();
+        if !id.trim().is_empty() {
+            self.session_id = id;
+        }
+    }
+
+    pub fn session_id(&self) -> &str {
+        &self.session_id
+    }
+
+    /// Mark an explicit user model pick (Web picker / CLI flags). Beats `host_decide`.
+    pub fn set_explicit_model(&mut self, model: Option<String>) {
+        self.explicit_model = model.filter(|m| !m.trim().is_empty());
+    }
+
+    #[cfg(feature = "ai-protocol")]
+    pub fn last_turn_model(&self) -> Option<&crate::orchestration::TurnModelDecision> {
+        self.last_turn_model.as_ref()
     }
 
     /// Enable CLI Markdown rendering and `>>` speaker prefixes for this agent session.
@@ -413,19 +450,35 @@ impl Agent {
 
         let provider: Box<dyn Provider> = provider;
 
-        let dispatcher_choice = config.agent.tool_dispatcher.as_str();
         #[cfg(feature = "ai-protocol")]
-        let tool_dispatcher = crate::agent::dispatcher::build_tool_dispatcher(
-            dispatcher_choice,
-            provider.as_ref(),
-            execution.tool_calling_policy(),
-        );
+        let tool_dispatcher = {
+            let workspace_policy = crate::config::discover_and_load(config)
+                .context("load workspace agent-policy.yaml")?;
+            let workspace_dispatcher = workspace_policy.as_ref().and_then(|p| p.tool_dispatcher());
+            let effective = crate::config::EffectivePolicy::resolve(
+                config.agent.tool_dispatcher.as_str(),
+                workspace_dispatcher,
+                None,
+                execution.tool_calling_policy(),
+            );
+            effective.build_dispatcher(provider.as_ref())
+        };
         #[cfg(not(feature = "ai-protocol"))]
-        let tool_dispatcher: Box<dyn ToolDispatcher> = match dispatcher_choice {
-            "native" => Box::new(NativeToolDispatcher::default()),
-            "xml" => Box::new(XmlToolDispatcher::default()),
-            _ if provider.supports_native_tools() => Box::new(NativeToolDispatcher::default()),
-            _ => Box::new(XmlToolDispatcher::default()),
+        let tool_dispatcher: Box<dyn ToolDispatcher> = {
+            let workspace_policy = crate::config::discover_and_load(config)
+                .context("load workspace agent-policy.yaml")?;
+            let workspace_dispatcher = workspace_policy.as_ref().and_then(|p| p.tool_dispatcher());
+            let choice = crate::config::merge_tool_dispatcher(
+                config.agent.tool_dispatcher.as_str(),
+                workspace_dispatcher,
+                None,
+            );
+            match choice.as_str() {
+                "native" => Box::new(NativeToolDispatcher::default()),
+                "xml" => Box::new(XmlToolDispatcher::default()),
+                _ if provider.supports_native_tools() => Box::new(NativeToolDispatcher::default()),
+                _ => Box::new(XmlToolDispatcher::default()),
+            }
         };
 
         let available_hints: Vec<String> =
@@ -638,41 +691,53 @@ impl Agent {
 
     fn classify_model(&self, user_message: &str) -> Result<String> {
         #[cfg(feature = "ai-protocol")]
-        if let Some(host) = &self.host_decide_host {
-            if let Some(selected) = crate::orchestration::try_host_decide_model(
-                host,
+        {
+            let req = crate::orchestration::TurnModelRequest {
                 user_message,
-                self.session_id.as_str(),
-            )? {
-                return Ok(selected);
-            }
+                session_key: self.session_id.as_str(),
+                default_model: self.model_name.as_str(),
+                explicit_model: self.explicit_model.as_deref(),
+                host_decide: self.host_decide_host.as_ref(),
+                intent_route: self.intent_route_host.as_ref(),
+                classification: &self.classification_config,
+                available_hints: &self.available_hints,
+            };
+            let decision = crate::orchestration::resolve_turn_model(&req)?;
+            Ok(decision.model)
         }
+        #[cfg(not(feature = "ai-protocol"))]
+        {
+            let _ = user_message;
+            Ok(super::classifier::resolve_model_for_message(
+                &self.classification_config,
+                &self.available_hints,
+                &self.model_name,
+                user_message,
+            ))
+        }
+    }
 
+    /// Resolve turn model and remember the decision for observe/UX.
+    fn classify_model_tracked(&mut self, user_message: &str) -> Result<String> {
         #[cfg(feature = "ai-protocol")]
-        if let Some(host) = &self.intent_route_host {
-            if host.enabled {
-                let decision = crate::agent::intent_route::resolve_for_host(
-                    host,
-                    &self.classification_config,
-                    &self.available_hints,
-                    &self.model_name,
-                    user_message,
-                    None,
-                    None,
-                    false,
-                )?;
-                return decision.selected_model.ok_or_else(|| {
-                    anyhow::anyhow!("intent route returned no model: {}", decision.reason)
-                });
-            }
+        {
+            let req = crate::orchestration::TurnModelRequest {
+                user_message,
+                session_key: self.session_id.as_str(),
+                default_model: self.model_name.as_str(),
+                explicit_model: self.explicit_model.as_deref(),
+                host_decide: self.host_decide_host.as_ref(),
+                intent_route: self.intent_route_host.as_ref(),
+                classification: &self.classification_config,
+                available_hints: &self.available_hints,
+            };
+            let decision = crate::orchestration::resolve_turn_model(&req)?;
+            let model = decision.model.clone();
+            self.last_turn_model = Some(decision);
+            Ok(model)
         }
-
-        Ok(super::classifier::resolve_model_for_message(
-            &self.classification_config,
-            &self.available_hints,
-            &self.model_name,
-            user_message,
-        ))
+        #[cfg(not(feature = "ai-protocol"))]
+        self.classify_model(user_message)
     }
 
     /// Ensure the system prompt is the first history entry (for Web UI history seeding).
@@ -729,7 +794,30 @@ impl Agent {
         self.history
             .push(ConversationMessage::Chat(ChatMessage::user(enriched)));
 
-        let effective_model = self.classify_model(user_message)?;
+        #[cfg(feature = "ai-protocol")]
+        if self.config.envelope_assemble {
+            let mut chat_hist: Vec<ChatMessage> = self
+                .history
+                .iter()
+                .filter_map(|m| match m {
+                    ConversationMessage::Chat(c) => Some(c.clone()),
+                    _ => None,
+                })
+                .collect();
+            crate::agent::envelope_pilot::apply_envelope_pilot_async(
+                &mut chat_hist,
+                true,
+                self.config.compact_context,
+                self.config.envelope_assemble_async,
+            )
+            .await?;
+            self.history = chat_hist
+                .into_iter()
+                .map(ConversationMessage::Chat)
+                .collect();
+        }
+
+        let effective_model = self.classify_model_tracked(user_message)?;
 
         // VL-TTC-016: CorrectivePrompt → NativeOnlyReask → StripFailClosed.
         let mut format_ladder = velaclaw_agent_runtime::ToolFormatLadder::new();

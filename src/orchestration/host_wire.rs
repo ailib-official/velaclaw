@@ -40,6 +40,24 @@ pub fn try_host_decide_model(
     user_message: &str,
     session_key: &str,
 ) -> Result<Option<String>> {
+    Ok(try_host_decide_selection(host, user_message, session_key)?.map(|s| s.logical_id))
+}
+
+/// Observable host Decide selection (model + reason codes).
+#[derive(Debug, Clone, PartialEq)]
+pub struct HostDecideSelection {
+    pub logical_id: String,
+    pub reason: String,
+    pub used_cost_router: bool,
+    pub optimize: String,
+}
+
+/// When host Decide is enabled, return selection details or `Ok(None)`.
+pub fn try_host_decide_selection(
+    host: &HostDecideHost,
+    user_message: &str,
+    session_key: &str,
+) -> Result<Option<HostDecideSelection>> {
     if !host.enabled {
         return Ok(None);
     }
@@ -85,6 +103,8 @@ pub fn try_host_decide_model(
         return Ok(None);
     };
 
+    let logical_id = format!("{}/{}", decision.provider_id, decision.model);
+
     tracing::info!(
         target: "host_decide",
         provider = %decision.provider_id,
@@ -95,5 +115,10 @@ pub fn try_host_decide_model(
         "host decide selected model"
     );
 
-    Ok(Some(format!("{}/{}", decision.provider_id, decision.model)))
+    Ok(Some(HostDecideSelection {
+        logical_id,
+        reason: decision.reason,
+        used_cost_router: decision.used_cost_router,
+        optimize: optimize.as_str().to_string(),
+    }))
 }

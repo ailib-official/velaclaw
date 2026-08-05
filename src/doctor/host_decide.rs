@@ -104,16 +104,30 @@ pub fn run_host_decide(
         println!("  active override:           {}/{}", o.provider_id, o.model);
     }
 
-    match decide_among_reachable(&decidable, optimize, ov.as_ref()) {
+    let pricing = crate::orchestration::host_decide::load_embedded_pricing();
+    println!(
+        "  pricing_table:             {}",
+        if pricing.is_some() {
+            "embedded_example"
+        } else {
+            "(none → stub)"
+        }
+    );
+
+    match decide_among_reachable(&decidable, optimize, ov.as_ref(), pricing.as_ref()) {
         Some(d) => {
             println!();
             println!("Decision:");
-            println!("  model:        {}", d.model);
-            println!("  provider_id:  {}", d.provider_id);
-            println!("  reason:       {}", d.reason);
-            println!("  est_cost/1k:  {}", d.estimated_cost_per_1k_prompt_usd);
-            println!("  fallback:     {:?}", d.fallback_chain);
-            println!("  disclaimer:   {}", d.disclaimer);
+            println!("  model:             {}", d.model);
+            println!("  provider_id:       {}", d.provider_id);
+            println!("  reason:            {}", d.reason);
+            println!(
+                "  est_cost/1k:       {}",
+                d.estimated_cost_per_1k_prompt_usd
+            );
+            println!("  fallback:          {:?}", d.fallback_chain);
+            println!("  disclaimer:        {}", d.disclaimer);
+            println!("  used_cost_router:  {}", d.used_cost_router);
             Ok(())
         }
         None => {

@@ -15,6 +15,9 @@ pub mod session_override;
 pub mod dag_emit;
 
 #[cfg(feature = "ai-protocol")]
+mod pricing;
+
+#[cfg(feature = "ai-protocol")]
 pub mod host_wire;
 
 #[cfg(feature = "ai-protocol")]

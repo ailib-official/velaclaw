@@ -440,6 +440,44 @@ pub async fn dispatch_configured_command(command: Commands, config: Config) -> R
                     )
                 }
             }
+            Some(DoctorCommands::DagPlan {
+                message,
+                fallback,
+                force,
+                compact,
+                stagnation_limit,
+                temperature,
+            }) => {
+                #[cfg(feature = "ai-protocol")]
+                {
+                    let fallback_path = fallback.map(std::path::PathBuf::from);
+                    doctor::run_dag_plan(
+                        &config,
+                        &message,
+                        fallback_path.as_deref(),
+                        force,
+                        compact,
+                        stagnation_limit,
+                        temperature,
+                    )
+                    .await
+                }
+                #[cfg(not(feature = "ai-protocol"))]
+                {
+                    let _ = (
+                        config,
+                        message,
+                        fallback,
+                        force,
+                        compact,
+                        stagnation_limit,
+                        temperature,
+                    );
+                    anyhow::bail!(
+                        "`velaclaw doctor dag-plan` requires the `ai-protocol` Cargo feature"
+                    )
+                }
+            }
             None => doctor::run(&config),
         },
 

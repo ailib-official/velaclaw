@@ -896,16 +896,19 @@
     max-width: 1100px;
     margin: 0 auto;
     padding: 1rem;
-    min-height: 100vh;
+    height: 100%;
+    box-sizing: border-box;
     display: flex;
     flex-direction: column;
     gap: 0.75rem;
+    overflow: hidden;
   }
   header {
     display: flex;
     align-items: center;
     gap: 0.75rem;
     flex-wrap: wrap;
+    flex-shrink: 0;
   }
   h1 {
     margin: 0;
@@ -972,6 +975,7 @@
     flex-wrap: wrap;
     gap: 0.5rem;
     align-items: end;
+    flex-shrink: 0;
   }
   label {
     display: flex;
@@ -1006,13 +1010,15 @@
     grid-template-columns: 220px 1fr;
     gap: 0.75rem;
     flex: 1;
-    min-height: 400px;
+    min-height: 0;
+    overflow: hidden;
   }
   .sessions {
     background: #1e293b;
     border-radius: 8px;
     padding: 0.5rem;
     overflow-y: auto;
+    min-height: 0;
   }
   .sessions-head {
     display: flex;
@@ -1099,6 +1105,8 @@
     flex-direction: column;
     gap: 0.5rem;
     min-height: 0;
+    flex: 1;
+    overflow: hidden;
   }
   .messages {
     flex: 1;
@@ -1106,7 +1114,7 @@
     display: flex;
     flex-direction: column;
     gap: 0.75rem;
-    min-height: 300px;
+    min-height: 0;
     padding: 0.5rem;
     background: #1e293b;
     border-radius: 8px;
@@ -1235,6 +1243,7 @@
     display: flex;
     gap: 0.5rem;
     align-items: stretch;
+    flex-shrink: 0;
   }
   textarea {
     flex: 1;
@@ -1250,6 +1259,8 @@
     border-radius: 8px;
     padding: 1rem;
     flex: 1;
+    min-height: 0;
+    overflow-y: auto;
   }
   .panel-head {
     display: flex;

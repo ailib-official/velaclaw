@@ -7,6 +7,8 @@ mod capabilities;
 #[cfg(feature = "ai-protocol")]
 mod dag_emit;
 #[cfg(feature = "ai-protocol")]
+mod dag_plan;
+#[cfg(feature = "ai-protocol")]
 mod dag_view;
 #[cfg(feature = "ai-protocol")]
 mod host_decide;
@@ -29,6 +31,8 @@ pub use capabilities::run_capabilities;
 use chrono::{DateTime, Utc};
 #[cfg(feature = "ai-protocol")]
 pub use dag_emit::run_dag_emit;
+#[cfg(feature = "ai-protocol")]
+pub use dag_plan::run_dag_plan;
 #[cfg(feature = "ai-protocol")]
 pub use dag_view::run_dag_view;
 #[cfg(feature = "ai-protocol")]

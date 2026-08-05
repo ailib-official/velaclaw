@@ -714,6 +714,33 @@ enum DoctorCommands {
         #[arg(long, default_value_t = 0)]
         stagnation_limit: u32,
     },
+
+    /// ORCH-DAG-EMIT-002: opt-in LLM plan → schema validate → L2 (not default chat)
+    DagPlan {
+        /// User task description for the planner model
+        #[arg(
+            long,
+            default_value = "doctor dag-plan probe: linear code-fix style task"
+        )]
+        message: String,
+
+        /// Optional L2 fallback template path
+        #[arg(long)]
+        fallback: Option<String>,
+
+        /// Run even when `[agent].candidate_dag_emit` is false
+        #[arg(long, default_value_t = false)]
+        force: bool,
+
+        #[arg(long, default_value_t = false)]
+        compact: bool,
+
+        #[arg(long, default_value_t = 0)]
+        stagnation_limit: u32,
+
+        #[arg(long, default_value_t = 0.2)]
+        temperature: f64,
+    },
 }
 
 #[tokio::main]

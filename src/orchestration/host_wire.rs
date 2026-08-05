@@ -78,7 +78,10 @@ pub fn try_host_decide_model(
     }
 
     let ov = session_override::get_override(session_key);
-    let Some(decision) = decide_among_reachable(&decidable, optimize, ov.as_ref()) else {
+    let pricing = crate::orchestration::host_decide::load_embedded_pricing();
+    let Some(decision) =
+        decide_among_reachable(&decidable, optimize, ov.as_ref(), pricing.as_ref())
+    else {
         return Ok(None);
     };
 
@@ -88,6 +91,7 @@ pub fn try_host_decide_model(
         model = %decision.model,
         reason = %decision.reason,
         optimize = optimize.as_str(),
+        used_cost_router = decision.used_cost_router,
         "host decide selected model"
     );
 

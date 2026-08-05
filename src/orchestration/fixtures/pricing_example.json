@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "provider_id": "groq",
+      "model_id": "llama-3.1-8b-instant",
+      "prompt_per_1m": 0.05,
+      "completion_per_1m": 0.08
+    },
+    {
+      "provider_id": "deepseek",
+      "model_id": "deepseek-chat",
+      "prompt_per_1m": 0.14,
+      "completion_per_1m": 0.28,
+      "reasoning_per_1m": 0.28
+    },
+    {
+      "provider_id": "openai",
+      "model_id": "gpt-4o-mini",
+      "prompt_per_1m": 0.15,
+      "completion_per_1m": 0.60
+    }
+  ]
+}

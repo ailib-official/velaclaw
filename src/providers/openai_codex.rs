@@ -1,3 +1,21 @@
+//! OpenAI Codex / ChatGPT subscription provider (Experimental — [GOV-007]).
+//!
+//! # GOV-007 written exception
+//!
+//! This adapter talks to `chatgpt.com/backend-api/codex/responses` with OAuth
+//! tokens from `auth login --provider openai-codex`. That surface is **not** the
+//! ai-protocol OpenAI Chat Completions path, so model calls cannot yet reuse
+//! `ProtocolBackedProvider` / `AiClient` without a dedicated Codex protocol
+//! manifest + credential bridge.
+//!
+//! - **Default BYOK / protocol production path**: `provider/model` →
+//!   [`crate::providers::protocol_adapter::ProtocolBackedProvider`].
+//! - **This module**: explicit subscription mode only; do not treat as the
+//!   mainstream runtime. Retirement: migrate to AiClient once Codex Responses
+//!   auth is expressible in ai-protocol (tracked under GOV-007-W2-velaclaw).
+//!
+//! Auth stays in `crate::auth`; this file is the remaining vendor HTTP dialect.
+
 use crate::auth::openai_oauth::extract_account_id_from_jwt;
 use crate::auth::AuthService;
 use crate::providers::traits::{ChatMessage, Provider};

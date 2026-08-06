@@ -320,7 +320,14 @@ pub fn create_provider_with_options(
     options: &ProviderRuntimeOptions,
 ) -> anyhow::Result<Box<dyn Provider>> {
     match name.trim() {
+        // Experimental subscription dialect — see openai_codex.rs GOV-007 exception.
+        // Prefer `openai/<model>` (ProtocolBackedProvider) for API-key BYOK.
         "openai-codex" | "openai_codex" | "codex" => {
+            tracing::warn!(
+                provider = name.trim(),
+                "Using Experimental openai-codex subscription adapter (GOV-007 exception); \
+                 prefer provider/model via ProtocolBackedProvider for BYOK"
+            );
             Ok(Box::new(openai_codex::OpenAiCodexProvider::new(options)))
         }
         _ => create_provider_with_url_and_options(name, api_key, None, options),

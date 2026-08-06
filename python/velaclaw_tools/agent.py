@@ -1,8 +1,17 @@
 """
 LangGraph-based agent factory for consistent tool calling.
+
+**Experimental ([GOV-007])** — this companion package uses `langchain_openai.ChatOpenAI`
+and is **not** the VelaClaw production model path (Rust `ProtocolBackedProvider` /
+`AiClient`). Prefer the Rust CLI/agent or `ai-lib-python` for protocol-backed calls.
+Retirement: migrate this package to `ai-lib-python` or remove from default docs
+(GOV-007-W2-velaclaw-providers).
 """
 
+from __future__ import annotations
+
 import os
+import warnings
 from typing import Any, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -21,9 +30,7 @@ class VelaclawAgent:
     """
     LangGraph-based agent with consistent tool calling behavior.
 
-    This agent wraps an LLM with LangGraph's tool execution loop, ensuring
-    reliable tool calling even with providers that have inconsistent native
-    tool calling support.
+    Experimental: LangChain OpenAI bypass — not the Rust AiClient mainstream path.
     """
 
     def __init__(
@@ -35,6 +42,12 @@ class VelaclawAgent:
         temperature: float = 0.7,
         system_prompt: Optional[str] = None,
     ):
+        warnings.warn(
+            "velaclaw_tools.VelaclawAgent is Experimental (GOV-007): uses langchain_openai, "
+            "not ai-lib-python / Rust AiClient. Prefer the Rust agent or migrate to ai-lib-python.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.tools = tools
         self.model = model
         self.temperature = temperature

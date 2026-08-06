@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "velaclaw-tools"
 version = "0.1.0"
-description = "Python companion package for VelaClaw - LangGraph-based tool calling for consistent LLM agent execution"
+description = "Experimental Python companion for VelaClaw (LangGraph). Not the production AiClient path — see GOV-007."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
@@ -19,9 +19,10 @@ keywords = [
     "langgraph",
     "velaclaw",
     "tool-calling",
+    "experimental",
 ]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",

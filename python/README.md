@@ -1,5 +1,10 @@
 # velaclaw-tools
 
+> **Experimental ([GOV-007])** — This package uses LangChain OpenAI and is **not** the
+> VelaClaw production model path. Prefer the Rust agent (`ProtocolBackedProvider` /
+> `AiClient`) or `ai-lib-python`. Planned retirement: migrate to ai-lib-python or remove
+> from default docs.
+
 Python companion package for [VelaClaw](https://github.com/velaclaw-labs/velaclaw) — LangGraph-based tool calling for consistent LLM agent execution.
 
 ## Why This Package?

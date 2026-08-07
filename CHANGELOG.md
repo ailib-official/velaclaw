@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-07
+
+### Milestone
+
+- **GOV-007 Wave2**: Providers hygiene + pin `ai-lib-rust` **1.3.0** (c7132af). Tag **v0.9.0**.
+
+
 ## [0.8.0] - 2026-08-04
 
 ### Added

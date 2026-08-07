@@ -89,8 +89,8 @@ dependencies = [
 
 [[package]]
 name = "ai-lib-contact"
-version = "1.2.0"
-source = "git+https://github.com/ailib-official/ai-lib-rust?rev=ddee3ce93de18024424b63a93e9841b3627d0c47#ddee3ce93de18024424b63a93e9841b3627d0c47"
+version = "1.3.0"
+source = "git+https://github.com/ailib-official/ai-lib-rust?rev=c7132af158a33ce05e6c8da7540d8664addd5860#c7132af158a33ce05e6c8da7540d8664addd5860"
 dependencies = [
  "ai-lib-core",
  "async-trait",
@@ -107,8 +107,8 @@ dependencies = [
 
 [[package]]
 name = "ai-lib-core"
-version = "1.2.0"
-source = "git+https://github.com/ailib-official/ai-lib-rust?rev=ddee3ce93de18024424b63a93e9841b3627d0c47#ddee3ce93de18024424b63a93e9841b3627d0c47"
+version = "1.3.0"
+source = "git+https://github.com/ailib-official/ai-lib-rust?rev=c7132af158a33ce05e6c8da7540d8664addd5860#c7132af158a33ce05e6c8da7540d8664addd5860"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -140,8 +140,8 @@ dependencies = [
 
 [[package]]
 name = "ai-lib-rust"
-version = "1.2.0"
-source = "git+https://github.com/ailib-official/ai-lib-rust?rev=ddee3ce93de18024424b63a93e9841b3627d0c47#ddee3ce93de18024424b63a93e9841b3627d0c47"
+version = "1.3.0"
+source = "git+https://github.com/ailib-official/ai-lib-rust?rev=c7132af158a33ce05e6c8da7540d8664addd5860#c7132af158a33ce05e6c8da7540d8664addd5860"
 dependencies = [
  "ai-lib-contact",
  "ai-lib-core",
@@ -7581,7 +7581,7 @@ checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
 name = "velaclaw"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "ai-lib-rust",
  "anyhow",

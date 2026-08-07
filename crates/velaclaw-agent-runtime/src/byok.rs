@@ -64,10 +64,7 @@ pub async fn execute_chat_with_retry(
     telemetry: Option<&dyn ByokTelemetryHook>,
 ) -> Result<ai_lib_rust::client::UnifiedResponse, ai_lib_rust::Error> {
     let started = Instant::now();
-    let mut builder = client
-        .chat()
-        .messages(messages)
-        .temperature(temperature);
+    let mut builder = client.chat().messages(messages).temperature(temperature);
     if let Some(ref t) = tools {
         if !t.is_empty() {
             builder = builder.tools_json(t.clone());
@@ -75,7 +72,13 @@ pub async fn execute_chat_with_retry(
     }
     // Single execute — library PolicyEngine owns retries ([GOV-007] / VELA-004).
     let response = builder.execute().await?;
-    maybe_emit_telemetry(telemetry, provider_id, model_id, &response, started.elapsed());
+    maybe_emit_telemetry(
+        telemetry,
+        provider_id,
+        model_id,
+        &response,
+        started.elapsed(),
+    );
     Ok(response)
 }
 

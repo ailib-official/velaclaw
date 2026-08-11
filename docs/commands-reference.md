@@ -68,9 +68,9 @@ VelaClaw composes `provider/model` (e.g. `nvidia` + `meta/llama-…` →
 `nvidia/meta/llama-…`). Full `--model nvidia/…` is unchanged. Details:
 [providers-reference.md](providers-reference.md#nvidia-nim-notes).
 
-Opt-in context Envelope pilot (CR-L1/L2): set `[agent].envelope_assemble = true` in `config.toml` (requires `--features ai-protocol`). Applies to `velaclaw agent`, Web `Agent::turn`, **and** channel message dispatch; HardBudget fails the turn (channel replies with an error). See [config-reference.md](config-reference.md).
+Opt-in context Envelope (CR-L1/L2 / VL-CTX-001): `[agent].envelope_assemble` defaults to **`true`** (requires `--features ai-protocol`). All surfaces use `context_orch::prepare_turn_history` (optional LLM compact when over `max_history_messages`, then `assemble_layered`). Set `envelope_assemble = false` only as an emergency kill-switch (message-count trim). HardBudget fails the turn (channel replies with an error). See [config-reference.md](config-reference.md).
 
-CR-L3-003 async schedule façade (opt-in, default off): set `[agent].envelope_assemble_async = true` **in addition to** `envelope_assemble = true` to use ai-lib `AssemblePool` (same assemble algorithm; bounded concurrency / timeout; fail-closed). Sync remains the default path.
+CR-L3-003 async schedule façade (opt-in, default off): set `[agent].envelope_assemble_async = true` **in addition to** `envelope_assemble = true` to use ai-lib `AssemblePool` (same assemble algorithm; bounded concurrency / timeout; fail-closed). Sync remains the default algorithm path.
 
 Turn model selection (CLI + Web) shares `orchestration::resolve_turn_model`: explicit user pick → `host_decide` → `intent_capability_route` → `query_classification` / `default_model`. Channels still use `route.model` only. See the wiring matrix in [config-reference.md](config-reference.md#agent).
 

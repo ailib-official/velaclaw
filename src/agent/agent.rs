@@ -536,7 +536,9 @@ impl Agent {
         self.execution.as_ref()
     }
 
-    fn trim_history(&mut self) {
+    /// Mid-loop message-count safety net (not a second orch pipeline).
+    /// Full compact+layered runs at turn start/end via [`prepare_history_after_turn`].
+    fn trim_conversation_cap(&mut self) {
         let max = self.config.max_history_messages;
         if self.history.len() <= max {
             return;
@@ -561,6 +563,51 @@ impl Agent {
 
         self.history = system_messages;
         self.history.extend(other_messages);
+    }
+
+    /// End-of-turn history prepare (GOV-007 / VL-CTX-001): compact + layered or trim.
+    async fn prepare_history_after_turn(&mut self) -> Result<()> {
+        self.prepare_conversation_history().await
+    }
+
+    /// Run [`prepare_turn_history`] on Chat frames and reintegrate without
+    /// reordering native `AssistantToolCalls` / `ToolResults` frames.
+    async fn prepare_conversation_history(&mut self) -> Result<()> {
+        let original_chat_count = self
+            .history
+            .iter()
+            .filter(|m| matches!(m, ConversationMessage::Chat(_)))
+            .count();
+        let mut chat_hist: Vec<ChatMessage> = self
+            .history
+            .iter()
+            .filter_map(|m| match m {
+                ConversationMessage::Chat(c) => Some(c.clone()),
+                _ => None,
+            })
+            .collect();
+        if chat_hist.is_empty() {
+            self.trim_conversation_cap();
+            return Ok(());
+        }
+        let summarizer = crate::agent::context_orch::HistorySummarizer {
+            provider: self.provider.as_ref(),
+            model: &self.model_name,
+        };
+        crate::agent::context_orch::prepare_turn_history(
+            &mut chat_hist,
+            crate::agent::context_orch::PrepareHistoryOpts {
+                layered: self.config.envelope_assemble,
+                compact_context: self.config.compact_context,
+                async_pool: self.config.envelope_assemble_async,
+                max_history: self.config.max_history_messages,
+                summarizer: Some(&summarizer),
+            },
+        )
+        .await?;
+        self.history = reintegrate_prepared_chat(&self.history, chat_hist, original_chat_count);
+        self.trim_conversation_cap();
+        Ok(())
     }
 
     fn build_system_prompt(&self) -> Result<String> {
@@ -794,28 +841,7 @@ impl Agent {
         self.history
             .push(ConversationMessage::Chat(ChatMessage::user(enriched)));
 
-        #[cfg(feature = "ai-protocol")]
-        if self.config.envelope_assemble {
-            let mut chat_hist: Vec<ChatMessage> = self
-                .history
-                .iter()
-                .filter_map(|m| match m {
-                    ConversationMessage::Chat(c) => Some(c.clone()),
-                    _ => None,
-                })
-                .collect();
-            crate::agent::envelope_pilot::apply_envelope_pilot_async(
-                &mut chat_hist,
-                true,
-                self.config.compact_context,
-                self.config.envelope_assemble_async,
-            )
-            .await?;
-            self.history = chat_hist
-                .into_iter()
-                .map(ConversationMessage::Chat)
-                .collect();
-        }
+        self.prepare_conversation_history().await?;
 
         let effective_model = self.classify_model_tracked(user_message)?;
 
@@ -980,7 +1006,7 @@ impl Agent {
                     .push(ConversationMessage::Chat(ChatMessage::assistant(
                         final_text.clone(),
                     )));
-                self.trim_history();
+                self.prepare_history_after_turn().await?;
 
                 return Ok(final_text);
             }
@@ -1028,7 +1054,7 @@ impl Agent {
                 let formatted = self.tool_dispatcher.format_results(&results);
                 self.history.push(formatted);
             }
-            self.trim_history();
+            self.trim_conversation_cap();
         }
 
         anyhow::bail!(
@@ -1072,6 +1098,38 @@ impl Agent {
         listen_handle.abort();
         Ok(())
     }
+}
+
+/// Reintegrate prepared Chat frames into `ConversationMessage` history.
+///
+/// When prepare did not change Chat count, replace Chat slots in place so
+/// native `AssistantToolCalls` / `ToolResults` keep their temporal order.
+/// When compact/layered rewrote the Chat vector length, fall back to a
+/// Chat-only history (structured frames from the compacted span are dropped).
+fn reintegrate_prepared_chat(
+    history: &[ConversationMessage],
+    prepared: Vec<ChatMessage>,
+    original_chat_count: usize,
+) -> Vec<ConversationMessage> {
+    if prepared.len() == original_chat_count {
+        let mut prepared_iter = prepared.into_iter();
+        return history
+            .iter()
+            .map(|msg| match msg {
+                ConversationMessage::Chat(_) => ConversationMessage::Chat(
+                    prepared_iter
+                        .next()
+                        .expect("prepared chat count matches original"),
+                ),
+                other => other.clone(),
+            })
+            .collect();
+    }
+
+    prepared
+        .into_iter()
+        .map(ConversationMessage::Chat)
+        .collect()
 }
 
 pub async fn run(

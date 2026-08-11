@@ -11,14 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Soft-fail UX + Channel surface** ([#217](https://github.com/ailib-official/velaclaw/pull/217), [#218](https://github.com/ailib-official/velaclaw/pull/218)): always-on notices when tool-format recovery exhausts or provider limit/quota hard-fails (CLI `/model`, Web picker, Channel `/models`); opt-in `[agent].host_decide_failover` advances session override along Decide fallbacks (default off).
 
+### Changed
+
+- **Context orchestration unify** (VL-CTX-001 / GOV-007): CLI, Web, and Channel share `context_orch::prepare_turn_history` (optional LLM compact → `assemble_layered`). `[agent].envelope_assemble` defaults to **`true`** (`false` = emergency trim-only kill-switch). Web now gets the same overflow compact path as CLI.
+- **host_decide optimize honesty** (ORCH-HOST-006): keep contract values `cost` \| `latency` \| `balanced`; host embed no longer claims Eos-style `lowest_latency` / `balanced_score` or `used_cost_router=true` without real cost ranking / latency health (stub reasons instead).
+
 ### Fixed
 
 - **host_decide multi-segment logical ids** ([#216](https://github.com/ailib-official/velaclaw/pull/216)): preserve NIM/org wire segments via `compose_logical_model_id`; CAP index load failure soft-skips Decide instead of hard-failing the turn.
 - **Shell Always over-broad session** (VL-SEC-009): human approval no longer bypasses `allowed_commands`; shell-policy Always remembers executable basenames only (`approval.session_shell_binaries`), and non-allowlisted commands are denied without an interactive risk prompt (single ApprovalGate path / GOV-007).
-
-### Changed
-
-- **host_decide optimize honesty** (ORCH-HOST-006): keep contract values `cost` \| `latency` \| `balanced`; host embed no longer claims Eos-style `lowest_latency` / `balanced_score` or `used_cost_router=true` without real cost ranking / latency health (stub reasons instead).
 
 ## [0.9.0] - 2026-08-07
 

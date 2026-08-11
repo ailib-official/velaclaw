@@ -375,9 +375,10 @@ pub struct AgentConfig {
     /// Tool dispatch strategy (e.g. `"auto"`). Default: `"auto"`.
     #[serde(default = "default_agent_tool_dispatcher")]
     pub tool_dispatcher: String,
-    /// CR-L1 pilot: run `assemble_layered` on the CLI `velaclaw agent` path before each turn.
-    /// Default: `false` (opt-in). Requires `--features ai-protocol`.
-    #[serde(default)]
+    /// CR-L1/L2 + VL-CTX-001: run `assemble_layered` via `prepare_turn_history` before each turn
+    /// on CLI, Web, and channel dispatch. Default: `true` (normative). Set `false` only as an
+    /// emergency kill-switch. Requires `--features ai-protocol`.
+    #[serde(default = "default_true")]
     pub envelope_assemble: bool,
     /// CR-L3-003: when `envelope_assemble` is on, schedule via ai-lib `AssemblePool`
     /// (`assemble_layered_async`) instead of sync `assemble_layered`.
@@ -451,7 +452,7 @@ impl Default for AgentConfig {
             max_history_messages: default_agent_max_history_messages(),
             parallel_tools: false,
             tool_dispatcher: default_agent_tool_dispatcher(),
-            envelope_assemble: false,
+            envelope_assemble: true,
             envelope_assemble_async: false,
             template_dag: false,
             candidate_dag_shadow: false,
@@ -4566,6 +4567,8 @@ reasoning_enabled = false
     async fn agent_config_defaults() {
         let cfg = AgentConfig::default();
         assert!(!cfg.compact_context);
+        assert!(cfg.envelope_assemble);
+        assert!(!cfg.envelope_assemble_async);
         assert_eq!(cfg.max_tool_iterations, 10);
         assert_eq!(cfg.max_history_messages, 50);
         assert!(!cfg.parallel_tools);
@@ -4582,6 +4585,7 @@ max_tool_iterations = 20
 max_history_messages = 80
 parallel_tools = true
 tool_dispatcher = "xml"
+envelope_assemble = false
 "#;
         let parsed: Config = toml::from_str(raw).unwrap();
         assert!(parsed.agent.compact_context);
@@ -4589,6 +4593,18 @@ tool_dispatcher = "xml"
         assert_eq!(parsed.agent.max_history_messages, 80);
         assert!(parsed.agent.parallel_tools);
         assert_eq!(parsed.agent.tool_dispatcher, "xml");
+        assert!(!parsed.agent.envelope_assemble);
+    }
+
+    #[test]
+    async fn agent_config_omitted_envelope_assemble_defaults_true() {
+        let raw = r#"
+default_temperature = 0.7
+[agent]
+tool_dispatcher = "auto"
+"#;
+        let parsed: Config = toml::from_str(raw).unwrap();
+        assert!(parsed.agent.envelope_assemble);
     }
 
     #[tokio::test]

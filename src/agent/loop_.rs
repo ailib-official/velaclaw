@@ -15,7 +15,6 @@ use crate::providers::{
 use crate::runtime;
 use crate::security::PolicyHandle;
 use crate::tools::{self, Tool};
-use crate::util::truncate_with_ellipsis;
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::fmt::Write;
@@ -25,9 +24,8 @@ use std::time::Instant;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 use velaclaw_agent_runtime::loop_parse::{
-    self, apply_compaction_summary, build_assistant_history_with_tool_calls,
-    build_compaction_transcript, build_native_assistant_history, trim_history, ToolLoopCancelled,
-    COMPACTION_KEEP_RECENT_MESSAGES, COMPACTION_MAX_SUMMARY_CHARS, DEFAULT_MAX_TOOL_ITERATIONS,
+    self, build_assistant_history_with_tool_calls, build_native_assistant_history,
+    ToolLoopCancelled, DEFAULT_MAX_TOOL_ITERATIONS,
 };
 
 pub(crate) use velaclaw_agent_runtime::loop_parse::{
@@ -126,55 +124,6 @@ fn extract_json_values(input: &str) -> Vec<serde_json::Value> {
 
 fn parse_glm_style_tool_calls(text: &str) -> Vec<(String, serde_json::Value, Option<String>)> {
     loop_parse::parse_glm_style_tool_calls(text)
-}
-
-async fn auto_compact_history(
-    history: &mut Vec<ChatMessage>,
-    provider: &dyn Provider,
-    model: &str,
-    max_history: usize,
-) -> Result<bool> {
-    let has_system = history.first().is_some_and(|m| m.role == "system");
-    let non_system_count = if has_system {
-        history.len().saturating_sub(1)
-    } else {
-        history.len()
-    };
-
-    if non_system_count <= max_history {
-        return Ok(false);
-    }
-
-    let start = if has_system { 1 } else { 0 };
-    let keep_recent = COMPACTION_KEEP_RECENT_MESSAGES.min(non_system_count);
-    let compact_count = non_system_count.saturating_sub(keep_recent);
-    if compact_count == 0 {
-        return Ok(false);
-    }
-
-    let compact_end = start + compact_count;
-    let to_compact: Vec<ChatMessage> = history[start..compact_end].to_vec();
-    let transcript = build_compaction_transcript(&to_compact);
-
-    let summarizer_system = crate::agent::prompt_composer::build_compact_summarizer_system();
-
-    let summarizer_user = format!(
-        "Summarize the following conversation history for context preservation. Keep it short (max 12 bullet points).\n\n{}",
-        transcript
-    );
-
-    let summary_raw = provider
-        .chat_with_system(Some(&summarizer_system), &summarizer_user, model, 0.2)
-        .await
-        .unwrap_or_else(|_| {
-            // Fallback to deterministic local truncation when summarization fails.
-            truncate_with_ellipsis(&transcript, COMPACTION_MAX_SUMMARY_CHARS)
-        });
-
-    let summary = truncate_with_ellipsis(&summary_raw, COMPACTION_MAX_SUMMARY_CHARS);
-    apply_compaction_summary(history, start, compact_end, &summary);
-
-    Ok(true)
 }
 
 /// Build context preamble by searching memory for relevant entries.
@@ -1263,12 +1212,19 @@ pub async fn run(
             ChatMessage::user(&enriched),
         ];
 
-        #[cfg(feature = "ai-protocol")]
-        crate::agent::envelope_pilot::apply_envelope_pilot_async(
+        let summarizer = crate::agent::context_orch::HistorySummarizer {
+            provider: provider.as_ref(),
+            model: &model_name,
+        };
+        crate::agent::context_orch::prepare_turn_history(
             &mut history,
-            config.agent.envelope_assemble,
-            config.agent.compact_context,
-            config.agent.envelope_assemble_async,
+            crate::agent::context_orch::PrepareHistoryOpts {
+                layered: config.agent.envelope_assemble,
+                compact_context: config.agent.compact_context,
+                async_pool: config.agent.envelope_assemble_async,
+                max_history: config.agent.max_history_messages,
+                summarizer: Some(&summarizer),
+            },
         )
         .await?;
 
@@ -1492,14 +1448,24 @@ pub async fn run(
 
             history.push(ChatMessage::user(&enriched));
 
-            #[cfg(feature = "ai-protocol")]
-            crate::agent::envelope_pilot::apply_envelope_pilot_async(
+            let summarizer = crate::agent::context_orch::HistorySummarizer {
+                provider: provider.as_ref(),
+                model: &session_model,
+            };
+            let prepare_report = crate::agent::context_orch::prepare_turn_history(
                 &mut history,
-                config.agent.envelope_assemble,
-                config.agent.compact_context,
-                config.agent.envelope_assemble_async,
+                crate::agent::context_orch::PrepareHistoryOpts {
+                    layered: config.agent.envelope_assemble,
+                    compact_context: config.agent.compact_context,
+                    async_pool: config.agent.envelope_assemble_async,
+                    max_history: config.agent.max_history_messages,
+                    summarizer: Some(&summarizer),
+                },
             )
             .await?;
+            if prepare_report.compacted {
+                println!("🧹 Auto-compaction complete");
+            }
 
             let turn_model = resolve_cli_turn_model(
                 &config,
@@ -1564,22 +1530,27 @@ pub async fn run(
             }
             observer.record_event(&ObserverEvent::TurnComplete);
 
-            // Auto-compaction before hard trimming to preserve long-context signal.
-            if let Ok(compacted) = auto_compact_history(
+            // Post-turn prepare: compact overflow + layered (or trim kill-switch).
+            let summarizer = crate::agent::context_orch::HistorySummarizer {
+                provider: provider.as_ref(),
+                model: &session_model,
+            };
+            if let Ok(report) = crate::agent::context_orch::prepare_turn_history(
                 &mut history,
-                provider.as_ref(),
-                &model_name,
-                config.agent.max_history_messages,
+                crate::agent::context_orch::PrepareHistoryOpts {
+                    layered: config.agent.envelope_assemble,
+                    compact_context: config.agent.compact_context,
+                    async_pool: config.agent.envelope_assemble_async,
+                    max_history: config.agent.max_history_messages,
+                    summarizer: Some(&summarizer),
+                },
             )
             .await
             {
-                if compacted {
+                if report.compacted {
                     println!("🧹 Auto-compaction complete");
                 }
             }
-
-            // Hard cap as a safety net.
-            trim_history(&mut history, config.agent.max_history_messages);
         }
     }
 
@@ -1827,6 +1798,9 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
+    use velaclaw_agent_runtime::loop_parse::{
+        apply_compaction_summary, build_compaction_transcript, trim_history,
+    };
     use velaclaw_agent_runtime::loop_parse::{
         tools_to_openai_format, DEFAULT_MAX_HISTORY_MESSAGES,
     };

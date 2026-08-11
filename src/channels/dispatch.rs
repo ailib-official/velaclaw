@@ -237,47 +237,49 @@ pub(crate) async fn process_channel_message(
     let mut history = vec![ChatMessage::system(system_prompt)];
     history.extend(prior_turns);
 
-    #[cfg(feature = "ai-protocol")]
+    let summarizer = crate::agent::context_orch::HistorySummarizer {
+        provider: active_provider.as_ref(),
+        model: route.model.as_str(),
+    };
+    if let Err(err) = crate::agent::context_orch::prepare_turn_history(
+        &mut history,
+        crate::agent::context_orch::PrepareHistoryOpts {
+            layered: ctx.envelope_pilot.enabled,
+            compact_context: ctx.envelope_pilot.compact_context,
+            async_pool: ctx.envelope_pilot.use_async_pool,
+            max_history: super::runtime::MAX_CHANNEL_HISTORY,
+            summarizer: Some(&summarizer),
+        },
+    )
+    .await
     {
-        if let Err(err) = crate::agent::envelope_pilot::apply_envelope_pilot_async(
-            &mut history,
-            ctx.envelope_pilot.enabled,
-            ctx.envelope_pilot.compact_context,
-            ctx.envelope_pilot.use_async_pool,
-        )
-        .await
+        tracing::warn!(
+            channel = %msg.channel,
+            sender = %msg.sender,
+            "Context prepare failed (fail-closed): {err}"
+        );
+        // Undo the user turn we appended before assemble so the next message
+        // does not see an orphan user turn without an assistant reply.
+        if let Some(turns) = ctx
+            .conversation_histories
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get_mut(&history_key)
         {
-            tracing::warn!(
-                channel = %msg.channel,
-                sender = %msg.sender,
-                "Envelope assemble failed (fail-closed): {err}"
-            );
-            // Undo the user turn we appended before assemble so the next message
-            // does not see an orphan user turn without an assistant reply.
-            if let Some(turns) = ctx
-                .conversation_histories
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .get_mut(&history_key)
-            {
-                let _ = turns.pop();
-            }
-            if let Some(channel) = target_channel.as_ref() {
-                let reply = format!(
-                    "⚠️ Context envelope assembly failed. Message not processed.\nDetails: {err}"
-                );
-                if let Err(send_err) = channel
-                    .send(
-                        &SendMessage::new(&reply, &msg.reply_target)
-                            .in_thread(msg.thread_ts.clone()),
-                    )
-                    .await
-                {
-                    eprintln!("  ❌ Failed to reply on {}: {send_err}", channel.name());
-                }
-            }
-            return;
+            let _ = turns.pop();
         }
+        if let Some(channel) = target_channel.as_ref() {
+            let reply = format!(
+                "⚠️ Context envelope assembly failed. Message not processed.\nDetails: {err}"
+            );
+            if let Err(send_err) = channel
+                .send(&SendMessage::new(&reply, &msg.reply_target).in_thread(msg.thread_ts.clone()))
+                .await
+            {
+                eprintln!("  ❌ Failed to reply on {}: {send_err}", channel.name());
+            }
+        }
+        return;
     }
 
     let use_streaming = target_channel

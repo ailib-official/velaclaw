@@ -130,8 +130,8 @@ impl HumanApprovalBackend for ManagerApprovalBackend<'_> {
             .is_some_and(|s| s.mode == ChannelApprovalMode::Inline)
     }
 
-    fn shell_session_always_allowed(&self) -> bool {
-        self.manager.session_allowlist().contains("shell")
+    fn shell_session_always_allowed(&self, command: &str) -> bool {
+        self.manager.shell_session_always_covers(command)
     }
 
     fn approve_shell_command_sync(&self, command: &str) -> bool {

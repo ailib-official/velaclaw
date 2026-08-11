@@ -34,8 +34,9 @@ pub trait HumanApprovalBackend: Send + Sync {
         self.approve_shell_command_sync(command)
     }
 
-    /// Session-scoped "always allow shell" from a prior Always response on this channel.
-    fn shell_session_always_allowed(&self) -> bool {
+    /// Session-scoped Always for risk prompts covering this command's executable basenames.
+    fn shell_session_always_allowed(&self, command: &str) -> bool {
+        let _ = command;
         false
     }
 }
@@ -138,7 +139,8 @@ impl<'a, B: HumanApprovalBackend + ?Sized> ApprovalGate<'a, B> {
                 shell_human_approved: false,
             };
         };
-        let pre_approved = prior_tool_level_approval || self.backend.shell_session_always_allowed();
+        let pre_approved =
+            prior_tool_level_approval || self.backend.shell_session_always_allowed(command);
         if pre_approved && hook.validate_shell_command(tool_name, args, true).is_ok() {
             return GateDecision::Proceed {
                 shell_human_approved: true,
@@ -149,23 +151,30 @@ impl<'a, B: HumanApprovalBackend + ?Sized> ApprovalGate<'a, B> {
                 shell_human_approved: false,
             };
         }
-        if self.backend.interactive_shell_approval() {
-            if self.backend.approve_shell_command_sync(command) {
-                GateDecision::Proceed {
-                    shell_human_approved: true,
-                }
-            } else {
-                GateDecision::Denied {
-                    message: "Denied by user.".into(),
+        // Allowlisted but needs risk approval vs hard deny (allowlist/safety).
+        // Do not prompt when approve=true still fails — that would Yes then deny at tool.
+        match hook.validate_shell_command(tool_name, args, true) {
+            Ok(()) => {
+                if self.backend.interactive_shell_approval() {
+                    if self.backend.approve_shell_command_sync(command) {
+                        GateDecision::Proceed {
+                            shell_human_approved: true,
+                        }
+                    } else {
+                        GateDecision::Denied {
+                            message: "Denied by user.".into(),
+                        }
+                    }
+                } else {
+                    GateDecision::Denied {
+                        message: format!(
+                            "Command requires explicit human approval: {command}. \
+                             Interactive approval is not available on this channel."
+                        ),
+                    }
                 }
             }
-        } else {
-            GateDecision::Denied {
-                message: format!(
-                    "Command requires explicit human approval: {command}. \
-                     Interactive approval is not available on this channel."
-                ),
-            }
+            Err(message) => GateDecision::Denied { message },
         }
     }
 
@@ -190,7 +199,8 @@ impl<'a, B: HumanApprovalBackend + ?Sized> ApprovalGate<'a, B> {
                 shell_human_approved: false,
             };
         };
-        let pre_approved = prior_tool_level_approval || self.backend.shell_session_always_allowed();
+        let pre_approved =
+            prior_tool_level_approval || self.backend.shell_session_always_allowed(command);
         if pre_approved && hook.validate_shell_command(tool_name, args, true).is_ok() {
             return GateDecision::Proceed {
                 shell_human_approved: true,
@@ -201,23 +211,28 @@ impl<'a, B: HumanApprovalBackend + ?Sized> ApprovalGate<'a, B> {
                 shell_human_approved: false,
             };
         }
-        if self.backend.interactive_shell_approval() {
-            if self.backend.approve_shell_command_async(command).await {
-                GateDecision::Proceed {
-                    shell_human_approved: true,
-                }
-            } else {
-                GateDecision::Denied {
-                    message: "Denied by user.".into(),
+        match hook.validate_shell_command(tool_name, args, true) {
+            Ok(()) => {
+                if self.backend.interactive_shell_approval() {
+                    if self.backend.approve_shell_command_async(command).await {
+                        GateDecision::Proceed {
+                            shell_human_approved: true,
+                        }
+                    } else {
+                        GateDecision::Denied {
+                            message: "Denied by user.".into(),
+                        }
+                    }
+                } else {
+                    GateDecision::Denied {
+                        message: format!(
+                            "Command requires explicit human approval: {command}. \
+                             Interactive approval is not available on this channel."
+                        ),
+                    }
                 }
             }
-        } else {
-            GateDecision::Denied {
-                message: format!(
-                    "Command requires explicit human approval: {command}. \
-                     Interactive approval is not available on this channel."
-                ),
-            }
+            Err(message) => GateDecision::Denied { message },
         }
     }
 }

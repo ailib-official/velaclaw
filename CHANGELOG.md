@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **host_decide multi-segment logical ids** ([#216](https://github.com/ailib-official/velaclaw/pull/216)): preserve NIM/org wire segments via `compose_logical_model_id`; CAP index load failure soft-skips Decide instead of hard-failing the turn.
+- **Shell Always over-broad session** (VL-SEC-009): human approval no longer bypasses `allowed_commands`; shell-policy Always remembers executable basenames only (`approval.session_shell_binaries`), and non-allowlisted commands are denied without an interactive risk prompt (single ApprovalGate path / GOV-007).
 
 ### Changed
 

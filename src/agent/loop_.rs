@@ -784,7 +784,11 @@ fn self_adjust_prompt_fields(config: &Config) -> (Vec<String>, Vec<String>) {
                     return (section.allowed_writes, section.denied_writes);
                 }
                 (
-                    vec!["approval.session_allowlist".into(), "approval.*".into()],
+                    vec![
+                        "approval.session_allowlist".into(),
+                        "approval.session_shell_binaries".into(),
+                        "approval.*".into(),
+                    ],
                     vec![
                         "security".into(),
                         "security.*".into(),

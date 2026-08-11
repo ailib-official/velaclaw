@@ -51,7 +51,7 @@ pub enum ApprovalResponse {
     Yes,
     /// Deny this call.
     No,
-    /// Execute and add tool to session-scoped allowlist.
+    /// Execute and add tool to session-scoped allowlist (shell: also remember executable basename).
     Always,
 }
 
@@ -70,7 +70,7 @@ pub struct ApprovalLogEntry {
 /// Manages the interactive approval workflow.
 ///
 /// - Checks config-level `auto_approve` / `always_ask` lists
-/// - Maintains a session-scoped "always" allowlist
+/// - Maintains a session-scoped "always" allowlist (tools) and shell binary set
 /// - Records an audit trail of all decisions
 pub struct ApprovalManager {
     /// Tools that never need approval (from config).
@@ -79,8 +79,10 @@ pub struct ApprovalManager {
     always_ask: HashSet<String>,
     /// Autonomy level from config.
     autonomy_level: AutonomyLevel,
-    /// Session-scoped allowlist built from "Always" responses.
+    /// Session-scoped allowlist built from "Always" responses (tool names).
     session_allowlist: Mutex<HashSet<String>>,
+    /// Session-scoped shell executable basenames from shell-policy "Always" (VL-SEC-009).
+    session_shell_binaries: Mutex<HashSet<String>>,
     /// Audit trail of approval decisions.
     audit_log: Mutex<Vec<ApprovalLogEntry>>,
     /// L2.5 persistence for "Always" decisions (VL-SEC-004).
@@ -97,6 +99,7 @@ impl ApprovalManager {
             always_ask: config.always_ask.iter().cloned().collect(),
             autonomy_level: config.level,
             session_allowlist: Mutex::new(HashSet::new()),
+            session_shell_binaries: Mutex::new(HashSet::new()),
             audit_log: Mutex::new(Vec::new()),
             overrides_store: None,
             security_audit: None,
@@ -111,6 +114,20 @@ impl ApprovalManager {
     pub fn with_security_audit(mut self, audit: Arc<AuditLogger>) -> Self {
         self.security_audit = Some(audit);
         self
+    }
+
+    /// Seed shell-policy Always basenames from L2.5 on manager spawn.
+    pub fn seed_session_shell_binaries<I>(&self, binaries: I)
+    where
+        I: IntoIterator<Item = String>,
+    {
+        let mut set = self.session_shell_binaries.lock();
+        for b in binaries {
+            let trimmed = b.trim();
+            if !trimmed.is_empty() {
+                set.insert(trimmed.to_string());
+            }
+        }
     }
 
     /// Check whether a tool call requires interactive approval.
@@ -158,6 +175,7 @@ impl ApprovalManager {
         if decision == ApprovalResponse::Always {
             let mut allowlist = self.session_allowlist.lock();
             allowlist.insert(tool_name.to_string());
+            drop(allowlist);
             if let Some(store) = &self.overrides_store {
                 if let Err(err) = store.persist_session_allowlist_add(tool_name) {
                     tracing::warn!(
@@ -165,6 +183,32 @@ impl ApprovalManager {
                         error = %err,
                         "failed to persist session allowlist to policy-overrides.yaml"
                     );
+                }
+            }
+
+            // Shell-policy Always: remember executable basenames only (VL-SEC-009 / H).
+            if velaclaw_agent_runtime::is_shell_policy_tool(tool_name) {
+                if let Some(command) = args.get("command").and_then(|v| v.as_str()) {
+                    let bases = crate::security::SecurityPolicy::base_executables(command);
+                    if !bases.is_empty() {
+                        {
+                            let mut bins = self.session_shell_binaries.lock();
+                            for b in &bases {
+                                bins.insert(b.clone());
+                            }
+                        }
+                        if let Some(store) = &self.overrides_store {
+                            for b in &bases {
+                                if let Err(err) = store.persist_session_shell_binary_add(b) {
+                                    tracing::warn!(
+                                        binary = %b,
+                                        error = %err,
+                                        "failed to persist session shell binary to policy-overrides.yaml"
+                                    );
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -209,6 +253,21 @@ impl ApprovalManager {
         self.session_allowlist.lock().clone()
     }
 
+    /// Whether session Always covers risk prompts for every basename in `command`.
+    pub fn shell_session_always_covers(&self, command: &str) -> bool {
+        let bases = crate::security::SecurityPolicy::base_executables(command);
+        if bases.is_empty() {
+            return false;
+        }
+        let remembered = self.session_shell_binaries.lock();
+        bases.iter().all(|b| remembered.contains(b))
+    }
+
+    /// Snapshot of session shell binary Always set.
+    pub fn session_shell_binaries(&self) -> HashSet<String> {
+        self.session_shell_binaries.lock().clone()
+    }
+
     /// Prompt the user on the CLI and return their decision.
     ///
     /// For non-CLI channels, returns `Yes` automatically (interactive
@@ -246,7 +305,7 @@ fn prompt_cli_interactive(request: &ApprovalRequest) -> ApprovalResponse {
         } else {
             eprintln!("   {summary}");
         }
-        eprintln!("   [Y]es = once, [A]lways = allow shell this session, [N]o = deny");
+        eprintln!("   [Y]es = once, [A]lways = skip risk prompts for this executable this session, [N]o = deny");
     } else {
         eprintln!(
             "🔒 Security policy requires approval for tool: {}",
@@ -633,17 +692,18 @@ mod tests {
         use std::sync::Arc;
         use std::time::Duration;
 
-        // Shell not in always_ask, but command not allowlisted → shell-policy
-        // interactive path. Web + ApprovalHub must prompt (not sync-deny).
+        // Allowlisted high-risk command under supervised → shell-policy interactive path.
+        // Web + ApprovalHub must prompt (not sync-deny). Non-allowlisted never prompts (VL-SEC-009).
         let autonomy = AutonomyConfig {
-            level: AutonomyLevel::Full,
+            level: AutonomyLevel::Supervised,
             always_ask: vec![],
+            auto_approve: vec!["shell".into()],
             ..AutonomyConfig::default()
         };
         let mgr = ApprovalManager::from_config(&autonomy);
         let mut policy = SecurityPolicy::default();
-        policy.autonomy = AutonomyLevel::Full;
-        policy.allowed_commands = vec!["echo".into()];
+        policy.autonomy = AutonomyLevel::Supervised;
+        policy.allowed_commands = vec!["curl".into()];
         let security = PolicyHandle::new(policy);
         let hub = Arc::new(ApprovalHub::new());
         let mut sub = hub.subscribe();
@@ -651,7 +711,7 @@ mod tests {
 
         let call = ParsedToolCall {
             name: "shell".into(),
-            arguments: serde_json::json!({"command": "apt remove -y samba"}),
+            arguments: serde_json::json!({"command": "curl https://example.com"}),
             tool_call_id: None,
         };
 
@@ -672,12 +732,17 @@ mod tests {
             GateDecision::Proceed {
                 shell_human_approved: true,
             } => {}
-            other => panic!("expected Proceed with human approval, got {other:?}"),
+            GateDecision::Proceed {
+                shell_human_approved: false,
+            } => panic!("expected Proceed with human approval, got shell_human_approved=false"),
+            GateDecision::Denied { message } => {
+                panic!("expected Proceed with human approval, got Denied: {message}")
+            }
         }
     }
 
     #[tokio::test]
-    async fn shell_session_always_skips_repeated_shell_policy_prompt() {
+    async fn shell_session_always_skips_risk_prompt_for_same_binary_only() {
         use super::gate::ApprovalGate;
         use super::hub::ApprovalHub;
         use crate::agent::dispatcher::ParsedToolCall;
@@ -697,6 +762,9 @@ mod tests {
             ApprovalResponse::Always,
             "web",
         );
+        assert!(mgr.session_shell_binaries().contains("echo"));
+        assert!(!mgr.shell_session_always_covers("apt remove -y samba"));
+
         let mut policy = SecurityPolicy::default();
         policy.autonomy = AutonomyLevel::Full;
         policy.allowed_commands = vec!["echo".into()];
@@ -704,18 +772,88 @@ mod tests {
         let hub = Arc::new(ApprovalHub::new());
         let gate = ApprovalGate::new(&mgr, "web", Some(security)).with_hub(Arc::clone(&hub));
 
-        let call = ParsedToolCall {
+        let foreign = ParsedToolCall {
             name: "shell".into(),
             arguments: serde_json::json!({"command": "apt remove -y samba"}),
             tool_call_id: None,
         };
+        match gate.decide_async(&foreign).await {
+            GateDecision::Denied { message } => {
+                assert!(
+                    message.contains("not in allowed_commands"),
+                    "expected hard allowlist deny, got {message}"
+                );
+            }
+            other @ GateDecision::Proceed { .. } => {
+                panic!("expected Denied for non-allowlisted apt, got {other:?}")
+            }
+        }
 
-        let decision = gate.decide_async(&call).await;
-        match decision {
+        let mut policy2 = SecurityPolicy::default();
+        policy2.autonomy = AutonomyLevel::Supervised;
+        policy2.allowed_commands = vec!["echo".into()];
+        policy2.require_approval_for_medium_risk = true;
+        // echo alone is low risk — proceed without prompt even under supervised.
+        let security2 = PolicyHandle::new(policy2);
+        let gate2 = ApprovalGate::new(&mgr, "web", Some(security2)).with_hub(Arc::clone(&hub));
+        let echo_again = ParsedToolCall {
+            name: "shell".into(),
+            arguments: serde_json::json!({"command": "echo again"}),
+            tool_call_id: None,
+        };
+        match gate2.decide_async(&echo_again).await {
+            GateDecision::Proceed { .. } => {}
+            other @ GateDecision::Denied { .. } => {
+                panic!("expected Proceed for allowlisted echo, got {other:?}")
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn shell_session_always_covers_risk_for_remembered_binary() {
+        use super::gate::ApprovalGate;
+        use super::hub::ApprovalHub;
+        use crate::agent::dispatcher::ParsedToolCall;
+        use crate::config::AutonomyConfig;
+        use crate::security::{AutonomyLevel, PolicyHandle, SecurityPolicy};
+        use std::sync::Arc;
+
+        let autonomy = AutonomyConfig {
+            level: AutonomyLevel::Full,
+            always_ask: vec![],
+            ..AutonomyConfig::default()
+        };
+        let mgr = ApprovalManager::from_config(&autonomy);
+        mgr.record_decision(
+            "shell",
+            &serde_json::json!({"command": "curl https://example.com"}),
+            ApprovalResponse::Always,
+            "web",
+        );
+
+        let mut policy = SecurityPolicy::default();
+        policy.autonomy = AutonomyLevel::Supervised;
+        policy.allowed_commands = vec!["curl".into()];
+        policy.require_approval_for_medium_risk = true;
+        let security = PolicyHandle::new(policy);
+        let hub = Arc::new(ApprovalHub::new());
+        let gate = ApprovalGate::new(&mgr, "web", Some(security)).with_hub(hub);
+
+        let call = ParsedToolCall {
+            name: "shell".into(),
+            arguments: serde_json::json!({"command": "curl https://example.com/other"}),
+            tool_call_id: None,
+        };
+        match gate.decide_async(&call).await {
             GateDecision::Proceed {
                 shell_human_approved: true,
             } => {}
-            other => panic!("expected session-always Proceed, got {other:?}"),
+            GateDecision::Proceed {
+                shell_human_approved: false,
+            } => panic!("expected session-binary Always Proceed, got shell_human_approved=false"),
+            GateDecision::Denied { message } => {
+                panic!("expected session-binary Always Proceed, got Denied: {message}")
+            }
         }
     }
 
@@ -737,7 +875,7 @@ mod tests {
         let mgr = ApprovalManager::from_config(&autonomy);
         let mut policy = SecurityPolicy::default();
         policy.autonomy = AutonomyLevel::Supervised;
-        policy.allowed_commands = vec!["echo".into()];
+        policy.allowed_commands = vec!["curl".into()];
         let security = PolicyHandle::new(policy);
         let hub = Arc::new(ApprovalHub::new());
         let mut sub = hub.subscribe();
@@ -745,7 +883,7 @@ mod tests {
 
         let call = ParsedToolCall {
             name: "shell".into(),
-            arguments: serde_json::json!({"command": "apt remove -y samba"}),
+            arguments: serde_json::json!({"command": "curl https://example.com"}),
             tool_call_id: None,
         };
 
@@ -772,7 +910,57 @@ mod tests {
             GateDecision::Proceed {
                 shell_human_approved: true,
             } => {}
-            other => panic!("expected Proceed with human approval, got {other:?}"),
+            GateDecision::Proceed {
+                shell_human_approved: false,
+            } => panic!("expected Proceed with human approval, got shell_human_approved=false"),
+            GateDecision::Denied { message } => {
+                panic!("expected Proceed with human approval, got Denied: {message}")
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn non_allowlisted_shell_denied_without_hub_prompt() {
+        use super::gate::ApprovalGate;
+        use super::hub::ApprovalHub;
+        use crate::agent::dispatcher::ParsedToolCall;
+        use crate::config::AutonomyConfig;
+        use crate::security::{AutonomyLevel, PolicyHandle, SecurityPolicy};
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        let autonomy = AutonomyConfig {
+            level: AutonomyLevel::Full,
+            always_ask: vec![],
+            ..AutonomyConfig::default()
+        };
+        let mgr = ApprovalManager::from_config(&autonomy);
+        let mut policy = SecurityPolicy::default();
+        policy.autonomy = AutonomyLevel::Full;
+        policy.allowed_commands = vec!["echo".into()];
+        let security = PolicyHandle::new(policy);
+        let hub = Arc::new(ApprovalHub::new());
+        let mut sub = hub.subscribe();
+        let gate = ApprovalGate::new(&mgr, "web", Some(security)).with_hub(hub);
+
+        let call = ParsedToolCall {
+            name: "shell".into(),
+            arguments: serde_json::json!({"command": "apt remove -y samba"}),
+            tool_call_id: None,
+        };
+
+        let decision = gate.decide_async(&call).await;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), sub.recv())
+                .await
+                .is_err(),
+            "non-allowlisted shell must not open ApprovalHub"
+        );
+        match decision {
+            GateDecision::Denied { message } => {
+                assert!(message.contains("not in allowed_commands"));
+            }
+            other @ GateDecision::Proceed { .. } => panic!("expected hard deny, got {other:?}"),
         }
     }
 }

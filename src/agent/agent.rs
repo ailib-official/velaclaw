@@ -536,7 +536,9 @@ impl Agent {
         self.execution.as_ref()
     }
 
-    fn trim_history(&mut self) {
+    /// Mid-loop message-count safety net (not a second orch pipeline).
+    /// Full compact+layered runs at turn start/end via [`prepare_history_after_turn`].
+    fn trim_conversation_cap(&mut self) {
         let max = self.config.max_history_messages;
         if self.history.len() <= max {
             return;
@@ -561,6 +563,51 @@ impl Agent {
 
         self.history = system_messages;
         self.history.extend(other_messages);
+    }
+
+    /// End-of-turn history prepare (GOV-007 / VL-CTX-001): compact + layered or trim.
+    async fn prepare_history_after_turn(&mut self) -> Result<()> {
+        let mut chat_hist: Vec<ChatMessage> = self
+            .history
+            .iter()
+            .filter_map(|m| match m {
+                ConversationMessage::Chat(c) => Some(c.clone()),
+                _ => None,
+            })
+            .collect();
+        if chat_hist.is_empty() {
+            self.trim_conversation_cap();
+            return Ok(());
+        }
+        let summarizer = crate::agent::context_orch::HistorySummarizer {
+            provider: self.provider.as_ref(),
+            model: &self.model_name,
+        };
+        crate::agent::context_orch::prepare_turn_history(
+            &mut chat_hist,
+            crate::agent::context_orch::PrepareHistoryOpts {
+                layered: self.config.envelope_assemble,
+                compact_context: self.config.compact_context,
+                async_pool: self.config.envelope_assemble_async,
+                max_history: self.config.max_history_messages,
+                summarizer: Some(&summarizer),
+            },
+        )
+        .await?;
+        // Rebuild: keep structured native tool frames, replace Chat slice.
+        let structured: Vec<_> = self
+            .history
+            .iter()
+            .filter(|m| !matches!(m, ConversationMessage::Chat(_)))
+            .cloned()
+            .collect();
+        self.history = chat_hist
+            .into_iter()
+            .map(ConversationMessage::Chat)
+            .collect();
+        self.history.extend(structured);
+        self.trim_conversation_cap();
+        Ok(())
     }
 
     fn build_system_prompt(&self) -> Result<String> {
@@ -794,8 +841,7 @@ impl Agent {
         self.history
             .push(ConversationMessage::Chat(ChatMessage::user(enriched)));
 
-        #[cfg(feature = "ai-protocol")]
-        if self.config.envelope_assemble {
+        {
             let mut chat_hist: Vec<ChatMessage> = self
                 .history
                 .iter()
@@ -804,11 +850,19 @@ impl Agent {
                     _ => None,
                 })
                 .collect();
-            crate::agent::envelope_pilot::apply_envelope_pilot_async(
+            let summarizer = crate::agent::context_orch::HistorySummarizer {
+                provider: self.provider.as_ref(),
+                model: &self.model_name,
+            };
+            crate::agent::context_orch::prepare_turn_history(
                 &mut chat_hist,
-                true,
-                self.config.compact_context,
-                self.config.envelope_assemble_async,
+                crate::agent::context_orch::PrepareHistoryOpts {
+                    layered: self.config.envelope_assemble,
+                    compact_context: self.config.compact_context,
+                    async_pool: self.config.envelope_assemble_async,
+                    max_history: self.config.max_history_messages,
+                    summarizer: Some(&summarizer),
+                },
             )
             .await?;
             self.history = chat_hist
@@ -980,7 +1034,7 @@ impl Agent {
                     .push(ConversationMessage::Chat(ChatMessage::assistant(
                         final_text.clone(),
                     )));
-                self.trim_history();
+                self.prepare_history_after_turn().await?;
 
                 return Ok(final_text);
             }
@@ -1028,7 +1082,7 @@ impl Agent {
                 let formatted = self.tool_dispatcher.format_results(&results);
                 self.history.push(formatted);
             }
-            self.trim_history();
+            self.trim_conversation_cap();
         }
 
         anyhow::bail!(

@@ -79,7 +79,7 @@ Same `[agent]` keys must not silently mean different things on different shells.
 | Channels (Telegram/Discord/…) | No | Use channel `route.model` only (documented; not ORCH parity yet) |
 | Doctor observe | Independent | `--force` bypasses live flags |
 
-**Shared pre-turn (CLI + Web):** `resolve_turn_model`, optional `envelope_assemble*`, and L2 `agent-policy.yaml` tool_dispatcher merge. **Still dual:** the tool-call iteration body (`run_tool_call_loop` vs `Agent::turn` inline loop) and approval backends (stdin vs ApprovalHub) remain separate; further merge is a follow-up.
+**Shared pre-turn (CLI + Web + Channel):** `resolve_turn_model` (CLI/Web), **`context_orch::prepare_turn_history`** (compact + `assemble_layered`; VL-CTX-001 / GOV-007), and L2 `agent-policy.yaml` tool_dispatcher merge. **Still dual (VL-CTX-002):** the tool-call iteration body (`run_tool_call_loop` vs `Agent::turn` inline loop) and approval backends (stdin vs ApprovalHub) remain separate.
 
 DAG-related keys below are **library / doctor** surfaces. Enabling them does **not** change live chat behavior (AI-DAG remains frozen off the default turn path).
 
@@ -90,8 +90,8 @@ DAG-related keys below are **library / doctor** surfaces. Enabling them does **n
 | `max_history_messages` | `50` | Maximum conversation history messages retained per session |
 | `parallel_tools` | `false` | Enable parallel tool execution within a single iteration |
 | `tool_dispatcher` | `auto` | Tool dispatch strategy |
-| `envelope_assemble` | `false` | **CR-L1/L2 pilot (opt-in):** run ai-lib `assemble_layered` before each turn on `velaclaw agent`, Web `Agent::turn`, **and** channel dispatch (`channels/dispatch`). HardBudgetViolation fails the turn explicitly (channels reply with an error and drop the pending user turn). Requires `--features ai-protocol`. Default remains off. |
-| `envelope_assemble_async` | `false` | **CR-L3-003 (opt-in):** when `envelope_assemble` is true, schedule assemble via ai-lib `AssemblePool` / `assemble_layered_async` (bounded concurrency + timeout; fail-closed on QueueFull/Timeout/HardBudget). Default remains **off** (sync path). Does **not** promote Experimental Envelope/Tag to a stable Facade. Requires `--features ai-protocol`. |
+| `envelope_assemble` | `true` | **VL-CTX-001 (normative):** run ai-lib `assemble_layered` via `prepare_turn_history` before each turn on CLI, Web, and channel dispatch. HardBudgetViolation fails the turn explicitly. Set `false` only as an emergency kill-switch (falls back to message-count trim). Requires `--features ai-protocol`. |
+| `envelope_assemble_async` | `false` | **CR-L3-003 (opt-in):** when `envelope_assemble` is true, schedule assemble via ai-lib `AssemblePool` / `assemble_layered_async`. Default remains **off** (sync algorithm path). Requires `--features ai-protocol`. |
 | `template_dag` | `false` | **Reserved / unused live gate.** CR-L2 `agent::dag_runner` APIs exist for library + doctor; this bool is **not read** by CLI/Web/channel turns. Observe with `velaclaw doctor template-dag --fixture <path>`. No LLM DAG generation. Requires `--features ai-protocol`. |
 | `candidate_dag_shadow` | `false` | **Library/doctor gate (CR-L4-003).** When true, `maybe_run_candidate_shadow` may run for callers that invoke it. **Not wired** into live chat. Observe anytime via `velaclaw doctor candidate-dag`. Requires `--features ai-protocol`. |
 | `candidate_dag_stagnation_limit` | `0` | **CR-L4-003:** optional consecutive assemble-output hash limit for shadow library runs (`0` = off). |

@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **host_decide multi-segment logical ids** ([#216](https://github.com/ailib-official/velaclaw/pull/216)): preserve NIM/org wire segments via `compose_logical_model_id`; CAP index load failure soft-skips Decide instead of hard-failing the turn.
 
+### Changed
+
+- **host_decide optimize honesty** (ORCH-HOST-006): keep contract values `cost` \| `latency` \| `balanced`; host embed no longer claims Eos-style `lowest_latency` / `balanced_score` or `used_cost_router=true` without real cost ranking / latency health (stub reasons instead).
+
 ## [0.9.0] - 2026-08-07
 
 ### Milestone

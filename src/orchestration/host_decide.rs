@@ -107,7 +107,7 @@ pub fn decide_among_reachable(
                     .unwrap_or(0.0),
                 fallback_chain: rest,
                 disclaimer: NOT_PRODUCTION_SLA.into(),
-                used_cost_router: pricing.is_some(),
+                used_cost_router: false,
             });
         }
     }
@@ -138,17 +138,15 @@ fn decide_with_pricing(
             .filter(|c| model_id_of(c) == Some(model_id))
             .map(|c| c.provider_id.clone())
             .collect();
-        if let Some((provider_id, est, reason, fallback)) =
-            decide_providers_for_model(model_id, &providers, optimize, table)
-        {
+        if let Some(pick) = decide_providers_for_model(model_id, &providers, optimize, table) {
             return Some(HostDecideResponse {
                 model: model_id.to_string(),
-                provider_id,
-                reason,
-                estimated_cost_per_1k_prompt_usd: est,
-                fallback_chain: fallback,
+                provider_id: pick.provider_id,
+                reason: pick.reason,
+                estimated_cost_per_1k_prompt_usd: pick.estimated_cost_per_1k_prompt_usd,
+                fallback_chain: pick.fallback,
                 disclaimer: NOT_PRODUCTION_SLA.into(),
-                used_cost_router: true,
+                used_cost_router: pick.used_cost_router,
             });
         }
     }
@@ -167,8 +165,13 @@ fn decide_with_pricing(
         return None;
     }
 
+    let any_priced = scored.iter().any(|(_, c)| *c != f64::MAX);
+
     match optimize {
-        OptimizeGoal::Cost | OptimizeGoal::Balanced => {
+        OptimizeGoal::Cost => {
+            if !any_priced {
+                return None;
+            }
             scored.sort_by(|a, b| {
                 a.1.partial_cmp(&b.1)
                     .unwrap_or(std::cmp::Ordering::Equal)
@@ -179,18 +182,36 @@ fn decide_with_pricing(
             });
         }
         OptimizeGoal::Latency => {
+            // No live latency — alphabetical stub (ignore prices for ranking).
             scored.sort_by(|a, b| {
                 (&a.0.provider_id, model_id_of(a.0)).cmp(&(&b.0.provider_id, model_id_of(b.0)))
             });
+        }
+        OptimizeGoal::Balanced => {
+            // No latency health — cost stand-in when priced, else alphabetical.
+            if any_priced {
+                scored.sort_by(|a, b| {
+                    a.1.partial_cmp(&b.1)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                        .then_with(|| {
+                            (&a.0.provider_id, model_id_of(a.0))
+                                .cmp(&(&b.0.provider_id, model_id_of(b.0)))
+                        })
+                });
+            } else {
+                scored.sort_by(|a, b| {
+                    (&a.0.provider_id, model_id_of(a.0)).cmp(&(&b.0.provider_id, model_id_of(b.0)))
+                });
+            }
         }
     }
 
     let (first, cost) = scored.first()?;
     let model = model_id_of(first)?.to_string();
-    let reason = match optimize {
-        OptimizeGoal::Cost => "lowest_cost",
-        OptimizeGoal::Latency => "host_reachable_latency_stub",
-        OptimizeGoal::Balanced => "balanced_score",
+    let (reason, used_cost_router) = match optimize {
+        OptimizeGoal::Cost => ("lowest_cost", true),
+        OptimizeGoal::Latency => ("host_reachable_latency_stub", false),
+        OptimizeGoal::Balanced => ("host_reachable_balanced_stub", false),
     };
     let fallback_chain: Vec<String> = scored
         .iter()
@@ -205,7 +226,7 @@ fn decide_with_pricing(
         estimated_cost_per_1k_prompt_usd: if *cost == f64::MAX { 0.0 } else { *cost },
         fallback_chain,
         disclaimer: NOT_PRODUCTION_SLA.into(),
-        used_cost_router: true,
+        used_cost_router,
     })
 }
 
@@ -423,5 +444,49 @@ mod tests {
             "unexpected logical {logical}"
         );
         assert!(!logical.ends_with("nvidia/deepseek-v4-flash"));
+    }
+
+    #[test]
+    fn latency_optimize_uses_stub_reason_not_lowest_latency() {
+        let table = load_embedded_pricing().expect("pricing");
+        let a = cand("openai", Some("openai/gpt-4o-mini"));
+        let b = cand("groq", Some("groq/llama-3.1-8b-instant"));
+        let refs = [&a, &b];
+        let decidable = decidable_reachable(&refs);
+        let out = decide_among_reachable(&decidable, OptimizeGoal::Latency, None, Some(&table))
+            .expect("decide");
+        assert_eq!(out.reason, "host_reachable_latency_stub");
+        assert!(!out.used_cost_router);
+        assert_ne!(out.reason, "lowest_latency");
+    }
+
+    #[test]
+    fn balanced_optimize_uses_stub_reason_not_balanced_score() {
+        let table = load_embedded_pricing().expect("pricing");
+        let a = cand("openai", Some("openai/gpt-4o-mini"));
+        let b = cand("groq", Some("groq/llama-3.1-8b-instant"));
+        let refs = [&a, &b];
+        let decidable = decidable_reachable(&refs);
+        let out = decide_among_reachable(&decidable, OptimizeGoal::Balanced, None, Some(&table))
+            .expect("decide");
+        assert_eq!(out.reason, "host_reachable_balanced_stub");
+        assert!(!out.used_cost_router);
+        assert_ne!(out.reason, "balanced_score");
+    }
+
+    #[test]
+    fn session_override_does_not_claim_used_cost_router() {
+        let table = load_embedded_pricing().expect("pricing");
+        let a = cand("openai", Some("openai/gpt-4o-mini"));
+        let refs = [&a];
+        let decidable = decidable_reachable(&refs);
+        let ov = SessionModelOverride {
+            provider_id: "openai".into(),
+            model: "gpt-4o-mini".into(),
+        };
+        let out = decide_among_reachable(&decidable, OptimizeGoal::Cost, Some(&ov), Some(&table))
+            .expect("decide");
+        assert_eq!(out.reason, "session_override");
+        assert!(!out.used_cost_router);
     }
 }

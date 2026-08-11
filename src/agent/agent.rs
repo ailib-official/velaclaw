@@ -567,6 +567,17 @@ impl Agent {
 
     /// End-of-turn history prepare (GOV-007 / VL-CTX-001): compact + layered or trim.
     async fn prepare_history_after_turn(&mut self) -> Result<()> {
+        self.prepare_conversation_history().await
+    }
+
+    /// Run [`prepare_turn_history`] on Chat frames and reintegrate without
+    /// reordering native `AssistantToolCalls` / `ToolResults` frames.
+    async fn prepare_conversation_history(&mut self) -> Result<()> {
+        let original_chat_count = self
+            .history
+            .iter()
+            .filter(|m| matches!(m, ConversationMessage::Chat(_)))
+            .count();
         let mut chat_hist: Vec<ChatMessage> = self
             .history
             .iter()
@@ -594,18 +605,7 @@ impl Agent {
             },
         )
         .await?;
-        // Rebuild: keep structured native tool frames, replace Chat slice.
-        let structured: Vec<_> = self
-            .history
-            .iter()
-            .filter(|m| !matches!(m, ConversationMessage::Chat(_)))
-            .cloned()
-            .collect();
-        self.history = chat_hist
-            .into_iter()
-            .map(ConversationMessage::Chat)
-            .collect();
-        self.history.extend(structured);
+        self.history = reintegrate_prepared_chat(&self.history, chat_hist, original_chat_count);
         self.trim_conversation_cap();
         Ok(())
     }
@@ -841,35 +841,7 @@ impl Agent {
         self.history
             .push(ConversationMessage::Chat(ChatMessage::user(enriched)));
 
-        {
-            let mut chat_hist: Vec<ChatMessage> = self
-                .history
-                .iter()
-                .filter_map(|m| match m {
-                    ConversationMessage::Chat(c) => Some(c.clone()),
-                    _ => None,
-                })
-                .collect();
-            let summarizer = crate::agent::context_orch::HistorySummarizer {
-                provider: self.provider.as_ref(),
-                model: &self.model_name,
-            };
-            crate::agent::context_orch::prepare_turn_history(
-                &mut chat_hist,
-                crate::agent::context_orch::PrepareHistoryOpts {
-                    layered: self.config.envelope_assemble,
-                    compact_context: self.config.compact_context,
-                    async_pool: self.config.envelope_assemble_async,
-                    max_history: self.config.max_history_messages,
-                    summarizer: Some(&summarizer),
-                },
-            )
-            .await?;
-            self.history = chat_hist
-                .into_iter()
-                .map(ConversationMessage::Chat)
-                .collect();
-        }
+        self.prepare_conversation_history().await?;
 
         let effective_model = self.classify_model_tracked(user_message)?;
 
@@ -1126,6 +1098,38 @@ impl Agent {
         listen_handle.abort();
         Ok(())
     }
+}
+
+/// Reintegrate prepared Chat frames into `ConversationMessage` history.
+///
+/// When prepare did not change Chat count, replace Chat slots in place so
+/// native `AssistantToolCalls` / `ToolResults` keep their temporal order.
+/// When compact/layered rewrote the Chat vector length, fall back to a
+/// Chat-only history (structured frames from the compacted span are dropped).
+fn reintegrate_prepared_chat(
+    history: &[ConversationMessage],
+    prepared: Vec<ChatMessage>,
+    original_chat_count: usize,
+) -> Vec<ConversationMessage> {
+    if prepared.len() == original_chat_count {
+        let mut prepared_iter = prepared.into_iter();
+        return history
+            .iter()
+            .map(|msg| match msg {
+                ConversationMessage::Chat(_) => ConversationMessage::Chat(
+                    prepared_iter
+                        .next()
+                        .expect("prepared chat count matches original"),
+                ),
+                other => other.clone(),
+            })
+            .collect();
+    }
+
+    prepared
+        .into_iter()
+        .map(ConversationMessage::Chat)
+        .collect()
 }
 
 pub async fn run(

@@ -35,7 +35,7 @@ The shell tool schema **does not** expose an `approved` parameter. Human consent
 
 | Entry | Supervised tool approval | Shell medium-risk confirmation | Notes |
 |---|---|---|---|
-| **CLI** (`velaclaw agent`, one-shot) | Interactive stdin: `🔒 Security policy requires approval...` then `[Y]es / [N]o / [A]lways` | Same prompt path when policy requires human approval; shell shows the command | `Always` persists tool to L2.5 `approval.session_allowlist` |
+| **CLI** (`velaclaw agent`, one-shot) | Interactive stdin: `🔒 Security policy requires approval...` then `[Y]es / [N]o / [A]lways` | Same prompt path when policy requires human approval; shell shows the command | Tool `Always` → L2.5 `approval.session_allowlist`. Shell-policy `Always` → executable basename in `approval.session_shell_binaries` (does **not** widen `allowed_commands`) |
 | **Gateway** (Web UI) | `ApprovalHub` modal / async request | Gateway hub prompt when shell policy requires it | Requires pairing when `require_pairing = true` |
 | **Channel** (Telegram, Discord, …) | Controlled by `approval_mode` (see below) | Inline mode only; `deny` blocks interactive approval | Default: `inline` with timeout (300s) |
 
@@ -95,7 +95,8 @@ User-facing persistent layer under the workspace:
 
 Written by:
 
-- Operator **Always** responses (appends to `approval.session_allowlist`)
+- Operator **Always** on tools (appends to `approval.session_allowlist`)
+- Operator **Always** on shell-policy prompts (appends executable basename to `approval.session_shell_binaries`)
 - `policy_patch` tool when `self_adjust` allows the dot-path (requires `ai-protocol` feature)
 
 Example:
@@ -105,13 +106,16 @@ version: 1
 approval:
   session_allowlist:
     - file_write
+  session_shell_binaries:
+    - curl
 autonomy:
   allowed_commands:
     - git
     - cargo
+    - curl
 ```
 
-After autonomy-related patches, `PolicyHandle` hot-refreshes in-process policy without restart.
+**VL-SEC-009 (scheme H):** `allowed_commands` is a hard gate — interactive Yes/Always cannot add executables. Non-allowlisted shell commands are denied without a risk prompt. Shell-policy Always only skips **risk** re-prompts for remembered basenames that are already allowlisted.
 
 ## `policy_patch` tool
 
@@ -120,6 +124,7 @@ Available with `--features ai-protocol`. Applies validated dot-path patches to L
 Supported paths include:
 
 - `approval.session_allowlist`
+- `approval.session_shell_binaries`
 - `autonomy.level`, `autonomy.workspace_only`, `autonomy.allowed_commands`, `autonomy.forbidden_paths`
 - `autonomy.auto_approve`, `autonomy.always_ask`
 

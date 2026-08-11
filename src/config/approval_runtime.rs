@@ -31,6 +31,11 @@ impl ApprovalManagerWiring {
         if let Some(audit) = &self.security_audit {
             mgr = mgr.with_security_audit(Arc::clone(audit));
         }
+        if let Ok(Some(layer)) = self.overrides_store.load() {
+            if let Some(approval) = layer.approval {
+                mgr.seed_session_shell_binaries(approval.session_shell_binaries);
+            }
+        }
         mgr
     }
 

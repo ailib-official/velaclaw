@@ -667,11 +667,12 @@ impl SecurityPolicy {
             ));
         }
 
-        if !self.segments_are_allowlisted(command) && !approved {
+        // Hard allowlist: human approval cannot widen allowed_commands (VL-SEC-009 / H).
+        if !self.segments_are_allowlisted(command) {
             return Err(self.format_command_policy_error(
                 "Command not allowed by security policy (not in allowed_commands).",
                 command,
-                true,
+                false,
             ));
         }
 
@@ -775,30 +776,30 @@ impl SecurityPolicy {
         })
     }
 
-    fn segments_are_allowlisted(&self, command: &str) -> bool {
-        let segments = split_unquoted_segments(command);
-        for segment in &segments {
-            let cmd_part = skip_env_assignments(segment);
+    /// Executable basenames for each shell segment (same split rules as allowlist).
+    pub fn base_executables(command: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        for segment in split_unquoted_segments(command) {
+            let cmd_part = skip_env_assignments(&segment);
             let mut words = cmd_part.split_whitespace();
             let base_raw = words.next().unwrap_or("");
             let base_cmd = base_raw.rsplit('/').next().unwrap_or("");
-
-            if base_cmd.is_empty() {
-                continue;
-            }
-
-            if !self
-                .allowed_commands
-                .iter()
-                .any(|allowed| allowed == base_cmd)
-            {
-                return false;
+            if !base_cmd.is_empty() {
+                out.push(base_cmd.to_string());
             }
         }
+        out
+    }
 
-        segments.iter().any(|s| {
-            let s = skip_env_assignments(s.trim());
-            s.split_whitespace().next().is_some_and(|w| !w.is_empty())
+    fn segments_are_allowlisted(&self, command: &str) -> bool {
+        let bases = Self::base_executables(command);
+        if bases.is_empty() {
+            return false;
+        }
+        bases.iter().all(|base_cmd| {
+            self.allowed_commands
+                .iter()
+                .any(|allowed| allowed == base_cmd)
         })
     }
 
@@ -811,12 +812,21 @@ impl SecurityPolicy {
         let mut msg = format!("{headline}\n   Command: {command}");
         if approval_eligible {
             msg.push_str(
-                "\n\n   Interactive approval: [Y]es = run once, [A]lways = allow shell this session, [N]o = deny.",
+                "\n\n   Interactive approval: [Y]es = run once, [A]lways = skip risk prompts for this \
+                 executable basename this session, [N]o = deny.",
             );
             use std::fmt::Write as _;
             let _ = write!(
                 msg,
                 "\n   Config: add executable names to [autonomy].allowed_commands (current: {}).",
+                self.allowed_commands.join(", ")
+            );
+        } else if !self.segments_are_allowlisted(command) {
+            use std::fmt::Write as _;
+            let _ = write!(
+                msg,
+                "\n\n   Add the executable basename to [autonomy].allowed_commands (current: {}). \
+                 Interactive approval cannot widen the allowlist.",
                 self.allowed_commands.join(", ")
             );
         }
@@ -1351,12 +1361,15 @@ mod tests {
     }
 
     #[test]
-    fn validate_command_allowlist_bypass_when_human_approved() {
+    fn validate_command_allowlist_not_bypassed_when_human_approved() {
         let p = default_policy();
         let denied = p.validate_command_execution("python3 -c 'print(1)'", false);
         assert!(denied.is_err());
-        let allowed = p.validate_command_execution("python3 -c 'print(1)'", true);
-        assert!(allowed.is_ok());
+        let still_denied = p.validate_command_execution("python3 -c 'print(1)'", true);
+        assert!(still_denied.is_err());
+        assert!(still_denied
+            .unwrap_err()
+            .contains("not in allowed_commands"));
     }
 
     #[test]

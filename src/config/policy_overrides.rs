@@ -69,6 +69,25 @@ impl PolicyOverridesStore {
         }
         save_policy_overrides(&path, &layer)
     }
+
+    /// Append executable basename to `approval.session_shell_binaries` and persist.
+    pub fn persist_session_shell_binary_add(&self, binary: &str) -> Result<()> {
+        self.enforcer.validate_session_shell_binary(binary)?;
+        let path = self.path();
+        let mut layer = load_policy_overrides_from_path(&path)?.unwrap_or_default();
+        layer.version = Some(1);
+        let approval = layer.approval.get_or_insert_with(Default::default);
+        if !approval
+            .session_shell_binaries
+            .iter()
+            .any(|existing| existing == binary)
+        {
+            approval.session_shell_binaries.push(binary.to_string());
+            approval.session_shell_binaries.sort();
+            approval.session_shell_binaries.dedup();
+        }
+        save_policy_overrides(&path, &layer)
+    }
 }
 
 pub fn discover_policy_overrides(config: &Config) -> Result<Option<PolicyOverridesLayer>> {
@@ -85,6 +104,10 @@ fn apply_dot_patch(
         "approval.session_allowlist" => {
             let approval = layer.approval.get_or_insert_with(Default::default);
             approval.session_allowlist = parse_string_list(value, patch_path)?;
+        }
+        "approval.session_shell_binaries" => {
+            let approval = layer.approval.get_or_insert_with(Default::default);
+            approval.session_shell_binaries = parse_string_list(value, patch_path)?;
         }
         "autonomy.level" => {
             let autonomy = layer.autonomy.get_or_insert_with(Default::default);

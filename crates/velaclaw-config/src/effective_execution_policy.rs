@@ -171,6 +171,7 @@ mod tests {
             version: Some(1),
             approval: Some(ApprovalOverridesSection {
                 session_allowlist: vec!["file_write".into()],
+                ..Default::default()
             }),
             autonomy: None,
         };

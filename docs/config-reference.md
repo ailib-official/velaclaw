@@ -141,9 +141,10 @@ Persistent operator/agent policy patches live under:
 Created automatically when:
 
 - An operator chooses **Always** on a supervised tool prompt (appends to `approval.session_allowlist`).
+- An operator chooses **Always** on a shell-policy risk prompt (appends executable basename to `approval.session_shell_binaries`; does not widen `allowed_commands`).
 - The agent invokes the `policy_patch` tool with an allowed dot-path (`self_adjust` globs in L2).
 
-Merged **after** L2 `agent-policy.yaml` when computing effective autonomy/approval. Autonomy patches hot-reload via `PolicyHandle` without process restart.
+Merged **after** L2 `agent-policy.yaml` when computing effective autonomy/approval. Autonomy patches hot-reload via `PolicyHandle` without process restart. `session_shell_binaries` is hydrated into runtime session state (not into `auto_approve`).
 
 Example:
 
@@ -152,10 +153,13 @@ version: 1
 approval:
   session_allowlist:
     - file_write
+  session_shell_binaries:
+    - curl
 autonomy:
   allowed_commands:
     - git
     - cargo
+    - curl
 ```
 
 See [policy-approval-reference.md](policy-approval-reference.md) and [migration-policy-v0.7.0.md](migration-policy-v0.7.0.md).
@@ -394,7 +398,7 @@ Notes:
 - **Recommended default for new installs**: keep `level = "supervised"` and `workspace_only = true`. Use `full` only when operators accept broader shell/filesystem scope.
 - **Two approval layers**: `[autonomy]` enforces path/command guardrails (`allowed_commands`, `forbidden_paths`, `workspace_only`); `ApprovalGate` gates medium/high-risk tool operations when `level = "supervised"`. A command can fail on guardrails even when `level = "full"`.
 - **Unified gate**: shell tools no longer accept model-supplied `approved`; human consent is injected only after CLI/Gateway/Channel approval. See [policy-approval-reference.md](policy-approval-reference.md).
-- **Shell allowlist**: commands not listed in `allowed_commands` are rejected before execution; CLI sessions cannot override the allowlist interactively—add the executable name to config instead.
+- **Shell allowlist (VL-SEC-009)**: commands not listed in `allowed_commands` are hard-denied; human Yes/Always cannot widen the allowlist. Shell-policy Always only skips risk re-prompts for remembered executable basenames that are already allowlisted—add new binaries via config / L2 / `policy_patch` on `autonomy.allowed_commands`.
 - `level = "full"` skips medium-risk approval gating for shell execution, while still enforcing configured guardrails.
 - Shell separator/operator parsing is quote-aware. Characters like `;` inside quoted arguments are treated as literals, not command separators.
 - Unquoted shell chaining/operators are still enforced by policy checks (`;`, `|`, `&&`, `||`, background chaining, and redirects).

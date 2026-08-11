@@ -26,6 +26,10 @@ pub struct ApprovalOverridesSection {
     /// Tools the operator marked "Always" — merged into L1 `auto_approve` at load.
     #[serde(default)]
     pub session_allowlist: Vec<String>,
+    /// Shell executable basenames from shell-policy "Always" (VL-SEC-009).
+    /// Not merged into `auto_approve`; hydrated into runtime session state.
+    #[serde(default)]
+    pub session_shell_binaries: Vec<String>,
 }
 
 /// Enforces `self_adjust.allowed_writes` / `denied_writes` for policy patch paths.
@@ -50,7 +54,11 @@ impl SelfAdjustEnforcer {
     /// Default: only `approval.session_allowlist` may be persisted when L2 has no self_adjust.
     pub fn default_session_allowlist_only() -> Self {
         Self {
-            allowed_writes: vec!["approval.session_allowlist".into(), "approval.*".into()],
+            allowed_writes: vec![
+                "approval.session_allowlist".into(),
+                "approval.session_shell_binaries".into(),
+                "approval.*".into(),
+            ],
             denied_writes: vec![
                 "security".into(),
                 "security.*".into(),
@@ -92,6 +100,13 @@ impl SelfAdjustEnforcer {
             bail!("tool name must not be empty");
         }
         self.validate_write_path("approval.session_allowlist")
+    }
+
+    pub fn validate_session_shell_binary(&self, binary: &str) -> Result<()> {
+        if binary.trim().is_empty() {
+            bail!("shell binary name must not be empty");
+        }
+        self.validate_write_path("approval.session_shell_binaries")
     }
 }
 
@@ -209,6 +224,7 @@ mod tests {
             version: Some(1),
             approval: Some(ApprovalOverridesSection {
                 session_allowlist: vec!["file_write".into(), "shell".into()],
+                ..Default::default()
             }),
             autonomy: None,
         };

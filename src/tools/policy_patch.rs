@@ -47,7 +47,7 @@ impl Tool for PolicyPatchTool {
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Dot path under policy-overrides.yaml (e.g. autonomy.allowed_commands, approval.session_allowlist)"
+                    "description": "Dot path under policy-overrides.yaml (e.g. autonomy.allowed_commands, approval.session_allowlist, approval.session_shell_binaries)"
                 },
                 "value": {
                     "description": "JSON value to set at the path (string, bool, number, or array)"

@@ -1,12 +1,12 @@
 //! 代理引擎模块，实现自主循环、分类与任务分发。
 //!
-//! ## Turn unification (ORCH cleanup / VL-CTX-001)
+//! ## Turn unification (ORCH cleanup / VL-CTX-001 / VL-CTX-002)
 //! - **Shared:** [`crate::orchestration::resolve_turn_model`] (CLI `loop_` + Web
 //!   [`agent::Agent::turn`]), [`context_orch::prepare_turn_history`] (compact + layered),
-//!   L2 tool_dispatcher merge.
-//! - **Still dual (VL-CTX-002):** tool-iteration body (`loop_::run_tool_call_loop` vs
-//!   `Agent::turn` inline loop) and approval backends (stdin vs ApprovalHub).
-//!   Do not add a third path.
+//!   L2 tool_dispatcher merge, and tool iteration via [`loop_::run_tool_call_loop`]
+//!   (Web ApprovalHub / HITL still injected as `ToolBatchGateExtras` adapters).
+//! - **Still dual:** approval backend *adapters* (stdin vs ApprovalHub) and CLI
+//!   fold/render — not a second policy or tool-loop body.
 #[allow(clippy::module_inception)]
 pub mod agent;
 #[cfg(feature = "ai-protocol")]

@@ -457,6 +457,7 @@ pub(crate) async fn process_channel_message(
                     config: None,
                     surface: velaclaw_agent_runtime::SoftFailSurface::Channel,
                 }),
+            None,
             ),
         ) => LlmExecutionResult::Completed(result),
     };

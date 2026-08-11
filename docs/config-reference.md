@@ -79,7 +79,7 @@ Same `[agent]` keys must not silently mean different things on different shells.
 | Channels (Telegram/Discord/…) | No | Use channel `route.model` only (documented; not ORCH parity yet) |
 | Doctor observe | Independent | `--force` bypasses live flags |
 
-**Shared pre-turn (CLI + Web + Channel):** `resolve_turn_model` (CLI/Web), **`context_orch::prepare_turn_history`** (compact + `assemble_layered`; VL-CTX-001 / GOV-007), and L2 `agent-policy.yaml` tool_dispatcher merge. **Still dual (VL-CTX-002):** the tool-call iteration body (`run_tool_call_loop` vs `Agent::turn` inline loop) and approval backends (stdin vs ApprovalHub) remain separate.
+**Shared pre-turn (CLI + Web + Channel):** `resolve_turn_model` (CLI/Web), **`context_orch::prepare_turn_history`** (compact + `assemble_layered`; VL-CTX-001 / GOV-007), and L2 `agent-policy.yaml` tool_dispatcher merge. **Shared tool loop (VL-CTX-002):** `run_tool_call_loop` is the single iteration body; Web injects ApprovalHub/HITL via gate extras (adapters, not a second policy).
 
 DAG-related keys below are **library / doctor** surfaces. Enabling them does **not** change live chat behavior (AI-DAG remains frozen off the default turn path).
 

@@ -2,6 +2,9 @@
   import { onMount, tick } from "svelte";
   import {
     appendAssistantDelta,
+    appendSystemNotice,
+    lastAssistantHasVelaClawNotice,
+    looksLikeVelaClawNotice,
     streamChat,
     type ChatMessage,
   } from "./lib/chat";
@@ -58,6 +61,7 @@
   let tab = $state<Tab>("chat");
   let models = $state<ProviderModel[]>([]);
   let selectedModel = $state("");
+  let modelPickerAttention = $state(false);
   let messages = $state<ChatMessage[]>([]);
   let sessions = $state<SessionSummary[]>([]);
   let activeSessionId = $state<string | null>(null);
@@ -89,6 +93,7 @@
 
   let listEl: HTMLDivElement | undefined;
   let inputEl: HTMLTextAreaElement | undefined;
+  let modelSelectEl: HTMLSelectElement | undefined;
 
   /** Return focus to the chat composer after a turn ends (textarea was disabled while streaming). */
   async function focusChatInput() {
@@ -97,11 +102,30 @@
     inputEl?.focus();
   }
 
-  function showToast(msg: string) {
+  async function highlightModelPicker() {
+    modelPickerAttention = true;
+    await tick();
+    modelSelectEl?.focus();
+    setTimeout(() => {
+      modelPickerAttention = false;
+    }, 12000);
+  }
+
+  function showToast(msg: string, ms = 5000) {
     toast = msg;
     setTimeout(() => {
       if (toast === msg) toast = "";
-    }, 5000);
+    }, ms);
+  }
+
+  function surfaceSoftFailUx(msg: string, opts: { persistSystem?: boolean } = {}) {
+    const { persistSystem = true } = opts;
+    if (persistSystem) {
+      messages = appendSystemNotice(messages, msg);
+      scrollToBottom();
+    }
+    showToast(msg, 10000);
+    void highlightModelPicker();
   }
 
   function scrollToBottom() {
@@ -487,7 +511,7 @@
       return;
     }
 
-    const history = messages;
+    const history = messages.filter((m) => m.role !== "system");
     cancelStream = streamChat({
       token,
       sessionId,
@@ -502,13 +526,27 @@
         cancelStream = null;
         scrollToBottom();
         loadSessions();
-        void focusChatInput();
+        if (lastAssistantHasVelaClawNotice(messages)) {
+          showToast(
+            "Model soft-fail notice in reply — consider switching model in the picker.",
+            10000,
+          );
+          void highlightModelPicker();
+        } else {
+          void focusChatInput();
+        }
       },
       onError: (msg) => {
         streaming = false;
         cancelStream = null;
-        showToast(msg);
-        void focusChatInput();
+        if (looksLikeVelaClawNotice(msg)) {
+          surfaceSoftFailUx(msg);
+        } else {
+          messages = appendSystemNotice(messages, msg);
+          scrollToBottom();
+          showToast(msg);
+          void focusChatInput();
+        }
       },
       onApprovalRequired: (payload) => {
         pendingApprovals = [...pendingApprovals, payload];
@@ -551,9 +589,13 @@
     </label>
     <button type="button" onclick={saveTokenAndRefresh}>Save token</button>
     {#if tab === "chat"}
-      <label>
+      <label class:model-attention={modelPickerAttention}>
         Model
-        <select bind:value={selectedModel} disabled={models.length === 0}>
+        <select
+          bind:this={modelSelectEl}
+          bind:value={selectedModel}
+          disabled={models.length === 0}
+        >
           {#if models.length === 0}
             <option value="">No models (check BYOK)</option>
           {:else}
@@ -1132,6 +1174,16 @@
     align-self: flex-start;
     background: #334155;
   }
+  article.system {
+    align-self: stretch;
+    max-width: 100%;
+    background: #451a03;
+    border: 1px solid #f59e0b;
+    color: #fde68a;
+  }
+  article.system .role {
+    color: #fbbf24;
+  }
   .role {
     font-size: 0.65rem;
     text-transform: uppercase;
@@ -1469,6 +1521,21 @@
     padding: 0.75rem 1rem;
     border-radius: 8px;
     max-width: 360px;
+    white-space: pre-wrap;
+  }
+  label.model-attention select {
+    outline: 2px solid #f59e0b;
+    box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.35);
+    animation: model-pulse 1.2s ease-in-out 3;
+  }
+  @keyframes model-pulse {
+    0%,
+    100% {
+      box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.35);
+    }
+    50% {
+      box-shadow: 0 0 0 6px rgba(245, 158, 11, 0.15);
+    }
   }
   @media (max-width: 720px) {
     .chat-grid {

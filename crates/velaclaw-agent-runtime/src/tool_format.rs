@@ -124,13 +124,15 @@ pub fn tool_format_recovery_message(strategy: ToolFormatRecoveryStrategy) -> &'s
     }
 }
 
-/// Where the soft-fail notice will be shown (ORCH-HOST-004).
+/// Where the soft-fail notice will be shown (ORCH-HOST-004/005).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SoftFailSurface {
     /// Interactive / one-shot CLI agent.
     Cli,
     /// Web Local Control /chat.
     Web,
+    /// Messaging channels (Telegram/Discord/etc.).
+    Channel,
 }
 
 impl SoftFailSurface {
@@ -139,6 +141,9 @@ impl SoftFailSurface {
         match self {
             Self::Cli => "Switch model with `/model <provider/model>` (list: `/models`).",
             Self::Web => "Switch model with the Web model picker (provider/model id).",
+            Self::Channel => {
+                "Switch model with `/model <provider/model>` (list: `/models` or `/models <provider>`)."
+            }
         }
     }
 }
@@ -283,6 +288,9 @@ mod tests {
         assert!(out.contains("groq/llama-3.1-8b-instant"));
         assert!(out.contains("/model"));
         let web = append_tool_format_exhausted_notice("", "openai/gpt-4o", SoftFailSurface::Web);
+        let channel =
+            append_tool_format_exhausted_notice("", "openai/gpt-4o", SoftFailSurface::Channel);
+        assert!(channel.contains("/models"));
         assert!(web.contains("model picker"));
         assert!(web.contains("openai/gpt-4o"));
     }

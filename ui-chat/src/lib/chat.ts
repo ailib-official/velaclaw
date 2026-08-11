@@ -1,8 +1,30 @@
-export type ChatRole = "user" | "assistant";
+export type ChatRole = "user" | "assistant" | "system";
 
 export interface ChatMessage {
   role: ChatRole;
   content: string;
+}
+
+/** Marker emitted by ORCH-HOST-004 soft-fail / quota notices (do not re-classify in UI). */
+export const VELACLAW_NOTICE_MARKER = "VelaClaw notice:";
+
+export function looksLikeVelaClawNotice(text: string): boolean {
+  return text.includes(VELACLAW_NOTICE_MARKER);
+}
+
+export function appendSystemNotice(messages: ChatMessage[], content: string): ChatMessage[] {
+  return [...messages, { role: "system", content }];
+}
+
+/** Last assistant blob contains a soft-fail / failover notice (streamed in reply text). */
+export function lastAssistantHasVelaClawNotice(messages: ChatMessage[]): boolean {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const m = messages[i];
+    if (m.role === "assistant") {
+      return looksLikeVelaClawNotice(m.content);
+    }
+  }
+  return false;
 }
 
 export interface WsServerFrame {

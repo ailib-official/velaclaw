@@ -450,7 +450,11 @@ pub(crate) async fn process_channel_message(
                     fold_enabled: false,
                 },
                 None,
-                None,
+                Some(SoftFailLoopCtx {
+                    session_key: history_key.as_str(),
+                    config: None,
+                    surface: velaclaw_agent_runtime::SoftFailSurface::Channel,
+                }),
             ),
         ) => LlmExecutionResult::Completed(result),
     };
@@ -601,6 +605,14 @@ pub(crate) async fn process_channel_message(
             eprintln!(
                 "  ❌ LLM error after {}ms: {e}",
                 started_at.elapsed().as_millis()
+            );
+            #[cfg(feature = "ai-protocol")]
+            let e = crate::orchestration::map_provider_limit_error(
+                e,
+                route.model.as_str(),
+                velaclaw_agent_runtime::SoftFailSurface::Channel,
+                None,
+                history_key.as_str(),
             );
             if let Some(channel) = target_channel.as_ref() {
                 if let Some(ref draft_id) = draft_message_id {

@@ -343,11 +343,15 @@ pub(crate) fn append_text_tool_prompt(
     }
 }
 
-/// Soft-fail UX context for CLI tool loop (ORCH-HOST-004).
+/// Soft-fail UX context for tool loop (ORCH-HOST-004/005).
+///
+/// `config` is required for opt-in `host_decide_failover` (CLI/Web). Channel
+/// surfaces pass `None` — notices still apply; Decide failover does not (no
+/// host Decide on the channel path).
 #[derive(Clone, Copy)]
 pub(crate) struct SoftFailLoopCtx<'a> {
     pub session_key: &'a str,
-    pub config: &'a Config,
+    pub config: Option<&'a Config>,
     pub surface: velaclaw_agent_runtime::SoftFailSurface,
 }
 
@@ -579,13 +583,14 @@ pub(crate) async fn run_tool_call_loop(
                     });
                     #[cfg(feature = "ai-protocol")]
                     if let Some(ctx) = soft_fail {
-                        let host = crate::orchestration::HostDecideHost::from_config(ctx.config);
-                        let host_ref = host.enabled.then_some(&host);
+                        let host = ctx
+                            .config
+                            .map(crate::orchestration::HostDecideHost::from_config);
                         return Err(crate::orchestration::map_provider_limit_error(
                             e,
                             model,
                             ctx.surface,
-                            host_ref,
+                            host.as_ref(),
                             ctx.session_key,
                         ));
                     }
@@ -651,31 +656,25 @@ pub(crate) async fn run_tool_call_loop(
             history.push(ChatMessage::assistant(response_text.clone()));
             let mut final_text = crate::util::strip_tool_call_markup(&display_text);
             if strip_fail_closed {
+                let surface = soft_fail
+                    .map(|c| c.surface)
+                    .unwrap_or(velaclaw_agent_runtime::SoftFailSurface::Cli);
+                let session_key = soft_fail.map(|c| c.session_key).unwrap_or("");
                 #[cfg(feature = "ai-protocol")]
                 {
-                    if let Some(ctx) = soft_fail {
-                        let host = crate::orchestration::HostDecideHost::from_config(ctx.config);
-                        let host_ref = host.enabled.then_some(&host);
-                        final_text = crate::orchestration::finalize_tool_format_exhausted(
-                            &final_text,
-                            model,
-                            ctx.surface,
-                            host_ref,
-                            ctx.session_key,
-                        );
-                    } else {
-                        final_text = velaclaw_agent_runtime::append_tool_format_exhausted_notice(
-                            &final_text,
-                            model,
-                            velaclaw_agent_runtime::SoftFailSurface::Cli,
-                        );
-                    }
+                    let host = soft_fail
+                        .and_then(|c| c.config)
+                        .map(crate::orchestration::HostDecideHost::from_config);
+                    final_text = crate::orchestration::finalize_tool_format_exhausted(
+                        &final_text,
+                        model,
+                        surface,
+                        host.as_ref(),
+                        session_key,
+                    );
                 }
                 #[cfg(not(feature = "ai-protocol"))]
                 {
-                    let surface = soft_fail
-                        .map(|c| c.surface)
-                        .unwrap_or(velaclaw_agent_runtime::SoftFailSurface::Cli);
                     final_text = velaclaw_agent_runtime::append_tool_format_exhausted_notice(
                         &final_text,
                         model,
@@ -1305,7 +1304,7 @@ pub async fn run(
             None,
             Some(SoftFailLoopCtx {
                 session_key: session_id.as_str(),
-                config: &config,
+                config: Some(&config),
                 surface: velaclaw_agent_runtime::SoftFailSurface::Cli,
             }),
         )
@@ -1534,7 +1533,7 @@ pub async fn run(
                 Some(&fold_cache),
                 Some(SoftFailLoopCtx {
                     session_key: session_id.as_str(),
-                    config: &config,
+                    config: Some(&config),
                     surface: velaclaw_agent_runtime::SoftFailSurface::Cli,
                 }),
             )

@@ -25,6 +25,7 @@ pub mod turn_model;
 
 #[cfg(feature = "ai-protocol")]
 pub use host_wire::{
+    finalize_tool_format_exhausted, map_provider_limit_error, maybe_apply_host_decide_failover,
     try_host_decide_model, try_host_decide_selection, HostDecideHost, HostDecideSelection,
 };
 

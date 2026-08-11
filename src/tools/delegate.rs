@@ -438,6 +438,7 @@ impl DelegateTool {
                     fold_enabled: false,
                 },
                 None,
+                None,
             ),
         )
         .await;

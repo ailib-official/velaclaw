@@ -307,6 +307,7 @@ pub(crate) async fn agent_turn(
             fold_enabled: false,
         },
         None,
+        None,
     )
     .await
 }
@@ -342,6 +343,14 @@ pub(crate) fn append_text_tool_prompt(
     }
 }
 
+/// Soft-fail UX context for CLI tool loop (ORCH-HOST-004).
+#[derive(Clone, Copy)]
+pub(crate) struct SoftFailLoopCtx<'a> {
+    pub session_key: &'a str,
+    pub config: &'a Config,
+    pub surface: velaclaw_agent_runtime::SoftFailSurface,
+}
+
 /// Execute a single turn of the agent loop: send messages, parse tool calls,
 /// execute tools, and loop until the LLM produces a final text response.
 #[allow(clippy::too_many_arguments)]
@@ -367,6 +376,7 @@ pub(crate) async fn run_tool_call_loop(
     text_tool_result_history: bool,
     render_opts: RenderOpts,
     fold_cache: Option<&FoldCache>,
+    soft_fail: Option<SoftFailLoopCtx<'_>>,
 ) -> Result<String> {
     let max_iterations = if max_tool_iterations == 0 {
         DEFAULT_MAX_TOOL_ITERATIONS
@@ -567,6 +577,18 @@ pub(crate) async fn run_tool_call_loop(
                         success: false,
                         error_message: Some(crate::providers::sanitize_api_error(&e.to_string())),
                     });
+                    #[cfg(feature = "ai-protocol")]
+                    if let Some(ctx) = soft_fail {
+                        let host = crate::orchestration::HostDecideHost::from_config(ctx.config);
+                        let host_ref = host.enabled.then_some(&host);
+                        return Err(crate::orchestration::map_provider_limit_error(
+                            e,
+                            model,
+                            ctx.surface,
+                            host_ref,
+                            ctx.session_key,
+                        ));
+                    }
                     return Err(e);
                 }
             };
@@ -579,6 +601,7 @@ pub(crate) async fn run_tool_call_loop(
 
         if tool_calls.is_empty() {
             // VL-TTC-016: typed leakage → recovery ladder.
+            let mut strip_fail_closed = false;
             if velaclaw_agent_runtime::needs_tool_format_correction(&response_text, 0) {
                 let strategy = format_ladder.next_strategy();
                 tracing::warn!(
@@ -598,6 +621,7 @@ pub(crate) async fn run_tool_call_loop(
                     tool_format_strategy = "StripFailClosed",
                     "tool_format_retry_exhausted: stripping markup after recovery ladder"
                 );
+                strip_fail_closed = true;
             }
             // No tool calls — this is the final response.
             // If a streaming sender is provided, relay the text in small chunks
@@ -625,7 +649,41 @@ pub(crate) async fn run_tool_call_loop(
                 }
             }
             history.push(ChatMessage::assistant(response_text.clone()));
-            return Ok(crate::util::strip_tool_call_markup(&display_text));
+            let mut final_text = crate::util::strip_tool_call_markup(&display_text);
+            if strip_fail_closed {
+                #[cfg(feature = "ai-protocol")]
+                {
+                    if let Some(ctx) = soft_fail {
+                        let host = crate::orchestration::HostDecideHost::from_config(ctx.config);
+                        let host_ref = host.enabled.then_some(&host);
+                        final_text = crate::orchestration::finalize_tool_format_exhausted(
+                            &final_text,
+                            model,
+                            ctx.surface,
+                            host_ref,
+                            ctx.session_key,
+                        );
+                    } else {
+                        final_text = velaclaw_agent_runtime::append_tool_format_exhausted_notice(
+                            &final_text,
+                            model,
+                            velaclaw_agent_runtime::SoftFailSurface::Cli,
+                        );
+                    }
+                }
+                #[cfg(not(feature = "ai-protocol"))]
+                {
+                    let surface = soft_fail
+                        .map(|c| c.surface)
+                        .unwrap_or(velaclaw_agent_runtime::SoftFailSurface::Cli);
+                    final_text = velaclaw_agent_runtime::append_tool_format_exhausted_notice(
+                        &final_text,
+                        model,
+                        surface,
+                    );
+                }
+            }
+            return Ok(final_text);
         }
 
         // Print any text the LLM produced alongside tool calls (unless silent)
@@ -1245,6 +1303,11 @@ pub async fn run(
             text_tool_result_history,
             render_opts,
             None,
+            Some(SoftFailLoopCtx {
+                session_key: session_id.as_str(),
+                config: &config,
+                surface: velaclaw_agent_runtime::SoftFailSurface::Cli,
+            }),
         )
         .await?;
         final_output = response.clone();
@@ -1469,6 +1532,11 @@ pub async fn run(
                 text_tool_result_history,
                 render_opts,
                 Some(&fold_cache),
+                Some(SoftFailLoopCtx {
+                    session_key: session_id.as_str(),
+                    config: &config,
+                    surface: velaclaw_agent_runtime::SoftFailSurface::Cli,
+                }),
             )
             .await
             {
@@ -2006,6 +2074,7 @@ mod tests {
                 fold_enabled: false,
             },
             None,
+            None,
         )
         .await
         .expect_err("provider without vision support should fail");
@@ -2063,6 +2132,7 @@ mod tests {
                 fold_enabled: false,
             },
             None,
+            None,
         )
         .await
         .expect_err("oversized payload must fail");
@@ -2113,6 +2183,7 @@ mod tests {
                 fold_lines: 10,
                 fold_enabled: false,
             },
+            None,
             None,
         )
         .await
@@ -2253,6 +2324,7 @@ mod tests {
                 fold_enabled: false,
             },
             None,
+            None,
         )
         .await
         .expect("parallel execution should complete");
@@ -2342,6 +2414,7 @@ mod tests {
                 fold_lines: 10,
                 fold_enabled: false,
             },
+            None,
             None,
         )
         .await

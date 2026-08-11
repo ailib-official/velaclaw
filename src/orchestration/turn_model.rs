@@ -247,6 +247,7 @@ mod tests {
         let host = HostDecideHost {
             enabled: false,
             optimize: "cost".into(),
+            failover: false,
             config_dir: PathBuf::from("/tmp/velaclaw-turn-model-test-missing"),
         };
         let req = TurnModelRequest {
@@ -271,6 +272,7 @@ mod tests {
         let host = HostDecideHost {
             enabled: false,
             optimize: "cost".into(),
+            failover: false,
             config_dir: PathBuf::from("."),
         };
         let req = TurnModelRequest {

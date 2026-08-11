@@ -79,7 +79,9 @@ pub use whatsapp_web::WhatsAppWebChannel;
 
 #[cfg(feature = "ai-protocol")]
 use crate::agent::dispatcher::ToolDispatcher;
-use crate::agent::loop_::{append_text_tool_prompt, build_tool_instructions, run_tool_call_loop};
+use crate::agent::loop_::{
+    append_text_tool_prompt, build_tool_instructions, run_tool_call_loop, SoftFailLoopCtx,
+};
 use crate::approval::{ApprovalManager, ChannelApprovalHub, ChannelApprovalSession};
 use crate::cli_render::{RenderOpts, RenderStyle};
 use crate::config::{ChannelApprovalMode, Config, DEFAULT_PROTOCOL_MODEL_ID};

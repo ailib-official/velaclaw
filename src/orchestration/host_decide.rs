@@ -1,7 +1,9 @@
-//! Host-side Decide (ORCH-HOST-001/002) — CAP reachable ∩ pricing / stub.
+//! Host-side Decide (ORCH-HOST-001/002/003) — CAP reachable ∩ pricing / stub.
 //!
 //! Matches Decide contract fields. Default-off via `[agent].host_decide`.
 //! Pricing mirrors prism-core CostRouter JSON + reason codes (HOST-002).
+//! ORCH-HOST-003: `model` is the wire key after `{provider_id}/` (may contain
+//! `/`), aligned with [`crate::protocol_registry::compose_logical_model_id`].
 
 use crate::capability_index::CapabilityCandidate;
 use crate::orchestration::pricing::{decide_providers_for_model, PricingTable};
@@ -44,6 +46,8 @@ impl OptimizeGoal {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct HostDecideResponse {
+    /// Wire / model key after `{provider_id}/` (may be multi-segment, e.g.
+    /// `deepseek-ai/deepseek-v4-flash`). Not a last-path-segment bare name.
     pub model: String,
     pub provider_id: String,
     pub reason: String,
@@ -59,6 +63,7 @@ pub struct HostDecideResponse {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionModelOverride {
     pub provider_id: String,
+    /// Wire key after `{provider_id}/` (may contain `/`).
     pub model: String,
 }
 
@@ -236,12 +241,36 @@ fn stub_rank(
     })
 }
 
+/// Wire model id: strip `{provider_id}/` prefix only (ORCH-HOST-003).
+///
+/// Preserves multi-segment aggregator wires such as
+/// `nvidia/deepseek-ai/deepseek-v4-flash` → `deepseek-ai/deepseek-v4-flash`.
+/// Do **not** use last-path-segment truncation (`rsplit_once`).
 fn model_id_of(c: &CapabilityCandidate) -> Option<&str> {
-    let logical = c.logical_model_id.as_deref()?;
+    let logical = c.logical_model_id.as_deref()?.trim();
+    if logical.is_empty() {
+        return None;
+    }
+    let provider = c.provider_id.trim();
+    if provider.is_empty() {
+        return Some(logical);
+    }
+    let prefix = format!("{provider}/");
+    if let Some(rest) = logical.strip_prefix(prefix.as_str()) {
+        if rest.is_empty() {
+            return None;
+        }
+        return Some(rest);
+    }
+    if logical == provider {
+        return None;
+    }
+    // Mismatched prefix (should be rare in CAP index): keep prior last-segment
+    // fallback so decidable filtering still yields something observable.
     Some(logical.rsplit_once('/').map(|(_, m)| m).unwrap_or(logical))
 }
 
-/// Prefer logical model id bare segment; if missing, return None (skip).
+/// Prefer candidates with a usable wire model id; if missing, return None (skip).
 #[must_use]
 pub fn decidable_reachable<'a>(
     reachable: &[&'a CapabilityCandidate],
@@ -251,6 +280,12 @@ pub fn decidable_reachable<'a>(
         .copied()
         .filter(|c| model_id_of(c).is_some())
         .collect()
+}
+
+/// Rebuild full logical id from a Decide response (provider + wire model).
+#[must_use]
+pub fn logical_id_from_decision(decision: &HostDecideResponse) -> String {
+    crate::protocol_registry::compose_logical_model_id(&decision.provider_id, &decision.model)
 }
 
 #[cfg(test)]
@@ -333,5 +368,60 @@ mod tests {
             .expect("decide");
         assert_eq!(out.provider_id, "groq");
         assert_ne!(out.reason, "session_override");
+    }
+
+    #[test]
+    fn multi_segment_wire_id_preserved_through_decide() {
+        let a = cand("nvidia", Some("nvidia/deepseek-ai/deepseek-v4-flash"));
+        let b = cand("deepseek", Some("deepseek/deepseek-v4-flash"));
+        let refs = [&a, &b];
+        let decidable = decidable_reachable(&refs);
+        assert_eq!(decidable.len(), 2);
+
+        let out =
+            decide_among_reachable(&decidable, OptimizeGoal::Cost, None, None).expect("decide");
+        // Alphabetical provider_id: deepseek before nvidia for stub rank.
+        assert_eq!(out.provider_id, "deepseek");
+        assert_eq!(out.model, "deepseek-v4-flash");
+        assert_eq!(logical_id_from_decision(&out), "deepseek/deepseek-v4-flash");
+
+        let ov = SessionModelOverride {
+            provider_id: "nvidia".into(),
+            model: "deepseek-ai/deepseek-v4-flash".into(),
+        };
+        let picked = decide_among_reachable(&decidable, OptimizeGoal::Cost, Some(&ov), None)
+            .expect("override");
+        assert_eq!(picked.reason, "session_override");
+        assert_eq!(picked.provider_id, "nvidia");
+        assert_eq!(picked.model, "deepseek-ai/deepseek-v4-flash");
+        assert_eq!(
+            logical_id_from_decision(&picked),
+            "nvidia/deepseek-ai/deepseek-v4-flash"
+        );
+    }
+
+    #[test]
+    fn distinct_multi_segment_wires_do_not_collapse_for_pricing_key() {
+        // Same bare suffix, different wire — must not share unique_model path.
+        let nvidia = cand("nvidia", Some("nvidia/deepseek-ai/deepseek-v4-flash"));
+        let deepseek = cand("deepseek", Some("deepseek/deepseek-v4-flash"));
+        let refs = [&nvidia, &deepseek];
+        let decidable = decidable_reachable(&refs);
+        let table = load_embedded_pricing().expect("pricing");
+        let out = decide_among_reachable(&decidable, OptimizeGoal::Cost, None, Some(&table))
+            .expect("decide");
+        // Wire keys differ → scored path (not unique_model CostRouter collapse).
+        assert!(
+            out.model == "deepseek-ai/deepseek-v4-flash" || out.model == "deepseek-v4-flash",
+            "unexpected model {}",
+            out.model
+        );
+        let logical = logical_id_from_decision(&out);
+        assert!(
+            logical == "nvidia/deepseek-ai/deepseek-v4-flash"
+                || logical == "deepseek/deepseek-v4-flash",
+            "unexpected logical {logical}"
+        );
+        assert!(!logical.ends_with("nvidia/deepseek-v4-flash"));
     }
 }

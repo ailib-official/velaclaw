@@ -1,11 +1,11 @@
-//! Wire host Decide into agent model selection (ORCH-HOST-001).
+//! Wire host Decide into agent model selection (ORCH-HOST-001/003).
 
 use crate::capability_index::{
     filter_reachable, load_or_rebuild_for_config, lookup_tag, CAPABILITY_TAGS,
 };
 use crate::execution::provider_has_usable_key;
 use crate::orchestration::host_decide::{
-    decidable_reachable, decide_among_reachable, OptimizeGoal,
+    decidable_reachable, decide_among_reachable, logical_id_from_decision, OptimizeGoal,
 };
 use crate::orchestration::session_override;
 use anyhow::Result;
@@ -62,9 +62,25 @@ pub fn try_host_decide_selection(
         return Ok(None);
     }
 
-    let optimize = OptimizeGoal::parse(host.optimize.as_str()).unwrap_or(OptimizeGoal::Cost);
+    let optimize = OptimizeGoal::parse(host.optimize.as_str()).unwrap_or_else(|| {
+        tracing::warn!(
+            optimize = %host.optimize,
+            "host_decide: invalid host_decide_optimize; falling back to cost"
+        );
+        OptimizeGoal::Cost
+    });
 
-    let (index, _) = load_or_rebuild_for_config(&host.config_dir, false)?;
+    let (index, _) = match load_or_rebuild_for_config(&host.config_dir, false) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                config_dir = %host.config_dir.display(),
+                "host_decide: CAP index unavailable; skip (turn ladder continues)"
+            );
+            return Ok(None);
+        }
+    };
 
     let preferred_tags: &[&str] = if user_message.to_ascii_lowercase().contains("pdf")
         || user_message.to_ascii_lowercase().contains("document")
@@ -103,12 +119,13 @@ pub fn try_host_decide_selection(
         return Ok(None);
     };
 
-    let logical_id = format!("{}/{}", decision.provider_id, decision.model);
+    let logical_id = logical_id_from_decision(&decision);
 
     tracing::info!(
         target: "host_decide",
         provider = %decision.provider_id,
         model = %decision.model,
+        logical_id = %logical_id,
         reason = %decision.reason,
         optimize = optimize.as_str(),
         used_cost_router = decision.used_cost_router,
@@ -121,4 +138,54 @@ pub fn try_host_decide_selection(
         used_cost_router: decision.used_cost_router,
         optimize: optimize.as_str().to_string(),
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::orchestration::host_decide::{HostDecideResponse, NOT_PRODUCTION_SLA};
+
+    #[test]
+    fn logical_id_from_decision_preserves_multi_segment_wire() {
+        let d = HostDecideResponse {
+            model: "deepseek-ai/deepseek-v4-flash".into(),
+            provider_id: "nvidia".into(),
+            reason: "test".into(),
+            estimated_cost_per_1k_prompt_usd: 0.0,
+            fallback_chain: vec![],
+            disclaimer: NOT_PRODUCTION_SLA.into(),
+            used_cost_router: false,
+        };
+        assert_eq!(
+            logical_id_from_decision(&d),
+            "nvidia/deepseek-ai/deepseek-v4-flash"
+        );
+    }
+
+    #[test]
+    fn cap_load_failure_soft_skips_when_enabled() {
+        let _guard = crate::capability_index::PROTOCOL_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let host = HostDecideHost {
+            enabled: true,
+            optimize: "cost".into(),
+            config_dir: PathBuf::from("/tmp/velaclaw-orch-host-003-missing-cap"),
+        };
+        let prev_dir = std::env::var_os("AI_PROTOCOL_DIR");
+        let prev_path = std::env::var_os("AI_PROTOCOL_PATH");
+        std::env::remove_var("AI_PROTOCOL_DIR");
+        std::env::remove_var("AI_PROTOCOL_PATH");
+        let out = try_host_decide_selection(&host, "hello", "test-session");
+        match prev_dir {
+            Some(v) => std::env::set_var("AI_PROTOCOL_DIR", v),
+            None => std::env::remove_var("AI_PROTOCOL_DIR"),
+        }
+        match prev_path {
+            Some(v) => std::env::set_var("AI_PROTOCOL_PATH", v),
+            None => std::env::remove_var("AI_PROTOCOL_PATH"),
+        }
+        let selection = out.expect("must not hard-fail turn");
+        assert!(selection.is_none());
+    }
 }

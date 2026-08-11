@@ -415,6 +415,11 @@ pub struct AgentConfig {
     /// Optimize goal when `host_decide` is true: `cost` | `latency` | `balanced`.
     #[serde(default = "default_host_decide_optimize")]
     pub host_decide_optimize: String,
+    /// ORCH-HOST-004: when `host_decide` is true, soft-fail / quota may write a
+    /// session_override to the next Decide fallback logical id (next turn).
+    /// Default: `false`.
+    #[serde(default)]
+    pub host_decide_failover: bool,
     /// ORCH-DAG-EMIT-001/002: library/doctor gate for schema-strict / LLM plan emit.
     /// Default: `false`. **Not wired** into live chat. Observe: `doctor dag-emit` /
     /// `doctor dag-plan`. Does **not** default-on AI-DAG in the live chat loop.
@@ -454,6 +459,7 @@ impl Default for AgentConfig {
             intent_capability_route: false,
             host_decide: false,
             host_decide_optimize: default_host_decide_optimize(),
+            host_decide_failover: false,
             candidate_dag_emit: false,
         }
     }

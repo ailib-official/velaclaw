@@ -841,7 +841,23 @@ impl Agent {
                 .await
             {
                 Ok(resp) => resp,
-                Err(err) => return Err(err),
+                Err(err) => {
+                    #[cfg(feature = "ai-protocol")]
+                    {
+                        let host = self.host_decide_host.as_ref();
+                        return Err(crate::orchestration::map_provider_limit_error(
+                            err,
+                            &effective_model,
+                            velaclaw_agent_runtime::SoftFailSurface::Web,
+                            host,
+                            self.session_id.as_str(),
+                        ));
+                    }
+                    #[cfg(not(feature = "ai-protocol"))]
+                    {
+                        return Err(err);
+                    }
+                }
             };
 
             // Manifest XML parser requires a closing </tool_call>. Models (esp. Nemotron)
@@ -894,6 +910,7 @@ impl Agent {
                 } else {
                     response_text
                 };
+                let mut strip_fail_closed = false;
                 if velaclaw_agent_runtime::needs_tool_format_correction(raw_for_correction, 0) {
                     let strategy = format_ladder.next_strategy();
                     tracing::warn!(
@@ -928,6 +945,7 @@ impl Agent {
                         tool_format_strategy = "StripFailClosed",
                         "tool_format_retry_exhausted: stripping markup after recovery ladder"
                     );
+                    strip_fail_closed = true;
                 }
 
                 let final_text = if text.is_empty() {
@@ -936,7 +954,27 @@ impl Agent {
                     text
                 };
                 // Defense-in-depth: never leak DSML / tool_call scaffolding to Web UI.
-                let final_text = crate::util::strip_tool_call_markup(&final_text);
+                let mut final_text = crate::util::strip_tool_call_markup(&final_text);
+                if strip_fail_closed {
+                    #[cfg(feature = "ai-protocol")]
+                    {
+                        final_text = crate::orchestration::finalize_tool_format_exhausted(
+                            &final_text,
+                            &effective_model,
+                            velaclaw_agent_runtime::SoftFailSurface::Web,
+                            self.host_decide_host.as_ref(),
+                            self.session_id.as_str(),
+                        );
+                    }
+                    #[cfg(not(feature = "ai-protocol"))]
+                    {
+                        final_text = velaclaw_agent_runtime::append_tool_format_exhausted_notice(
+                            &final_text,
+                            &effective_model,
+                            velaclaw_agent_runtime::SoftFailSurface::Web,
+                        );
+                    }
+                }
 
                 self.history
                     .push(ConversationMessage::Chat(ChatMessage::assistant(

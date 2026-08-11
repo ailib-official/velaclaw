@@ -124,6 +124,93 @@ pub fn tool_format_recovery_message(strategy: ToolFormatRecoveryStrategy) -> &'s
     }
 }
 
+/// Where the soft-fail notice will be shown (ORCH-HOST-004).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SoftFailSurface {
+    /// Interactive / one-shot CLI agent.
+    Cli,
+    /// Web Local Control /chat.
+    Web,
+}
+
+impl SoftFailSurface {
+    #[must_use]
+    pub fn switch_hint(self) -> &'static str {
+        match self {
+            Self::Cli => "Switch model with `/model <provider/model>` (list: `/models`).",
+            Self::Web => "Switch model with the Web model picker (provider/model id).",
+        }
+    }
+}
+
+/// Append a user-visible notice after tool-format recovery is exhausted.
+#[must_use]
+pub fn append_tool_format_exhausted_notice(
+    reply: &str,
+    model: &str,
+    surface: SoftFailSurface,
+) -> String {
+    let notice = format!(
+        "\n\n---\nVelaClaw notice: tool-format recovery exhausted for model `{model}`. \
+         The reply above may be incomplete (tool markup was stripped). {}",
+        surface.switch_hint()
+    );
+    if reply.trim().is_empty() {
+        notice.trim_start().to_string()
+    } else {
+        format!("{reply}{notice}")
+    }
+}
+
+/// True when an error string looks like provider rate-limit / quota exhaustion.
+#[must_use]
+pub fn looks_like_provider_limit(err_msg: &str) -> bool {
+    let lower = err_msg.to_lowercase();
+    if lower.contains("429")
+        && (lower.contains("too many")
+            || lower.contains("rate")
+            || lower.contains("limit")
+            || lower.contains("quota"))
+    {
+        return true;
+    }
+    const HINTS: &[&str] = &[
+        "rate limit",
+        "rate_limited",
+        "quota exhausted",
+        "insufficient quota",
+        "insufficient_quota",
+        "insufficient balance",
+        "out of credits",
+        "all providers/models failed",
+    ];
+    HINTS.iter().any(|h| lower.contains(h))
+}
+
+/// Build an actionable user-facing message for provider limit / quota hard-fail.
+#[must_use]
+pub fn provider_limit_user_message(
+    sanitized_error: &str,
+    model: &str,
+    surface: SoftFailSurface,
+) -> String {
+    format!(
+        "VelaClaw notice: provider limit or quota failure for model `{model}`.\n\
+         Detail: {sanitized_error}\n\
+         {}",
+        surface.switch_hint()
+    )
+}
+
+/// Announce a session model failover (host_decide_failover).
+#[must_use]
+pub fn host_decide_failover_announce(from_model: &str, to_model: &str) -> String {
+    format!(
+        "\n\n---\nVelaClaw notice: session model switched from `{from_model}` to `{to_model}` \
+         (host_decide_failover). The next turn will use the new model."
+    )
+}
+
 /// Backward-compatible alias for CorrectivePrompt message (VL-TTC-014).
 #[must_use]
 pub fn tool_format_correction_message() -> &'static str {
@@ -183,5 +270,47 @@ mod tests {
         assert!(
             tool_format_recovery_message(ToolFormatRecoveryStrategy::StripFailClosed).is_empty()
         );
+    }
+
+    #[test]
+    fn tool_format_exhausted_notice_includes_model_and_switch_hint() {
+        let out = append_tool_format_exhausted_notice(
+            "partial",
+            "groq/llama-3.1-8b-instant",
+            SoftFailSurface::Cli,
+        );
+        assert!(out.contains("partial"));
+        assert!(out.contains("groq/llama-3.1-8b-instant"));
+        assert!(out.contains("/model"));
+        let web = append_tool_format_exhausted_notice("", "openai/gpt-4o", SoftFailSurface::Web);
+        assert!(web.contains("model picker"));
+        assert!(web.contains("openai/gpt-4o"));
+    }
+
+    #[test]
+    fn provider_limit_detection_and_message() {
+        assert!(looks_like_provider_limit(
+            "429 Too Many Requests rate limit"
+        ));
+        assert!(looks_like_provider_limit("insufficient_quota"));
+        assert!(looks_like_provider_limit(
+            "All providers/models failed. Attempts:"
+        ));
+        assert!(!looks_like_provider_limit("connection reset"));
+        let msg = provider_limit_user_message(
+            "429 rate limited",
+            "deepseek/deepseek-v4-flash",
+            SoftFailSurface::Web,
+        );
+        assert!(msg.contains("deepseek/deepseek-v4-flash"));
+        assert!(msg.contains("model picker"));
+    }
+
+    #[test]
+    fn failover_announce_mentions_both_models() {
+        let a = host_decide_failover_announce("a/x", "b/y");
+        assert!(a.contains("`a/x`"));
+        assert!(a.contains("`b/y`"));
+        assert!(a.contains("host_decide_failover"));
     }
 }

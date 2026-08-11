@@ -441,12 +441,17 @@ pub(crate) async fn process_channel_message(
                 Some(&ctx.security),
                 channel_approval,
                 text_tool_result_history,
-            RenderOpts {
-                style: RenderStyle { ansi: false, markdown: true },
-                fold_lines: 10,
-                fold_enabled: false,
-            },
-            None),
+                RenderOpts {
+                    style: RenderStyle {
+                        ansi: false,
+                        markdown: true,
+                    },
+                    fold_lines: 10,
+                    fold_enabled: false,
+                },
+                None,
+                None,
+            ),
         ) => LlmExecutionResult::Completed(result),
     };
 

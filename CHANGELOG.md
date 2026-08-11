@@ -7,12 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Soft-fail UX + Channel surface** ([#217](https://github.com/ailib-official/velaclaw/pull/217), [#218](https://github.com/ailib-official/velaclaw/pull/218)): always-on notices when tool-format recovery exhausts or provider limit/quota hard-fails (CLI `/model`, Web picker, Channel `/models`); opt-in `[agent].host_decide_failover` advances session override along Decide fallbacks (default off).
+
+### Fixed
+
+- **host_decide multi-segment logical ids** ([#216](https://github.com/ailib-official/velaclaw/pull/216)): preserve NIM/org wire segments via `compose_logical_model_id`; CAP index load failure soft-skips Decide instead of hard-failing the turn.
+
 ## [0.9.0] - 2026-08-07
 
 ### Milestone
 
-- **GOV-007 Wave2**: Providers hygiene + pin `ai-lib-rust` **1.3.0** (c7132af). Tag **v0.9.0**.
+- **GOV-007 Wave2**: Providers hygiene + pin `ai-lib-rust` **1.3.0**. Tag **v0.9.0**.
 
+### Added
+
+- **Host Decide + DAG (ORCH wave A/B, default-off)** ([#206](https://github.com/ailib-official/velaclaw/pull/206), [#208](https://github.com/ailib-official/velaclaw/pull/208), [#209](https://github.com/ailib-official/velaclaw/pull/209)):
+  - `[agent].host_decide` (default `false`): CAP reachable ∩ embedded CostRouter-shaped pricing / stub; session override; CLI + Web via unified `resolve_turn_model` ladder (explicit user picks beat Decide).
+  - `[agent].host_decide_optimize` (default `cost`): contract values `cost` \| `latency` \| `balanced` (host latency/balanced remain stub-grade without live latency signals — see config-reference).
+  - Doctor/library DAG surfaces (`dag-view` / `dag-emit` / plan emit); **not** wired into live chat turns.
+  - Observe: `velaclaw doctor host-decide --force` (`used_cost_router`, `NOT_PRODUCTION_SLA`).
+
+### Fixed
+
+- **GOV-007 providers / BYOK** ([#210](https://github.com/ailib-official/velaclaw/pull/210), [#211](https://github.com/ailib-official/velaclaw/pull/211)): remove glm orphan path; mark Experimental codex/python; drop BYOK double micro-retry around `AiClient::execute`.
 
 ## [0.8.0] - 2026-08-04
 

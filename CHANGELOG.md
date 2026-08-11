@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Context orchestration unify** (VL-CTX-001 / GOV-007): CLI, Web, and Channel share `context_orch::prepare_turn_history` (optional LLM compact → `assemble_layered`). `[agent].envelope_assemble` defaults to **`true`** (`false` = emergency trim-only kill-switch). Web now gets the same overflow compact path as CLI.
+- **Tool-loop unify** (VL-CTX-002 / GOV-007): Web `Agent::turn` delegates tool iteration to `run_tool_call_loop`; ApprovalHub / human-input remain adapter injections (`ToolBatchGateExtras`), not a second loop body.
 - **host_decide optimize honesty** (ORCH-HOST-006): keep contract values `cost` \| `latency` \| `balanced`; host embed no longer claims Eos-style `lowest_latency` / `balanced_score` or `used_cost_router=true` without real cost ranking / latency health (stub reasons instead).
 
 ### Fixed

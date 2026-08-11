@@ -2,11 +2,14 @@
 //! 统一工具批执行：批准门 + 并行/串行调度。
 
 use crate::agent::dispatcher::ParsedToolCall as GateToolCall;
-use crate::approval::{ApprovalGate, ApprovalManager, ChannelApprovalSession, GateDecision};
+use crate::approval::{
+    ApprovalGate, ApprovalHub, ApprovalManager, ChannelApprovalSession, GateDecision, HumanInputHub,
+};
 use crate::observability::{Observer, ObserverEvent};
 use crate::security::PolicyHandle;
 use crate::tools::{Tool, ToolExecutionContext};
 use anyhow::Result;
+use std::sync::Arc;
 use std::time::Instant;
 use tokio_util::sync::CancellationToken;
 use velaclaw_agent_runtime::normalize_tool_arguments;
@@ -27,8 +30,55 @@ pub struct ToolBatchResult {
     pub success: bool,
 }
 
+/// Optional Web/gateway gate extras (VL-CTX-002): ApprovalHub + secret_slot hub.
+#[derive(Clone, Default)]
+pub(crate) struct ToolBatchGateExtras {
+    pub approval_hub: Option<Arc<ApprovalHub>>,
+    pub human_input_hub: Option<Arc<HumanInputHub>>,
+}
+
 fn find_tool<'a>(tools: &'a [Box<dyn Tool>], name: &str) -> Option<&'a dyn Tool> {
     tools.iter().find(|t| t.name() == name).map(|t| t.as_ref())
+}
+
+/// Resolve shell `secret_slot` into stdin secret (same semantics as Agent::execute_tool_call).
+fn build_tool_execution_context(
+    call_name: &str,
+    args: &mut serde_json::Value,
+    shell_human_approved: bool,
+    human_input_hub: Option<&HumanInputHub>,
+) -> Result<ToolExecutionContext, ToolBatchResult> {
+    let mut stdin_secret = None;
+    if call_name == "shell" {
+        if let Some(slot_id) = args
+            .as_object_mut()
+            .and_then(|m| m.remove("secret_slot"))
+            .and_then(|v| v.as_str().map(|s| s.to_string()))
+        {
+            let Some(hub) = human_input_hub else {
+                return Err(ToolBatchResult {
+                    output: "Error: secret_slot requires interactive gateway human input".into(),
+                    success: false,
+                });
+            };
+            match hub.secret_slots().take(&slot_id) {
+                Some(secret) => stdin_secret = Some(secret),
+                None => {
+                    return Err(ToolBatchResult {
+                        output: format!(
+                            "Error: secret_slot '{slot_id}' is missing or already consumed. \
+                             Call request_human_input(kind=secret) again."
+                        ),
+                        success: false,
+                    });
+                }
+            }
+        }
+    }
+    Ok(
+        ToolExecutionContext::with_shell_human_approved(shell_human_approved)
+            .with_stdin_secret(stdin_secret),
+    )
 }
 
 async fn execute_one_tool(
@@ -150,12 +200,20 @@ async fn execute_tools_sequential_no_gate(
     tools_registry: &[Box<dyn Tool>],
     observer: &dyn Observer,
     cancellation_token: Option<&CancellationToken>,
+    human_input_hub: Option<&HumanInputHub>,
 ) -> Result<Vec<ToolBatchResult>> {
-    let ctx = ToolExecutionContext::default();
     let mut results = Vec::with_capacity(tool_calls.len());
 
     for call in tool_calls {
-        let args = normalize_tool_arguments(&call.name, call.arguments.clone());
+        let mut args = normalize_tool_arguments(&call.name, call.arguments.clone());
+        let ctx = match build_tool_execution_context(&call.name, &mut args, false, human_input_hub)
+        {
+            Ok(ctx) => ctx,
+            Err(err) => {
+                results.push(err);
+                continue;
+            }
+        };
         results.push(
             execute_one_tool(
                 &call.name,
@@ -178,11 +236,12 @@ async fn execute_tools_sequential_with_gate(
     observer: &dyn Observer,
     gate: &ApprovalGate<'_>,
     cancellation_token: Option<&CancellationToken>,
+    human_input_hub: Option<&HumanInputHub>,
 ) -> Result<Vec<ToolBatchResult>> {
     let mut results = Vec::with_capacity(tool_calls.len());
 
     for call in tool_calls {
-        let args = normalize_tool_arguments(&call.name, call.arguments.clone());
+        let mut args = normalize_tool_arguments(&call.name, call.arguments.clone());
         let gate_call = GateToolCall {
             name: call.name.clone(),
             arguments: call.arguments.clone(),
@@ -206,7 +265,18 @@ async fn execute_tools_sequential_with_gate(
             continue;
         }
 
-        let ctx = ToolExecutionContext::with_shell_human_approved(shell_human_approved);
+        let ctx = match build_tool_execution_context(
+            &call.name,
+            &mut args,
+            shell_human_approved,
+            human_input_hub,
+        ) {
+            Ok(ctx) => ctx,
+            Err(err) => {
+                results.push(err);
+                continue;
+            }
+        };
         results.push(
             execute_one_tool(
                 &call.name,
@@ -233,6 +303,7 @@ pub(crate) async fn execute_tool_batch(
     channel_name: &str,
     channel_approval: Option<ChannelApprovalSession>,
     cancellation_token: Option<&CancellationToken>,
+    gate_extras: Option<&ToolBatchGateExtras>,
 ) -> Result<Vec<ToolBatchResult>> {
     let policy = security.cloned();
     let managed_gate = approval.map(|mgr| {
@@ -240,12 +311,20 @@ pub(crate) async fn execute_tool_batch(
         if let Some(session) = channel_approval {
             gate = gate.with_channel_session(session);
         }
+        if let Some(hub) = gate_extras.and_then(|e| e.approval_hub.clone()) {
+            gate = gate.with_hub(hub);
+        }
         gate
     });
 
     let gate_ref: Option<&ApprovalGate<'_>> = managed_gate.as_ref();
+    let human_input = gate_extras
+        .and_then(|e| e.human_input_hub.as_ref())
+        .map(std::convert::AsRef::as_ref);
 
-    let should_parallel = should_execute_tools_in_parallel(tool_calls, gate_ref);
+    // secret_slot resolution requires sequential execution.
+    let should_parallel =
+        should_execute_tools_in_parallel(tool_calls, gate_ref) && human_input.is_none();
 
     if should_parallel {
         return execute_tools_parallel(tool_calls, tools_registry, observer, cancellation_token)
@@ -259,11 +338,18 @@ pub(crate) async fn execute_tool_batch(
             observer,
             gate,
             cancellation_token,
+            human_input,
         )
         .await
     } else {
-        execute_tools_sequential_no_gate(tool_calls, tools_registry, observer, cancellation_token)
-            .await
+        execute_tools_sequential_no_gate(
+            tool_calls,
+            tools_registry,
+            observer,
+            cancellation_token,
+            human_input,
+        )
+        .await
     }
 }
 

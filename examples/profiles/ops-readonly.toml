@@ -1,0 +1,19 @@
+# Ops-readonly shell profile (VL-UX-OPS-001)
+#
+# Copy these basenames into `[autonomy].allowed_commands` in your config.toml.
+# Do not paste this file over an existing trial config — merge deliberately.
+# Approval (Y/Always) cannot widen the allowlist (VL-SEC-009).
+#
+# Docs: docs/policy-approval-reference.md#ops-readonly-profile
+
+[autonomy]
+# Example merge — append to your existing list:
+# allowed_commands = [ ..., "df", "du", "free", "uname", "uptime", "hostname" ]
+allowed_commands = [
+  "df",
+  "du",
+  "free",
+  "uname",
+  "uptime",
+  "hostname",
+]

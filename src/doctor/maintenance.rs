@@ -40,8 +40,14 @@ pub fn print_maintenance_guide() {
     println!("Layers (outside → inside):");
     println!("  L3 Protocol  — $AI_PROTOCOL_DIR manifests (providers, endpoints, models)");
     println!("  L1 Config    — ~/.velaclaw/config.toml (or workspace config)");
-    println!("  L2 Policy    — agent-policy.yaml");
+    println!(
+        "  L2 Policy    — agent-policy.yaml (fresh onboard seeds self_adjust for allowed_commands)"
+    );
     println!("  L2.5 Overrides — <workspace>/.velaclaw/policy-overrides.yaml");
+    println!();
+    println!("Ops-readonly shell hints (manual merge only; never silent overwrite):");
+    println!("  examples/profiles/ops-readonly.toml  — df/du/free/uname/…");
+    println!("  docs/policy-approval-reference.md#ops-readonly-profile");
     println!();
     println!("No rebuild needed for:");
     println!("  • Editing config.toml (provider, model, temperature, reliability, model_routes, query_classification)");

@@ -83,7 +83,11 @@ impl SelfAdjustEnforcer {
             bail!("policy patch path denied by self_adjust: {path}");
         }
         if self.allowed_writes.is_empty() {
-            bail!("no self_adjust.allowed_writes configured; patch denied: {path}");
+            bail!(
+                "no self_adjust.allowed_writes configured; patch denied: {path}. \
+                 Edit [autonomy] in config.toml, or add workspace agent-policy.yaml \
+                 (see examples/profiles/agent-policy.self-adjust.yaml)."
+            );
         }
         if self
             .allowed_writes
@@ -92,7 +96,11 @@ impl SelfAdjustEnforcer {
         {
             return Ok(());
         }
-        bail!("policy patch path not in self_adjust.allowed_writes: {path}")
+        bail!(
+            "policy patch path not in self_adjust.allowed_writes: {path}. \
+             Without L2 self_adjust covering this path, edit config.toml directly \
+             (seed: examples/profiles/agent-policy.self-adjust.yaml)."
+        )
     }
 
     pub fn validate_session_allowlist_tool(&self, tool_name: &str) -> Result<()> {

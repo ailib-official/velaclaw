@@ -352,6 +352,8 @@ Keep architecture extensible and auditable by following these boundaries.
 | CLI host (`run` / `process_message`) | `src/agent/loop_/mod.rs` |
 | Shared tool-call loop body | `src/agent/loop_/tool_loop.rs` |
 | Config → runtime stack assembly | `src/agent/assemble.rs` |
+| Ops-readonly allowlist fragment | `examples/profiles/ops-readonly.toml` |
+| Fresh-workspace L2 self_adjust seed | `examples/profiles/agent-policy.self-adjust.yaml` (onboard scaffold) |
 
 ## Naming and Architecture Examples (Bad vs Good)
 

@@ -825,8 +825,15 @@ impl SecurityPolicy {
             use std::fmt::Write as _;
             let _ = write!(
                 msg,
-                "\n\n   Add the executable basename to [autonomy].allowed_commands (current: {}). \
-                 Interactive approval cannot widen the allowlist.",
+                "\n\n   Next steps (CLI + Web):\n\
+                   1. Add the executable basename to [autonomy].allowed_commands in config.toml \
+(current: {}).\n\
+                   2. For common ops reads (df/du/free/uname/…), merge \
+`examples/profiles/ops-readonly.toml` — do not overwrite an existing config.\n\
+                   3. If workspace `agent-policy.yaml` allows `autonomy.allowed_commands` via \
+self_adjust, use the `policy_patch` tool; otherwise edit config.toml (no silent rewrite).\n\
+                   4. Interactive approval cannot widen the allowlist (VL-SEC-009).\n\
+                   Docs: docs/policy-approval-reference.md#ops-readonly-profile",
                 self.allowed_commands.join(", ")
             );
         }
@@ -1370,6 +1377,18 @@ mod tests {
         assert!(still_denied
             .unwrap_err()
             .contains("not in allowed_commands"));
+    }
+
+    #[test]
+    fn allowlist_deny_mentions_ops_readonly_and_sec009() {
+        let p = default_policy();
+        let err = p
+            .validate_command_execution("df -h", false)
+            .expect_err("df should be denied by default allowlist");
+        assert!(err.contains("ops-readonly"));
+        assert!(err.contains("VL-SEC-009"));
+        assert!(err.contains("allowed_commands"));
+        assert!(err.contains("policy_patch") || err.contains("config.toml"));
     }
 
     #[test]

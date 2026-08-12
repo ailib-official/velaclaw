@@ -117,6 +117,16 @@ autonomy:
 
 **VL-SEC-009 (scheme H):** `allowed_commands` is a hard gate — interactive Yes/Always cannot add executables. Non-allowlisted shell commands are denied without a risk prompt. Shell-policy Always only skips **risk** re-prompts for remembered basenames that are already allowlisted.
 
+### Ops-readonly profile {#ops-readonly-profile}
+
+VelaClaw does **not** enable ops diagnostics (`df` / `du` / `free` / `uname` / …) in global schema defaults. Operators who want those basenames can **manually merge** the fragment:
+
+- Example: [`examples/profiles/ops-readonly.toml`](../examples/profiles/ops-readonly.toml)
+- Fresh onboard also seeds [`agent-policy.yaml`](../examples/profiles/agent-policy.self-adjust.yaml) so `policy_patch` may extend `autonomy.allowed_commands` when L2 self_adjust allows it.
+- Existing `config.toml` / `daemon.env` are never silently rewritten.
+
+Deny messages (CLI shell tool + Web tool result) share the same next-step semantics: edit `[autonomy].allowed_commands`, merge ops-readonly, or use `policy_patch` when seeded — approval cannot widen the allowlist.
+
 ## `policy_patch` tool
 
 Available with `--features ai-protocol`. Applies validated dot-path patches to L2.5. Paths must match `self_adjust.allowed_writes` globs and must not match `denied_writes`.

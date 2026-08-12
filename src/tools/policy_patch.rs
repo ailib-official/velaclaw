@@ -38,6 +38,8 @@ impl Tool for PolicyPatchTool {
         "Apply a dot-path patch to workspace policy-overrides.yaml (L2.5). \
          Paths must match self_adjust.allowed_writes in agent-policy.yaml; \
          security.* and channels.* are denied by default. \
+         Without a seed that allows autonomy.allowed_commands, edit config.toml instead \
+         (examples/profiles/agent-policy.self-adjust.yaml). \
          Autonomy patches take effect immediately; approval list patches persist for the next session reload."
     }
 

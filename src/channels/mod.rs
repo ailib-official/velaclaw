@@ -79,18 +79,17 @@ pub use whatsapp_web::WhatsAppWebChannel;
 
 #[cfg(feature = "ai-protocol")]
 use crate::agent::dispatcher::ToolDispatcher;
-use crate::agent::loop_::{
-    append_text_tool_prompt, build_tool_instructions, run_tool_call_loop, SoftFailLoopCtx,
-};
+#[cfg(any(test, not(feature = "ai-protocol")))]
+use crate::agent::loop_::build_tool_instructions;
+use crate::agent::loop_::{append_text_tool_prompt, run_tool_call_loop, SoftFailLoopCtx};
 use crate::approval::{ApprovalManager, ChannelApprovalHub, ChannelApprovalSession};
 use crate::cli_render::{RenderOpts, RenderStyle};
 use crate::config::{ChannelApprovalMode, Config, DEFAULT_PROTOCOL_MODEL_ID};
 use crate::memory::{self, Memory};
-use crate::observability::{self, Observer};
+use crate::observability::Observer;
 use crate::providers::{self, ChatMessage, Provider};
-use crate::runtime as runtime_adapter;
 use crate::security::PolicyHandle;
-use crate::tools::{self, Tool};
+use crate::tools::Tool;
 use crate::util::truncate_with_ellipsis;
 use anyhow::{Context, Result};
 use serde::Deserialize;

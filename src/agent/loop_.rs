@@ -4,18 +4,13 @@ use crate::cli_render::{
     format_user_prompt, indent_lines, prefix_agent_lines, RenderOpts, RenderStyle,
 };
 use crate::config::Config;
-#[cfg(not(feature = "ai-protocol"))]
-use crate::config::DEFAULT_PROTOCOL_MODEL_ID;
 use crate::memory::{self, Memory, MemoryCategory};
 use crate::multimodal;
-use crate::observability::{self, Observer, ObserverEvent};
-use crate::providers::{
-    self, ChatMessage, ChatRequest, Provider, ProviderCapabilityError, ToolCall,
-};
-use crate::runtime;
+use crate::observability::{Observer, ObserverEvent};
+use crate::providers::{ChatMessage, ChatRequest, Provider, ProviderCapabilityError, ToolCall};
 use crate::security::PolicyHandle;
-use crate::tools::{self, Tool};
-use anyhow::{Context, Result};
+use crate::tools::Tool;
+use anyhow::Result;
 use std::collections::HashMap;
 use std::fmt::Write;
 use std::io::Write as _;
@@ -857,20 +852,16 @@ pub async fn run(
         RenderOpts::from_config(config.cli_render.as_ref(), no_color, no_fold, interactive);
     let fold_cache: FoldCache = Arc::new(Mutex::new(HashMap::new()));
 
-    // ── Wire up agnostic subsystems ──────────────────────────────
-    let base_observer = observability::create_observer(&config.observability);
-    let observer: Arc<dyn Observer> = Arc::from(base_observer);
-    let runtime: Arc<dyn runtime::RuntimeAdapter> =
-        Arc::from(runtime::create_runtime(&config.runtime)?);
-    let security = PolicyHandle::from_workspace_config(&config)?;
-
-    // ── Memory (the brain) ────────────────────────────────────────
-    let mem: Arc<dyn Memory> = Arc::from(memory::create_memory_with_storage(
-        &config.memory,
-        Some(&config.storage.provider.config),
-        &config.workspace_dir,
-        config.api_key.as_deref(),
-    )?);
+    // ── Canonical stack (VL-REVIEW2-A0 / GOV-007) ─────────────────
+    let mut assembled = crate::agent::assemble::assemble_runtime(
+        &config,
+        crate::config::BootstrapOptions {
+            with_embedding_routes: false,
+        },
+    )?;
+    let observer = assembled.boot.observer.clone();
+    let security = assembled.boot.security.clone();
+    let mem = assembled.boot.memory.clone();
     tracing::info!(backend = mem.name(), "Memory initialized");
 
     // ── Peripherals (merge peripheral tools into registry) ─
@@ -881,30 +872,7 @@ pub async fn run(
         );
     }
 
-    // ── Tools (including memory tools and peripherals) ────────────
-    let (composio_key, composio_entity_id) = if config.composio.enabled {
-        (
-            config.composio.api_key.as_deref(),
-            Some(config.composio.entity_id.as_str()),
-        )
-    } else {
-        (None, None)
-    };
-    let (mut tools_registry, _human_input_attach) = tools::all_tools_with_runtime(
-        Arc::new(config.clone()),
-        &security,
-        runtime,
-        mem.clone(),
-        composio_key,
-        composio_entity_id,
-        &config.browser,
-        &config.http_request,
-        &config.workspace_dir,
-        &config.agents,
-        config.api_key.as_deref(),
-        &config,
-    );
-
+    let mut tools_registry = std::mem::take(&mut assembled.boot.tools);
     let peripheral_tools: Vec<Box<dyn Tool>> =
         crate::peripherals::create_peripheral_tools(&config.peripherals).await?;
     if !peripheral_tools.is_empty() {
@@ -912,63 +880,10 @@ pub async fn run(
         tools_registry.extend(peripheral_tools);
     }
 
-    // ── Resolve provider ─────────────────────────────────────────
-    let provider_runtime_options = providers::ProviderRuntimeOptions {
-        auth_profile_override: None,
-        velaclaw_dir: config.config_path.parent().map(std::path::PathBuf::from),
-        secrets_encrypt: config.secrets.encrypt,
-        reasoning_enabled: config.runtime.reasoning_enabled,
-    };
-
-    #[cfg(feature = "ai-protocol")]
-    let (provider, model_name, tool_dispatcher, text_tool_result_history) = {
-        let (exec_handle, provider) =
-            crate::execution::bootstrap_routed_provider(&config, &provider_runtime_options)?;
-        let model_name = exec_handle.logical_model_id().to_string();
-        let tool_calling_policy = exec_handle.tool_calling_policy();
-        let text_tool_result_history =
-            tool_calling_policy.native_strategy == ai_lib_rust::NativeStrategy::Hybrid;
-        let workspace_policy = crate::config::discover_and_load(&config)
-            .with_context(|| "load workspace agent-policy.yaml")?;
-        let workspace_dispatcher = workspace_policy.as_ref().and_then(|p| p.tool_dispatcher());
-        let effective = crate::config::EffectivePolicy::resolve(
-            config.agent.tool_dispatcher.as_str(),
-            workspace_dispatcher,
-            None,
-            tool_calling_policy,
-        );
-        let tool_dispatcher = Some(effective.build_dispatcher(provider.as_ref()));
-        (
-            provider,
-            model_name,
-            tool_dispatcher,
-            text_tool_result_history,
-        )
-    };
-
-    #[cfg(not(feature = "ai-protocol"))]
-    let (provider, model_name, tool_dispatcher, text_tool_result_history) = {
-        let provider_name = config
-            .default_provider
-            .as_deref()
-            .unwrap_or(DEFAULT_PROTOCOL_MODEL_ID);
-        let model_name = config
-            .default_model
-            .as_deref()
-            .unwrap_or(DEFAULT_PROTOCOL_MODEL_ID)
-            .to_string();
-        let provider = providers::create_routed_provider_with_options(
-            provider_name,
-            config.api_key.as_deref(),
-            config.api_url.as_deref(),
-            &config.reliability,
-            &config.model_routes,
-            &model_name,
-            &provider_runtime_options,
-            None,
-        )?;
-        (provider, model_name, None, false)
-    };
+    let provider = assembled.provider;
+    let model_name = assembled.model_name;
+    let text_tool_result_history = assembled.text_tool_result_history;
+    let tool_dispatcher = Some(assembled.tool_dispatcher);
 
     let provider_name = model_name
         .split_once('/')
@@ -1588,79 +1503,22 @@ pub async fn run(
 /// Process a single message through the full agent (with tools, peripherals, memory).
 /// Used by channels (Telegram, Discord, etc.) to enable hardware and tool use.
 pub async fn process_message(config: Config, message: &str) -> Result<String> {
-    let observer: Arc<dyn Observer> =
-        Arc::from(observability::create_observer(&config.observability));
-    let runtime: Arc<dyn runtime::RuntimeAdapter> =
-        Arc::from(runtime::create_runtime(&config.runtime)?);
-    let security = PolicyHandle::from_workspace_config(&config)?;
-    let mem: Arc<dyn Memory> = Arc::from(memory::create_memory_with_storage(
-        &config.memory,
-        Some(&config.storage.provider.config),
-        &config.workspace_dir,
-        config.api_key.as_deref(),
-    )?);
-
-    let (composio_key, composio_entity_id) = if config.composio.enabled {
-        (
-            config.composio.api_key.as_deref(),
-            Some(config.composio.entity_id.as_str()),
-        )
-    } else {
-        (None, None)
-    };
-    let (mut tools_registry, _human_input_attach) = tools::all_tools_with_runtime(
-        Arc::new(config.clone()),
-        &security,
-        runtime,
-        mem.clone(),
-        composio_key,
-        composio_entity_id,
-        &config.browser,
-        &config.http_request,
-        &config.workspace_dir,
-        &config.agents,
-        config.api_key.as_deref(),
+    let mut assembled = crate::agent::assemble::assemble_runtime(
         &config,
-    );
+        crate::config::BootstrapOptions {
+            with_embedding_routes: false,
+        },
+    )?;
+    let observer = assembled.boot.observer.clone();
+    let security = assembled.boot.security.clone();
+    let mem = assembled.boot.memory.clone();
+    let mut tools_registry = std::mem::take(&mut assembled.boot.tools);
     let peripheral_tools: Vec<Box<dyn Tool>> =
         crate::peripherals::create_peripheral_tools(&config.peripherals).await?;
     tools_registry.extend(peripheral_tools);
 
-    let provider_runtime_options = providers::ProviderRuntimeOptions {
-        auth_profile_override: None,
-        velaclaw_dir: config.config_path.parent().map(std::path::PathBuf::from),
-        secrets_encrypt: config.secrets.encrypt,
-        reasoning_enabled: config.runtime.reasoning_enabled,
-    };
-    #[cfg(feature = "ai-protocol")]
-    let (provider, model_name) = {
-        let (exec_handle, provider) =
-            crate::execution::bootstrap_routed_provider(&config, &provider_runtime_options)?;
-        let model_name = exec_handle.logical_model_id().to_string();
-        (provider, model_name)
-    };
-    #[cfg(not(feature = "ai-protocol"))]
-    let (provider, model_name) = {
-        let provider_name = config
-            .default_provider
-            .as_deref()
-            .unwrap_or(DEFAULT_PROTOCOL_MODEL_ID);
-        let model_name = config
-            .default_model
-            .clone()
-            .unwrap_or_else(|| "anthropic/claude-sonnet-4-20250514".into());
-        let provider = providers::create_routed_provider_with_options(
-            provider_name,
-            config.api_key.as_deref(),
-            config.api_url.as_deref(),
-            &config.reliability,
-            &config.model_routes,
-            &model_name,
-            &provider_runtime_options,
-            None,
-        )?;
-        (provider, model_name)
-    };
+    let provider = assembled.provider;
+    let model_name = assembled.model_name;
     let provider: Box<dyn Provider> = provider;
     let provider_name = model_name
         .split_once('/')
@@ -2810,7 +2668,7 @@ Done."#;
             &crate::config::AutonomyConfig::default(),
             std::path::Path::new("/tmp"),
         );
-        let tools = tools::default_tools(security);
+        let tools = crate::tools::default_tools(security);
         let instructions = build_tool_instructions(&tools);
 
         assert!(instructions.contains("## Tool Use Protocol"));
@@ -2826,7 +2684,7 @@ Done."#;
             &crate::config::AutonomyConfig::default(),
             std::path::Path::new("/tmp"),
         );
-        let tools = tools::default_tools(security);
+        let tools = crate::tools::default_tools(security);
         let formatted = tools_to_openai_format(&tools);
 
         assert!(!formatted.is_empty());

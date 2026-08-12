@@ -8,23 +8,14 @@ use super::dispatch::{
 use super::*;
 
 pub async fn start_channels(config: Config) -> Result<()> {
-    let provider_name = resolved_default_provider(&config);
-    let provider_runtime_options = providers::ProviderRuntimeOptions {
-        auth_profile_override: None,
-        velaclaw_dir: config.config_path.parent().map(std::path::PathBuf::from),
-        secrets_encrypt: config.secrets.encrypt,
-        reasoning_enabled: config.runtime.reasoning_enabled,
-    };
-    let provider: Arc<dyn Provider> = Arc::from(
-        create_resilient_provider_nonblocking(
-            &provider_name,
-            config.api_key.clone(),
-            config.api_url.clone(),
-            config.reliability.clone(),
-            provider_runtime_options.clone(),
-        )
-        .await?,
-    );
+    // Canonical Config → stack (VL-REVIEW2-A0 / GOV-007). Warmup stays transport-only.
+    let assembled = crate::agent::assemble::assemble_runtime(
+        &config,
+        crate::config::BootstrapOptions {
+            with_embedding_routes: false,
+        },
+    )?;
+    let provider: Arc<dyn Provider> = Arc::from(assembled.provider);
 
     // Warm up the provider connection pool (TLS handshake, DNS, HTTP/2 setup)
     // so the first real message doesn't hit a cold-start timeout.
@@ -46,11 +37,9 @@ pub async fn start_channels(config: Config) -> Result<()> {
         );
     }
 
-    let observer: Arc<dyn Observer> =
-        Arc::from(observability::create_observer(&config.observability));
-    let runtime: Arc<dyn runtime_adapter::RuntimeAdapter> =
-        Arc::from(runtime_adapter::create_runtime(&config.runtime)?);
-    let security = PolicyHandle::from_workspace_config(&config)?;
+    let observer = assembled.boot.observer.clone();
+    let security = assembled.boot.security.clone();
+    let provider_runtime_options = assembled.boot.provider_runtime_options.clone();
     let effective_autonomy = crate::config::resolve_effective_autonomy(&config)?;
     let approval_wiring = Arc::new(crate::config::ApprovalManagerWiring::from_config(&config)?);
     let channel_approval_hub = Arc::new(ChannelApprovalHub::new());
@@ -59,39 +48,15 @@ pub async fn start_channels(config: Config) -> Result<()> {
         .telegram
         .as_ref()
         .map(|tg| (tg.approval_mode, tg.approval_timeout_secs));
-    let model = resolved_default_model(&config);
+    let model = assembled.model_name.clone();
+    let provider_name = resolved_default_provider(&config);
     let temperature = config.default_temperature;
-    let mem: Arc<dyn Memory> = Arc::from(memory::create_memory_with_storage(
-        &config.memory,
-        Some(&config.storage.provider.config),
-        &config.workspace_dir,
-        config.api_key.as_deref(),
-    )?);
-    let (composio_key, composio_entity_id) = if config.composio.enabled {
-        (
-            config.composio.api_key.as_deref(),
-            Some(config.composio.entity_id.as_str()),
-        )
-    } else {
-        (None, None)
-    };
+    let mem = assembled.boot.memory.clone();
+    let text_tool_result_history = assembled.text_tool_result_history;
+    let tool_dispatcher = assembled.tool_dispatcher;
     // Build system prompt from workspace identity files + skills
     let workspace = config.workspace_dir.clone();
-    let (tools_list, _human_input_attach) = tools::all_tools_with_runtime(
-        Arc::new(config.clone()),
-        &security,
-        runtime,
-        Arc::clone(&mem),
-        composio_key,
-        composio_entity_id,
-        &config.browser,
-        &config.http_request,
-        &workspace,
-        &config.agents,
-        config.api_key.as_deref(),
-        &config,
-    );
-    let tools_registry = Arc::new(tools_list);
+    let tools_registry = Arc::new(assembled.boot.tools);
 
     let skills = crate::skills::load_skills_with_config(&workspace, &config);
 
@@ -174,32 +139,19 @@ pub async fn start_channels(config: Config) -> Result<()> {
     );
     #[cfg(feature = "ai-protocol")]
     {
-        let hybrid_manifest = crate::execution::ExecutionHandle::from_config(&config)
-            .ok()
-            .is_some_and(|h| {
-                h.tool_calling_policy().native_strategy == ai_lib_rust::NativeStrategy::Hybrid
-            });
-        if let Ok(dispatcher) = crate::agent::dispatcher::build_tool_dispatcher_for_logical_model(
-            config.agent.tool_dispatcher.as_str(),
-            &provider_name,
-            provider.as_ref(),
-        ) {
-            let strategy = if hybrid_manifest {
-                ai_lib_rust::NativeStrategy::Hybrid
-            } else if dispatcher.should_send_tool_specs() {
-                ai_lib_rust::NativeStrategy::Full
-            } else {
-                ai_lib_rust::NativeStrategy::TextOnly
-            };
-            append_text_tool_prompt(
-                &mut system_prompt,
-                dispatcher.as_ref(),
-                tools_registry.as_ref(),
-                strategy,
-            );
-        } else if !native_tools {
-            system_prompt.push_str(&build_tool_instructions(tools_registry.as_ref()));
-        }
+        let strategy = if text_tool_result_history {
+            ai_lib_rust::NativeStrategy::Hybrid
+        } else if tool_dispatcher.should_send_tool_specs() {
+            ai_lib_rust::NativeStrategy::Full
+        } else {
+            ai_lib_rust::NativeStrategy::TextOnly
+        };
+        append_text_tool_prompt(
+            &mut system_prompt,
+            tool_dispatcher.as_ref(),
+            tools_registry.as_ref(),
+            strategy,
+        );
     }
     #[cfg(not(feature = "ai-protocol"))]
     {

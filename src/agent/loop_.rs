@@ -295,14 +295,24 @@ pub(crate) fn append_text_tool_prompt(
 
 /// Soft-fail UX context for tool loop (ORCH-HOST-004/005).
 ///
-/// `config` is required for opt-in `host_decide_failover` (CLI/Web). Channel
-/// surfaces pass `None` — notices still apply; Decide failover does not (no
-/// host Decide on the channel path).
+/// `config` (CLI) or `host_decide` (Web) enable opt-in `host_decide_failover`.
+/// Channel surfaces pass neither — notices still apply; Decide failover does not.
 #[derive(Clone, Copy)]
 pub(crate) struct SoftFailLoopCtx<'a> {
     pub session_key: &'a str,
     pub config: Option<&'a Config>,
+    /// Pre-built host Decide context (Web `Agent` path — no full [`Config`] retained).
+    #[cfg(feature = "ai-protocol")]
+    pub host_decide: Option<&'a crate::orchestration::HostDecideHost>,
     pub surface: velaclaw_agent_runtime::SoftFailSurface,
+}
+
+#[cfg(feature = "ai-protocol")]
+impl SoftFailLoopCtx<'_> {
+    fn host_decide_owned(&self) -> Option<crate::orchestration::HostDecideHost> {
+        self.config
+            .map(crate::orchestration::HostDecideHost::from_config)
+    }
 }
 
 /// Execute a single turn of the agent loop: send messages, parse tool calls,
@@ -534,14 +544,13 @@ pub(crate) async fn run_tool_call_loop(
                     });
                     #[cfg(feature = "ai-protocol")]
                     if let Some(ctx) = soft_fail {
-                        let host = ctx
-                            .config
-                            .map(crate::orchestration::HostDecideHost::from_config);
+                        let host_owned = ctx.host_decide_owned();
+                        let host = ctx.host_decide.or(host_owned.as_ref());
                         return Err(crate::orchestration::map_provider_limit_error(
                             e,
                             model,
                             ctx.surface,
-                            host.as_ref(),
+                            host,
                             ctx.session_key,
                         ));
                     }
@@ -613,14 +622,15 @@ pub(crate) async fn run_tool_call_loop(
                 let session_key = soft_fail.map(|c| c.session_key).unwrap_or("");
                 #[cfg(feature = "ai-protocol")]
                 {
+                    let host_owned = soft_fail.and_then(|c| c.host_decide_owned());
                     let host = soft_fail
-                        .and_then(|c| c.config)
-                        .map(crate::orchestration::HostDecideHost::from_config);
+                        .and_then(|c| c.host_decide)
+                        .or(host_owned.as_ref());
                     final_text = crate::orchestration::finalize_tool_format_exhausted(
                         &final_text,
                         model,
                         surface,
-                        host.as_ref(),
+                        host,
                         session_key,
                     );
                 }
@@ -1268,6 +1278,8 @@ pub async fn run(
             Some(SoftFailLoopCtx {
                 session_key: session_id.as_str(),
                 config: Some(&config),
+                #[cfg(feature = "ai-protocol")]
+                host_decide: None,
                 surface: velaclaw_agent_runtime::SoftFailSurface::Cli,
             }),
             None,
@@ -1508,6 +1520,8 @@ pub async fn run(
                 Some(SoftFailLoopCtx {
                     session_key: session_id.as_str(),
                     config: Some(&config),
+                    #[cfg(feature = "ai-protocol")]
+                    host_decide: None,
                     surface: velaclaw_agent_runtime::SoftFailSurface::Cli,
                 }),
                 None,

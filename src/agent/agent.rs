@@ -10,7 +10,7 @@ use crate::memory::{self, Memory, MemoryCategory};
 use crate::observability::{Observer, ObserverEvent};
 #[cfg(not(feature = "ai-protocol"))]
 use crate::providers;
-use crate::providers::{ChatMessage, ConversationMessage, Provider};
+use crate::providers::{ChatMessage, ConversationMessage, Provider, ToolCall};
 use crate::security::PolicyHandle;
 use crate::tools::{HumanInputAttach, Tool, ToolSpec};
 use anyhow::{Context, Result};
@@ -745,6 +745,8 @@ impl Agent {
         let soft_fail = crate::agent::loop_::SoftFailLoopCtx {
             session_key: self.session_id.as_str(),
             config: None,
+            #[cfg(feature = "ai-protocol")]
+            host_decide: self.host_decide_host.as_ref(),
             surface: velaclaw_agent_runtime::SoftFailSurface::Web,
         };
 
@@ -783,10 +785,10 @@ impl Agent {
         )
         .await?;
 
-        self.history = loop_history
-            .into_iter()
-            .map(ConversationMessage::Chat)
-            .collect();
+        // Restore structured ConversationMessage variants (GOV-007 / VL-CTX-002).
+        // `run_tool_call_loop` mutates provider-shaped Chat frames; blanket
+        // `Chat(...)` mapping would collapse AssistantToolCalls / ToolResults.
+        self.history = conversation_from_tool_loop_history(&loop_history);
         self.prepare_history_after_turn().await?;
         Ok(response)
     }
@@ -825,6 +827,108 @@ impl Agent {
 
         listen_handle.abort();
         Ok(())
+    }
+}
+
+/// Rebuild Agent history from `run_tool_call_loop` Chat frames (VL-CTX-002).
+///
+/// Restores `AssistantToolCalls` / `ToolResults` from the native wire encoding
+/// (`build_native_assistant_history` + `tool_with_call_id`) so Web observers
+/// keep the structured public history shape. Text-tool paths
+/// (`[Tool results]` user messages) stay as `Chat`.
+fn conversation_from_tool_loop_history(messages: &[ChatMessage]) -> Vec<ConversationMessage> {
+    let mut out = Vec::with_capacity(messages.len());
+    let mut i = 0;
+    while i < messages.len() {
+        let msg = &messages[i];
+        if msg.role == "assistant" {
+            if let Some((text, tool_calls)) = try_parse_native_assistant_tool_calls(&msg.content) {
+                out.push(ConversationMessage::AssistantToolCalls { text, tool_calls });
+                i += 1;
+                let mut results = Vec::new();
+                while i < messages.len() && messages[i].role == "tool" {
+                    results.push(tool_result_from_provider_chat(&messages[i]));
+                    i += 1;
+                }
+                if !results.is_empty() {
+                    out.push(ConversationMessage::ToolResults(results));
+                }
+                continue;
+            }
+            out.push(ConversationMessage::Chat(msg.clone()));
+            i += 1;
+            continue;
+        }
+
+        if msg.role == "tool" {
+            let mut results = Vec::new();
+            while i < messages.len() && messages[i].role == "tool" {
+                results.push(tool_result_from_provider_chat(&messages[i]));
+                i += 1;
+            }
+            out.push(ConversationMessage::ToolResults(results));
+            continue;
+        }
+
+        out.push(ConversationMessage::Chat(msg.clone()));
+        i += 1;
+    }
+    out
+}
+
+fn try_parse_native_assistant_tool_calls(content: &str) -> Option<(Option<String>, Vec<ToolCall>)> {
+    let value: serde_json::Value = serde_json::from_str(content).ok()?;
+    let raw_calls = value.get("tool_calls")?.as_array()?;
+    if raw_calls.is_empty() {
+        return None;
+    }
+    let text = match value.get("content") {
+        Some(serde_json::Value::String(s)) if !s.is_empty() => Some(s.clone()),
+        Some(serde_json::Value::Null) | None => None,
+        Some(other) => Some(other.to_string()),
+    };
+    let mut tool_calls = Vec::with_capacity(raw_calls.len());
+    for tc in raw_calls {
+        let id = tc.get("id")?.as_str()?.to_string();
+        let name = tc.get("name")?.as_str()?.to_string();
+        let arguments = match tc.get("arguments") {
+            Some(serde_json::Value::String(s)) => s.clone(),
+            Some(other) => other.to_string(),
+            None => "{}".into(),
+        };
+        tool_calls.push(ToolCall {
+            id,
+            name,
+            arguments,
+        });
+    }
+    Some((text, tool_calls))
+}
+
+fn tool_result_from_provider_chat(
+    msg: &ChatMessage,
+) -> velaclaw_agent_runtime::provider::ToolResultMessage {
+    if let Some(id) = msg.tool_call_id.as_ref() {
+        return velaclaw_agent_runtime::provider::ToolResultMessage {
+            tool_call_id: id.clone(),
+            content: msg.content.clone(),
+        };
+    }
+    // NativeToolDispatcher.to_provider_messages encodes tool results as JSON body.
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&msg.content) {
+        if let (Some(id), Some(content)) = (
+            value.get("tool_call_id").and_then(|v| v.as_str()),
+            value.get("content").and_then(|v| v.as_str()),
+        ) {
+            return velaclaw_agent_runtime::provider::ToolResultMessage {
+                tool_call_id: id.to_string(),
+                content: content.to_string(),
+            };
+        }
+    }
+    velaclaw_agent_runtime::provider::ToolResultMessage {
+        tool_call_id: "unknown".into(),
+        content: msg.content.clone(),
     }
 }
 
@@ -1230,5 +1334,90 @@ mod tests {
         assert!(out.starts_with(">> line one"));
         assert!(out.contains("\nline two"));
         assert!(!out.contains(">> line two"));
+    }
+
+    #[test]
+    fn conversation_from_tool_loop_history_restores_native_frames() {
+        use velaclaw_agent_runtime::loop_parse::build_native_assistant_history;
+
+        let assistant = ChatMessage::assistant(build_native_assistant_history(
+            "checking",
+            &[ToolCall {
+                id: "c1".into(),
+                name: "echo".into(),
+                arguments: "{}".into(),
+            }],
+        ));
+        let tool = ChatMessage::tool_with_call_id("c1", "tool-out");
+        let msgs = vec![
+            ChatMessage::system("sys"),
+            ChatMessage::user("hi"),
+            assistant,
+            tool,
+            ChatMessage::assistant("done"),
+        ];
+        let conv = conversation_from_tool_loop_history(&msgs);
+        assert!(matches!(
+            &conv[0],
+            ConversationMessage::Chat(m) if m.role == "system"
+        ));
+        assert!(matches!(
+            &conv[1],
+            ConversationMessage::Chat(m) if m.role == "user"
+        ));
+        match &conv[2] {
+            ConversationMessage::AssistantToolCalls { text, tool_calls } => {
+                assert_eq!(text.as_deref(), Some("checking"));
+                assert_eq!(tool_calls.len(), 1);
+                assert_eq!(tool_calls[0].id, "c1");
+                assert_eq!(tool_calls[0].name, "echo");
+            }
+            other => panic!("expected AssistantToolCalls, got {other:?}"),
+        }
+        match &conv[3] {
+            ConversationMessage::ToolResults(results) => {
+                assert_eq!(results.len(), 1);
+                assert_eq!(results[0].tool_call_id, "c1");
+                assert_eq!(results[0].content, "tool-out");
+            }
+            other => panic!("expected ToolResults, got {other:?}"),
+        }
+        assert!(matches!(
+            &conv[4],
+            ConversationMessage::Chat(m) if m.role == "assistant" && m.content == "done"
+        ));
+    }
+
+    #[test]
+    fn conversation_from_tool_loop_history_keeps_text_tool_results_as_chat() {
+        let msgs = vec![
+            ChatMessage::user("hi"),
+            ChatMessage::assistant("calling"),
+            ChatMessage::user("[Tool results]\n<tool_result id=\"x\">ok</tool_result>"),
+        ];
+        let conv = conversation_from_tool_loop_history(&msgs);
+        assert_eq!(conv.len(), 3);
+        assert!(conv
+            .iter()
+            .all(|m| matches!(m, ConversationMessage::Chat(_))));
+    }
+
+    #[test]
+    fn conversation_from_tool_loop_history_parses_json_body_tool_role() {
+        let msgs = vec![ChatMessage::tool(
+            serde_json::json!({
+                "tool_call_id": "from-json",
+                "content": "payload",
+            })
+            .to_string(),
+        )];
+        let conv = conversation_from_tool_loop_history(&msgs);
+        match &conv[0] {
+            ConversationMessage::ToolResults(results) => {
+                assert_eq!(results[0].tool_call_id, "from-json");
+                assert_eq!(results[0].content, "payload");
+            }
+            other => panic!("expected ToolResults, got {other:?}"),
+        }
     }
 }

@@ -41,7 +41,12 @@ fn find_tool<'a>(tools: &'a [Box<dyn Tool>], name: &str) -> Option<&'a dyn Tool>
     tools.iter().find(|t| t.name() == name).map(|t| t.as_ref())
 }
 
-/// Resolve shell `secret_slot` into stdin secret (same semantics as Agent::execute_tool_call).
+/// Resolve shell `secret_slot` into stdin secret (same semantics as prior Agent path).
+///
+/// Gate approval still sees the original args (including `secret_slot`) via
+/// `call.arguments.clone()`; this helper strips the slot from the execution
+/// copy and consumes the secret from [`HumanInputHub`] so the shell never
+/// receives the opaque slot id as a literal argument.
 fn build_tool_execution_context(
     call_name: &str,
     args: &mut serde_json::Value,
@@ -322,7 +327,8 @@ pub(crate) async fn execute_tool_batch(
         .and_then(|e| e.human_input_hub.as_ref())
         .map(std::convert::AsRef::as_ref);
 
-    // secret_slot resolution requires sequential execution.
+    // secret_slot resolution requires sequential execution (HITL store is not
+    // safe to consume concurrently across a parallel batch).
     let should_parallel =
         should_execute_tools_in_parallel(tool_calls, gate_ref) && human_input.is_none();
 

@@ -338,7 +338,20 @@ Keep architecture extensible and auditable by following these boundaries.
 - Avoid cross-subsystem coupling (provider ↔ channel internals, tools mutating security/gateway internals directly, etc.).
 - Keep responsibilities single-purpose by module (`agent` orchestration, `channels` transport, `providers` model I/O, `security` policy, `tools` execution, `memory` persistence).
 - Introduce shared abstractions only after repeated stable use (rule-of-three) and at least one current caller.
-- Treat `src/config/schema.rs` keys as public contract; document compatibility impact, migration steps, and rollback path for changes.
+- Treat `src/config/schema/` keys as public contract; document compatibility impact, migration steps, and rollback path for changes.
+
+### Module map (VL-REVIEW2-A1)
+
+| Change this… | Edit here |
+|--------------|-----------|
+| Config field defaults / section types | `src/config/schema/mod.rs` (+ `src/config/defaults.toml` for embedded defaults) |
+| Config load / save / resolution | `src/config/schema/load.rs` |
+| Onboard wizard entry / orchestration | `src/onboard/wizard/mod.rs` |
+| Onboard interactive steps | `src/onboard/wizard/steps.rs` |
+| Models catalog refresh in onboard | `src/onboard/wizard/models.rs` |
+| CLI host (`run` / `process_message`) | `src/agent/loop_/mod.rs` |
+| Shared tool-call loop body | `src/agent/loop_/tool_loop.rs` |
+| Config → runtime stack assembly | `src/agent/assemble.rs` |
 
 ## Naming and Architecture Examples (Bad vs Good)
 

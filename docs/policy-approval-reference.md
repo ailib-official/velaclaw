@@ -132,7 +132,7 @@ Denied by default: `security.*`, credential fields, `gateway.paired_tokens`.
 
 ## Defaults vs schema
 
-Documented defaults match `AutonomyConfig` / schema defaults in `src/config/schema.rs`:
+Documented defaults match `AutonomyConfig` / schema defaults in `src/config/schema/`:
 
 - `level = supervised`
 - `workspace_only = true`

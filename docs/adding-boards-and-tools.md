@@ -96,7 +96,7 @@ See `docs/hardware-peripherals-design.md` for the full design.
 
 1. Implement the `Tool` trait in `src/tools/`.
 2. Register in `create_peripheral_tools` (for hardware tools) or the agent tool registry.
-3. Add a tool description to the agent's `tool_descs` in `src/agent/loop_.rs`.
+3. Add a tool description to the agent's `tool_descs` in `src/agent/loop_/mod.rs`.
 
 ## CLI Reference
 

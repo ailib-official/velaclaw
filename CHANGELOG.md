@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-08-13
+
 ### Changed
 
 - **1.0.x product shape** (VL-REL-PRODUCT-001): upgrade runbook (`docs/upgrade-1.0.md`); `/health` + dashboard expose `version` matching `velaclaw --version`; CI merge-bot fail-closed notes; bootstrap clone URL → `ailib-official/velaclaw`.

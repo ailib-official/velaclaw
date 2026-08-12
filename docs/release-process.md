@@ -14,7 +14,7 @@ Last verified: **August 13, 2026**.
 
 ## 1.0.x train notes
 
-- Product version **1.0.0** landed on `main` (CHANGELOG + Cargo). Cut GitHub tag `v1.0.0` (and later `v1.0.x`) with the procedure below once release artifacts are ready.
+- Product train **1.0.x**: Cargo/CHANGELOG on `main`; cut GitHub tags `v1.0.x` with the procedure below (patch train resumed at **v1.0.1** for the productize wave).
 - Operators upgrading installed binaries: [upgrade-1.0.md](upgrade-1.0.md) (preserve config dir / `daemon.env`).
 - Merge policy + bot fail-closed: [ci-map.md](ci-map.md).
 

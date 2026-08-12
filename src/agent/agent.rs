@@ -1,6 +1,6 @@
+use crate::agent::dispatcher::ToolDispatcher;
 #[cfg(not(feature = "ai-protocol"))]
 use crate::agent::dispatcher::{NativeToolDispatcher, XmlToolDispatcher};
-use crate::agent::dispatcher::ToolDispatcher;
 use crate::agent::memory_loader::{DefaultMemoryLoader, MemoryLoader};
 use crate::agent::prompt::{PromptContext, SystemPromptBuilder};
 use crate::approval::{ApprovalHub, ApprovalManager, HumanInputHub};

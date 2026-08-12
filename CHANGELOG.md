@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-08-12
+
+### Milestone
+
+- **GOV-007 context/tool-loop unify** (VL-CTX-001/002) + ORCH soft-fail wave + shell Always narrowing; history round-trip fix (#226). Tag **v1.0.0**.
+
 ### Added
 
 - **Soft-fail UX + Channel surface** ([#217](https://github.com/ailib-official/velaclaw/pull/217), [#218](https://github.com/ailib-official/velaclaw/pull/218)): always-on notices when tool-format recovery exhausts or provider limit/quota hard-fails (CLI `/model`, Web picker, Channel `/models`); opt-in `[agent].host_decide_failover` advances session override along Decide fallbacks (default off).
@@ -19,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Web history structured variants after VL-CTX-002** (#225 follow-up): map `run_tool_call_loop` Chat frames back to `AssistantToolCalls` / `ToolResults` instead of blanket `Chat`, restoring public `agent.history()` shape; Web soft-fail again receives `host_decide` for failover notices.
+- **Web history structured variants after VL-CTX-002** ([#226](https://github.com/ailib-official/velaclaw/pull/226)): map `run_tool_call_loop` Chat frames back to `AssistantToolCalls` / `ToolResults` instead of blanket `Chat`, restoring public `agent.history()` shape; Web soft-fail again receives `host_decide` for failover notices.
 - **host_decide multi-segment logical ids** ([#216](https://github.com/ailib-official/velaclaw/pull/216)): preserve NIM/org wire segments via `compose_logical_model_id`; CAP index load failure soft-skips Decide instead of hard-failing the turn.
 - **Shell Always over-broad session** (VL-SEC-009): human approval no longer bypasses `allowed_commands`; shell-policy Always remembers executable basenames only (`approval.session_shell_binaries`), and non-allowlisted commands are denied without an interactive risk prompt (single ApprovalGate path / GOV-007).
 

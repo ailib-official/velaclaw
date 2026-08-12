@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Web history structured variants after VL-CTX-002** (#225 follow-up): map `run_tool_call_loop` Chat frames back to `AssistantToolCalls` / `ToolResults` instead of blanket `Chat`, restoring public `agent.history()` shape; Web soft-fail again receives `host_decide` for failover notices.
 - **host_decide multi-segment logical ids** ([#216](https://github.com/ailib-official/velaclaw/pull/216)): preserve NIM/org wire segments via `compose_logical_model_id`; CAP index load failure soft-skips Decide instead of hard-failing the turn.
 - **Shell Always over-broad session** (VL-SEC-009): human approval no longer bypasses `allowed_commands`; shell-policy Always remembers executable basenames only (`approval.session_shell_binaries`), and non-allowlisted commands are denied without an interactive risk prompt (single ApprovalGate path / GOV-007).
 

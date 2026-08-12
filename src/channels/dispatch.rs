@@ -455,6 +455,8 @@ pub(crate) async fn process_channel_message(
                 Some(SoftFailLoopCtx {
                     session_key: history_key.as_str(),
                     config: None,
+                    #[cfg(feature = "ai-protocol")]
+                    host_decide: None,
                     surface: velaclaw_agent_runtime::SoftFailSurface::Channel,
                 }),
             None,

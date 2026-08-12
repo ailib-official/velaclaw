@@ -1,6 +1,4 @@
 use crate::agent::dispatcher::ToolDispatcher;
-#[cfg(not(feature = "ai-protocol"))]
-use crate::agent::dispatcher::{NativeToolDispatcher, XmlToolDispatcher};
 use crate::agent::memory_loader::{DefaultMemoryLoader, MemoryLoader};
 use crate::agent::prompt::{PromptContext, SystemPromptBuilder};
 use crate::approval::{ApprovalHub, ApprovalManager, HumanInputHub};
@@ -8,12 +6,10 @@ use crate::cli_render::{prefix_agent_lines, RenderOpts};
 use crate::config::{Config, DEFAULT_PROTOCOL_MODEL_ID};
 use crate::memory::{self, Memory, MemoryCategory};
 use crate::observability::{Observer, ObserverEvent};
-#[cfg(not(feature = "ai-protocol"))]
-use crate::providers;
 use crate::providers::{ChatMessage, ConversationMessage, Provider, ToolCall};
 use crate::security::PolicyHandle;
 use crate::tools::{HumanInputAttach, Tool, ToolSpec};
-use anyhow::{Context, Result};
+use anyhow::Result;
 use parking_lot::Mutex;
 use std::sync::Arc;
 use std::time::Instant;
@@ -392,88 +388,27 @@ impl Agent {
     }
 
     pub fn from_config(config: &Config) -> Result<Self> {
-        let boot = crate::config::bootstrap_runtime(
+        let assembled = crate::agent::assemble::assemble_runtime(
             config,
             crate::config::BootstrapOptions {
                 with_embedding_routes: true,
             },
         )?;
-        let security = boot.security;
-        let memory = boot.memory;
-        let observer = boot.observer;
-        let tools = boot.tools;
-        let human_input_attach = boot.human_input_attach;
-        let provider_runtime_options = boot.provider_runtime_options;
-
-        #[cfg(feature = "ai-protocol")]
-        let (execution, provider, model_name) = {
-            let (exec_handle, provider) =
-                crate::execution::bootstrap_routed_provider(config, &provider_runtime_options)?;
-            let model_name = exec_handle.logical_model_id().to_string();
-            (exec_handle, provider, model_name)
-        };
-
-        #[cfg(not(feature = "ai-protocol"))]
-        let (provider, model_name) = {
-            let provider_name = config
-                .default_provider
-                .as_deref()
-                .unwrap_or(DEFAULT_PROTOCOL_MODEL_ID);
-            let model_name = config
-                .default_model
-                .as_deref()
-                .unwrap_or(DEFAULT_PROTOCOL_MODEL_ID)
-                .to_string();
-            let provider = providers::create_routed_provider(
-                provider_name,
-                config.api_key.as_deref(),
-                config.api_url.as_deref(),
-                &config.reliability,
-                &config.model_routes,
-                &model_name,
-            )?;
-            (provider, model_name)
-        };
-
-        let provider: Box<dyn Provider> = provider;
-
-        #[cfg(feature = "ai-protocol")]
-        let tool_dispatcher = {
-            let workspace_policy = crate::config::discover_and_load(config)
-                .context("load workspace agent-policy.yaml")?;
-            let workspace_dispatcher = workspace_policy.as_ref().and_then(|p| p.tool_dispatcher());
-            let effective = crate::config::EffectivePolicy::resolve(
-                config.agent.tool_dispatcher.as_str(),
-                workspace_dispatcher,
-                None,
-                execution.tool_calling_policy(),
-            );
-            effective.build_dispatcher(provider.as_ref())
-        };
-        #[cfg(not(feature = "ai-protocol"))]
-        let tool_dispatcher: Box<dyn ToolDispatcher> = {
-            let workspace_policy = crate::config::discover_and_load(config)
-                .context("load workspace agent-policy.yaml")?;
-            let workspace_dispatcher = workspace_policy.as_ref().and_then(|p| p.tool_dispatcher());
-            let choice = crate::config::merge_tool_dispatcher(
-                config.agent.tool_dispatcher.as_str(),
-                workspace_dispatcher,
-                None,
-            );
-            match choice.as_str() {
-                "native" => Box::new(NativeToolDispatcher::default()),
-                "xml" => Box::new(XmlToolDispatcher::default()),
-                _ if provider.supports_native_tools() => Box::new(NativeToolDispatcher::default()),
-                _ => Box::new(XmlToolDispatcher::default()),
-            }
-        };
+        let security = assembled.boot.security;
+        let memory = assembled.boot.memory;
+        let observer = assembled.boot.observer;
+        let tools = assembled.boot.tools;
+        let human_input_attach = assembled.boot.human_input_attach;
+        let provider = assembled.provider;
+        let model_name = assembled.model_name;
+        let tool_dispatcher = assembled.tool_dispatcher;
 
         let available_hints: Vec<String> =
             config.model_routes.iter().map(|r| r.hint.clone()).collect();
 
         #[cfg(feature = "ai-protocol")]
         let builder = Agent::builder()
-            .execution(Some(execution))
+            .execution(assembled.execution)
             .provider(provider);
         #[cfg(not(feature = "ai-protocol"))]
         let builder = Agent::builder().provider(provider);

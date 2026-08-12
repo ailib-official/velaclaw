@@ -1,4 +1,5 @@
 //! Shared runtime bootstrap for Agent / Gateway / Channels (VL-REVIEW-005).
+//! Lower layer for [`crate::agent::assemble::assemble_runtime`] (VL-REVIEW2-A0).
 
 use crate::config::Config;
 use crate::memory::{self, Memory};

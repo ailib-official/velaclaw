@@ -7,8 +7,16 @@
 //!   (Web ApprovalHub / HITL still injected as `ToolBatchGateExtras` adapters).
 //! - **Still dual:** approval backend *adapters* (stdin vs ApprovalHub) and CLI
 //!   fold/render — not a second policy or tool-loop body.
+//!
+//! ## Bootstrap unification (VL-REVIEW2-A0 / GOV-007)
+//! - **Canonical:** [`assemble::assemble_runtime`] (Config → security/memory/tools/
+//!   provider/dispatcher). Web `Agent::from_config`, CLI `loop_::run` /
+//!   `process_message`, and Channel `start_channels` call this entry.
+//! - **Adapters only:** peripherals merge, stdin vs ApprovalHub, channel listeners,
+//!   CLI fold/render.
 #[allow(clippy::module_inception)]
 pub mod agent;
+pub mod assemble;
 #[cfg(feature = "ai-protocol")]
 pub mod candidate_dag;
 pub mod classifier;

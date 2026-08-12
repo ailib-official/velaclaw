@@ -16,6 +16,8 @@ pub struct ComponentHealth {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct HealthSnapshot {
+    /// Package version (`CARGO_PKG_VERSION`) — same identity as `velaclaw --version`.
+    pub version: String,
     pub pid: u32,
     pub updated_at: String,
     pub uptime_seconds: u64,
@@ -86,6 +88,7 @@ pub fn snapshot() -> HealthSnapshot {
     let components = registry().components.lock().clone();
 
     HealthSnapshot {
+        version: env!("CARGO_PKG_VERSION").to_string(),
         pid: std::process::id(),
         updated_at: now_rfc3339(),
         uptime_seconds: registry().started_at.elapsed().as_secs(),
@@ -180,5 +183,12 @@ mod tests {
         assert!(component_json["updated_at"].as_str().is_some());
         assert!(component_json["last_ok"].as_str().is_some());
         assert!(json["uptime_seconds"].as_u64().is_some());
+        assert_eq!(json["version"], env!("CARGO_PKG_VERSION"));
+    }
+
+    #[test]
+    fn snapshot_version_matches_cargo_pkg_version() {
+        let snap = snapshot();
+        assert_eq!(snap.version, env!("CARGO_PKG_VERSION"));
     }
 }

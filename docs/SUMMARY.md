@@ -47,6 +47,7 @@ Last refreshed: **February 18, 2026**.
 
 - [operations/README.md](operations/README.md)
 - [operations-runbook.md](operations-runbook.md)
+- [upgrade-1.0.md](upgrade-1.0.md)
 - [release-process.md](release-process.md)
 - [troubleshooting.md](troubleshooting.md)
 - [network-deployment.md](network-deployment.md)

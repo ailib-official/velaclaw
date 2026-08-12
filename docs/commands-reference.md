@@ -150,7 +150,7 @@ After the gateway is listening (default `http://127.0.0.1:8080`):
 
 | Route | Method | Auth | Purpose |
 |---|---|---|---|
-| `/health` | GET | Public | Liveness / paired summary |
+| `/health` | GET | Public | Liveness; `version` (= `velaclaw --version`); paired summary; runtime snapshot |
 | `/metrics` | GET | Public | Prometheus metrics |
 | `/dashboard` | GET | Public | Legacy monitoring HTML (cost/runtime) |
 | `/api/dashboard` | GET | Public | JSON dashboard payload (health + optional cost) |

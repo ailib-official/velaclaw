@@ -354,6 +354,7 @@ Keep architecture extensible and auditable by following these boundaries.
 | Config → runtime stack assembly | `src/agent/assemble.rs` |
 | Ops-readonly allowlist fragment | `examples/profiles/ops-readonly.toml` |
 | Fresh-workspace L2 self_adjust seed | `examples/profiles/agent-policy.self-adjust.yaml` (onboard scaffold) |
+| 1.0.x upgrade (keep secrets) | `docs/upgrade-1.0.md` |
 
 ## Naming and Architecture Examples (Bad vs Good)
 

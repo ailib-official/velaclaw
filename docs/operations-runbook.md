@@ -2,7 +2,7 @@
 
 This runbook is for operators who maintain availability, security posture, and incident response.
 
-Last verified: **February 18, 2026**.
+Last verified: **August 13, 2026**.
 
 ## Scope
 
@@ -11,6 +11,7 @@ Use this document for day-2 operations:
 - starting and supervising runtime
 - health checks and diagnostics
 - safe rollout and rollback
+- **binary upgrades without touching secrets** — [upgrade-1.0.md](upgrade-1.0.md)
 - incident triage and recovery
 
 For first-time installation, start from [one-click-bootstrap.md](one-click-bootstrap.md).
@@ -22,6 +23,18 @@ For first-time installation, start from [one-click-bootstrap.md](one-click-boots
 | Foreground runtime | `velaclaw daemon` | local debugging, short-lived sessions |
 | Foreground gateway only | `velaclaw gateway` | webhook endpoint testing |
 | User service | `velaclaw service install && velaclaw service start` | persistent operator-managed runtime |
+
+## Build identity (CLI ↔ Web)
+
+The installed binary is the single source of truth:
+
+| Surface | How to read version |
+|---------|---------------------|
+| CLI | `velaclaw --version` |
+| Gateway | `GET /health` → top-level `version` (also `runtime.version`) |
+| Overview API | `GET /api/dashboard` → `health.version` |
+
+These strings must match after upgrade. If they disagree, multiple binaries are on `PATH` / the service unit points at a stale path.
 
 ## Baseline Operator Checklist
 
@@ -59,7 +72,12 @@ velaclaw service status
 | Config validity | `velaclaw doctor` | no critical errors |
 | Channel connectivity | `velaclaw channel doctor` | configured channels healthy |
 | Runtime summary | `velaclaw status` | expected provider/model/channels |
-| Daemon heartbeat/state | `~/.velaclaw/daemon_state.json` | file updates periodically |
+| Daemon heartbeat/state | `~/.velaclaw/daemon_state.json` (or `$VELACLAW_CONFIG_DIR/…`) | file updates periodically |
+| Build identity | `velaclaw --version` vs `curl …/health` | same `version` string |
+
+## Safe binary upgrade
+
+See **[upgrade-1.0.md](upgrade-1.0.md)**: keep `VELACLAW_CONFIG_DIR`, never overwrite `daemon.env`, restart the unit only.
 
 ## Logs and Diagnostics
 

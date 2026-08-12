@@ -21,6 +21,19 @@ Merge-blocking checks should stay small and deterministic. Optional checks are u
 - `.github/workflows/pr-intake-checks.yml` (`PR Intake Checks`)
     - Purpose: safe pre-CI PR checks (template completeness, added-line tabs/trailing-whitespace/conflict markers) with immediate sticky feedback comment
 
+### Merge-bot fail-closed {#merge-bot-fail-closed}
+
+Automation that merges PRs after watching GitHub Checks **must not** treat polluted stdout as a CI conclusion.
+
+Required properties (product expectation for any cron / review bot):
+
+1. **Stdout isolation** — log helpers must write to a file and/or stderr only; never `tee` into a pipe whose stdout is later parsed as CI status.
+2. **Fail closed** — unknown / empty / non-success conclusions skip merge (no fall-through `*)` merge).
+3. **Head SHA** — wait and re-check the PR head that will actually merge; queued/pending stays pending until timeout then skip.
+4. **Optional SSH merge** — keep force-path merge flags off unless an operator explicitly enables them.
+
+Human merges still require green **CI Required Gate** (GOV-003). Upgrade operators: see [upgrade-1.0.md](upgrade-1.0.md).
+
 ### Non-Blocking but Important
 
 - `.github/workflows/pub-docker-img.yml` (`Docker`)

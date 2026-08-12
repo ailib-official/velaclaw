@@ -1,22 +1,20 @@
+use crate::agent::dispatcher::ToolDispatcher;
 #[cfg(not(feature = "ai-protocol"))]
 use crate::agent::dispatcher::{NativeToolDispatcher, XmlToolDispatcher};
-use crate::agent::dispatcher::{ParsedToolCall, ToolDispatcher, ToolExecutionResult};
 use crate::agent::memory_loader::{DefaultMemoryLoader, MemoryLoader};
 use crate::agent::prompt::{PromptContext, SystemPromptBuilder};
-use crate::approval::{ApprovalGate, ApprovalHub, ApprovalManager, GateDecision, HumanInputHub};
+use crate::approval::{ApprovalHub, ApprovalManager, HumanInputHub};
 use crate::cli_render::{prefix_agent_lines, RenderOpts};
 use crate::config::{Config, DEFAULT_PROTOCOL_MODEL_ID};
 use crate::memory::{self, Memory, MemoryCategory};
 use crate::observability::{Observer, ObserverEvent};
 #[cfg(not(feature = "ai-protocol"))]
 use crate::providers;
-use crate::providers::{ChatMessage, ChatRequest, ConversationMessage, Provider};
+use crate::providers::{ChatMessage, ConversationMessage, Provider};
 use crate::security::PolicyHandle;
-use crate::tools::{HumanInputAttach, Tool, ToolExecutionContext, ToolSpec};
+use crate::tools::{HumanInputAttach, Tool, ToolSpec};
 use anyhow::{Context, Result};
 use parking_lot::Mutex;
-use std::fmt::Write as _;
-use std::io::Write as IoWrite;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -367,17 +365,6 @@ impl Agent {
         self.cli_render = Some(opts);
     }
 
-    fn print_agent_stdout(&self, text: &str) {
-        if let Some(render_opts) = self.cli_render {
-            let rendered = render_opts.render(text);
-            let prefixed = prefix_agent_lines(&rendered, render_opts.style);
-            print!("{prefixed}");
-        } else {
-            print!("{text}");
-        }
-        let _ = std::io::stdout().flush();
-    }
-
     fn format_agent_output(&self, text: &str) -> String {
         if let Some(render_opts) = self.cli_render {
             let rendered = render_opts.render(text);
@@ -624,118 +611,6 @@ impl Agent {
         self.prompt_builder.build(&ctx)
     }
 
-    async fn execute_tool_call(&self, call: &ParsedToolCall) -> ToolExecutionResult {
-        let start = Instant::now();
-
-        let shell_human_approved = if let Some((mgr, hub)) = &self.gateway_approval {
-            let gate = ApprovalGate::new(mgr, "web", Some(self.security.clone()))
-                .with_hub(Arc::clone(hub));
-            match gate.decide_async(call).await {
-                GateDecision::Denied { message } => {
-                    return ToolExecutionResult {
-                        name: call.name.clone(),
-                        output: message,
-                        success: false,
-                        tool_call_id: call.tool_call_id.clone(),
-                    };
-                }
-                GateDecision::Proceed {
-                    shell_human_approved,
-                } => shell_human_approved,
-            }
-        } else {
-            false
-        };
-
-        let mut tool_args = call.arguments.clone();
-        let mut stdin_secret = None;
-        if call.name == "shell" {
-            if let Some(slot_id) = tool_args
-                .as_object_mut()
-                .and_then(|m| m.remove("secret_slot"))
-                .and_then(|v| v.as_str().map(|s| s.to_string()))
-            {
-                let Some(hub) = &self.human_input_hub else {
-                    return ToolExecutionResult {
-                        name: call.name.clone(),
-                        output: "Error: secret_slot requires interactive gateway human input"
-                            .into(),
-                        success: false,
-                        tool_call_id: call.tool_call_id.clone(),
-                    };
-                };
-                match hub.secret_slots().take(&slot_id) {
-                    Some(secret) => stdin_secret = Some(secret),
-                    None => {
-                        return ToolExecutionResult {
-                            name: call.name.clone(),
-                            output: format!(
-                                "Error: secret_slot '{slot_id}' is missing or already consumed. \
-                                 Call request_human_input(kind=secret) again."
-                            ),
-                            success: false,
-                            tool_call_id: call.tool_call_id.clone(),
-                        };
-                    }
-                }
-            }
-        }
-
-        let ctx = ToolExecutionContext::with_shell_human_approved(shell_human_approved)
-            .with_stdin_secret(stdin_secret);
-        let mut success = false;
-        let result = if let Some(tool) = self.tools.iter().find(|t| t.name() == call.name) {
-            match tool.execute(tool_args, &ctx).await {
-                Ok(r) => {
-                    success = r.success;
-                    self.observer.record_event(&ObserverEvent::ToolCall {
-                        tool: call.name.clone(),
-                        duration: start.elapsed(),
-                        success: r.success,
-                    });
-                    if r.success {
-                        r.output
-                    } else {
-                        format!("Error: {}", r.error.unwrap_or(r.output))
-                    }
-                }
-                Err(e) => {
-                    self.observer.record_event(&ObserverEvent::ToolCall {
-                        tool: call.name.clone(),
-                        duration: start.elapsed(),
-                        success: false,
-                    });
-                    format!("Error executing {}: {e}", call.name)
-                }
-            }
-        } else {
-            format!("Unknown tool: {}", call.name)
-        };
-
-        ToolExecutionResult {
-            name: call.name.clone(),
-            output: result,
-            success,
-            tool_call_id: call.tool_call_id.clone(),
-        }
-    }
-
-    async fn execute_tools(&self, calls: &[ParsedToolCall]) -> Vec<ToolExecutionResult> {
-        if !self.config.parallel_tools || self.gateway_approval.is_some() {
-            let mut results = Vec::with_capacity(calls.len());
-            for call in calls {
-                results.push(self.execute_tool_call(call).await);
-            }
-            return results;
-        }
-
-        let futs: Vec<_> = calls
-            .iter()
-            .map(|call| self.execute_tool_call(call))
-            .collect();
-        futures_util::future::join_all(futs).await
-    }
-
     fn classify_model(&self, user_message: &str) -> Result<String> {
         #[cfg(feature = "ai-protocol")]
         {
@@ -845,222 +720,75 @@ impl Agent {
 
         let effective_model = self.classify_model_tracked(user_message)?;
 
-        // VL-TTC-016: CorrectivePrompt → NativeOnlyReask → StripFailClosed.
-        let mut format_ladder = velaclaw_agent_runtime::ToolFormatLadder::new();
+        // VL-CTX-002 / GOV-007: single tool-iteration body (`run_tool_call_loop`).
+        // ApprovalHub / HumanInputHub stay as backend adapters via gate_extras.
+        let mut loop_history = self.tool_dispatcher.to_provider_messages(&self.history);
+        let provider_name = crate::protocol_registry::provider_id_from_logical(&effective_model);
+        #[cfg(feature = "ai-protocol")]
+        let text_tool_result_history = self
+            .execution
+            .as_ref()
+            .map(|e| e.tool_calling_policy().native_strategy == ai_lib_rust::NativeStrategy::Hybrid)
+            .unwrap_or(false);
+        #[cfg(not(feature = "ai-protocol"))]
+        let text_tool_result_history = !self.tool_dispatcher.should_send_tool_specs();
 
-        for _ in 0..self.config.max_tool_iterations {
-            let messages = self.tool_dispatcher.to_provider_messages(&self.history);
-            let response = match self
-                .provider
-                .chat(
-                    ChatRequest {
-                        messages: &messages,
-                        tools: if self.tool_dispatcher.should_send_tool_specs() {
-                            Some(&self.tool_specs)
-                        } else {
-                            None
-                        },
-                    },
-                    &effective_model,
-                    self.temperature,
-                )
-                .await
-            {
-                Ok(resp) => resp,
-                Err(err) => {
-                    #[cfg(feature = "ai-protocol")]
-                    {
-                        let host = self.host_decide_host.as_ref();
-                        return Err(crate::orchestration::map_provider_limit_error(
-                            err,
-                            &effective_model,
-                            velaclaw_agent_runtime::SoftFailSurface::Web,
-                            host,
-                            self.session_id.as_str(),
-                        ));
-                    }
-                    #[cfg(not(feature = "ai-protocol"))]
-                    {
-                        return Err(err);
-                    }
-                }
-            };
+        let gate_extras = crate::agent::tool_batch::ToolBatchGateExtras {
+            approval_hub: self
+                .gateway_approval
+                .as_ref()
+                .map(|(_, hub)| Arc::clone(hub)),
+            human_input_hub: self.human_input_hub.clone(),
+        };
+        let approval_mgr = self.gateway_approval.as_ref().map(|(mgr, _)| mgr);
 
-            // Manifest XML parser requires a closing </tool_call>. Models (esp. Nemotron)
-            // often emit an opening tag + JSON without the close — same recovery as
-            // `run_tool_call_loop` so Web UI chat does not dump raw markup as the reply.
-            // VL-TTC-010: try ai-lib StandardTextToolParser before residual loop_parse
-            // (loop_parse must not grow DSML / provider dialects).
-            let (mut text, mut calls) = self.tool_dispatcher.parse_response(&response);
-            let response_text = response.text.as_deref().unwrap_or("");
-            if calls.is_empty() {
-                #[cfg(feature = "ai-protocol")]
-                {
-                    let (manifest_text, manifest_calls) =
-                        velaclaw_agent_runtime::parse_manifest_text_tool_fallback(response_text);
-                    if !manifest_calls.is_empty() {
-                        if !manifest_text.is_empty() {
-                            text = manifest_text;
-                        }
-                        calls = manifest_calls
-                            .into_iter()
-                            .map(|c| ParsedToolCall {
-                                name: c.name,
-                                arguments: c.arguments,
-                                tool_call_id: None,
-                            })
-                            .collect();
-                    }
-                }
-                if calls.is_empty() {
-                    let (fallback_text, fallback_calls) =
-                        velaclaw_agent_runtime::parse_tool_calls(response_text);
-                    if !fallback_calls.is_empty() {
-                        if !fallback_text.is_empty() {
-                            text = fallback_text;
-                        }
-                        calls = fallback_calls
-                            .into_iter()
-                            .map(|c| ParsedToolCall {
-                                name: c.name,
-                                arguments: c.arguments,
-                                tool_call_id: None,
-                            })
-                            .collect();
-                    }
-                }
-            }
-            if calls.is_empty() {
-                let raw_for_correction = if response_text.is_empty() {
-                    text.as_str()
-                } else {
-                    response_text
-                };
-                let mut strip_fail_closed = false;
-                if velaclaw_agent_runtime::needs_tool_format_correction(raw_for_correction, 0) {
-                    let strategy = format_ladder.next_strategy();
-                    tracing::warn!(
-                        target: "velaclaw::agent",
-                        tool_format_strategy = strategy.as_str(),
-                        "tool_format_recovery: unparsed tool markup"
-                    );
-                    if strategy
-                        != velaclaw_agent_runtime::ToolFormatRecoveryStrategy::StripFailClosed
-                    {
-                        let assistant_raw = if text.is_empty() {
-                            response
-                                .text
-                                .clone()
-                                .unwrap_or_else(|| raw_for_correction.to_string())
-                        } else {
-                            text.clone()
-                        };
-                        self.history
-                            .push(ConversationMessage::Chat(ChatMessage::assistant(
-                                assistant_raw,
-                            )));
-                        self.history
-                            .push(ConversationMessage::Chat(ChatMessage::user(
-                                velaclaw_agent_runtime::tool_format_recovery_message(strategy)
-                                    .to_string(),
-                            )));
-                        continue;
-                    }
-                    tracing::warn!(
-                        target: "velaclaw::agent",
-                        tool_format_strategy = "StripFailClosed",
-                        "tool_format_retry_exhausted: stripping markup after recovery ladder"
-                    );
-                    strip_fail_closed = true;
-                }
+        let soft_fail = crate::agent::loop_::SoftFailLoopCtx {
+            session_key: self.session_id.as_str(),
+            config: None,
+            surface: velaclaw_agent_runtime::SoftFailSurface::Web,
+        };
 
-                let final_text = if text.is_empty() {
-                    response.text.unwrap_or_default()
-                } else {
-                    text
-                };
-                // Defense-in-depth: never leak DSML / tool_call scaffolding to Web UI.
-                let mut final_text = crate::util::strip_tool_call_markup(&final_text);
-                if strip_fail_closed {
-                    #[cfg(feature = "ai-protocol")]
-                    {
-                        final_text = crate::orchestration::finalize_tool_format_exhausted(
-                            &final_text,
-                            &effective_model,
-                            velaclaw_agent_runtime::SoftFailSurface::Web,
-                            self.host_decide_host.as_ref(),
-                            self.session_id.as_str(),
-                        );
-                    }
-                    #[cfg(not(feature = "ai-protocol"))]
-                    {
-                        final_text = velaclaw_agent_runtime::append_tool_format_exhausted_notice(
-                            &final_text,
-                            &effective_model,
-                            velaclaw_agent_runtime::SoftFailSurface::Web,
-                        );
-                    }
-                }
+        let render_opts = self.cli_render.unwrap_or(RenderOpts {
+            style: crate::cli_render::RenderStyle {
+                ansi: false,
+                markdown: true,
+            },
+            fold_lines: 10,
+            fold_enabled: false,
+        });
 
-                self.history
-                    .push(ConversationMessage::Chat(ChatMessage::assistant(
-                        final_text.clone(),
-                    )));
-                self.prepare_history_after_turn().await?;
-
-                return Ok(final_text);
-            }
-
-            if !text.is_empty() {
-                self.print_agent_stdout(&text);
-            }
-
-            let results = self.execute_tools(&calls).await;
-
-            // Text-tool path (XML / unclosed-tag recovery): keep history as
-            // assistant text + user "[Tool results]" — never emit role=tool without
-            // a preceding assistant tool_calls payload (DeepSeek HTTP 400).
-            // Native path: AssistantToolCalls + ToolResults with matching ids.
-            if response.tool_calls.is_empty() {
-                let assistant_content = response.text.clone().unwrap_or_else(|| text.clone());
-                self.history
-                    .push(ConversationMessage::Chat(ChatMessage::assistant(
-                        assistant_content,
-                    )));
-                let mut tool_results = String::new();
-                for result in &results {
-                    let _ = writeln!(
-                        tool_results,
-                        "<tool_result name=\"{}\">\n{}\n</tool_result>",
-                        result.name, result.output
-                    );
-                }
-                self.history
-                    .push(ConversationMessage::Chat(ChatMessage::user(format!(
-                        "[Tool results]\n{tool_results}"
-                    ))));
-            } else {
-                // Attach tool_call_ids from native response onto execution results.
-                let mut results = results;
-                for (result, native) in results.iter_mut().zip(response.tool_calls.iter()) {
-                    if result.tool_call_id.is_none() {
-                        result.tool_call_id = Some(native.id.clone());
-                    }
-                }
-                self.history.push(ConversationMessage::AssistantToolCalls {
-                    text: response.text.clone(),
-                    tool_calls: response.tool_calls.clone(),
-                });
-                let formatted = self.tool_dispatcher.format_results(&results);
-                self.history.push(formatted);
-            }
-            self.trim_conversation_cap();
-        }
-
-        anyhow::bail!(
-            "Agent exceeded maximum tool iterations ({})",
-            self.config.max_tool_iterations
+        let response = crate::agent::loop_::run_tool_call_loop(
+            self.provider.as_ref(),
+            &mut loop_history,
+            &self.tools,
+            self.observer.as_ref(),
+            provider_name,
+            &effective_model,
+            self.temperature,
+            self.cli_render.is_none(),
+            approval_mgr,
+            "web",
+            &crate::config::MultimodalConfig::default(),
+            self.config.max_tool_iterations,
+            None,
+            None,
+            Some(self.tool_dispatcher.as_ref()),
+            Some(&self.security),
+            None,
+            text_tool_result_history,
+            render_opts,
+            None,
+            Some(soft_fail),
+            Some(&gate_extras),
         )
+        .await?;
+
+        self.history = loop_history
+            .into_iter()
+            .map(ConversationMessage::Chat)
+            .collect();
+        self.prepare_history_after_turn().await?;
+        Ok(response)
     }
 
     pub async fn run_single(&mut self, message: &str) -> Result<String> {
@@ -1198,7 +926,9 @@ pub async fn run(
 mod tests {
     use super::*;
     use crate::agent::dispatcher::{NativeToolDispatcher, XmlToolDispatcher};
+    use crate::providers::ChatRequest;
     use crate::security::SecurityPolicy;
+    use crate::tools::ToolExecutionContext;
     use async_trait::async_trait;
     use parking_lot::Mutex;
 

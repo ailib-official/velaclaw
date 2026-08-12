@@ -257,6 +257,7 @@ pub(crate) async fn agent_turn(
         },
         None,
         None,
+        None,
     )
     .await
 }
@@ -330,6 +331,7 @@ pub(crate) async fn run_tool_call_loop(
     render_opts: RenderOpts,
     fold_cache: Option<&FoldCache>,
     soft_fail: Option<SoftFailLoopCtx<'_>>,
+    gate_extras: Option<&crate::agent::tool_batch::ToolBatchGateExtras>,
 ) -> Result<String> {
     let max_iterations = if max_tool_iterations == 0 {
         DEFAULT_MAX_TOOL_ITERATIONS
@@ -658,6 +660,7 @@ pub(crate) async fn run_tool_call_loop(
             channel_name,
             channel_approval.clone(),
             cancellation_token.as_ref(),
+            gate_extras,
         )
         .await?;
         let individual_results: Vec<String> = batch_results.into_iter().map(|r| r.output).collect();
@@ -1267,6 +1270,7 @@ pub async fn run(
                 config: Some(&config),
                 surface: velaclaw_agent_runtime::SoftFailSurface::Cli,
             }),
+            None,
         )
         .await?;
         final_output = response.clone();
@@ -1506,6 +1510,7 @@ pub async fn run(
                     config: Some(&config),
                     surface: velaclaw_agent_runtime::SoftFailSurface::Cli,
                 }),
+                None,
             )
             .await
             {
@@ -2052,6 +2057,7 @@ mod tests {
             },
             None,
             None,
+            None,
         )
         .await
         .expect_err("provider without vision support should fail");
@@ -2110,6 +2116,7 @@ mod tests {
             },
             None,
             None,
+            None,
         )
         .await
         .expect_err("oversized payload must fail");
@@ -2160,6 +2167,7 @@ mod tests {
                 fold_lines: 10,
                 fold_enabled: false,
             },
+            None,
             None,
             None,
         )
@@ -2302,6 +2310,7 @@ mod tests {
             },
             None,
             None,
+            None,
         )
         .await
         .expect("parallel execution should complete");
@@ -2391,6 +2400,7 @@ mod tests {
                 fold_lines: 10,
                 fold_enabled: false,
             },
+            None,
             None,
             None,
         )

@@ -57,7 +57,7 @@ VelaClaw already has **excellent application-layer security**:
 | Memory monitoring + OOM kill | `src/resources/memory.rs` | 1 day | High |
 | CPU timeout per command | `src/tools/shell.rs` | 1 day | High |
 | Basic audit logging | `src/security/audit.rs` | 2 days | Medium |
-| Config schema updates | `src/config/schema.rs` | 1 day | - |
+| Config schema updates | `src/config/schema/` | 1 day | - |
 
 **Deliverables**:
 - Linux: Filesystem access restricted to workspace

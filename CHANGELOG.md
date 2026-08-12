@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Module structure** (VL-REVIEW2-A1): split hotspots into responsibility modules — `config/schema/{mod,load}.rs`, `onboard/wizard/{mod,steps,models}.rs`, `agent/loop_/{mod,tool_loop}.rs`. Public Config/onboard/loop APIs unchanged; no second execution path (GOV-007).
 - **Bootstrap unify** (VL-REVIEW2-A0 / GOV-007): CLI (`loop_::run` / `process_message`), Web (`Agent::from_config`), and Channel (`start_channels`) share `agent::assemble::assemble_runtime` for provider / memory / security / tools / dispatcher. Peripherals, ApprovalHub vs stdin, and channel listeners remain adapters only.
 
 ## [1.0.0] - 2026-08-12

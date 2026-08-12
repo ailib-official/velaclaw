@@ -5,6 +5,7 @@ For operators running VelaClaw in persistent or production-like environments.
 ## Core Operations
 
 - Day-2 runbook: [../operations-runbook.md](../operations-runbook.md)
+- **1.0.x upgrade (keep secrets):** [../upgrade-1.0.md](../upgrade-1.0.md)
 - Config vs rebuild contract: [../config-externalization.md](../config-externalization.md)
 - Release runbook: [../release-process.md](../release-process.md)
 - Troubleshooting matrix: [../troubleshooting.md](../troubleshooting.md)

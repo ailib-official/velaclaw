@@ -2,7 +2,7 @@
 
 This page defines the fastest supported path to install and initialize VelaClaw.
 
-Last verified: **February 20, 2026**.
+Last verified: **August 13, 2026**.
 
 ## Option 0: Homebrew (macOS/Linuxbrew)
 
@@ -13,7 +13,7 @@ brew install velaclaw
 ## Option A (Recommended): Clone + local script
 
 ```bash
-git clone https://github.com/velaclaw-labs/velaclaw.git
+git clone https://github.com/ailib-official/velaclaw.git
 cd velaclaw
 ./bootstrap.sh
 ```
@@ -22,6 +22,10 @@ What it does by default:
 
 1. `cargo build --release --locked`
 2. `cargo install --path . --force --locked`
+
+### Existing trial / custom config dir
+
+If you already run a trial with `VELACLAW_CONFIG_DIR` and `daemon.env`, **upgrade the binary only** — see [upgrade-1.0.md](upgrade-1.0.md). Bootstrap/onboard must not replace secrets files.
 
 ### Resource preflight and pre-built flow
 

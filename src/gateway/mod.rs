@@ -476,6 +476,7 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
 async fn handle_health(State(state): State<AppState>) -> impl IntoResponse {
     let body = serde_json::json!({
         "status": "ok",
+        "version": env!("CARGO_PKG_VERSION"),
         "paired": state.pairing.is_paired(),
         "runtime": crate::health::snapshot_json(),
     });
@@ -509,6 +510,7 @@ async fn handle_metrics(State(state): State<AppState>) -> impl IntoResponse {
 async fn handle_dashboard_api(State(state): State<AppState>) -> impl IntoResponse {
     let health = serde_json::json!({
         "status": "ok",
+        "version": env!("CARGO_PKG_VERSION"),
         "paired": state.pairing.is_paired(),
         "runtime": crate::health::snapshot_json(),
     });

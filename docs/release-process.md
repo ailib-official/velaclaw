@@ -2,7 +2,7 @@
 
 This runbook defines the maintainers' standard release flow.
 
-Last verified: **February 20, 2026**.
+Last verified: **August 13, 2026**.
 
 ## Release Goals
 
@@ -10,6 +10,13 @@ Last verified: **February 20, 2026**.
 - Publish only from code already in `main`.
 - Verify multi-target artifacts before publish.
 - Keep release cadence regular even with high PR volume.
+- On the **1.0.x** train: keep [CHANGELOG.md](../CHANGELOG.md) Unreleased discipline; bump SemVer in Cargo when cutting `vX.Y.Z`.
+
+## 1.0.x train notes
+
+- Product version **1.0.0** landed on `main` (CHANGELOG + Cargo). Cut GitHub tag `v1.0.0` (and later `v1.0.x`) with the procedure below once release artifacts are ready.
+- Operators upgrading installed binaries: [upgrade-1.0.md](upgrade-1.0.md) (preserve config dir / `daemon.env`).
+- Merge policy + bot fail-closed: [ci-map.md](ci-map.md).
 
 ## Standard Cadence
 

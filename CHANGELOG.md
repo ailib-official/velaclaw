@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **1.0.x product shape** (VL-REL-PRODUCT-001): upgrade runbook (`docs/upgrade-1.0.md`); `/health` + dashboard expose `version` matching `velaclaw --version`; CI merge-bot fail-closed notes; bootstrap clone URL → `ailib-official/velaclaw`.
 - **Ops-readonly + policy UX** (VL-UX-OPS-001 / VL-UX-POLICY-001): `examples/profiles/ops-readonly.toml` and seeded `agent-policy.yaml` (self_adjust for `autonomy.allowed_commands`); shell allowlist denials (CLI+Web) share next-step guidance; doctor maintenance points at the profile. Existing config/daemon.env never silently rewritten; SEC-009 preserved.
 - **Module structure** (VL-REVIEW2-A1): split hotspots into responsibility modules — `config/schema/{mod,load}.rs`, `onboard/wizard/{mod,steps,models}.rs`, `agent/loop_/{mod,tool_loop}.rs`. Public Config/onboard/loop APIs unchanged; no second execution path (GOV-007).
 - **Bootstrap unify** (VL-REVIEW2-A0 / GOV-007): CLI (`loop_::run` / `process_message`), Web (`Agent::from_config`), and Channel (`start_channels`) share `agent::assemble::assemble_runtime` for provider / memory / security / tools / dispatcher. Peripherals, ApprovalHub vs stdin, and channel listeners remain adapters only.

@@ -1777,10 +1777,14 @@ mod tests {
             "TOOLS.md",
             "BOOTSTRAP.md",
             "MEMORY.md",
+            "agent-policy.yaml",
         ];
         for f in &expected {
             assert!(tmp.path().join(f).exists(), "missing file: {f}");
         }
+        let policy = std::fs::read_to_string(tmp.path().join("agent-policy.yaml")).unwrap();
+        assert!(policy.contains("autonomy.allowed_commands"));
+        assert!(policy.contains("self_adjust"));
     }
 
     #[test]
@@ -2045,6 +2049,7 @@ mod tests {
             "TOOLS.md",
             "BOOTSTRAP.md",
             "MEMORY.md",
+            "agent-policy.yaml",
         ] {
             let content = tokio::fs::read_to_string(tmp.path().join(f)).await.unwrap();
             assert!(!content.trim().is_empty(), "{f} should not be empty");

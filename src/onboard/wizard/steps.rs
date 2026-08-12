@@ -3018,6 +3018,10 @@ pub(crate) fn scaffold_workspace(workspace_dir: &Path, ctx: &ProjectContext) -> 
         ("TOOLS.md", tools.to_string()),
         ("BOOTSTRAP.md", bootstrap),
         ("MEMORY.md", memory.to_string()),
+        (
+            "agent-policy.yaml",
+            include_str!("../../../examples/profiles/agent-policy.self-adjust.yaml").to_string(),
+        ),
     ];
 
     // Create subdirectories

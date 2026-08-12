@@ -1,0 +1,21 @@
+# Fresh-workspace L2 seed (VL-UX-POLICY-001).
+# Scaffolded into the workspace as `agent-policy.yaml` when missing.
+# Enables policy_patch for autonomy.allowed_commands; denies security/credential surfaces.
+version: 2
+self_adjust:
+  allowed_writes:
+    - approval.session_allowlist
+    - approval.session_shell_binaries
+    - approval.*
+    - autonomy.allowed_commands
+  denied_writes:
+    - security
+    - security.*
+    - gateway
+    - gateway.*
+    - channels
+    - channels.*
+    - secrets
+    - secrets.*
+    - api_key
+    - api_url

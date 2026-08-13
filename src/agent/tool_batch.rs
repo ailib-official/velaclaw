@@ -128,6 +128,9 @@ async fn execute_one_tool(
                 tool: call_name.to_string(),
                 duration: start.elapsed(),
                 success: r.success,
+                summary: Some(crate::agent::turn_progress::truncate_summary(
+                    &scrub_credentials(&r.output),
+                )),
             });
             if r.success {
                 ToolBatchResult {
@@ -146,6 +149,9 @@ async fn execute_one_tool(
                 tool: call_name.to_string(),
                 duration: start.elapsed(),
                 success: false,
+                summary: Some(crate::agent::turn_progress::truncate_summary(
+                    &e.to_string(),
+                )),
             });
             ToolBatchResult {
                 output: format!("Error executing {call_name}: {e}"),

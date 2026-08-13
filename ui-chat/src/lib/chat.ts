@@ -1,8 +1,9 @@
-export type ChatRole = "user" | "assistant" | "system";
+export type ChatRole = "user" | "assistant" | "system" | "status" | "step";
 
 export interface ChatMessage {
   role: ChatRole;
   content: string;
+  stepOk?: boolean;
 }
 
 /** Marker emitted by ORCH-HOST-004 soft-fail / quota notices (do not re-classify in UI). */
@@ -28,7 +29,15 @@ export function lastAssistantHasVelaClawNotice(messages: ChatMessage[]): boolean
 }
 
 export interface WsServerFrame {
-  type: "delta" | "done" | "error" | "approval_required" | "input_required";
+  type:
+    | "delta"
+    | "done"
+    | "error"
+    | "approval_required"
+    | "input_required"
+    | "status"
+    | "step"
+    | "cancelled";
   content?: string;
   message?: string;
   usage?: { input_tokens: number; output_tokens: number };
@@ -40,6 +49,11 @@ export interface WsServerFrame {
   prompt?: string;
   options?: string[];
   risk_note?: string;
+  phase?: string;
+  detail?: string;
+  tool?: string;
+  ok?: boolean;
+  summary?: string;
 }
 
 export interface ApprovalRequiredPayload {
@@ -67,6 +81,9 @@ export interface StreamChatOptions {
   onError: (message: string) => void;
   onApprovalRequired?: (payload: ApprovalRequiredPayload) => void;
   onInputRequired?: (payload: HumanInputRequiredPayload) => void;
+  onStatus?: (phase: string, detail?: string) => void;
+  onStep?: (payload: { kind: string; tool: string; ok: boolean; summary: string }) => void;
+  onCancelled?: (message?: string) => void;
 }
 
 function wsUrl(token: string): string {
@@ -103,6 +120,18 @@ export function streamChat(opts: StreamChatOptions): () => void {
     }
     if (frame.type === "delta" && frame.content) {
       opts.onDelta(frame.content);
+    } else if (frame.type === "status" && frame.phase) {
+      opts.onStatus?.(frame.phase, frame.detail);
+    } else if (frame.type === "step" && frame.tool) {
+      opts.onStep?.({
+        kind: frame.kind ?? "tool_result",
+        tool: frame.tool,
+        ok: frame.ok !== false,
+        summary: frame.summary ?? "",
+      });
+    } else if (frame.type === "cancelled") {
+      opts.onCancelled?.(frame.message);
+      socket.close();
     } else if (frame.type === "approval_required" && frame.id && frame.tool_name) {
       opts.onApprovalRequired?.({
         id: frame.id,
@@ -136,6 +165,13 @@ export function streamChat(opts: StreamChatOptions): () => void {
 
   return () => {
     closed = true;
+    if (socket.readyState === WebSocket.OPEN) {
+      try {
+        socket.send(JSON.stringify({ type: "cancel" }));
+      } catch {
+        /* ignore */
+      }
+    }
     socket.close();
   };
 }
@@ -150,4 +186,31 @@ export function appendAssistantDelta(messages: ChatMessage[], delta: string): Ch
     out.push({ role: "assistant", content: delta });
   }
   return out;
+}
+
+/** History sent to the model: user + assistant only. */
+export function outboundChatHistory(messages: ChatMessage[]): ChatMessage[] {
+  return messages.filter((m) => m.role === "user" || m.role === "assistant");
+}
+
+export function applyStatusFrame(messages: ChatMessage[], phase: string, detail?: string): ChatMessage[] {
+  const content = detail ? `${phase}: ${detail}` : phase;
+  const out = [...messages];
+  const last = out[out.length - 1];
+  if (last?.role === "status") {
+    out[out.length - 1] = { role: "status", content };
+  } else {
+    out.push({ role: "status", content });
+  }
+  return out;
+}
+
+export function applyStepFrame(
+  messages: ChatMessage[],
+  payload: { tool: string; ok: boolean; summary: string },
+): ChatMessage[] {
+  const content = payload.summary
+    ? `${payload.tool}: ${payload.summary}`
+    : payload.tool;
+  return [...messages, { role: "step", content, stepOk: payload.ok }];
 }

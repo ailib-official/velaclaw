@@ -114,6 +114,24 @@ pub enum WsServerMessage {
         #[serde(skip_serializing_if = "Option::is_none")]
         risk_note: Option<String>,
     },
+    /// Compact turn status (model request / tool start).
+    Status {
+        phase: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+    /// Intermediate tool result (distinct from assistant delta).
+    Step {
+        kind: String,
+        tool: String,
+        ok: bool,
+        summary: String,
+    },
+    /// User cancelled the in-flight turn.
+    Cancelled {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+    },
 }
 
 #[cfg(test)]
@@ -152,5 +170,35 @@ mod tests {
         };
         let json = serde_json::to_string(&msg).expect("serialize");
         assert_eq!(json, r#"{"type":"error","message":"fail"}"#);
+    }
+
+    #[test]
+    fn ws_server_status_and_step_serialize() {
+        let status = WsServerMessage::Status {
+            phase: "model".into(),
+            detail: Some("deepseek/x".into()),
+        };
+        let json = serde_json::to_string(&status).expect("serialize");
+        assert!(json.contains(r#""type":"status""#));
+        assert!(json.contains(r#""phase":"model""#));
+
+        let step = WsServerMessage::Step {
+            kind: "tool_result".into(),
+            tool: "shell".into(),
+            ok: true,
+            summary: "ok".into(),
+        };
+        let json = serde_json::to_string(&step).expect("serialize");
+        assert!(json.contains(r#""type":"step""#));
+        assert!(json.contains(r#""tool":"shell""#));
+    }
+
+    #[test]
+    fn ws_server_cancelled_serializes() {
+        let msg = WsServerMessage::Cancelled {
+            message: Some("Stopped.".into()),
+        };
+        let json = serde_json::to_string(&msg).expect("serialize");
+        assert!(json.contains(r#""type":"cancelled""#));
     }
 }

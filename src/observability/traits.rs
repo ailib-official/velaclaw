@@ -44,6 +44,8 @@ pub enum ObserverEvent {
         tool: String,
         duration: Duration,
         success: bool,
+        /// Truncated, scrubbed output for UX step traces (never secrets).
+        summary: Option<String>,
     },
     /// The agent produced a final answer for the current user message.
     TurnComplete,
@@ -186,6 +188,7 @@ mod tests {
             tool: "shell".into(),
             duration: Duration::from_millis(10),
             success: true,
+            summary: None,
         };
         let metric = ObserverMetric::RequestLatency(Duration::from_millis(8));
 

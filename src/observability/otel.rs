@@ -270,6 +270,7 @@ impl Observer for OtelObserver {
                 tool,
                 duration,
                 success,
+                ..
             } => {
                 let secs = duration.as_secs_f64();
                 let start_time = SystemTime::now()
@@ -434,11 +435,13 @@ mod tests {
             tool: "shell".into(),
             duration: Duration::from_millis(10),
             success: true,
+            summary: None,
         });
         obs.record_event(&ObserverEvent::ToolCall {
             tool: "file_read".into(),
             duration: Duration::from_millis(5),
             success: false,
+            summary: None,
         });
         obs.record_event(&ObserverEvent::TurnComplete);
         obs.record_event(&ObserverEvent::ChannelMessage {

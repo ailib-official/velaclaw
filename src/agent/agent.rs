@@ -57,6 +57,10 @@ pub struct Agent {
     /// Last turn's model decision (observe / UX honesty).
     #[cfg(feature = "ai-protocol")]
     last_turn_model: Option<crate::orchestration::TurnModelDecision>,
+    /// Per-turn cancel (Web Stop / CLI double-Esc).
+    cancellation_token: Option<tokio_util::sync::CancellationToken>,
+    /// Optional progress fan-out for Web WS frames.
+    progress_tx: Option<tokio::sync::mpsc::Sender<crate::agent::turn_progress::TurnProgress>>,
 }
 
 pub struct AgentBuilder {
@@ -311,6 +315,8 @@ impl AgentBuilder {
             explicit_model: self.explicit_model,
             #[cfg(feature = "ai-protocol")]
             last_turn_model: None,
+            cancellation_token: None,
+            progress_tx: None,
         })
     }
 }
@@ -368,6 +374,19 @@ impl Agent {
         } else {
             text.to_string()
         }
+    }
+
+    /// Cancel token for the next `turn` (Web Stop / CLI double-Esc).
+    pub fn set_cancellation_token(&mut self, token: Option<tokio_util::sync::CancellationToken>) {
+        self.cancellation_token = token;
+    }
+
+    /// Progress sink for the next `turn` (WebSocket status/step frames).
+    pub fn set_progress_tx(
+        &mut self,
+        tx: Option<tokio::sync::mpsc::Sender<crate::agent::turn_progress::TurnProgress>>,
+    ) {
+        self.progress_tx = tx;
     }
 
     /// Enable interactive tool approval for gateway/Web chat (`VL-UI-004`).
@@ -694,11 +713,24 @@ impl Agent {
             fold_enabled: false,
         });
 
+        let observer: Arc<dyn Observer> = if let Some(tx) = &self.progress_tx {
+            Arc::new(crate::agent::turn_progress::ProgressObserver::forwarding(
+                Arc::clone(&self.observer),
+                tx.clone(),
+            ))
+        } else if self.cancellation_token.is_some() {
+            Arc::new(crate::agent::turn_progress::ProgressObserver::cli(
+                Arc::clone(&self.observer),
+            ))
+        } else {
+            Arc::clone(&self.observer)
+        };
+
         let response = crate::agent::loop_::run_tool_call_loop(
             self.provider.as_ref(),
             &mut loop_history,
             &self.tools,
-            self.observer.as_ref(),
+            observer.as_ref(),
             provider_name,
             &effective_model,
             self.temperature,
@@ -707,7 +739,7 @@ impl Agent {
             "web",
             &crate::config::MultimodalConfig::default(),
             self.config.max_tool_iterations,
-            None,
+            self.cancellation_token.clone(),
             None,
             Some(self.tool_dispatcher.as_ref()),
             Some(&self.security),
@@ -739,7 +771,7 @@ impl Agent {
         self.cli_render = Some(render_opts);
 
         println!("🦀 VelaClaw Interactive Mode");
-        println!("Type /quit to exit.\n");
+        println!("Type /quit to exit. During a turn, press Esc twice to stop.\n");
 
         let (tx, mut rx) = tokio::sync::mpsc::channel(32);
         let cli = crate::channels::CliChannel::with_render_opts(render_opts);
@@ -749,9 +781,24 @@ impl Agent {
         });
 
         while let Some(msg) = rx.recv().await {
+            let token = tokio_util::sync::CancellationToken::new();
+            self.set_cancellation_token(Some(token.clone()));
+            let watch = crate::agent::double_esc::spawn_double_esc_watcher(token.clone());
             let response = match self.turn(&msg.content).await {
-                Ok(resp) => resp,
+                Ok(resp) => {
+                    token.cancel();
+                    let _ = watch.await;
+                    self.set_cancellation_token(None);
+                    resp
+                }
                 Err(e) => {
+                    token.cancel();
+                    let _ = watch.await;
+                    self.set_cancellation_token(None);
+                    if crate::agent::loop_::is_tool_loop_cancelled(&e) {
+                        eprintln!("Stopped.\n");
+                        continue;
+                    }
                     eprintln!("\nError: {e}\n");
                     continue;
                 }

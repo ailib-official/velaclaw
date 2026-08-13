@@ -54,6 +54,8 @@ pub async fn handle_post_chat(
         &req,
         Some(&state.approval_hub),
         Some(&state.human_input_hub),
+        None,
+        None,
     )
     .await
     {

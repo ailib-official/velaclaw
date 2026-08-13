@@ -157,9 +157,9 @@ opentelemetry-otlp = { version = "0.31", default-features = false, features = ["
 # Serial port for peripheral communication (STM32, etc.)
 tokio-serial = { version = "5", default-features = false, optional = true }
 
-# ai-lib-rust — ALR-TTC-016 tip on public main (ToolFormatError + recovery ladder)
+# ai-lib-rust — ALR-TTC-012 tip on public main (invoke parse-aid + steer; #66+#67)
 # Rollback pin: 2200cb14f526d330eb35379944ecd7eb617d949e (prior VL-TTC-016 pin)
-ai-lib-rust = { version = "1.3.0", git = "https://github.com/ailib-official/ai-lib-rust", rev = "c7132af158a33ce05e6c8da7540d8664addd5860", optional = true }
+ai-lib-rust = { version = "1.3.0", git = "https://github.com/ailib-official/ai-lib-rust", rev = "cc49a15db70f63c1d4c51a388472ecf9d72f2824", optional = true }
 async-stream = { version = "0.3", optional = true }
 serde_yaml = { version = "0.9", optional = true }
 

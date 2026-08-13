@@ -118,6 +118,8 @@ velaclaw doctor intent-route [--message <text>] [--hint <hint>] [--tag <Tag>] [-
 Interactive REPL extras:
 
 - `/expand <id>` — replay a folded long tool/code block from the current session
+- **Esc Esc** (TTY, within 500ms) — stop the current turn and return to the prompt
+- Web Chat: while a turn is running, **Stop** cancels it (same `CancellationToken` as CLI)
 - Long tool outputs fold after `[cli_render].fold_lines` (default `10`) when stdout is a TTY and `--no-fold` is not set
 - `--no-color` forces plain output (also honors `NO_COLOR`); non-TTY/pipe already strips ANSI
 

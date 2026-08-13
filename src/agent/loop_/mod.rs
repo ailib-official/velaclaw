@@ -603,7 +603,7 @@ pub async fn run(
         observer.record_event(&ObserverEvent::TurnComplete);
     } else {
         println!("🦀 VelaClaw Interactive Mode");
-        println!("Type /help for commands.\n");
+        println!("Type /help for commands. During a turn, press Esc twice to stop.\n");
         let cli = crate::channels::CliChannel::with_render_opts(render_opts);
 
         // Persistent conversation history across turns
@@ -642,7 +642,8 @@ pub async fn run(
                     println!("  /model       Show/set model for this session");
                     println!("  /expand <id> Replay a folded long output by id");
                     println!("  /clear /new  Start a new session (clear this session's memory)");
-                    println!("  /quit /exit  Exit interactive mode\n");
+                    println!("  /quit /exit  Exit interactive mode");
+                    println!("  Esc Esc      Stop the current turn (TTY)\n");
                     continue;
                 }
                 "/version" => {
@@ -808,11 +809,16 @@ pub async fn run(
                 &available_hints,
             )?;
 
+            let turn_cancel = CancellationToken::new();
+            let esc_watch = crate::agent::double_esc::spawn_double_esc_watcher(turn_cancel.clone());
+            let progress_obs =
+                crate::agent::turn_progress::ProgressObserver::cli(Arc::clone(&observer));
+
             let response = match run_tool_call_loop(
                 provider.as_ref(),
                 &mut history,
                 &tools_registry,
-                observer.as_ref(),
+                &progress_obs,
                 provider_name,
                 &turn_model,
                 temperature,
@@ -821,7 +827,7 @@ pub async fn run(
                 "cli",
                 &config.multimodal,
                 config.agent.max_tool_iterations,
-                None,
+                Some(turn_cancel.clone()),
                 None,
                 tool_dispatcher_ref,
                 Some(&security),
@@ -840,8 +846,18 @@ pub async fn run(
             )
             .await
             {
-                Ok(resp) => resp,
+                Ok(resp) => {
+                    turn_cancel.cancel();
+                    let _ = esc_watch.await;
+                    resp
+                }
                 Err(e) => {
+                    turn_cancel.cancel();
+                    let _ = esc_watch.await;
+                    if is_tool_loop_cancelled(&e) {
+                        eprintln!("Stopped.\n");
+                        continue;
+                    }
                     eprintln!("\nError: {e}\n");
                     continue;
                 }

@@ -12,6 +12,8 @@ use crate::providers::ChatMessage;
 use anyhow::{anyhow, Context, Result};
 use std::path::Path;
 use std::sync::Arc;
+use tokio::sync::mpsc::Sender;
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 /// Apply per-request model/temperature overrides onto a config clone.
@@ -88,6 +90,8 @@ pub async fn run_agent_chat(
     req: &ChatApiRequest,
     approval_hub: Option<&Arc<crate::approval::ApprovalHub>>,
     human_input_hub: Option<&Arc<crate::approval::HumanInputHub>>,
+    cancellation: Option<CancellationToken>,
+    progress_tx: Option<Sender<crate::agent::turn_progress::TurnProgress>>,
 ) -> Result<ChatApiResponse> {
     let user_message = extract_last_user_message(&req.messages)?;
     let explicit_model = explicit_model_from_request(req);
@@ -114,6 +118,8 @@ pub async fn run_agent_chat(
     }
     // Seed prior turns so multi-step Web UI chat keeps context (UI sends full history).
     seed_prior_messages(&mut agent, &req.messages)?;
+    agent.set_cancellation_token(cancellation);
+    agent.set_progress_tx(progress_tx);
     let content = agent
         .turn(&user_message)
         .await

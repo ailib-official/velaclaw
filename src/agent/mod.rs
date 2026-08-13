@@ -24,6 +24,7 @@ pub mod context_orch;
 #[cfg(feature = "ai-protocol")]
 pub mod dag_runner;
 pub mod dispatcher;
+pub mod double_esc;
 #[cfg(feature = "ai-protocol")]
 pub mod envelope_pilot;
 #[cfg(feature = "ai-protocol")]
@@ -33,6 +34,7 @@ pub mod memory_loader;
 pub mod prompt;
 pub mod prompt_composer;
 pub mod tool_batch;
+pub mod turn_progress;
 
 #[cfg(test)]
 mod tests;

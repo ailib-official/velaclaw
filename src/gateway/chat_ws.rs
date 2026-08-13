@@ -5,17 +5,22 @@ use super::local_control::auth::{check_pairing_auth, unauthorized_response};
 use super::local_control::runner::{chunk_text_for_stream, persist_chat_turn, run_agent_chat};
 use super::local_control::types::{ChatApiRequest, WsClientMessage, WsServerMessage};
 use super::AppState;
+use crate::agent::loop_::is_tool_loop_cancelled;
+use crate::agent::turn_progress::TurnProgress;
 use crate::approval::HumanInputKind;
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{Query, State, WebSocketUpgrade};
 use axum::http::HeaderMap;
 use axum::response::IntoResponse;
-use futures_util::StreamExt;
+use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 
 const WS_CHUNK_SIZE: usize = 48;
+
+type WsSink = futures_util::stream::SplitSink<WebSocket, Message>;
 
 #[derive(Debug, Deserialize, Default)]
 pub struct WsQuery {
@@ -29,6 +34,26 @@ fn human_input_kind_label(kind: HumanInputKind) -> &'static str {
         HumanInputKind::Text => "text",
         HumanInputKind::Secret => "secret",
         HumanInputKind::Handoff => "handoff",
+    }
+}
+
+fn progress_frame(progress: TurnProgress) -> WsServerMessage {
+    match progress {
+        TurnProgress::Status { phase, detail } => WsServerMessage::Status {
+            phase,
+            detail: Some(detail),
+        },
+        TurnProgress::Step {
+            kind,
+            tool,
+            ok,
+            summary,
+        } => WsServerMessage::Step {
+            kind,
+            tool,
+            ok,
+            summary,
+        },
     }
 }
 
@@ -47,17 +72,15 @@ pub async fn handle_ws_chat(
 }
 
 async fn handle_ws_socket(socket: WebSocket, state: AppState) {
-    let socket = Arc::new(Mutex::new(socket));
+    let (sink, mut stream) = socket.split();
+    let sink = Arc::new(Mutex::new(sink));
 
-    while let Some(msg) = {
-        let mut guard = socket.lock().await;
-        guard.next().await
-    } {
-        let msg = match msg {
-            Ok(Message::Text(text)) => text,
-            Ok(Message::Close(_)) => break,
-            Ok(_) => continue,
-            Err(e) => {
+    loop {
+        let msg = match stream.next().await {
+            Some(Ok(Message::Text(text))) => text,
+            Some(Ok(Message::Close(_))) | None => break,
+            Some(Ok(_)) => continue,
+            Some(Err(e)) => {
                 tracing::warn!("WebSocket receive error: {e}");
                 break;
             }
@@ -69,18 +92,22 @@ async fn handle_ws_socket(socket: WebSocket, state: AppState) {
                 let frame = WsServerMessage::Error {
                     message: format!("Invalid JSON: {e}"),
                 };
-                if send_frame(socket.clone(), &frame).await.is_err() {
+                if send_frame(sink.clone(), &frame).await.is_err() {
                     break;
                 }
                 continue;
             }
         };
 
+        if client.msg_type == "cancel" {
+            continue;
+        }
+
         if client.msg_type != "chat" {
             let frame = WsServerMessage::Error {
                 message: format!("Unsupported message type: {}", client.msg_type),
             };
-            if send_frame(socket.clone(), &frame).await.is_err() {
+            if send_frame(sink.clone(), &frame).await.is_err() {
                 break;
             }
             continue;
@@ -90,7 +117,7 @@ async fn handle_ws_socket(socket: WebSocket, state: AppState) {
             let frame = WsServerMessage::Error {
                 message: "messages must not be empty".into(),
             };
-            if send_frame(socket.clone(), &frame).await.is_err() {
+            if send_frame(sink.clone(), &frame).await.is_err() {
                 break;
             }
             continue;
@@ -109,11 +136,8 @@ async fn handle_ws_socket(socket: WebSocket, state: AppState) {
         let human_hub = state.human_input_hub.clone();
         let mut approval_sub = hub.subscribe();
         let mut human_sub = human_hub.subscribe();
-        let sock_fwd = socket.clone();
-        let sock_hitl = socket.clone();
-        // Keep forwarding even after `Lagged` (burst of approvals); only stop on closed
-        // channel or socket send failure. A bare `while let Ok` exits on Lagged and then
-        // silently drops later `approval_required` frames.
+        let sock_fwd = sink.clone();
+        let sock_hitl = sink.clone();
         let forwarder = tokio::spawn(async move {
             loop {
                 match approval_sub.recv().await {
@@ -160,7 +184,52 @@ async fn handle_ws_socket(socket: WebSocket, state: AppState) {
             }
         });
 
-        let chat_result = run_agent_chat(&config, &req, Some(&hub), Some(&human_hub)).await;
+        let cancel = CancellationToken::new();
+        let (progress_tx, mut progress_rx) = tokio::sync::mpsc::channel(64);
+        let mut chat_fut = std::pin::pin!(run_agent_chat(
+            &config,
+            &req,
+            Some(&hub),
+            Some(&human_hub),
+            Some(cancel.clone()),
+            Some(progress_tx),
+        ));
+
+        let chat_result = loop {
+            tokio::select! {
+                result = &mut chat_fut => {
+                    break result;
+                }
+                progress = progress_rx.recv() => {
+                    if let Some(progress) = progress {
+                        let frame = progress_frame(progress);
+                        if send_frame(sink.clone(), &frame).await.is_err() {
+                            cancel.cancel();
+                        }
+                    }
+                }
+                incoming = stream.next() => {
+                    match incoming {
+                        None | Some(Ok(Message::Close(_))) => {
+                            cancel.cancel();
+                        }
+                        Some(Ok(Message::Text(text))) => {
+                            if let Ok(frame) = serde_json::from_str::<WsClientMessage>(&text) {
+                                if frame.msg_type == "cancel" {
+                                    cancel.cancel();
+                                }
+                            }
+                        }
+                        Some(Err(e)) => {
+                            tracing::warn!("WebSocket receive error during turn: {e}");
+                            cancel.cancel();
+                        }
+                        Some(Ok(_)) => {}
+                    }
+                }
+            }
+        };
+
         forwarder.abort();
         hitl_forwarder.abort();
 
@@ -178,7 +247,7 @@ async fn handle_ws_socket(socket: WebSocket, state: AppState) {
                 }
                 for chunk in chunk_text_for_stream(&resp.content, WS_CHUNK_SIZE) {
                     let delta = WsServerMessage::Delta { content: chunk };
-                    if send_frame(socket.clone(), &delta).await.is_err() {
+                    if send_frame(sink.clone(), &delta).await.is_err() {
                         return;
                     }
                 }
@@ -188,24 +257,33 @@ async fn handle_ws_socket(socket: WebSocket, state: AppState) {
                     selected_model: resp.selected_model,
                     model_selection_reason: resp.model_selection_reason,
                 };
-                if send_frame(socket.clone(), &done).await.is_err() {
+                if send_frame(sink.clone(), &done).await.is_err() {
                     return;
                 }
             }
             Err(e) => {
-                let frame = WsServerMessage::Error {
-                    message: e.to_string(),
-                };
-                if send_frame(socket.clone(), &frame).await.is_err() {
-                    break;
+                if is_tool_loop_cancelled(&e) {
+                    let frame = WsServerMessage::Cancelled {
+                        message: Some("Stopped.".into()),
+                    };
+                    if send_frame(sink.clone(), &frame).await.is_err() {
+                        break;
+                    }
+                } else {
+                    let frame = WsServerMessage::Error {
+                        message: e.to_string(),
+                    };
+                    if send_frame(sink.clone(), &frame).await.is_err() {
+                        break;
+                    }
                 }
             }
         }
     }
 }
 
-async fn send_frame(socket: Arc<Mutex<WebSocket>>, frame: &WsServerMessage) -> Result<(), ()> {
+async fn send_frame(sink: Arc<Mutex<WsSink>>, frame: &WsServerMessage) -> Result<(), ()> {
     let text = serde_json::to_string(frame).map_err(|_| ())?;
-    let mut guard = socket.lock().await;
+    let mut guard = sink.lock().await;
     guard.send(Message::Text(text.into())).await.map_err(|_| ())
 }

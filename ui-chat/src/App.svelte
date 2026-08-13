@@ -3,8 +3,11 @@
   import {
     appendAssistantDelta,
     appendSystemNotice,
+    applyStatusFrame,
+    applyStepFrame,
     lastAssistantHasVelaClawNotice,
     looksLikeVelaClawNotice,
+    outboundChatHistory,
     streamChat,
     type ChatMessage,
   } from "./lib/chat";
@@ -154,6 +157,9 @@
       cancelStream = null;
     }
     streaming = false;
+    pendingApprovals = [];
+    pendingHumanInput = null;
+    void focusChatInput();
   }
 
   function trackActiveSession(id: string | null) {
@@ -511,7 +517,7 @@
       return;
     }
 
-    const history = messages.filter((m) => m.role !== "system");
+    const history = outboundChatHistory(messages);
     cancelStream = streamChat({
       token,
       sessionId,
@@ -520,6 +526,23 @@
       onDelta: (chunk) => {
         messages = appendAssistantDelta(messages, chunk);
         scrollToBottom();
+      },
+      onStatus: (phase, detail) => {
+        messages = applyStatusFrame(messages, phase, detail);
+        scrollToBottom();
+      },
+      onStep: (payload) => {
+        messages = applyStepFrame(messages, payload);
+        scrollToBottom();
+      },
+      onCancelled: (msg) => {
+        streaming = false;
+        cancelStream = null;
+        messages = appendSystemNotice(messages, msg || "Stopped.");
+        scrollToBottom();
+        pendingApprovals = [];
+        pendingHumanInput = null;
+        void focusChatInput();
       },
       onDone: () => {
         streaming = false;
@@ -684,7 +707,7 @@
       <div class="chat-main">
         <div class="messages" bind:this={listEl}>
           {#each messages as msg}
-            <article class={msg.role}>
+            <article class={msg.role} class:step-fail={msg.role === "step" && msg.stepOk === false}>
               <div class="role">{msg.role}</div>
               {#if msg.role === "assistant"}
                 <div class="body md">{@html renderMarkdown(msg.content)}</div>
@@ -693,8 +716,8 @@
               {/if}
             </article>
           {/each}
-          {#if streaming}
-            <p class="typing">Streaming…</p>
+          {#if streaming && !messages.some((m) => m.role === "status" || m.role === "step")}
+            <p class="typing">Working…</p>
           {/if}
         </div>
 
@@ -707,7 +730,11 @@
             placeholder="Message… (Enter to send)"
             disabled={streaming}
           ></textarea>
-          <button type="button" onclick={send} disabled={streaming || !input.trim()}>Send</button>
+          {#if streaming}
+            <button type="button" class="stop" onclick={stopStreaming} title="Stop">Stop</button>
+          {:else}
+            <button type="button" onclick={send} disabled={!input.trim()}>Send</button>
+          {/if}
         </footer>
       </div>
     </div>
@@ -1300,6 +1327,35 @@
   textarea {
     flex: 1;
     resize: vertical;
+  }
+
+  article.status .role,
+  article.step .role {
+    text-transform: lowercase;
+  }
+  article.status {
+    opacity: 0.75;
+    font-size: 0.85rem;
+  }
+  article.status .body {
+    color: #94a3b8;
+    font-style: italic;
+  }
+  article.step .body {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.82rem;
+    background: #0f172a;
+    padding: 0.4rem 0.5rem;
+    border-radius: 6px;
+    white-space: pre-wrap;
+    color: #7dd3fc;
+  }
+  article.step-fail .body {
+    color: #fda4af;
+  }
+  button.stop {
+    background: #be123c;
+    min-width: 4.5rem;
   }
   .typing {
     color: #94a3b8;

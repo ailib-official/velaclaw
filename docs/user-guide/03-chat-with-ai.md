@@ -25,7 +25,7 @@ velaclaw agent
 
 ```
 VelaClaw 交互模式
-输入消息开始对话，输入 /help 查看帮助，输入 /quit 退出
+输入消息开始对话，输入 /help 查看帮助，输入 /quit 退出。任务进行中可连按两次 Esc 停止当前 turn。。任务进行中可连按两次 Esc 停止当前 turn。
 
 你: 你好！
 VelaClaw: 你好！有什么我可以帮你的吗？

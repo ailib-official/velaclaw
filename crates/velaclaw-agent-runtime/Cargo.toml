@@ -22,4 +22,4 @@ tracing = { version = "0.1", default-features = false }
 async-trait = "0.1"
 tokio = { version = "1.50", default-features = false, features = ["rt-multi-thread", "macros", "time"] }
 # VL-TTC-016 / ALR-TTC-016: ToolFormatError ladder @ ddee3ce (rollback: 2200cb1)
-ai-lib-rust = { version = "1.3.0", git = "https://github.com/ailib-official/ai-lib-rust", rev = "c7132af158a33ce05e6c8da7540d8664addd5860", optional = true }
+ai-lib-rust = { version = "1.3.0", git = "https://github.com/ailib-official/ai-lib-rust", rev = "cc49a15db70f63c1d4c51a388472ecf9d72f2824", optional = true }

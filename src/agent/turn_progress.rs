@@ -192,7 +192,7 @@ mod tests {
                 assert!(ok);
                 assert_eq!(summary, "ok output");
             }
-            _ => panic!("expected step"),
+            TurnProgress::Status { .. } => panic!("expected step"),
         }
     }
 }

@@ -101,6 +101,7 @@ With `AI_PROTOCOL_DIR` set to a **local** ai-protocol checkout:
 velaclaw models protocol-providers
 velaclaw models protocol-models
 velaclaw models protocol-providers --json
+velaclaw models protocol-generative --model openai/gpt-image-1 --capability image_generation
 ```
 
 ## Config: logical provider / model ids (Phase 2)

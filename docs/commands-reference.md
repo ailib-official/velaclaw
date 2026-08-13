@@ -235,8 +235,13 @@ Notes:
 - `velaclaw models refresh`
 - `velaclaw models refresh --provider <ID>`
 - `velaclaw models refresh --force`
+- `velaclaw models protocol-providers`
+- `velaclaw models protocol-models`
+- `velaclaw models protocol-generative --model <provider/model> --capability image_generation`
 
 `models refresh` currently supports live catalog refresh for provider IDs: `openrouter`, `openai`, `anthropic`, `groq`, `mistral`, `deepseek`, `xai`, `together-ai`, `gemini`, `ollama`, `llamacpp`, `astrai`, `venice`, `fireworks`, `cohere`, `moonshot`, `glm`, `zai`, `qwen`, and `nvidia`.
+
+`protocol-generative` inspects Experimental PT-GEN keys (`image_generation`, `speech_to_text`, `text_to_speech`) against local `AI_PROTOCOL_DIR` manifests. Omitted capability keys fail closed. It does not call vendor HTTP.
 
 ### `channel`
 

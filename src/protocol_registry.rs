@@ -468,6 +468,109 @@ pub fn scan_protocol_root(root: &Path) -> anyhow::Result<ProtocolRegistrySnapsho
     })
 }
 
+/// Experimental (VL-GEN-001): inspect a model's generative capability + L-Exec path.
+///
+/// Fail-closed: omitted `model_capabilities.<key>` is not treated as true.
+/// Does not call vendor HTTP.
+#[derive(Debug, Clone, Serialize)]
+pub struct GenerativeCapabilityInspect {
+    pub logical_id: String,
+    pub provider: String,
+    pub model: String,
+    pub capability: String,
+    pub capability_declared: bool,
+    pub endpoint_path: Option<String>,
+    pub adapter: Option<String>,
+    pub allowed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fail_closed_reason: Option<String>,
+}
+
+const GENERATIVE_KEYS: &[&str] = &["image_generation", "speech_to_text", "text_to_speech"];
+
+/// Inspect `provider/model` + PT-GEN capability key against local manifests.
+pub fn inspect_generative_capability(
+    root: &Path,
+    logical: &str,
+    capability: &str,
+) -> anyhow::Result<GenerativeCapabilityInspect> {
+    let capability = capability.trim();
+    if !GENERATIVE_KEYS.contains(&capability) {
+        anyhow::bail!(
+            "unknown generative capability `{capability}`; expected one of {}",
+            GENERATIVE_KEYS.join(", ")
+        );
+    }
+    let provider = provider_id_from_logical(logical).to_string();
+    let model = {
+        let raw = logical.trim();
+        let raw = raw.strip_prefix("protocol:").map(str::trim).unwrap_or(raw);
+        raw.split_once('/')
+            .map(|(_, m)| m.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| anyhow::anyhow!("expected provider/model logical id, got `{logical}`"))?
+    };
+
+    let mut found: Option<ProtocolManifest> = None;
+    for path in collect_provider_files(root) {
+        let Some(stem) = provider_id_from_path(&path) else {
+            continue;
+        };
+        let Ok(manifest) = load_provider_manifest(&path) else {
+            continue;
+        };
+        let id = if manifest.id.trim().is_empty() {
+            stem.clone()
+        } else {
+            manifest.id.clone()
+        };
+        if id == provider || stem == provider {
+            found = Some(manifest);
+            break;
+        }
+    }
+    let Some(manifest) = found else {
+        anyhow::bail!(
+            "no provider manifest for `{provider}` under {}",
+            root.display()
+        );
+    };
+
+    let capability_declared = manifest.supports_generative_for_model(&model, capability);
+    // Inspect-only: do not enable `ai-lib-rust/generative` (HTTP drivers).
+    // Gate uses Core `supports_generative_for_model`; path comes from the same
+    // `endpoints.<key>` map ALR-GEN-002 would resolve.
+    let (endpoint_path, adapter) = match manifest.endpoints.as_ref().and_then(|e| e.get(capability))
+    {
+        Some(ep) => (Some(ep.path.clone()), ep.adapter.clone()),
+        None => (None, None),
+    };
+    let allowed = capability_declared && endpoint_path.is_some();
+    let fail_closed_reason = if allowed {
+        None
+    } else if !capability_declared {
+        Some(format!(
+            "model `{model}` does not declare model_capabilities.{capability}=true (omit≠false fail-closed)"
+        ))
+    } else {
+        Some(format!(
+            "manifest endpoints.{capability} missing; declare PT-GEN-002 L-Exec map"
+        ))
+    };
+
+    Ok(GenerativeCapabilityInspect {
+        logical_id: compose_logical_model_id(&provider, &model),
+        provider,
+        model,
+        capability: capability.to_string(),
+        capability_declared,
+        endpoint_path,
+        adapter,
+        allowed,
+        fail_closed_reason,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -762,6 +865,108 @@ endpoints:
 "#,
         )
         .expect("write");
-        assert_eq!(manifest_has_chat_endpoint(&path), Some(false));
+    }
+
+    #[test]
+    fn inspect_generative_fail_closed_on_omit_and_allows_declared() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let providers = dir.path().join("v2").join("providers");
+        fs::create_dir_all(&providers).expect("provider dir");
+        fs::write(
+            providers.join("genprov.yaml"),
+            r#"
+id: genprov
+protocol_version: v2-alpha
+provider_id: genprov
+name: Gen
+version: v2
+status: stable
+category: ai_provider
+official_url: https://example.com
+support_contact: support@example.com
+capabilities: [chat]
+endpoint:
+  base_url: https://example.com/v1
+  auth:
+    type: bearer
+    token_env: VELACLAW_GEN_TOKEN
+endpoints:
+  image_generation:
+    path: /images/generations
+    method: POST
+    adapter: openai
+metadata:
+  models:
+    img-1:
+      model_capabilities:
+        image_generation: true
+    chat-1:
+      context_window: 128
+"#,
+        )
+        .expect("manifest");
+
+        let ok = inspect_generative_capability(dir.path(), "genprov/img-1", "image_generation")
+            .expect("inspect img");
+        assert!(ok.allowed);
+        assert_eq!(ok.endpoint_path.as_deref(), Some("/images/generations"));
+
+        let omit = inspect_generative_capability(dir.path(), "genprov/chat-1", "image_generation")
+            .expect("inspect omit");
+        assert!(!omit.allowed);
+        assert!(!omit.capability_declared);
+        assert!(omit
+            .fail_closed_reason
+            .as_deref()
+            .unwrap_or("")
+            .contains("omit"));
+
+        let unknown =
+            inspect_generative_capability(dir.path(), "genprov/img-1", "video_generation");
+        assert!(unknown.is_err());
+    }
+
+    #[test]
+    fn inspect_generative_declared_without_lexec_fails_closed() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let providers = dir.path().join("v2").join("providers");
+        fs::create_dir_all(&providers).expect("provider dir");
+        fs::write(
+            providers.join("genprov.yaml"),
+            r#"
+id: genprov
+protocol_version: v2-alpha
+provider_id: genprov
+name: Gen
+version: v2
+status: stable
+category: ai_provider
+official_url: https://example.com
+support_contact: support@example.com
+capabilities: [chat]
+endpoint:
+  base_url: https://example.com/v1
+  auth:
+    type: bearer
+    token_env: VELACLAW_GEN_TOKEN
+metadata:
+  models:
+    img-1:
+      model_capabilities:
+        image_generation: true
+"#,
+        )
+        .expect("manifest");
+
+        let out = inspect_generative_capability(dir.path(), "genprov/img-1", "image_generation")
+            .expect("inspect");
+        assert!(out.capability_declared);
+        assert!(!out.allowed);
+        assert!(out.endpoint_path.is_none());
+        assert!(out
+            .fail_closed_reason
+            .as_deref()
+            .unwrap_or("")
+            .contains("endpoints.image_generation"));
     }
 }

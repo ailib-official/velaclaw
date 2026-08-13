@@ -28,6 +28,8 @@ pub mod cron_update;
 pub mod delegate;
 pub mod file_read;
 pub mod file_write;
+#[cfg(feature = "ai-protocol")]
+pub mod generative;
 pub mod git_operations;
 pub mod glob_search;
 pub mod hardware_board_info;
@@ -347,6 +349,9 @@ pub fn all_tools_with_runtime(
                 security.clone(),
             )));
         }
+        tool_arcs.push(Arc::new(
+            crate::tools::generative::GenerativeCapabilityTool::new(security.clone()),
+        ));
     }
 
     (boxed_registry_from_arcs(tool_arcs), human_input_attach)
@@ -412,6 +417,8 @@ mod tests {
         assert!(names.contains(&"schedule"));
         assert!(names.contains(&"pushover"));
         assert!(names.contains(&"proxy_config"));
+        #[cfg(feature = "ai-protocol")]
+        assert!(names.contains(&"generative_capability"));
     }
 
     #[test]

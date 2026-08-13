@@ -536,6 +536,18 @@ enum ModelCommands {
         #[arg(long)]
         json: bool,
     },
+    /// Inspect PT-GEN generative capability + L-Exec path (no vendor HTTP)
+    ProtocolGenerative {
+        /// Logical id `provider/model`
+        #[arg(long)]
+        model: String,
+        /// `image_generation`, `speech_to_text`, or `text_to_speech`
+        #[arg(long)]
+        capability: String,
+        /// Emit JSON
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]

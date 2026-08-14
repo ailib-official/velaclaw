@@ -10,10 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Turn cancel + step traces** (VL-UX-CANCEL-001): Web Chat Send becomes Stop (sends `cancel`); CLI interactive **Esc Esc** (TTY, 500ms) stops the current turn and returns to the prompt. Shared `CancellationToken` + Observer→status/step mapping; tool summaries use a distinct style from the final assistant reply. Cancelled turns are not persisted as successful replies.
+- **Experimental generative inspect** (VL-GEN-001): `velaclaw models protocol-generative` and agent tool `generative_capability` declare PT-GEN keys (`image_generation` / `speech_to_text` / `text_to_speech`) against local `AI_PROTOCOL_DIR`. Omitted capability keys fail closed. No vendor HTTP; does not enable `ai-lib-rust/generative` drivers.
 
 ### Changed
 
-- **ai-lib-rust pin** (VL-TTC-012): git rev `c7132af` → `cc49a15` (#66+#67) so lenient parse-aid accepts bare `<invoke>`/`<parameter>` and prompts no longer claim those formats are ignored.
+- **ai-lib-rust pin** (VL-GEN-001): git rev `cc49a15` → `3bfda86` (ALR-GEN-002; still contains VL-TTC-012).
 
 ## [1.0.1] - 2026-08-13
 

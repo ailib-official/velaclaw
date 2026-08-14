@@ -74,6 +74,41 @@ pub async fn handle_models_command(config: &Config, model_command: ModelCommands
         ModelCommands::ProtocolModels { .. } => {
             anyhow::bail!("Rebuild with --features ai-protocol to use this command.")
         }
+        #[cfg(feature = "ai-protocol")]
+        ModelCommands::ProtocolGenerative {
+            model,
+            capability,
+            json,
+        } => {
+            use velaclaw::protocol_registry::{
+                inspect_generative_capability, resolve_local_protocol_root,
+            };
+            let Some(root) = resolve_local_protocol_root() else {
+                anyhow::bail!("Set AI_PROTOCOL_DIR to a local ai-protocol checkout (not a URL).");
+            };
+            let info = inspect_generative_capability(&root, &model, &capability)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&info)?);
+            } else {
+                println!("logical:    {}", info.logical_id);
+                println!("capability: {}", info.capability);
+                println!("declared:   {}", info.capability_declared);
+                println!(
+                    "endpoint:   {}",
+                    info.endpoint_path.as_deref().unwrap_or("-")
+                );
+                println!("adapter:    {}", info.adapter.as_deref().unwrap_or("-"));
+                println!("allowed:    {}", info.allowed);
+                if let Some(reason) = &info.fail_closed_reason {
+                    println!("reason:     {reason}");
+                }
+            }
+            Ok(())
+        }
+        #[cfg(not(feature = "ai-protocol"))]
+        ModelCommands::ProtocolGenerative { .. } => {
+            anyhow::bail!("Rebuild with --features ai-protocol to use this command.")
+        }
     }
 }
 

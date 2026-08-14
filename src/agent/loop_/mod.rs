@@ -1,8 +1,6 @@
 use crate::agent::tool_batch::{self, ParsedToolCall};
 use crate::approval::{ApprovalManager, ChannelApprovalSession};
-use crate::cli_render::{
-    format_user_prompt, indent_lines, prefix_agent_lines, RenderOpts, RenderStyle,
-};
+use crate::cli_render::{format_user_prompt, prefix_agent_lines, RenderOpts, RenderStyle};
 use crate::config::Config;
 use crate::memory::{self, Memory, MemoryCategory};
 use crate::multimodal;
@@ -36,36 +34,6 @@ fn store_fold_payload(cache: &FoldCache, payload: &str) -> u64 {
     let id = guard.len() as u64 + 1;
     guard.insert(id, payload.to_string());
     id
-}
-
-/// Print a tool result block, folding when `render_opts.fold_enabled` and over threshold.
-fn print_tool_result_block(
-    tool_name: &str,
-    result: &str,
-    render_opts: RenderOpts,
-    fold_cache: Option<&FoldCache>,
-) {
-    let rendered = render_opts.render(result);
-    let total_lines = rendered.split('\n').count();
-    let body = indent_lines(&rendered, 2);
-    let should_fold =
-        render_opts.fold_enabled && fold_cache.is_some() && total_lines > render_opts.fold_lines;
-    if !should_fold {
-        println!("\n── tool:{tool_name} ──\n{body}\n");
-        return;
-    }
-    let cache = fold_cache.expect("fold_cache checked above");
-    let id = store_fold_payload(cache, &rendered);
-    let head: String = rendered
-        .split('\n')
-        .take(render_opts.fold_lines)
-        .collect::<Vec<_>>()
-        .join("\n");
-    let head = indent_lines(&head, 2);
-    println!(
-        "\n── tool:{tool_name} (前 {} 行 / 共 {total_lines} 行) ──\n{head}\n─────\n用 /expand {id} 展开全部\n",
-        render_opts.fold_lines
-    );
 }
 
 /// Minimum characters per chunk when relaying LLM text to a streaming draft.
@@ -566,11 +534,13 @@ pub async fn run(
             &available_hints,
         )?;
 
+        let progress_obs =
+            crate::agent::turn_progress::ProgressObserver::cli(Arc::clone(&observer));
         let response = run_tool_call_loop(
             provider.as_ref(),
             &mut history,
             &tools_registry,
-            observer.as_ref(),
+            &progress_obs,
             provider_name,
             &turn_model,
             temperature,

@@ -82,7 +82,7 @@ workspace/
 1. **短优于全。** Prompt 预算有限；几十行索引胜过几百行。
 2. **抽象规则放 SOUL；具体主机放 USER/INFRA。** 不要把一次性 e2e 脚本写进人格。
 3. **工具调用必须完整。** 裸 JSON 或只剩 `</tool_call>` 会当聊天展示且 **不会执行**。
-4. **不要复读工具 UI。** 出现 `── tool:… ──` 后，助手只做简短归纳。
+4. **不要复读步骤 caption。** 出现 `git status` / `read foo.rs` 一类短行后，助手只做简短归纳。
 5. **空白 `Error:`** 常表示 exit≠0 且 stderr 为空（如 `grep` 无匹配）。可选搜索先判断存在或加 `|| true`。
 6. **改完 workspace 文档或 `config.toml` 后重启 agent**（或新开会话），以便 CLI 重新加载。
 
@@ -128,7 +128,7 @@ seeds/
 应用模板包后：
 
 - [ ] 用 SSH 别名提一个口语化远程问题（不得把主机名当本地目录）。
-- [ ] 工具结果出现在 `── tool:shell ──`（不能只有贴出的 JSON）。
+- [ ] 确认出现简短步骤 caption（如 `git status`、`read file`），而不是 stdout 全文。
 - [ ] 最终 `>>` 回复是短总结，不是第二份全文。
 - [ ] `config.toml` 限额符合该安装档位。
 - [ ] `workspace/` 下无密码/PAT。

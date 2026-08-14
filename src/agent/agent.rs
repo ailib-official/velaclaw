@@ -718,7 +718,7 @@ impl Agent {
                 Arc::clone(&self.observer),
                 tx.clone(),
             ))
-        } else if self.cancellation_token.is_some() {
+        } else if self.cli_render.is_some() || self.cancellation_token.is_some() {
             Arc::new(crate::agent::turn_progress::ProgressObserver::cli(
                 Arc::clone(&self.observer),
             ))

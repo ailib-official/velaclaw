@@ -1,13 +1,15 @@
-//! Shared turn progress mapping for CLI and Web (VL-UX-CANCEL-001 / GOV-007).
-//! 将 Observer 事件映射为 CLI/Web 共用的步骤提示。
+//! Shared turn progress mapping for CLI and Web (VL-UX-STEP-001 / GOV-007).
+//! CLI 与 Web 共用 caption：同一函数，禁止把 stdout/完整脚本当步骤提示。
 
 use crate::observability::traits::ObserverMetric;
 use crate::observability::{Observer, ObserverEvent};
+use serde_json::Value;
 use std::any::Any;
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
+use velaclaw_agent_runtime::scrub_credentials;
 
-const SUMMARY_MAX_CHARS: usize = 240;
+const CAPTION_MAX_CHARS: usize = 80;
 
 /// User-facing progress during a tool-loop turn (not the final assistant reply).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,22 +26,167 @@ pub enum TurnProgress {
     },
 }
 
-/// Truncate tool output for step display (no secrets; caller should scrub first).
+/// Truncate a display string (no secrets; caller should scrub first).
+#[must_use]
 pub fn truncate_summary(text: &str) -> String {
+    truncate_chars(text, CAPTION_MAX_CHARS)
+}
+
+fn truncate_chars(text: &str, max: usize) -> String {
     let flat: String = text
         .chars()
-        .map(|c| if c.is_control() && c != '\n' { ' ' } else { c })
+        .map(|c| if c.is_control() { ' ' } else { c })
         .collect();
-    let flat = flat.trim();
-    if flat.chars().count() <= SUMMARY_MAX_CHARS {
-        return flat.to_string();
+    let flat = flat.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flat.chars().count() <= max {
+        return flat;
     }
-    let mut out: String = flat
-        .chars()
-        .take(SUMMARY_MAX_CHARS.saturating_sub(1))
-        .collect();
+    let mut out: String = flat.chars().take(max.saturating_sub(1)).collect();
     out.push('…');
     out
+}
+
+/// Logical model id once — do not wrap `{provider}/` when `model` already has `/`.
+#[must_use]
+pub fn model_status_detail(provider: &str, model: &str) -> String {
+    let model = model.trim();
+    let provider = provider.trim();
+    if model.contains('/') {
+        return model.to_string();
+    }
+    if provider.is_empty() {
+        return model.to_string();
+    }
+    if provider == model {
+        return model.to_string();
+    }
+    format!("{provider}/{model}")
+}
+
+/// Semantic caption: verb + object. Never the full script or tool stdout.
+#[must_use]
+pub fn progress_caption(tool: &str, args: &Value) -> String {
+    let raw = match tool {
+        "shell" => shell_caption(args),
+        "file_read" | "pdf_read" => verb_path("read", args),
+        "file_write" => verb_path("write", args),
+        "glob_search" => verb_arg("glob", args, &["pattern", "glob"]),
+        "web_search_tool" => verb_arg("search", args, &["query", "q"]),
+        "http_request" => http_caption(args),
+        "git_operations" => git_ops_caption(args),
+        "memory_store" => verb_arg("memory store", args, &["key"]),
+        "memory_recall" => verb_arg("memory recall", args, &["query", "key"]),
+        "memory_forget" => verb_arg("memory forget", args, &["key"]),
+        "browser_open" => verb_arg("open", args, &["url", "path"]),
+        "browser" => verb_arg("browser", args, &["action", "url"]),
+        "screenshot" => "screenshot".into(),
+        "cron_list" => "cron list".into(),
+        "cron_add" => verb_arg("cron add", args, &["name", "schedule"]),
+        "cron_remove" => verb_arg("cron remove", args, &["name", "id"]),
+        "cron_run" => verb_arg("cron run", args, &["name", "id"]),
+        "cron_update" => verb_arg("cron update", args, &["name", "id"]),
+        "cron_runs" => "cron runs".into(),
+        "request_human_input" => verb_arg("ask", args, &["kind", "prompt"]),
+        "delegate" => verb_arg("delegate", args, &["task", "goal"]),
+        "generative_capability" => verb_arg("generative", args, &["capability"]),
+        other => default_caption(other, args),
+    };
+    truncate_chars(&scrub_credentials(&raw), CAPTION_MAX_CHARS)
+}
+
+fn first_str<'a>(args: &'a Value, keys: &[&str]) -> Option<&'a str> {
+    let obj = args.as_object()?;
+    for key in keys {
+        if let Some(s) = obj.get(*key).and_then(Value::as_str) {
+            let t = s.trim();
+            if !t.is_empty() {
+                return Some(t);
+            }
+        }
+    }
+    None
+}
+
+fn first_any_string(args: &Value) -> Option<&str> {
+    let obj = args.as_object()?;
+    for (k, v) in obj {
+        if k == "secret_slot" || k == "content" || k == "body" || k == "headers" {
+            continue;
+        }
+        if let Some(s) = v.as_str() {
+            let t = s.trim();
+            if !t.is_empty() {
+                return Some(t);
+            }
+        }
+    }
+    None
+}
+
+fn basename_or_path(path: &str) -> &str {
+    let trimmed = path.trim_end_matches('/');
+    trimmed
+        .rsplit(['/', '\\'])
+        .next()
+        .filter(|s| !s.is_empty())
+        .unwrap_or(path)
+}
+
+fn verb_path(verb: &str, args: &Value) -> String {
+    match first_str(args, &["path", "file", "filename"]) {
+        Some(p) => format!("{verb} {}", basename_or_path(p)),
+        None => verb.to_string(),
+    }
+}
+
+fn verb_arg(verb: &str, args: &Value, keys: &[&str]) -> String {
+    match first_str(args, keys) {
+        Some(v) => format!("{verb} {v}"),
+        None => verb.to_string(),
+    }
+}
+
+fn shell_caption(args: &Value) -> String {
+    let Some(cmd) = first_str(args, &["command"]) else {
+        return "shell".into();
+    };
+    let head = cmd.split('|').next().unwrap_or(cmd).trim();
+    let mut tokens = head.split_whitespace().filter(|t| !t.contains('='));
+    let Some(bin_raw) = tokens.next() else {
+        return "shell".into();
+    };
+    let bin = basename_or_path(bin_raw);
+    let obj = tokens.find(|t| !t.starts_with('-'));
+    match obj {
+        Some(o) => format!("{bin} {o}"),
+        None => bin.to_string(),
+    }
+}
+
+fn http_caption(args: &Value) -> String {
+    let method = first_str(args, &["method"]).unwrap_or("GET").to_uppercase();
+    let Some(url) = first_str(args, &["url"]) else {
+        return method;
+    };
+    let stripped = url
+        .trim_start_matches("https://")
+        .trim_start_matches("http://");
+    let host_path = stripped.split('?').next().unwrap_or(stripped);
+    format!("{method} {host_path}")
+}
+
+fn git_ops_caption(args: &Value) -> String {
+    match first_str(args, &["operation"]) {
+        Some(op) => format!("git {op}"),
+        None => "git".into(),
+    }
+}
+
+fn default_caption(tool: &str, args: &Value) -> String {
+    match first_any_string(args) {
+        Some(v) => format!("{tool} {}", basename_or_path(v)),
+        None => tool.to_string(),
+    }
 }
 
 /// Map a runtime observer event to a compact progress item.
@@ -49,23 +196,35 @@ pub fn event_to_progress(event: &ObserverEvent) -> Option<TurnProgress> {
             provider, model, ..
         } => Some(TurnProgress::Status {
             phase: "model".into(),
-            detail: format!("{provider}/{model}"),
+            detail: model_status_detail(provider, model),
         }),
-        ObserverEvent::ToolCallStart { tool } => Some(TurnProgress::Status {
-            phase: "tool".into(),
-            detail: tool.clone(),
-        }),
+        ObserverEvent::ToolCallStart { tool, caption } => {
+            let cap = caption
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .unwrap_or(tool.as_str());
+            Some(TurnProgress::Status {
+                phase: "run".into(),
+                detail: format!("run {cap}"),
+            })
+        }
         ObserverEvent::ToolCall {
             tool,
             success,
             summary,
             ..
-        } => Some(TurnProgress::Step {
-            kind: "tool_result".into(),
-            tool: tool.clone(),
-            ok: *success,
-            summary: summary.clone().unwrap_or_default(),
-        }),
+        } => {
+            let cap = summary
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .unwrap_or(tool.as_str());
+            Some(TurnProgress::Step {
+                kind: "tool_result".into(),
+                tool: tool.clone(),
+                ok: *success,
+                summary: cap.to_string(),
+            })
+        }
         _ => None,
     }
 }
@@ -126,21 +285,15 @@ impl Observer for ProgressObserver {
 }
 
 /// Dim status / distinct step lines (not Markdown assistant output).
+/// Renders the same strings Web shows — no second captioner.
 pub fn print_cli_progress(progress: &TurnProgress) {
     match progress {
-        TurnProgress::Status { phase, detail } => {
-            eprintln!("{}", console::style(format!("· {phase}: {detail}")).dim());
+        TurnProgress::Status { detail, .. } => {
+            eprintln!("{}", console::style(format!("· {detail}")).dim());
         }
-        TurnProgress::Step {
-            tool, ok, summary, ..
-        } => {
+        TurnProgress::Step { ok, summary, .. } => {
             let tag = if *ok { "ok" } else { "fail" };
-            let line = if summary.is_empty() {
-                format!("  [{tag}] {tool}")
-            } else {
-                format!("  [{tag}] {tool}: {summary}")
-            };
-            eprintln!("{}", console::style(line).cyan());
+            eprintln!("{}", console::style(format!("  [{tag}] {summary}")).cyan());
         }
     }
 }
@@ -148,21 +301,38 @@ pub fn print_cli_progress(progress: &TurnProgress) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
     use std::time::Duration;
 
     #[test]
     fn truncate_summary_caps_length() {
         let long = "a".repeat(400);
         let out = truncate_summary(&long);
-        assert!(out.chars().count() <= SUMMARY_MAX_CHARS);
+        assert!(out.chars().count() <= CAPTION_MAX_CHARS);
         assert!(out.ends_with('…'));
+    }
+
+    #[test]
+    fn model_status_skips_double_prefix() {
+        assert_eq!(
+            model_status_detail("deepseek", "deepseek/deepseek-v4-flash"),
+            "deepseek/deepseek-v4-flash"
+        );
+        assert_eq!(
+            model_status_detail("deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-flash"),
+            "deepseek/deepseek-v4-flash"
+        );
+        assert_eq!(
+            model_status_detail("deepseek", "deepseek-v4-flash"),
+            "deepseek/deepseek-v4-flash"
+        );
     }
 
     #[test]
     fn llm_request_maps_to_status() {
         let p = event_to_progress(&ObserverEvent::LlmRequest {
             provider: "deepseek".into(),
-            model: "deepseek-v4-flash".into(),
+            model: "deepseek/deepseek-v4-flash".into(),
             messages_count: 2,
         })
         .expect("mapped");
@@ -176,21 +346,67 @@ mod tests {
     }
 
     #[test]
-    fn tool_call_maps_to_step() {
-        let p = event_to_progress(&ObserverEvent::ToolCall {
+    fn shell_caption_is_verb_and_object() {
+        let cap = progress_caption(
+            "shell",
+            &json!({"command": "git status -sb && echo secret"}),
+        );
+        assert_eq!(cap, "git status");
+        let pipe = progress_caption("shell", &json!({"command": "cat Cargo.toml | wc -l"}));
+        assert_eq!(pipe, "cat Cargo.toml");
+        let cargo = progress_caption("shell", &json!({"command": "cargo test --lib repairs"}));
+        assert_eq!(cargo, "cargo test");
+    }
+
+    #[test]
+    fn file_read_caption_uses_basename() {
+        let cap = progress_caption("file_read", &json!({"path": "src/agent/turn_progress.rs"}));
+        assert_eq!(cap, "read turn_progress.rs");
+    }
+
+    #[test]
+    fn unknown_tool_falls_back_without_body() {
+        let cap = progress_caption(
+            "custom_tool",
+            &json!({"path": "a/b.txt", "content": "huge body"}),
+        );
+        assert_eq!(cap, "custom_tool b.txt");
+    }
+
+    #[test]
+    fn caption_scrubs_key_like_tokens() {
+        let cap = progress_caption(
+            "http_request",
+            &json!({"url": "https://example.com/api_key=sk-secretvalue123"}),
+        );
+        assert!(!cap.contains("sk-secretvalue123"));
+    }
+
+    #[test]
+    fn tool_start_and_result_share_caption() {
+        let start = event_to_progress(&ObserverEvent::ToolCallStart {
+            tool: "shell".into(),
+            caption: Some("git status".into()),
+        })
+        .expect("start");
+        assert_eq!(
+            start,
+            TurnProgress::Status {
+                phase: "run".into(),
+                detail: "run git status".into(),
+            }
+        );
+        let step = event_to_progress(&ObserverEvent::ToolCall {
             tool: "shell".into(),
             duration: Duration::from_millis(1),
             success: true,
-            summary: Some("ok output".into()),
+            summary: Some("git status".into()),
         })
-        .expect("mapped");
-        match p {
-            TurnProgress::Step {
-                tool, ok, summary, ..
-            } => {
-                assert_eq!(tool, "shell");
+        .expect("step");
+        match step {
+            TurnProgress::Step { summary, ok, .. } => {
+                assert_eq!(summary, "git status");
                 assert!(ok);
-                assert_eq!(summary, "ok output");
             }
             TurnProgress::Status { .. } => panic!("expected step"),
         }

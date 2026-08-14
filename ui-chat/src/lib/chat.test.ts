@@ -60,55 +60,27 @@ describe("velaClaw notice helpers", () => {
 });
 
 describe("progress frames", () => {
-  it("replaces last status line", () => {
+  it("replaces last status line with caption text", () => {
     const a = applyStatusFrame([{ role: "user", content: "hi" }], "model", "deepseek/x");
-    const b = applyStatusFrame(a, "tool", "shell");
+    const b = applyStatusFrame(a, "run", "run git status");
     expect(b.filter((m) => m.role === "status")).toHaveLength(1);
-    expect(b[b.length - 1].content).toBe("tool: shell");
+    expect(b[b.length - 1].content).toBe("run git status");
   });
 
-  it("appends step with ok flag", () => {
+  it("appends step with ok flag using caption only", () => {
     const next = applyStepFrame([{ role: "user", content: "hi" }], {
       tool: "shell",
       ok: true,
-      summary: "ls",
+      summary: "git status",
     });
-    expect(next[1]).toEqual({ role: "step", content: "shell: ls", stepOk: true });
+    expect(next[1]).toEqual({ role: "step", content: "git status", stepOk: true });
   });
 
   it("outbound history drops status and step", () => {
     const hist = outboundChatHistory([
       { role: "user", content: "hi" },
-      { role: "status", content: "model: x" },
-      { role: "step", content: "shell: ok", stepOk: true },
-      { role: "assistant", content: "done" },
-    ]);
-    expect(hist.map((m) => m.role)).toEqual(["user", "assistant"]);
-  });
-});
-
-describe("progress frames", () => {
-  it("replaces last status line", () => {
-    const a = applyStatusFrame([{ role: "user", content: "hi" }], "model", "deepseek/x");
-    const b = applyStatusFrame(a, "tool", "shell");
-    expect(b.filter((m) => m.role === "status")).toHaveLength(1);
-    expect(b[b.length - 1].content).toBe("tool: shell");
-  });
-
-  it("appends step with ok flag", () => {
-    const next = applyStepFrame([{ role: "user", content: "hi" }], {
-      tool: "shell",
-      ok: true,
-      summary: "ls",
-    });
-    expect(next[1]).toEqual({ role: "step", content: "shell: ls", stepOk: true });
-  });
-
-  it("outbound history drops status and step", () => {
-    const hist = outboundChatHistory([
-      { role: "user", content: "hi" },
-      { role: "status", content: "model: x" },
-      { role: "step", content: "shell: ok", stepOk: true },
+      { role: "status", content: "deepseek/x" },
+      { role: "step", content: "git status", stepOk: true },
       { role: "assistant", content: "done" },
     ]);
     expect(hist.map((m) => m.role)).toEqual(["user", "assistant"]);

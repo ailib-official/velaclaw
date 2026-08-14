@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Turn cancel + step traces** (VL-UX-CANCEL-001): Web Chat Send becomes Stop (sends `cancel`); CLI interactive **Esc Esc** (TTY, 500ms) stops the current turn and returns to the prompt. Shared `CancellationToken` + Observer→status/step mapping; tool summaries use a distinct style from the final assistant reply. Cancelled turns are not persisted as successful replies.
 - **Experimental generative inspect** (VL-GEN-001): `velaclaw models protocol-generative` and agent tool `generative_capability` declare PT-GEN keys (`image_generation` / `speech_to_text` / `text_to_speech`) against local `AI_PROTOCOL_DIR`. Omitted capability keys fail closed. No vendor HTTP; does not enable `ai-lib-rust/generative` drivers.
+- **Experimental generative doctor** (VL-GEN-002): `velaclaw doctor generative [--capability] [--reachable-only] [--json]` lists PT-GEN declared/L-Exec rows plus query-time key reachability (no secrets). Does not mutate CR-CAP Tag tables.
 
 ### Changed
 

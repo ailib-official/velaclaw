@@ -82,7 +82,7 @@ Exclude:
 1. **Short beats complete.** Prompt budget is finite; indexes of tens of lines beat hundreds.
 2. **Abstract rules in SOUL; concrete hosts in USER/INFRA.** Don’t encode one-off e2e scripts into persona.
 3. **Tool calls must be complete.** Bare JSON or a lone closing `</tool_call>` is shown as chat and **does not execute**.
-4. **Don’t re-paste tool UI.** After `── tool:… ──`, the assistant should summarize only.
+4. **Don’t re-paste step captions.** After a compact line like `git status` / `read foo.rs`, the assistant should summarize only.
 5. **Empty `Error:`** often means exit ≠ 0 with empty stderr (e.g. `grep` no match). Prefer existence checks or `|| true` for optional greps.
 6. **Restart the agent** (or new session) after editing workspace docs or `config.toml` so CLI reloads them.
 
@@ -128,7 +128,7 @@ Install merge policy (proposal only):
 After applying a pack:
 
 - [ ] Ask a vague remote question using an SSH alias (host must not be treated as a local directory).
-- [ ] Confirm tool results appear under `── tool:shell ──` (not only as pasted JSON).
+- [ ] Confirm compact step captions (e.g. `git status`, `read file`) appear — not full stdout dumps.
 - [ ] Confirm the final `>>` reply is a short summary, not a second full dump.
 - [ ] Confirm `config.toml` limits match the intended install profile.
 - [ ] Confirm no passwords/PATs appear under `workspace/`.

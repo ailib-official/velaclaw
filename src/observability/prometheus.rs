@@ -166,7 +166,7 @@ impl Observer for PrometheusObserver {
                     self.tokens_used.set(i64::try_from(*t).unwrap_or(i64::MAX));
                 }
             }
-            ObserverEvent::ToolCallStart { tool: _ }
+            ObserverEvent::ToolCallStart { tool: _, .. }
             | ObserverEvent::TurnComplete
             | ObserverEvent::LlmRequest { .. }
             | ObserverEvent::LlmResponse { .. } => {}

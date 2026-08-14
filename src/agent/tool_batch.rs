@@ -95,6 +95,7 @@ async fn execute_one_tool(
     ctx: &ToolExecutionContext,
 ) -> ToolBatchResult {
     let call_arguments = normalize_tool_arguments(call_name, call_arguments);
+    let caption = crate::agent::turn_progress::progress_caption(call_name, &call_arguments);
     let Some(tool) = find_tool(tools_registry, call_name) else {
         return ToolBatchResult {
             output: format!("Unknown tool: {call_name}"),
@@ -104,6 +105,7 @@ async fn execute_one_tool(
 
     observer.record_event(&ObserverEvent::ToolCallStart {
         tool: call_name.to_string(),
+        caption: Some(caption.clone()),
     });
     let start = Instant::now();
 
@@ -128,9 +130,7 @@ async fn execute_one_tool(
                 tool: call_name.to_string(),
                 duration: start.elapsed(),
                 success: r.success,
-                summary: Some(crate::agent::turn_progress::truncate_summary(
-                    &scrub_credentials(&r.output),
-                )),
+                summary: Some(caption.clone()),
             });
             if r.success {
                 ToolBatchResult {
@@ -149,9 +149,7 @@ async fn execute_one_tool(
                 tool: call_name.to_string(),
                 duration: start.elapsed(),
                 success: false,
-                summary: Some(crate::agent::turn_progress::truncate_summary(
-                    &e.to_string(),
-                )),
+                summary: Some(caption),
             });
             ToolBatchResult {
                 output: format!("Error executing {call_name}: {e}"),

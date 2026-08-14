@@ -430,6 +430,7 @@ mod tests {
         });
         obs.record_event(&ObserverEvent::ToolCallStart {
             tool: "shell".into(),
+            caption: None,
         });
         obs.record_event(&ObserverEvent::ToolCall {
             tool: "shell".into(),

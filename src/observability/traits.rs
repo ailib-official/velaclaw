@@ -38,13 +38,17 @@ pub enum ObserverEvent {
         cost_usd: Option<f64>,
     },
     /// A tool call is about to be executed.
-    ToolCallStart { tool: String },
+    ToolCallStart {
+        tool: String,
+        /// Semantic caption (VL-UX-STEP-001); never full stdout.
+        caption: Option<String>,
+    },
     /// A tool call has completed with a success/failure outcome.
     ToolCall {
         tool: String,
         duration: Duration,
         success: bool,
-        /// Truncated, scrubbed output for UX step traces (never secrets).
+        /// Semantic caption for UX step traces (never secrets, never stdout).
         summary: Option<String>,
     },
     /// The agent produced a final answer for the current user message.

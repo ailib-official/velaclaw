@@ -194,7 +194,7 @@ export function outboundChatHistory(messages: ChatMessage[]): ChatMessage[] {
 }
 
 export function applyStatusFrame(messages: ChatMessage[], phase: string, detail?: string): ChatMessage[] {
-  const content = detail ? `${phase}: ${detail}` : phase;
+  const content = detail && detail.length > 0 ? detail : phase;
   const out = [...messages];
   const last = out[out.length - 1];
   if (last?.role === "status") {
@@ -209,8 +209,6 @@ export function applyStepFrame(
   messages: ChatMessage[],
   payload: { tool: string; ok: boolean; summary: string },
 ): ChatMessage[] {
-  const content = payload.summary
-    ? `${payload.tool}: ${payload.summary}`
-    : payload.tool;
+  const content = payload.summary || payload.tool;
   return [...messages, { role: "step", content, stepOk: payload.ok }];
 }

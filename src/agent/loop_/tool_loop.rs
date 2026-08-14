@@ -130,7 +130,7 @@ pub(crate) async fn run_tool_call_loop(
     // When true, tool results use `[Tool results]` user text (Hybrid manifests).
     text_tool_result_history: bool,
     render_opts: RenderOpts,
-    fold_cache: Option<&FoldCache>,
+    _fold_cache: Option<&FoldCache>,
     soft_fail: Option<SoftFailLoopCtx<'_>>,
     gate_extras: Option<&crate::agent::tool_batch::ToolBatchGateExtras>,
 ) -> Result<String> {
@@ -518,9 +518,6 @@ pub(crate) async fn run_tool_call_loop(
         }
 
         if !silent {
-            for (call, result) in tool_calls.iter().zip(individual_results.iter()) {
-                print_tool_result_block(&call.name, result, render_opts, fold_cache);
-            }
             let _ = std::io::stdout().flush();
         }
 

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-08-14
+
 ### Added
 
 - **Turn cancel + step traces** (VL-UX-CANCEL-001): Web Chat Send becomes Stop (sends `cancel`); CLI interactive **Esc Esc** (TTY, 500ms) stops the current turn and returns to the prompt. Shared `CancellationToken` + Observer→status/step mapping; tool summaries use a distinct style from the final assistant reply. Cancelled turns are not persisted as successful replies.
@@ -15,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **ai-lib-rust pin** (VL-GEN-001): git rev `cc49a15` → `3bfda86` (ALR-GEN-002; still contains VL-TTC-012).
+- **ai-lib-rust pin** (VL-TTC-012 / VL-GEN-001): git rev after 1.0.1 → `cc49a15` (bare invoke/parameter parse-aid) → `3bfda86` (ALR-GEN-002). No vendor generative HTTP.
 
 ## [1.0.1] - 2026-08-13
 

@@ -630,6 +630,21 @@ enum DoctorCommands {
         reachable_only: bool,
     },
 
+    /// Experimental (VL-GEN-002): PT-GEN declared / L-Exec + key reachability
+    Generative {
+        /// Filter to one PT-GEN key (`image_generation`, `speech_to_text`, `text_to_speech`)
+        #[arg(long)]
+        capability: Option<String>,
+
+        /// List only rows that are allowed and have a usable local API key
+        #[arg(long, default_value_t = false)]
+        reachable_only: bool,
+
+        /// Emit JSON instead of a human table
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+
     /// CR-CAP-003/005: observe capability-index route (Tag/Hint → reachable ∩ constraints; no LLM)
     #[command(visible_alias = "capability-route")]
     IntentRoute {

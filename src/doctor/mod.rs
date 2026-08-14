@@ -11,6 +11,8 @@ mod dag_plan;
 #[cfg(feature = "ai-protocol")]
 mod dag_view;
 #[cfg(feature = "ai-protocol")]
+mod generative;
+#[cfg(feature = "ai-protocol")]
 mod host_decide;
 #[cfg(feature = "ai-protocol")]
 mod intent_route;
@@ -35,6 +37,8 @@ pub use dag_emit::run_dag_emit;
 pub use dag_plan::run_dag_plan;
 #[cfg(feature = "ai-protocol")]
 pub use dag_view::run_dag_view;
+#[cfg(feature = "ai-protocol")]
+pub use generative::run_generative;
 #[cfg(feature = "ai-protocol")]
 pub use host_decide::run_host_decide;
 #[cfg(feature = "ai-protocol")]

@@ -346,6 +346,24 @@ pub async fn dispatch_configured_command(command: Commands, config: Config) -> R
                     )
                 }
             }
+            Some(DoctorCommands::Generative {
+                capability,
+                reachable_only,
+                json,
+            }) => {
+                #[cfg(feature = "ai-protocol")]
+                {
+                    let _ = config;
+                    doctor::run_generative(capability.as_deref(), reachable_only, json)
+                }
+                #[cfg(not(feature = "ai-protocol"))]
+                {
+                    let _ = (config, capability, reachable_only, json);
+                    anyhow::bail!(
+                        "`velaclaw doctor generative` requires the `ai-protocol` Cargo feature"
+                    )
+                }
+            }
             Some(DoctorCommands::IntentRoute {
                 message,
                 hint,

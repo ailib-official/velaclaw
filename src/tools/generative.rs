@@ -99,8 +99,11 @@ mod tests {
     use super::*;
     use crate::security::{PolicyHandle, SecurityPolicy};
 
-    #[tokio::test]
-    async fn missing_protocol_dir_fails_closed() {
+    #[test]
+    fn missing_protocol_dir_fails_closed() {
+        // Sync test + `block_on`: keep PROTOCOL_ENV_LOCK for the whole env
+        // mutation window without holding a std Mutex across `.await`
+        // (`clippy::await_holding_lock` / CI rust-protocol-required).
         let _guard = crate::capability_index::PROTOCOL_ENV_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -109,12 +112,15 @@ mod tests {
         std::env::remove_var("AI_PROTOCOL_DIR");
         std::env::remove_var("AI_PROTOCOL_PATH");
         let tool = GenerativeCapabilityTool::new(PolicyHandle::new(SecurityPolicy::default()));
-        let out = tool
-            .execute(
+        let ctx = ToolExecutionContext::default();
+        let out = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime")
+            .block_on(tool.execute(
                 json!({"model": "openai/gpt-image-1", "capability": "image_generation"}),
-                &ToolExecutionContext::default(),
-            )
-            .await
+                &ctx,
+            ))
             .expect("tool result");
         match prev_dir {
             Some(v) => std::env::set_var("AI_PROTOCOL_DIR", v),

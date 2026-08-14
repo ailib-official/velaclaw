@@ -1170,9 +1170,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn turn_retries_once_on_unparsed_tool_markup() {
+    async fn turn_repairs_unparsed_tool_markup_into_ir() {
         let bad = "<tool_call>\nNOT_JSON\n</tool_call>";
-        let good = "<tool_call>\n{\"name\": \"echo\", \"arguments\": {}}\n</tool_call>";
+        let repair = r#"[{"name":"echo","arguments":{}}]"#;
         let provider = Box::new(MockProvider {
             responses: Mutex::new(vec![
                 crate::providers::ChatResponse {
@@ -1180,7 +1180,7 @@ mod tests {
                     tool_calls: vec![],
                 },
                 crate::providers::ChatResponse {
-                    text: Some(good.into()),
+                    text: Some(repair.into()),
                     tool_calls: vec![],
                 },
                 crate::providers::ChatResponse {
@@ -1205,7 +1205,7 @@ mod tests {
             .tools(vec![Box::new(MockTool)])
             .memory(mem)
             .observer(observer)
-            .tool_dispatcher(Box::new(XmlToolDispatcher::default()))
+            .tool_dispatcher(Box::new(NativeToolDispatcher::default()))
             .workspace_dir(std::path::PathBuf::from("/tmp"))
             .security(test_security())
             .build()
@@ -1213,22 +1213,19 @@ mod tests {
 
         let response = agent.turn("hi").await.unwrap();
         assert_eq!(response, "done");
-        // Correction message must have been injected once.
-        let hist = agent.history();
-        let correction = velaclaw_agent_runtime::tool_format_correction_message();
-        assert!(hist.iter().any(|msg| matches!(
+        assert!(agent
+            .history()
+            .iter()
+            .any(|msg| matches!(msg, ConversationMessage::ToolResults(_))));
+        assert!(!agent.history().iter().any(|msg| matches!(
             msg,
             ConversationMessage::Chat(m) if m.role == "user" && m.content.contains("invalid format")
         )));
-        let _ = correction;
     }
 
     #[tokio::test]
-    async fn turn_strips_markup_after_retry_exhausted() {
-        // Ladder: CorrectivePrompt → NativeOnlyReask → StripFailClosed (3rd bad).
+    async fn turn_strips_markup_when_repair_empty() {
         let bad = "<tool_call>\nNOT_JSON\n</tool_call>";
-        let still_bad = "<tool_call>\nSTILL_BAD\n</tool_call>";
-        let third_bad = "<$call>\nJUNK\n</$call>";
         let provider = Box::new(MockProvider {
             responses: Mutex::new(vec![
                 crate::providers::ChatResponse {
@@ -1236,11 +1233,7 @@ mod tests {
                     tool_calls: vec![],
                 },
                 crate::providers::ChatResponse {
-                    text: Some(still_bad.into()),
-                    tool_calls: vec![],
-                },
-                crate::providers::ChatResponse {
-                    text: Some(third_bad.into()),
+                    text: Some("[]".into()),
                     tool_calls: vec![],
                 },
             ]),
@@ -1268,15 +1261,11 @@ mod tests {
 
         let response = agent.turn("hi").await.unwrap();
         assert!(!response.contains("<tool_call"));
-        assert!(!response.contains("$call"));
+        assert!(response.contains("tool-format recovery exhausted"));
         let hist = agent.history();
-        assert!(hist.iter().any(|msg| matches!(
+        assert!(!hist.iter().any(|msg| matches!(
             msg,
             ConversationMessage::Chat(m) if m.role == "user" && m.content.contains("invalid format")
-        )));
-        assert!(hist.iter().any(|msg| matches!(
-            msg,
-            ConversationMessage::Chat(m) if m.role == "user" && m.content.contains("native API tool_calls")
         )));
     }
 

@@ -1630,12 +1630,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn run_tool_call_loop_retries_once_on_unparsed_tool_markup() {
+    async fn run_tool_call_loop_repairs_unparsed_markup_into_ir() {
         let bad = "<tool_call>\nNOT_JSON\n</tool_call>";
-        let good = r#"<tool_call>
-{"name":"delay_a","arguments":{"value":"fixed"}}
-</tool_call>"#;
-        let provider = ScriptedProvider::from_text_responses(vec![bad, good, "all good"]);
+        let repair = r#"[{"name":"delay_a","arguments":{"value":"fixed"}}]"#;
+        let provider = ScriptedProvider::from_text_responses(vec![bad, repair, "all good"]);
 
         let active = Arc::new(AtomicUsize::new(0));
         let max_active = Arc::new(AtomicUsize::new(0));
@@ -1690,12 +1688,15 @@ mod tests {
             None,
         )
         .await
-        .expect("corrective retry should recover");
+        .expect("IR repair should recover");
 
         assert_eq!(result, "all good");
-        assert!(history
+        assert!(!history
             .iter()
             .any(|m| m.role == "user" && m.content.contains("invalid format")));
+        assert!(history
+            .iter()
+            .any(|m| m.role == "tool" && m.content.contains("ok:fixed")));
     }
 
     #[test]

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Tool-format IR repair** (VL-TTC-013): when Decode finds tool intent but no calls, run one isolated JSON extract (no executable tools) and inject allowlisted `name`/`arguments` into the shared `run_tool_call_loop`. Replaces the two actor re-ask ladder. CLI, Web, and Channel share this path. Extract miss still strips markup and shows the existing SoftFailSurface notice.
+
 ## [1.0.2] - 2026-08-14
 
 ### Added

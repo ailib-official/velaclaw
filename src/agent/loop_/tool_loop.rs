@@ -146,9 +146,6 @@ pub(crate) async fn run_tool_call_loop(
         .map(|d| d.should_send_tool_specs() && !tool_specs.is_empty())
         .unwrap_or_else(|| provider.supports_native_tools() && !tool_specs.is_empty());
 
-    // VL-TTC-016: CorrectivePrompt → NativeOnlyReask → StripFailClosed.
-    let mut format_ladder = velaclaw_agent_runtime::ToolFormatLadder::new();
-
     for _iteration in 0..max_iterations {
         if cancellation_token
             .as_ref()
@@ -206,178 +203,224 @@ pub(crate) async fn run_tool_call_loop(
             chat_future.await
         };
 
-        let (response_text, parsed_text, tool_calls, assistant_history_content, native_tool_calls) =
-            match chat_result {
-                Ok(resp) => {
-                    observer.record_event(&ObserverEvent::LlmResponse {
-                        provider: provider_name.to_string(),
-                        model: model.to_string(),
-                        duration: llm_started_at.elapsed(),
-                        success: true,
-                        error_message: None,
-                    });
+        let (
+            response_text,
+            parsed_text,
+            mut tool_calls,
+            mut assistant_history_content,
+            mut native_tool_calls,
+        ) = match chat_result {
+            Ok(resp) => {
+                observer.record_event(&ObserverEvent::LlmResponse {
+                    provider: provider_name.to_string(),
+                    model: model.to_string(),
+                    duration: llm_started_at.elapsed(),
+                    success: true,
+                    error_message: None,
+                });
 
-                    if let Some(dispatcher) = tool_dispatcher {
-                        let response_text = resp.text_or_empty().to_string();
-                        let (mut parsed_text, mut disp_calls) = dispatcher.parse_response(&resp);
-                        if disp_calls.is_empty() {
-                            // VL-TTC-010: manifest parser before residual loop_parse.
-                            #[cfg(feature = "ai-protocol")]
-                            {
-                                let (manifest_text, manifest_calls) =
-                                    velaclaw_agent_runtime::parse_manifest_text_tool_fallback(
-                                        &response_text,
-                                    );
-                                if !manifest_calls.is_empty() {
-                                    if !manifest_text.is_empty() {
-                                        parsed_text = manifest_text;
-                                    }
-                                    disp_calls = manifest_calls;
+                if let Some(dispatcher) = tool_dispatcher {
+                    let response_text = resp.text_or_empty().to_string();
+                    let (mut parsed_text, mut disp_calls) = dispatcher.parse_response(&resp);
+                    if disp_calls.is_empty() {
+                        // VL-TTC-010: manifest parser before residual loop_parse.
+                        #[cfg(feature = "ai-protocol")]
+                        {
+                            let (manifest_text, manifest_calls) =
+                                velaclaw_agent_runtime::parse_manifest_text_tool_fallback(
+                                    &response_text,
+                                );
+                            if !manifest_calls.is_empty() {
+                                if !manifest_text.is_empty() {
+                                    parsed_text = manifest_text;
                                 }
-                            }
-                            if disp_calls.is_empty() {
-                                let (fallback_text, fallback_calls) =
-                                    parse_tool_calls(&response_text);
-                                if !fallback_calls.is_empty() {
-                                    if !fallback_text.is_empty() {
-                                        parsed_text = fallback_text;
-                                    }
-                                    disp_calls = fallback_calls
-                                        .into_iter()
-                                        .map(|c| crate::agent::dispatcher::ParsedToolCall {
-                                            name: c.name,
-                                            arguments: c.arguments,
-                                            tool_call_id: None,
-                                        })
-                                        .collect();
-                                }
+                                disp_calls = manifest_calls;
                             }
                         }
-                        let calls: Vec<ParsedToolCall> = disp_calls
-                            .into_iter()
-                            .map(|c| ParsedToolCall {
-                                name: c.name,
-                                arguments: c.arguments,
+                        if disp_calls.is_empty() {
+                            let (fallback_text, fallback_calls) = parse_tool_calls(&response_text);
+                            if !fallback_calls.is_empty() {
+                                if !fallback_text.is_empty() {
+                                    parsed_text = fallback_text;
+                                }
+                                disp_calls = fallback_calls
+                                    .into_iter()
+                                    .map(|c| crate::agent::dispatcher::ParsedToolCall {
+                                        name: c.name,
+                                        arguments: c.arguments,
+                                        tool_call_id: None,
+                                    })
+                                    .collect();
+                            }
+                        }
+                    }
+                    let calls: Vec<ParsedToolCall> = disp_calls
+                        .into_iter()
+                        .map(|c| ParsedToolCall {
+                            name: c.name,
+                            arguments: c.arguments,
+                        })
+                        .collect();
+                    let assistant_history_content = if !resp.tool_calls.is_empty() {
+                        build_native_assistant_history(&response_text, &resp.tool_calls)
+                    } else if !calls.is_empty() {
+                        let synthetic: Vec<ToolCall> = calls
+                            .iter()
+                            .enumerate()
+                            .map(|(i, c)| ToolCall {
+                                id: format!("text_tool_{i}"),
+                                name: c.name.clone(),
+                                arguments: c.arguments.to_string(),
                             })
                             .collect();
-                        let assistant_history_content = if !resp.tool_calls.is_empty() {
-                            build_native_assistant_history(&response_text, &resp.tool_calls)
-                        } else if !calls.is_empty() {
-                            let synthetic: Vec<ToolCall> = calls
-                                .iter()
-                                .enumerate()
-                                .map(|(i, c)| ToolCall {
-                                    id: format!("text_tool_{i}"),
-                                    name: c.name.clone(),
-                                    arguments: c.arguments.to_string(),
-                                })
-                                .collect();
-                            build_assistant_history_with_tool_calls(
-                                if parsed_text.is_empty() {
-                                    response_text.as_str()
-                                } else {
-                                    parsed_text.as_str()
-                                },
-                                &synthetic,
-                            )
-                        } else {
-                            response_text.clone()
-                        };
-                        (
-                            response_text,
-                            parsed_text,
-                            calls,
-                            assistant_history_content,
-                            resp.tool_calls,
+                        build_assistant_history_with_tool_calls(
+                            if parsed_text.is_empty() {
+                                response_text.as_str()
+                            } else {
+                                parsed_text.as_str()
+                            },
+                            &synthetic,
                         )
                     } else {
-                        let response_text = resp.text_or_empty().to_string();
-                        // First try native structured tool calls (OpenAI-format).
-                        // Fall back to text-based parsing (XML tags, markdown blocks,
-                        // GLM format) only if the provider returned no native calls —
-                        // this ensures we support both native and prompt-guided models.
-                        let mut calls = parse_structured_tool_calls(&resp.tool_calls);
-                        let mut parsed_text = String::new();
+                        response_text.clone()
+                    };
+                    (
+                        response_text,
+                        parsed_text,
+                        calls,
+                        assistant_history_content,
+                        resp.tool_calls,
+                    )
+                } else {
+                    let response_text = resp.text_or_empty().to_string();
+                    // First try native structured tool calls (OpenAI-format).
+                    // Fall back to text-based parsing (XML tags, markdown blocks,
+                    // GLM format) only if the provider returned no native calls —
+                    // this ensures we support both native and prompt-guided models.
+                    let mut calls = parse_structured_tool_calls(&resp.tool_calls);
+                    let mut parsed_text = String::new();
 
-                        if calls.is_empty() {
-                            let (fallback_text, fallback_calls) = parse_tool_calls(&response_text);
-                            if !fallback_text.is_empty() {
-                                parsed_text = fallback_text;
-                            }
-                            calls = fallback_calls;
+                    if calls.is_empty() {
+                        let (fallback_text, fallback_calls) = parse_tool_calls(&response_text);
+                        if !fallback_text.is_empty() {
+                            parsed_text = fallback_text;
                         }
-
-                        // Preserve native tool call IDs in assistant history so role=tool
-                        // follow-up messages can reference the exact call id.
-                        let assistant_history_content = if resp.tool_calls.is_empty() {
-                            response_text.clone()
-                        } else {
-                            build_native_assistant_history(&response_text, &resp.tool_calls)
-                        };
-
-                        let native_calls = resp.tool_calls;
-                        (
-                            response_text,
-                            parsed_text,
-                            calls,
-                            assistant_history_content,
-                            native_calls,
-                        )
+                        calls = fallback_calls;
                     }
+
+                    // Preserve native tool call IDs in assistant history so role=tool
+                    // follow-up messages can reference the exact call id.
+                    let assistant_history_content = if resp.tool_calls.is_empty() {
+                        response_text.clone()
+                    } else {
+                        build_native_assistant_history(&response_text, &resp.tool_calls)
+                    };
+
+                    let native_calls = resp.tool_calls;
+                    (
+                        response_text,
+                        parsed_text,
+                        calls,
+                        assistant_history_content,
+                        native_calls,
+                    )
                 }
-                Err(e) => {
-                    observer.record_event(&ObserverEvent::LlmResponse {
-                        provider: provider_name.to_string(),
-                        model: model.to_string(),
-                        duration: llm_started_at.elapsed(),
-                        success: false,
-                        error_message: Some(crate::providers::sanitize_api_error(&e.to_string())),
-                    });
-                    #[cfg(feature = "ai-protocol")]
-                    if let Some(ctx) = soft_fail {
-                        let host_owned = ctx.host_decide_owned();
-                        let host = ctx.host_decide.or(host_owned.as_ref());
-                        return Err(crate::orchestration::map_provider_limit_error(
-                            e,
-                            model,
-                            ctx.surface,
-                            host,
-                            ctx.session_key,
-                        ));
-                    }
-                    return Err(e);
+            }
+            Err(e) => {
+                observer.record_event(&ObserverEvent::LlmResponse {
+                    provider: provider_name.to_string(),
+                    model: model.to_string(),
+                    duration: llm_started_at.elapsed(),
+                    success: false,
+                    error_message: Some(crate::providers::sanitize_api_error(&e.to_string())),
+                });
+                #[cfg(feature = "ai-protocol")]
+                if let Some(ctx) = soft_fail {
+                    let host_owned = ctx.host_decide_owned();
+                    let host = ctx.host_decide.or(host_owned.as_ref());
+                    return Err(crate::orchestration::map_provider_limit_error(
+                        e,
+                        model,
+                        ctx.surface,
+                        host,
+                        ctx.session_key,
+                    ));
                 }
-            };
+                return Err(e);
+            }
+        };
 
         let display_text = if parsed_text.is_empty() {
             response_text.clone()
         } else {
-            parsed_text
+            parsed_text.clone()
         };
 
-        if tool_calls.is_empty() {
-            // VL-TTC-016: typed leakage → recovery ladder.
-            let mut strip_fail_closed = false;
-            if velaclaw_agent_runtime::needs_tool_format_correction(&response_text, 0) {
-                let strategy = format_ladder.next_strategy();
-                tracing::warn!(
-                    target: "velaclaw::agent",
-                    tool_format_strategy = strategy.as_str(),
-                    "tool_format_recovery: unparsed tool markup"
-                );
-                if strategy != velaclaw_agent_runtime::ToolFormatRecoveryStrategy::StripFailClosed {
-                    history.push(ChatMessage::assistant(response_text.clone()));
-                    history.push(ChatMessage::user(
-                        velaclaw_agent_runtime::tool_format_recovery_message(strategy).to_string(),
-                    ));
-                    continue;
+        if tool_calls.is_empty()
+            && velaclaw_agent_runtime::needs_tool_format_correction(&response_text, 0)
+        {
+            let names: Vec<String> = tools_registry
+                .iter()
+                .map(|t| t.name().to_string())
+                .collect();
+            match try_ir_repair(
+                provider,
+                model,
+                &response_text,
+                &names,
+                cancellation_token.as_ref(),
+                observer,
+                provider_name,
+            )
+            .await?
+            {
+                Some(repaired) if !repaired.is_empty() => {
+                    tracing::info!(
+                        target: "velaclaw::agent",
+                        repaired = repaired.len(),
+                        "tool_format_repair: injected IR into shared tool loop"
+                    );
+                    tool_calls = repaired
+                        .into_iter()
+                        .map(|c| ParsedToolCall {
+                            name: c.name,
+                            arguments: c.arguments,
+                        })
+                        .collect();
+                    let synthetic: Vec<ToolCall> = tool_calls
+                        .iter()
+                        .enumerate()
+                        .map(|(i, c)| ToolCall {
+                            id: format!("repair_tool_{i}"),
+                            name: c.name.clone(),
+                            arguments: c.arguments.to_string(),
+                        })
+                        .collect();
+                    let history_text = if parsed_text.is_empty() {
+                        response_text.as_str()
+                    } else {
+                        parsed_text.as_str()
+                    };
+                    assistant_history_content = if text_tool_result_history {
+                        build_assistant_history_with_tool_calls(history_text, &synthetic)
+                    } else {
+                        build_native_assistant_history(history_text, &synthetic)
+                    };
+                    native_tool_calls = synthetic;
                 }
+                _ => {}
+            }
+        }
+
+        if tool_calls.is_empty() {
+            // VL-TTC-013: Repair already attempted above. Remaining markup → strip.
+            let strip_fail_closed =
+                velaclaw_agent_runtime::needs_tool_format_correction(&response_text, 0);
+            if strip_fail_closed {
                 tracing::warn!(
                     target: "velaclaw::agent",
-                    tool_format_strategy = "StripFailClosed",
-                    "tool_format_retry_exhausted: stripping markup after recovery ladder"
+                    "tool_format_repair_exhausted: stripping markup after IR extract miss"
                 );
-                strip_fail_closed = true;
             }
             // No tool calls — this is the final response.
             // If a streaming sender is provided, relay the text in small chunks
@@ -496,6 +539,89 @@ pub(crate) async fn run_tool_call_loop(
     }
 
     anyhow::bail!("Agent exceeded maximum tool iterations ({max_iterations})")
+}
+
+/// Isolated Repair completion: blob → allowlisted IR. Network errors become `Ok(None)`.
+async fn try_ir_repair(
+    provider: &dyn Provider,
+    model: &str,
+    failed_blob: &str,
+    allowlisted_names: &[String],
+    cancellation_token: Option<&CancellationToken>,
+    observer: &dyn Observer,
+    provider_name: &str,
+) -> Result<Option<Vec<velaclaw_agent_runtime::RepairedToolCall>>> {
+    if cancellation_token.is_some_and(CancellationToken::is_cancelled) {
+        return Err(ToolLoopCancelled.into());
+    }
+    if allowlisted_names.is_empty() {
+        return Ok(None);
+    }
+
+    let system = velaclaw_agent_runtime::repair_extract_system_prompt(allowlisted_names);
+    let blob = velaclaw_agent_runtime::truncate_repair_blob(failed_blob);
+    let messages = [
+        ChatMessage::system(system),
+        ChatMessage::user(format!(
+            "Extract tool calls from this assistant message:\n\n{blob}"
+        )),
+    ];
+
+    observer.record_event(&ObserverEvent::LlmRequest {
+        provider: provider_name.to_string(),
+        model: model.to_string(),
+        messages_count: messages.len(),
+    });
+    let started = Instant::now();
+    let chat_future = provider.chat(
+        ChatRequest {
+            messages: &messages,
+            tools: None,
+        },
+        model,
+        0.0,
+    );
+    let chat_result = if let Some(token) = cancellation_token {
+        tokio::select! {
+            () = token.cancelled() => return Err(ToolLoopCancelled.into()),
+            result = chat_future => result,
+        }
+    } else {
+        chat_future.await
+    };
+
+    match chat_result {
+        Ok(resp) => {
+            observer.record_event(&ObserverEvent::LlmResponse {
+                provider: provider_name.to_string(),
+                model: model.to_string(),
+                duration: started.elapsed(),
+                success: true,
+                error_message: None,
+            });
+            let allow: std::collections::HashSet<String> =
+                allowlisted_names.iter().cloned().collect();
+            Ok(Some(velaclaw_agent_runtime::parse_repaired_tool_calls(
+                resp.text_or_empty(),
+                &allow,
+            )))
+        }
+        Err(e) => {
+            observer.record_event(&ObserverEvent::LlmResponse {
+                provider: provider_name.to_string(),
+                model: model.to_string(),
+                duration: started.elapsed(),
+                success: false,
+                error_message: Some(crate::providers::sanitize_api_error(&e.to_string())),
+            });
+            tracing::warn!(
+                target: "velaclaw::agent",
+                error = %crate::providers::sanitize_api_error(&e.to_string()),
+                "tool_format_repair: extract call failed; stripping"
+            );
+            Ok(None)
+        }
+    }
 }
 
 /// Surface configured autonomy/shell/path policy in the system prompt.

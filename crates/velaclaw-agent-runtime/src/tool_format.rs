@@ -1,5 +1,123 @@
-//! Tool-call format steering + recovery ladder (VL-TTC-014 / VL-TTC-016).
-//! 工具调用格式纠偏：类型化泄漏错误 + 固定策略阶梯，避免追逐方言。
+//! Tool-call format steering + IR repair (VL-TTC-013 / VL-TTC-016).
+//! 工具调用：Decode miss 后抽 Canonical IR；不再用两轮 actor 纠偏追方言。
+
+use serde::Deserialize;
+use serde_json::Value;
+use std::collections::HashSet;
+
+/// Max characters of the failed actor blob sent to Repair (VL-TTC-013).
+pub const REPAIR_BLOB_MAX_CHARS: usize = 12_000;
+
+/// Canonical IR row after Repair extract (name must be allowlisted by the host).
+#[derive(Debug, Clone, PartialEq)]
+pub struct RepairedToolCall {
+    pub name: String,
+    pub arguments: Value,
+}
+
+/// System prompt for an isolated Repair completion (no executable tools).
+#[must_use]
+pub fn repair_extract_system_prompt(allowlisted_names: &[String]) -> String {
+    let names = if allowlisted_names.is_empty() {
+        "(none)".to_string()
+    } else {
+        allowlisted_names.join(", ")
+    };
+    format!(
+        "You extract tool calls from a failed assistant message. \
+         Output ONLY a JSON array of objects with keys \"name\" (string) and \
+         \"arguments\" (object). Allowed names: {names}. \
+         Drop unknown names. If there is no tool intent, output []. \
+         No markdown, no XML, no DSML, no extra keys."
+    )
+}
+
+/// Parse a Repair completion into allowlisted IR rows.
+#[must_use]
+pub fn parse_repaired_tool_calls(raw: &str, allowlist: &HashSet<String>) -> Vec<RepairedToolCall> {
+    let Some(value) = extract_json_value(raw) else {
+        return Vec::new();
+    };
+    let items: Vec<Value> = match value {
+        Value::Array(arr) => arr,
+        Value::Object(map) => {
+            if let Some(Value::Array(arr)) = map.get("calls").or_else(|| map.get("tool_calls")) {
+                arr.clone()
+            } else if map.contains_key("name") {
+                vec![Value::Object(map)]
+            } else {
+                return Vec::new();
+            }
+        }
+        _ => return Vec::new(),
+    };
+
+    let mut out = Vec::new();
+    for item in items {
+        let Some(obj) = item.as_object() else {
+            continue;
+        };
+        let Some(name) = obj.get("name").and_then(Value::as_str) else {
+            continue;
+        };
+        let name = name.trim();
+        if name.is_empty() || !allowlist.contains(name) {
+            continue;
+        }
+        let arguments = match obj.get("arguments").or_else(|| obj.get("parameters")) {
+            Some(Value::Object(_)) => obj
+                .get("arguments")
+                .or_else(|| obj.get("parameters"))
+                .cloned()
+                .unwrap_or_else(|| Value::Object(Default::default())),
+            Some(Value::Null) | None => Value::Object(Default::default()),
+            Some(other) => {
+                let mut wrap = serde_json::Map::new();
+                wrap.insert("value".into(), other.clone());
+                Value::Object(wrap)
+            }
+        };
+        out.push(RepairedToolCall {
+            name: name.to_string(),
+            arguments,
+        });
+    }
+    out
+}
+
+fn extract_json_value(raw: &str) -> Option<Value> {
+    let trimmed = strip_md_fence(raw.trim());
+    if let Ok(v) = serde_json::from_str::<Value>(trimmed) {
+        return Some(v);
+    }
+    let start = trimmed.find(['[', '{'])?;
+    let slice = &trimmed[start..];
+    let mut de = serde_json::Deserializer::from_str(slice);
+    Value::deserialize(&mut de).ok()
+}
+
+fn strip_md_fence(raw: &str) -> &str {
+    let t = raw.trim();
+    let Some(rest) = t.strip_prefix("```") else {
+        return t;
+    };
+    let rest = rest
+        .strip_prefix("json")
+        .or_else(|| rest.strip_prefix("JSON"))
+        .unwrap_or(rest);
+    let rest = rest.trim_start_matches('\n');
+    rest.strip_suffix("```").map(str::trim).unwrap_or(rest)
+}
+
+/// Truncate a failed actor blob for the Repair user message.
+#[must_use]
+pub fn truncate_repair_blob(raw: &str) -> String {
+    let count = raw.chars().count();
+    if count <= REPAIR_BLOB_MAX_CHARS {
+        return raw.to_string();
+    }
+    raw.chars().take(REPAIR_BLOB_MAX_CHARS).collect()
+}
 
 /// DeepSeek DSML delimiter family (U+FF5C), same wire form as ai-lib-core.
 #[cfg(any(test, not(feature = "ai-protocol")))]
@@ -225,6 +343,7 @@ pub fn tool_format_correction_message() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
 
     #[test]
     fn ladder_order_is_corrective_then_native_then_strip() {
@@ -312,6 +431,40 @@ mod tests {
         );
         assert!(msg.contains("deepseek/deepseek-v4-flash"));
         assert!(msg.contains("model picker"));
+    }
+
+    #[test]
+    fn parse_repaired_calls_from_array_and_fence() {
+        let allow: HashSet<String> = ["echo", "shell"].iter().map(|s| (*s).to_string()).collect();
+        let raw = "```json\n[{\"name\":\"echo\",\"arguments\":{}}]\n```";
+        let out = parse_repaired_tool_calls(raw, &allow);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].name, "echo");
+    }
+
+    #[test]
+    fn parse_repaired_drops_unknown_names() {
+        let allow: HashSet<String> = ["echo"].iter().map(|s| (*s).to_string()).collect();
+        let raw = r#"[{"name":"rm","arguments":{}},{"name":"echo","arguments":{"x":1}}]"#;
+        let out = parse_repaired_tool_calls(raw, &allow);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].name, "echo");
+    }
+
+    #[test]
+    fn parse_repaired_empty_on_prose() {
+        let allow: HashSet<String> = ["echo"].iter().map(|s| (*s).to_string()).collect();
+        assert!(parse_repaired_tool_calls("just a sentence", &allow).is_empty());
+        assert!(parse_repaired_tool_calls("[]", &allow).is_empty());
+    }
+
+    #[test]
+    fn parse_repaired_single_object_and_trailing_junk() {
+        let allow: HashSet<String> = ["shell"].iter().map(|s| (*s).to_string()).collect();
+        let raw = "prefix {\"name\":\"shell\",\"arguments\":{\"command\":\"ls\"}} trailing";
+        let out = parse_repaired_tool_calls(raw, &allow);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].arguments["command"], "ls");
     }
 
     #[test]

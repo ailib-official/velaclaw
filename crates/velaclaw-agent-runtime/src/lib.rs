@@ -1,10 +1,11 @@
-//! VelaClaw agent runtime — tool dispatcher + BYOK + loop helpers (VL-ARCH-007/008/010).
-//! Agent 运行时：工具分发、BYOK、loop 解析/指令/擦除辅助；宿主编排仍在主 crate。
+//! VelaClaw agent runtime — tool dispatcher + BYOK + loop helpers (VL-ARCH-007/008/010/A2).
+//! Agent 运行时：工具分发、BYOK、loop 解析/历史还原辅助；`run_tool_call_loop` 仍在主 crate。
 
 pub mod approval;
 pub mod byok;
 pub mod dispatcher;
 pub mod execution_context;
+pub mod history_roundtrip;
 pub mod loop_parse;
 pub mod provider;
 pub mod telemetry;
@@ -26,6 +27,7 @@ pub use dispatcher::{
     NativeToolDispatcher, ParsedToolCall, ToolDispatcher, ToolExecutionResult, XmlToolDispatcher,
 };
 pub use execution_context::ToolExecutionContext;
+pub use history_roundtrip::{conversation_from_tool_loop_history, reintegrate_prepared_chat};
 pub use loop_parse::{
     build_tool_instructions, is_tool_loop_cancelled, parse_tool_calls, tools_to_openai_format,
     trim_history, ToolLoopCancelled, DEFAULT_MAX_HISTORY_MESSAGES, DEFAULT_MAX_TOOL_ITERATIONS,

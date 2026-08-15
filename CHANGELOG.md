@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Runtime history roundtrip** (VL-REVIEW2-A2): `conversation_from_tool_loop_history` and `reintegrate_prepared_chat` live in `velaclaw-agent-runtime`. The production `run_tool_call_loop` body stays in the main crate (not VL-ARCH-011).
 - **Tool-format IR repair** (VL-TTC-013): when Decode finds tool intent but no calls, run one isolated JSON extract (no executable tools) and inject allowlisted `name`/`arguments` into the shared `run_tool_call_loop`. Replaces the two actor re-ask ladder. CLI, Web, and Channel share this path. Extract miss still strips markup and shows the existing SoftFailSurface notice.
 - **Turn step captions** (VL-UX-STEP-001): CLI and Web share `progress_caption` (verb + object). Progress lines no longer dump tool stdout or full shell scripts. Model status uses the logical id once (no `provider/model` double prefix). Default CLI no longer prints `── tool:… ──` result blocks.
 

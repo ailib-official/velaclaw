@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Tool-format IR repair** (VL-TTC-013): when Decode finds tool intent but no calls, run one isolated JSON extract (no executable tools) and inject allowlisted `name`/`arguments` into the shared `run_tool_call_loop`. Replaces the two actor re-ask ladder. CLI, Web, and Channel share this path. Extract miss still strips markup and shows the existing SoftFailSurface notice.
 - **Turn step captions** (VL-UX-STEP-001): CLI and Web share `progress_caption` (verb + object). Progress lines no longer dump tool stdout or full shell scripts. Model status uses the logical id once (no `provider/model` double prefix). Default CLI no longer prints `── tool:… ──` result blocks.
 - **Turn step expand** (VL-UX-STEP-002): default step line stays the caption. Web click/`<details>` and CLI `/expand <id>` show the same scrubbed output (capped). Approval modal is unchanged.
+- **PeerContinue** (VL-TTC-014): after IR repair miss, retry the same `run_tool_call_loop` once with a catalog peer from `[[model_routes]]` (lexical pick, not cost / not `host_decide_failover`). Still StripFailClosed if the peer also misses.
 
 ## [1.0.2] - 2026-08-14
 

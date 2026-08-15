@@ -96,6 +96,8 @@ pub(crate) struct SoftFailLoopCtx<'a> {
     #[cfg(feature = "ai-protocol")]
     pub host_decide: Option<&'a crate::orchestration::HostDecideHost>,
     pub surface: velaclaw_agent_runtime::SoftFailSurface,
+    /// Logical model ids from `[[model_routes]]` (capability catalog, not cost order).
+    pub peer_logical_ids: &'a [String],
 }
 
 #[cfg(feature = "ai-protocol")]
@@ -140,6 +142,9 @@ pub(crate) async fn run_tool_call_loop(
         max_tool_iterations
     };
 
+    let mut active_model = model.to_string();
+    let mut peer_continue_used = false;
+
     let tool_specs: Vec<crate::tools::ToolSpec> =
         tools_registry.iter().map(|tool| tool.spec()).collect();
     let use_native_tools = tool_dispatcher
@@ -171,7 +176,7 @@ pub(crate) async fn run_tool_call_loop(
 
         observer.record_event(&ObserverEvent::LlmRequest {
             provider: provider_name.to_string(),
-            model: model.to_string(),
+            model: active_model.clone(),
             messages_count: history.len(),
         });
 
@@ -190,7 +195,7 @@ pub(crate) async fn run_tool_call_loop(
                 messages: &prepared_messages.messages,
                 tools: request_tools,
             },
-            model,
+            active_model.as_str(),
             temperature,
         );
 
@@ -213,7 +218,7 @@ pub(crate) async fn run_tool_call_loop(
             Ok(resp) => {
                 observer.record_event(&ObserverEvent::LlmResponse {
                     provider: provider_name.to_string(),
-                    model: model.to_string(),
+                    model: active_model.clone(),
                     duration: llm_started_at.elapsed(),
                     success: true,
                     error_message: None,
@@ -329,7 +334,7 @@ pub(crate) async fn run_tool_call_loop(
             Err(e) => {
                 observer.record_event(&ObserverEvent::LlmResponse {
                     provider: provider_name.to_string(),
-                    model: model.to_string(),
+                    model: active_model.clone(),
                     duration: llm_started_at.elapsed(),
                     success: false,
                     error_message: Some(crate::providers::sanitize_api_error(&e.to_string())),
@@ -340,7 +345,7 @@ pub(crate) async fn run_tool_call_loop(
                     let host = ctx.host_decide.or(host_owned.as_ref());
                     return Err(crate::orchestration::map_provider_limit_error(
                         e,
-                        model,
+                        &active_model,
                         ctx.surface,
                         host,
                         ctx.session_key,
@@ -365,7 +370,7 @@ pub(crate) async fn run_tool_call_loop(
                 .collect();
             match try_ir_repair(
                 provider,
-                model,
+                &active_model,
                 &response_text,
                 &names,
                 cancellation_token.as_ref(),
@@ -409,6 +414,35 @@ pub(crate) async fn run_tool_call_loop(
                     native_tool_calls = synthetic;
                 }
                 _ => {}
+            }
+        }
+
+        if tool_calls.is_empty()
+            && !peer_continue_used
+            && velaclaw_agent_runtime::needs_tool_format_correction(&response_text, 0)
+        {
+            let peers = soft_fail
+                .map(|c| c.peer_logical_ids)
+                .unwrap_or(&[])
+                .to_vec();
+            let peers = if peers.is_empty() {
+                soft_fail
+                    .and_then(|c| c.config)
+                    .map(logical_ids_from_config)
+                    .unwrap_or_default()
+            } else {
+                peers
+            };
+            if let Some(peer) = select_peer_continue_model(&active_model, &peers) {
+                peer_continue_used = true;
+                tracing::info!(
+                    target: "velaclaw::agent",
+                    from = %active_model,
+                    to = %peer,
+                    "tool_format_peer_continue: retrying shared loop with catalog peer"
+                );
+                active_model = peer;
+                continue;
             }
         }
 
@@ -462,7 +496,7 @@ pub(crate) async fn run_tool_call_loop(
                         .or(host_owned.as_ref());
                     final_text = crate::orchestration::finalize_tool_format_exhausted(
                         &final_text,
-                        model,
+                        &active_model,
                         surface,
                         host,
                         session_key,
@@ -472,7 +506,7 @@ pub(crate) async fn run_tool_call_loop(
                 {
                     final_text = velaclaw_agent_runtime::append_tool_format_exhausted_notice(
                         &final_text,
-                        model,
+                        &active_model,
                         surface,
                     );
                 }
@@ -536,6 +570,31 @@ pub(crate) async fn run_tool_call_loop(
     }
 
     anyhow::bail!("Agent exceeded maximum tool iterations ({max_iterations})")
+}
+
+/// Catalog logical ids from `[[model_routes]]` (not priced Decide fallbacks).
+pub(crate) fn logical_ids_from_config(config: &Config) -> Vec<String> {
+    config
+        .model_routes
+        .iter()
+        .map(|r| {
+            if r.model.contains('/') {
+                r.model.clone()
+            } else {
+                format!("{}/{}", r.provider, r.model)
+            }
+        })
+        .collect()
+}
+
+/// First remaining catalog id, sorted by name — capability list, not cost.
+pub(crate) fn select_peer_continue_model(current: &str, peers: &[String]) -> Option<String> {
+    let mut ids: Vec<&String> = peers
+        .iter()
+        .filter(|id| !id.is_empty() && id.as_str() != current)
+        .collect();
+    ids.sort_unstable();
+    ids.into_iter().next().cloned()
 }
 
 /// Isolated Repair completion: blob → allowlisted IR. Network errors become `Ok(None)`.
@@ -731,4 +790,22 @@ pub(crate) fn resolve_cli_turn_model(
         default_model,
         user_message,
     ))
+}
+
+#[cfg(test)]
+mod peer_continue_tests {
+    use super::select_peer_continue_model;
+
+    #[test]
+    fn select_peer_skips_current_and_sorts_lexically() {
+        let peers = vec!["zeta/m".into(), "alpha/m".into(), "cur/m".into()];
+        assert_eq!(
+            select_peer_continue_model("cur/m", &peers).as_deref(),
+            Some("alpha/m")
+        );
+        assert_eq!(
+            select_peer_continue_model("only", &[String::from("only")]),
+            None
+        );
+    }
 }

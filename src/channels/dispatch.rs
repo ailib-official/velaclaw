@@ -458,6 +458,7 @@ pub(crate) async fn process_channel_message(
                     #[cfg(feature = "ai-protocol")]
                     host_decide: None,
                     surface: velaclaw_agent_runtime::SoftFailSurface::Channel,
+                    peer_logical_ids: ctx.peer_logical_ids.as_slice(),
                 }),
             None,
             ),

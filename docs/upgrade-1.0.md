@@ -2,7 +2,7 @@
 
 How to upgrade an existing install without losing secrets or trial config.
 
-Last verified: **2026-08-14** (1.0.2 patch train).
+Last verified: **2026-08-15** (1.0.3 patch train).
 
 ## Non-negotiables
 
@@ -23,7 +23,7 @@ curl -sS http://127.0.0.1:3000/health | jq '{version,status}'
 # 2) Build from main (or a release tag)
 cd /path/to/velaclaw
 git fetch origin && git checkout main && git pull --ff-only origin main
-# Optional: checkout the release tag after it is cut, e.g. git checkout v1.0.2
+# Optional: checkout the release tag after it is cut, e.g. git checkout v1.0.3
 cargo build --release --features ai-protocol
 install -m 755 target/release/velaclaw ~/.local/bin/velaclaw   # or your install path
 

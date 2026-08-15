@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-08-15
+
 ### Changed
 
 - **Runtime history roundtrip** (VL-REVIEW2-A2): `conversation_from_tool_loop_history` and `reintegrate_prepared_chat` live in `velaclaw-agent-runtime`. The production `run_tool_call_loop` body stays in the main crate (not VL-ARCH-011).

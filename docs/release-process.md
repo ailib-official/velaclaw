@@ -2,7 +2,7 @@
 
 This runbook defines the maintainers' standard release flow.
 
-Last verified: **August 14, 2026**.
+Last verified: **August 15, 2026**.
 
 ## Release Goals
 
@@ -14,7 +14,7 @@ Last verified: **August 14, 2026**.
 
 ## 1.0.x train notes
 
-- Product train **1.0.x**: Cargo/CHANGELOG on `main`; cut GitHub tags `v1.0.x` with the procedure below (current patch **v1.0.2**: cancel UX + experimental generative inspect).
+- Product train **1.0.x**: Cargo/CHANGELOG on `main`; cut GitHub tags `v1.0.x` with the procedure below (current patch **v1.0.3**: IR repair, step captions/expand, PeerContinue, runtime history slice).
 - Operators upgrading installed binaries: [upgrade-1.0.md](upgrade-1.0.md) (preserve config dir / `daemon.env`).
 - Merge policy + bot fail-closed: [ci-map.md](ci-map.md).
 

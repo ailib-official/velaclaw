@@ -245,7 +245,7 @@ pub fn event_to_progress(event: &ObserverEvent) -> Option<TurnProgress> {
                 .unwrap_or(tool.as_str());
             Some(TurnProgress::Status {
                 phase: "run".into(),
-                detail: format!("run {cap}"),
+                detail: cap.to_string(),
             })
         }
         ObserverEvent::ToolCall {
@@ -459,7 +459,7 @@ mod tests {
             start,
             TurnProgress::Status {
                 phase: "run".into(),
-                detail: "run git status".into(),
+                detail: "git status".into(),
             }
         );
         let step = event_to_progress(&ObserverEvent::ToolCall {

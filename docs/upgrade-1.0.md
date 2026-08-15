@@ -24,6 +24,8 @@ curl -sS http://127.0.0.1:3000/health | jq '{version,status}'
 cd /path/to/velaclaw
 git fetch origin && git checkout main && git pull --ff-only origin main
 # Optional: checkout the release tag after it is cut, e.g. git checkout v1.0.3
+# Embed current Web Chat: ui-chat/dist is gitignored; skip this and /chat stays stale.
+(cd ui-chat && npm ci && npm run build)
 cargo build --release --features ai-protocol
 install -m 755 target/release/velaclaw ~/.local/bin/velaclaw   # or your install path
 

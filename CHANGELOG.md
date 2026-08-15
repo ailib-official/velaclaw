@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Web step expand** (VL-UX-STEP-002 follow-up): replace the in-flight `run` status with the result step so captions are not duplicated; show an explicit **expand** control. Local trial must rebuild `ui-chat` (`npm run build`) before `cargo build --release`, otherwise `/chat` embeds a stale SPA.
+
 ## [1.0.3] - 2026-08-15
 
 ### Changed

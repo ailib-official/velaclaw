@@ -714,7 +714,10 @@
               {:else if msg.role === "step" && msg.expand}
                 <div class="body">
                   <details>
-                    <summary>{msg.content}</summary>
+                    <summary>
+                      <span class="step-cap">{msg.content}</span>
+                      <span class="step-more">expand</span>
+                    </summary>
                     <pre class="step-expand">{msg.expand}</pre>
                   </details>
                 </div>
@@ -1362,7 +1365,18 @@
   }
   article.step details summary {
     cursor: pointer;
-    list-style-position: inside;
+    display: flex;
+    align-items: baseline;
+    gap: 0.55rem;
+    list-style: disclosure-closed;
+  }
+  article.step details[open] summary {
+    list-style: disclosure-open;
+  }
+  article.step .step-more {
+    color: #64748b;
+    font-size: 0.75rem;
+    text-transform: lowercase;
   }
   article.step pre.step-expand {
     margin: 0.45rem 0 0;

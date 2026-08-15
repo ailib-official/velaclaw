@@ -224,5 +224,11 @@ export function applyStepFrame(
   if (payload.expand) {
     msg.expand = payload.expand;
   }
-  return [...messages, msg];
+  const out = [...messages];
+  // In-flight "run …" status is the same step; do not keep both lines.
+  if (out[out.length - 1]?.role === "status") {
+    out.pop();
+  }
+  out.push(msg);
+  return out;
 }

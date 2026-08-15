@@ -62,9 +62,9 @@ describe("velaClaw notice helpers", () => {
 describe("progress frames", () => {
   it("replaces last status line with caption text", () => {
     const a = applyStatusFrame([{ role: "user", content: "hi" }], "model", "deepseek/x");
-    const b = applyStatusFrame(a, "run", "run git status");
+    const b = applyStatusFrame(a, "run", "git status");
     expect(b.filter((m) => m.role === "status")).toHaveLength(1);
-    expect(b[b.length - 1].content).toBe("run git status");
+    expect(b[b.length - 1].content).toBe("git status");
   });
 
   it("appends step with ok flag using caption only", () => {
@@ -81,6 +81,18 @@ describe("progress frames", () => {
       expand: "On branch main",
     });
     expect(next[1].content).not.toContain("On branch main");
+  });
+
+  it("step replaces trailing in-flight status", () => {
+    const withStatus = applyStatusFrame([{ role: "user", content: "hi" }], "run", "ls workspace");
+    const next = applyStepFrame(withStatus, {
+      tool: "shell",
+      ok: true,
+      summary: "ls workspace",
+      expand: "file.txt\n",
+    });
+    expect(next.map((m) => m.role)).toEqual(["user", "step"]);
+    expect(next[1].expand).toBe("file.txt\n");
   });
 
   it("outbound history drops status and step", () => {

@@ -210,7 +210,7 @@ pub(crate) async fn run_tool_call_loop(
 
         let (
             response_text,
-            parsed_text,
+            mut parsed_text,
             mut tool_calls,
             mut assistant_history_content,
             mut native_tool_calls,
@@ -355,11 +355,58 @@ pub(crate) async fn run_tool_call_loop(
             }
         };
 
-        let display_text = if parsed_text.is_empty() {
+        let mut display_text = if parsed_text.is_empty() {
             response_text.clone()
         } else {
             parsed_text.clone()
         };
+        let mut unregistered_ir = 0usize;
+
+        // VL-TTC-015: after envelopes miss, decode line-isolated {name,arguments} IR.
+        if tool_calls.is_empty() {
+            let allow: std::collections::HashMap<String, String> = tools_registry
+                .iter()
+                .map(|t| (t.name().to_ascii_lowercase(), t.name().to_string()))
+                .collect();
+            let decoded = velaclaw_agent_runtime::decode_unwrapped_ir(&response_text, &allow);
+            unregistered_ir = decoded.unknown_isolated;
+            if !decoded.calls.is_empty() {
+                tracing::info!(
+                    target: "velaclaw::agent",
+                    calls = decoded.calls.len(),
+                    "tool_decode: unwrapped IR (no envelope)"
+                );
+                tool_calls = decoded
+                    .calls
+                    .into_iter()
+                    .map(|c| ParsedToolCall {
+                        name: c.name,
+                        arguments: c.arguments,
+                    })
+                    .collect();
+                display_text = decoded.remaining;
+                parsed_text = display_text.clone();
+                let synthetic: Vec<ToolCall> = tool_calls
+                    .iter()
+                    .enumerate()
+                    .map(|(i, c)| ToolCall {
+                        id: format!("unwrapped_tool_{i}"),
+                        name: c.name.clone(),
+                        arguments: c.arguments.to_string(),
+                    })
+                    .collect();
+                assistant_history_content = if text_tool_result_history {
+                    build_assistant_history_with_tool_calls(display_text.as_str(), &synthetic)
+                } else {
+                    build_native_assistant_history(display_text.as_str(), &synthetic)
+                };
+                native_tool_calls = synthetic;
+            } else if unregistered_ir > 0 {
+                // Carrier stripped; turn continues without executing unknown tools.
+                display_text = decoded.remaining;
+                parsed_text = display_text.clone();
+            }
+        }
 
         if tool_calls.is_empty()
             && velaclaw_agent_runtime::needs_tool_format_correction(&response_text, 0)
@@ -456,33 +503,14 @@ pub(crate) async fn run_tool_call_loop(
                     "tool_format_repair_exhausted: stripping markup after IR extract miss"
                 );
             }
-            // No tool calls — this is the final response.
-            // If a streaming sender is provided, relay the text in small chunks
-            // so the channel can progressively update the draft message.
-            if let Some(ref tx) = on_delta {
-                // Split on whitespace boundaries, accumulating chunks of at least
-                // STREAM_CHUNK_MIN_CHARS characters for progressive draft updates.
-                let mut chunk = String::new();
-                for word in display_text.split_inclusive(char::is_whitespace) {
-                    if cancellation_token
-                        .as_ref()
-                        .is_some_and(CancellationToken::is_cancelled)
-                    {
-                        return Err(ToolLoopCancelled.into());
-                    }
-                    chunk.push_str(word);
-                    if chunk.len() >= STREAM_CHUNK_MIN_CHARS
-                        && tx.send(std::mem::take(&mut chunk)).await.is_err()
-                    {
-                        break; // receiver dropped
-                    }
-                }
-                if !chunk.is_empty() {
-                    let _ = tx.send(chunk).await;
-                }
-            }
-            history.push(ChatMessage::assistant(response_text.clone()));
+            let known: std::collections::HashSet<String> = tools_registry
+                .iter()
+                .map(|t| t.name().to_ascii_lowercase())
+                .collect();
+            // Sanitize before streaming so CLI/Web never paint the carrier (GOV-007 shared path).
             let mut final_text = crate::util::strip_tool_call_markup(&display_text);
+            final_text =
+                velaclaw_agent_runtime::strip_isolated_tool_json_artifacts(&final_text, &known);
             if strip_fail_closed {
                 let surface = soft_fail
                     .map(|c| c.surface)
@@ -510,12 +538,43 @@ pub(crate) async fn run_tool_call_loop(
                         surface,
                     );
                 }
+            } else if unregistered_ir > 0 {
+                final_text = velaclaw_agent_runtime::append_unregistered_ir_notice(&final_text);
             }
+            // Progressive draft: sanitized text only (no tool JSON / 入入 wrappers).
+            if let Some(ref tx) = on_delta {
+                let mut chunk = String::new();
+                for word in final_text.split_inclusive(char::is_whitespace) {
+                    if cancellation_token
+                        .as_ref()
+                        .is_some_and(CancellationToken::is_cancelled)
+                    {
+                        return Err(ToolLoopCancelled.into());
+                    }
+                    chunk.push_str(word);
+                    if chunk.len() >= STREAM_CHUNK_MIN_CHARS
+                        && tx.send(std::mem::take(&mut chunk)).await.is_err()
+                    {
+                        break;
+                    }
+                }
+                if !chunk.is_empty() {
+                    let _ = tx.send(chunk).await;
+                }
+            }
+            history.push(ChatMessage::assistant(response_text.clone()));
             return Ok(final_text);
         }
 
         // Print any text the LLM produced alongside tool calls (unless silent)
-        let visible_text = crate::util::strip_tool_call_markup(&display_text);
+        let known: std::collections::HashSet<String> = tools_registry
+            .iter()
+            .map(|t| t.name().to_ascii_lowercase())
+            .collect();
+        let visible_text = velaclaw_agent_runtime::strip_isolated_tool_json_artifacts(
+            &crate::util::strip_tool_call_markup(&display_text),
+            &known,
+        );
         if !silent && !visible_text.is_empty() {
             let rendered = render_opts.render(&visible_text);
             let prefixed = prefix_agent_lines(&rendered, render_opts.style);

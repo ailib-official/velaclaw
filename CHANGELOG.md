@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Unwrapped tool IR** (VL-TTC-015): Decode order is native `tool_calls` → envelope codec (XML/DSML/invoke) → line-isolated `{name, arguments}` on the **assistant** turn only. Same `run_tool_call_loop` for CLI/Web/Channel. Display strips carriers before streaming. Unregistered isolated IR is dropped with a continue notice (conversation does not abort).
+
 ### Fixed
 
 - **Web step expand** (VL-UX-STEP-002 follow-up): replace the in-flight `run` status with the result step so captions are not duplicated; show an explicit **expand** control. Local trial must rebuild `ui-chat` (`npm run build`) before `cargo build --release`, otherwise `/chat` embeds a stale SPA.

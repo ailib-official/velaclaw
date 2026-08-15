@@ -10,6 +10,7 @@ pub mod loop_parse;
 pub mod provider;
 pub mod telemetry;
 pub mod tool_format;
+pub mod tool_ir;
 pub mod tool_util;
 pub mod tools;
 
@@ -42,6 +43,11 @@ pub use tool_format::{
     repair_extract_system_prompt, tool_format_correction_message, tool_format_recovery_message,
     truncate_repair_blob, RepairedToolCall, SoftFailSurface, ToolFormatLadder,
     ToolFormatRecoveryStrategy,
+};
+pub use tool_ir::{
+    append_unregistered_ir_notice, decode_unwrapped_ir, is_line_isolated_json_segment,
+    is_tool_call_payload, is_tool_result_payload, sanitize_tool_json_value,
+    strip_isolated_tool_json_artifacts, UnwrappedIrDecode,
 };
 pub use tool_util::{normalize_tool_arguments, scrub_credentials};
 pub use tools::{Tool, ToolResult, ToolSpec};

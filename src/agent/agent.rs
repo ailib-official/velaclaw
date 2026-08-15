@@ -39,6 +39,7 @@ pub struct Agent {
     history: Vec<ConversationMessage>,
     classification_config: crate::config::QueryClassificationConfig,
     available_hints: Vec<String>,
+    peer_logical_ids: Vec<String>,
     security: PolicyHandle,
     gateway_approval: Option<(ApprovalManager, Arc<ApprovalHub>)>,
     /// Shared attach slot for `request_human_input` (same Arc as the tool).
@@ -84,6 +85,7 @@ pub struct AgentBuilder {
     auto_save: Option<bool>,
     classification_config: Option<crate::config::QueryClassificationConfig>,
     available_hints: Option<Vec<String>>,
+    peer_logical_ids: Option<Vec<String>>,
     security: Option<PolicyHandle>,
     human_input_attach: Option<HumanInputAttach>,
     #[cfg(feature = "ai-protocol")]
@@ -115,6 +117,7 @@ impl AgentBuilder {
             auto_save: None,
             classification_config: None,
             available_hints: None,
+            peer_logical_ids: None,
             security: None,
             human_input_attach: None,
             #[cfg(feature = "ai-protocol")]
@@ -222,6 +225,11 @@ impl AgentBuilder {
         self
     }
 
+    pub fn peer_logical_ids(mut self, peer_logical_ids: Vec<String>) -> Self {
+        self.peer_logical_ids = Some(peer_logical_ids);
+        self
+    }
+
     pub fn security(mut self, security: PolicyHandle) -> Self {
         self.security = Some(security);
         self
@@ -300,6 +308,7 @@ impl AgentBuilder {
             history: Vec::new(),
             classification_config: self.classification_config.unwrap_or_default(),
             available_hints: self.available_hints.unwrap_or_default(),
+            peer_logical_ids: self.peer_logical_ids.unwrap_or_default(),
             security: self
                 .security
                 .ok_or_else(|| anyhow::anyhow!("security is required"))?,
@@ -449,6 +458,7 @@ impl Agent {
             .workspace_dir(config.workspace_dir.clone())
             .classification_config(config.query_classification.clone())
             .available_hints(available_hints)
+            .peer_logical_ids(crate::agent::loop_::logical_ids_from_config(config))
             .identity_config(config.identity.clone())
             .skills(crate::skills::load_skills_with_config(
                 &config.workspace_dir,
@@ -703,6 +713,7 @@ impl Agent {
             #[cfg(feature = "ai-protocol")]
             host_decide: self.host_decide_host.as_ref(),
             surface: velaclaw_agent_runtime::SoftFailSurface::Web,
+            peer_logical_ids: &self.peer_logical_ids,
         };
 
         let render_opts = self.cli_render.unwrap_or(RenderOpts {
@@ -1134,6 +1145,96 @@ mod tests {
             msg,
             ConversationMessage::Chat(m) if m.role == "user" && m.content.contains("invalid format")
         )));
+    }
+
+    #[tokio::test]
+    async fn turn_peer_continues_after_repair_miss() {
+        let bad = "<tool_call>\nNOT_JSON\n</tool_call>";
+        let tool_xml = "<tool_call>\n{\"name\":\"echo\",\"arguments\":{}}\n</tool_call>";
+        let seen = Arc::new(Mutex::new(Vec::<String>::new()));
+        struct PeerMock {
+            responses: Mutex<Vec<crate::providers::ChatResponse>>,
+            seen: Arc<Mutex<Vec<String>>>,
+        }
+        #[async_trait]
+        impl Provider for PeerMock {
+            async fn chat_with_system(
+                &self,
+                _system_prompt: Option<&str>,
+                _message: &str,
+                _model: &str,
+                _temperature: f64,
+            ) -> Result<String> {
+                Ok("ok".into())
+            }
+            async fn chat(
+                &self,
+                _request: ChatRequest<'_>,
+                model: &str,
+                _temperature: f64,
+            ) -> Result<crate::providers::ChatResponse> {
+                self.seen.lock().push(model.to_string());
+                let mut guard = self.responses.lock();
+                if guard.is_empty() {
+                    return Ok(crate::providers::ChatResponse {
+                        text: Some("done".into()),
+                        tool_calls: vec![],
+                    });
+                }
+                Ok(guard.remove(0))
+            }
+        }
+
+        let provider = Box::new(PeerMock {
+            responses: Mutex::new(vec![
+                crate::providers::ChatResponse {
+                    text: Some(bad.into()),
+                    tool_calls: vec![],
+                },
+                crate::providers::ChatResponse {
+                    text: Some("[]".into()),
+                    tool_calls: vec![],
+                },
+                crate::providers::ChatResponse {
+                    text: Some(tool_xml.into()),
+                    tool_calls: vec![],
+                },
+                crate::providers::ChatResponse {
+                    text: Some("done".into()),
+                    tool_calls: vec![],
+                },
+            ]),
+            seen: Arc::clone(&seen),
+        });
+        let memory_cfg = crate::config::MemoryConfig {
+            backend: "none".into(),
+            ..crate::config::MemoryConfig::default()
+        };
+        let mem: Arc<dyn Memory> = Arc::from(
+            crate::memory::create_memory(&memory_cfg, std::path::Path::new("/tmp"), None)
+                .expect("memory"),
+        );
+        let observer: Arc<dyn Observer> = Arc::from(crate::observability::NoopObserver {});
+        let mut agent = Agent::builder()
+            .provider(provider)
+            .tools(vec![Box::new(MockTool)])
+            .memory(mem)
+            .observer(observer)
+            .tool_dispatcher(Box::new(XmlToolDispatcher::default()))
+            .workspace_dir(std::path::PathBuf::from("/tmp"))
+            .security(test_security())
+            .peer_logical_ids(vec!["peer/test-model".into()])
+            .build()
+            .expect("agent");
+
+        let response = agent.turn("hi").await.unwrap();
+        assert_eq!(response, "done");
+        let models = seen.lock().clone();
+        assert!(
+            models.iter().any(|m| m == "peer/test-model"),
+            "expected peer hop, saw {models:?}"
+        );
+        assert!(!response.contains("tool-format recovery exhausted"));
     }
 
     #[test]

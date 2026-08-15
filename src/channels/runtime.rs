@@ -139,6 +139,7 @@ pub(crate) struct ChannelRuntimeContext {
     pub(crate) observer: Arc<dyn Observer>,
     pub(crate) system_prompt: Arc<String>,
     pub(crate) model: Arc<String>,
+    pub(crate) peer_logical_ids: Arc<Vec<String>>,
     pub(crate) temperature: f64,
     pub(crate) auto_save_memory: bool,
     pub(crate) max_tool_iterations: usize,

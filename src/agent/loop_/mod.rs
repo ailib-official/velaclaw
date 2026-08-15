@@ -167,8 +167,8 @@ fn build_hardware_context(
 
 pub(crate) mod tool_loop;
 pub(crate) use tool_loop::{
-    agent_turn, append_execution_policy_to_prompt, append_text_tool_prompt, resolve_cli_turn_model,
-    run_tool_call_loop, SoftFailLoopCtx,
+    agent_turn, append_execution_policy_to_prompt, append_text_tool_prompt,
+    logical_ids_from_config, resolve_cli_turn_model, run_tool_call_loop, SoftFailLoopCtx,
 };
 pub async fn run(
     mut config: Config,
@@ -553,6 +553,7 @@ pub async fn run(
                 #[cfg(feature = "ai-protocol")]
                 host_decide: None,
                 surface: velaclaw_agent_runtime::SoftFailSurface::Cli,
+                peer_logical_ids: &[],
             }),
             None,
         )
@@ -800,6 +801,7 @@ pub async fn run(
                     #[cfg(feature = "ai-protocol")]
                     host_decide: None,
                     surface: velaclaw_agent_runtime::SoftFailSurface::Cli,
+                    peer_logical_ids: &[],
                 }),
                 None,
             )

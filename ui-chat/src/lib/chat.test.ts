@@ -72,8 +72,15 @@ describe("progress frames", () => {
       tool: "shell",
       ok: true,
       summary: "git status",
+      expand: "On branch main",
     });
-    expect(next[1]).toEqual({ role: "step", content: "git status", stepOk: true });
+    expect(next[1]).toEqual({
+      role: "step",
+      content: "git status",
+      stepOk: true,
+      expand: "On branch main",
+    });
+    expect(next[1].content).not.toContain("On branch main");
   });
 
   it("outbound history drops status and step", () => {

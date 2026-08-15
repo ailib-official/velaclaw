@@ -147,6 +147,7 @@ mod tests {
             duration: Duration::from_millis(10),
             success: false,
             summary: None,
+            detail: None,
         });
         obs.record_event(&ObserverEvent::ChannelMessage {
             channel: "telegram".into(),

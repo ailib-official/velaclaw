@@ -57,6 +57,7 @@ mod tests {
             duration: Duration::from_secs(1),
             success: true,
             summary: None,
+            detail: None,
         });
         obs.record_event(&ObserverEvent::ChannelMessage {
             channel: "cli".into(),

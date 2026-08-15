@@ -9,6 +9,7 @@ Last verified: **July 9, 2026** (VL-CLI-RENDER-001..004).
 - Renders common Markdown (headings, emphasis, lists, tables, fenced code, links) for TTY sessions
 - Computes display width with `unicode-width` so CJK/emoji alignment stays correct
 - Folds long tool/code blocks in interactive REPL and offers `/expand <id>`
+  (VL-UX-STEP-002: step traces stay as captions; `/expand` shows scrubbed tool output)
 - Stays pipe/CI friendly: non-TTY and `NO_COLOR` strip ANSI; box-drawing characters remain
 
 IM channels (Telegram/Discord/…) are unchanged — they keep platform-native formatting.

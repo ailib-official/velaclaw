@@ -437,12 +437,14 @@ mod tests {
             duration: Duration::from_millis(10),
             success: true,
             summary: None,
+            detail: None,
         });
         obs.record_event(&ObserverEvent::ToolCall {
             tool: "file_read".into(),
             duration: Duration::from_millis(5),
             success: false,
             summary: None,
+            detail: None,
         });
         obs.record_event(&ObserverEvent::TurnComplete);
         obs.record_event(&ObserverEvent::ChannelMessage {

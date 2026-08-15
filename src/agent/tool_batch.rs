@@ -126,33 +126,36 @@ async fn execute_one_tool(
 
     match tool_result {
         Ok(r) => {
+            let output = if r.success {
+                scrub_credentials(&r.output)
+            } else {
+                format!("Error: {}", r.error.unwrap_or_else(|| r.output))
+            };
+            let expand = crate::agent::turn_progress::progress_expand_body(&output);
             observer.record_event(&ObserverEvent::ToolCall {
                 tool: call_name.to_string(),
                 duration: start.elapsed(),
                 success: r.success,
                 summary: Some(caption.clone()),
+                detail: expand,
             });
-            if r.success {
-                ToolBatchResult {
-                    output: scrub_credentials(&r.output),
-                    success: true,
-                }
-            } else {
-                ToolBatchResult {
-                    output: format!("Error: {}", r.error.unwrap_or_else(|| r.output)),
-                    success: false,
-                }
+            ToolBatchResult {
+                output,
+                success: r.success,
             }
         }
         Err(e) => {
+            let output = format!("Error executing {call_name}: {e}");
+            let expand = crate::agent::turn_progress::progress_expand_body(&output);
             observer.record_event(&ObserverEvent::ToolCall {
                 tool: call_name.to_string(),
                 duration: start.elapsed(),
                 success: false,
                 summary: Some(caption),
+                detail: expand,
             });
             ToolBatchResult {
-                output: format!("Error executing {call_name}: {e}"),
+                output,
                 success: false,
             }
         }

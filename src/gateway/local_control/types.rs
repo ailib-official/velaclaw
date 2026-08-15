@@ -126,6 +126,8 @@ pub enum WsServerMessage {
         tool: String,
         ok: bool,
         summary: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        expand: Option<String>,
     },
     /// User cancelled the in-flight turn.
     Cancelled {
@@ -187,10 +189,12 @@ mod tests {
             tool: "shell".into(),
             ok: true,
             summary: "ok".into(),
+            expand: Some("On branch main".into()),
         };
         let json = serde_json::to_string(&step).expect("serialize");
         assert!(json.contains(r#""type":"step""#));
         assert!(json.contains(r#""tool":"shell""#));
+        assert!(json.contains(r#""expand":"On branch main""#));
     }
 
     #[test]

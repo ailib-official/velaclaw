@@ -48,11 +48,13 @@ fn progress_frame(progress: TurnProgress) -> WsServerMessage {
             tool,
             ok,
             summary,
+            expand,
         } => WsServerMessage::Step {
             kind,
             tool,
             ok,
             summary,
+            expand,
         },
     }
 }

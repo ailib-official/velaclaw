@@ -711,6 +711,13 @@
               <div class="role">{msg.role}</div>
               {#if msg.role === "assistant"}
                 <div class="body md">{@html renderMarkdown(msg.content)}</div>
+              {:else if msg.role === "step" && msg.expand}
+                <div class="body">
+                  <details>
+                    <summary>{msg.content}</summary>
+                    <pre class="step-expand">{msg.expand}</pre>
+                  </details>
+                </div>
               {:else}
                 <div class="body">{msg.content}</div>
               {/if}
@@ -1352,6 +1359,16 @@
   }
   article.step-fail .body {
     color: #fda4af;
+  }
+  article.step details summary {
+    cursor: pointer;
+    list-style-position: inside;
+  }
+  article.step pre.step-expand {
+    margin: 0.45rem 0 0;
+    white-space: pre-wrap;
+    color: #cbd5e1;
+    font-size: 0.78rem;
   }
   button.stop {
     background: #be123c;

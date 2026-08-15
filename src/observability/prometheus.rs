@@ -268,12 +268,14 @@ mod tests {
             duration: Duration::from_millis(10),
             success: true,
             summary: None,
+            detail: None,
         });
         obs.record_event(&ObserverEvent::ToolCall {
             tool: "file_read".into(),
             duration: Duration::from_millis(5),
             success: false,
             summary: None,
+            detail: None,
         });
         obs.record_event(&ObserverEvent::ChannelMessage {
             channel: "telegram".into(),
@@ -308,6 +310,7 @@ mod tests {
             duration: Duration::from_millis(100),
             success: true,
             summary: None,
+            detail: None,
         });
         obs.record_event(&ObserverEvent::HeartbeatTick);
         obs.record_metric(&ObserverMetric::RequestLatency(Duration::from_millis(250)));
@@ -340,18 +343,21 @@ mod tests {
             duration: Duration::from_millis(10),
             success: true,
             summary: None,
+            detail: None,
         });
         obs.record_event(&ObserverEvent::ToolCall {
             tool: "shell".into(),
             duration: Duration::from_millis(10),
             success: true,
             summary: None,
+            detail: None,
         });
         obs.record_event(&ObserverEvent::ToolCall {
             tool: "shell".into(),
             duration: Duration::from_millis(10),
             success: false,
             summary: None,
+            detail: None,
         });
 
         let output = obs.encode();

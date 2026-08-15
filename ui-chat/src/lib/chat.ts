@@ -4,6 +4,8 @@ export interface ChatMessage {
   role: ChatRole;
   content: string;
   stepOk?: boolean;
+  /** Scrubbed tool output; shown only when the user expands a step. */
+  expand?: string;
 }
 
 /** Marker emitted by ORCH-HOST-004 soft-fail / quota notices (do not re-classify in UI). */
@@ -54,6 +56,7 @@ export interface WsServerFrame {
   tool?: string;
   ok?: boolean;
   summary?: string;
+  expand?: string;
 }
 
 export interface ApprovalRequiredPayload {
@@ -82,7 +85,13 @@ export interface StreamChatOptions {
   onApprovalRequired?: (payload: ApprovalRequiredPayload) => void;
   onInputRequired?: (payload: HumanInputRequiredPayload) => void;
   onStatus?: (phase: string, detail?: string) => void;
-  onStep?: (payload: { kind: string; tool: string; ok: boolean; summary: string }) => void;
+  onStep?: (payload: {
+    kind: string;
+    tool: string;
+    ok: boolean;
+    summary: string;
+    expand?: string;
+  }) => void;
   onCancelled?: (message?: string) => void;
 }
 
@@ -128,6 +137,7 @@ export function streamChat(opts: StreamChatOptions): () => void {
         tool: frame.tool,
         ok: frame.ok !== false,
         summary: frame.summary ?? "",
+        expand: frame.expand,
       });
     } else if (frame.type === "cancelled") {
       opts.onCancelled?.(frame.message);
@@ -207,8 +217,12 @@ export function applyStatusFrame(messages: ChatMessage[], phase: string, detail?
 
 export function applyStepFrame(
   messages: ChatMessage[],
-  payload: { tool: string; ok: boolean; summary: string },
+  payload: { tool: string; ok: boolean; summary: string; expand?: string },
 ): ChatMessage[] {
   const content = payload.summary || payload.tool;
-  return [...messages, { role: "step", content, stepOk: payload.ok }];
+  const msg: ChatMessage = { role: "step", content, stepOk: payload.ok };
+  if (payload.expand) {
+    msg.expand = payload.expand;
+  }
+  return [...messages, msg];
 }

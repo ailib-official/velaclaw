@@ -50,6 +50,8 @@ pub enum ObserverEvent {
         success: bool,
         /// Semantic caption for UX step traces (never secrets, never stdout).
         summary: Option<String>,
+        /// Scrubbed tool output for on-demand expand (VL-UX-STEP-002). Not the default step line.
+        detail: Option<String>,
     },
     /// The agent produced a final answer for the current user message.
     TurnComplete,
@@ -193,6 +195,7 @@ mod tests {
             duration: Duration::from_millis(10),
             success: true,
             summary: None,
+            detail: None,
         };
         let metric = ObserverMetric::RequestLatency(Duration::from_millis(8));
 

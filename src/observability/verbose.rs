@@ -99,6 +99,7 @@ mod tests {
             duration: Duration::from_millis(2),
             success: true,
             summary: None,
+            detail: None,
         });
         obs.record_event(&ObserverEvent::TurnComplete);
     }

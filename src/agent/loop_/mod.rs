@@ -1,4 +1,5 @@
 use crate::agent::tool_batch::{self, ParsedToolCall};
+use crate::agent::turn_progress::{get_fold_payload, FoldCache};
 use crate::approval::{ApprovalManager, ChannelApprovalSession};
 use crate::cli_render::{format_user_prompt, prefix_agent_lines, RenderOpts, RenderStyle};
 use crate::config::Config;
@@ -24,17 +25,6 @@ use velaclaw_agent_runtime::loop_parse::{
 pub(crate) use velaclaw_agent_runtime::loop_parse::{
     build_tool_instructions, is_tool_loop_cancelled,
 };
-
-/// Session-scoped store for folded CLI payloads (`/expand <id>`).
-type FoldCache = Arc<Mutex<HashMap<u64, String>>>;
-
-/// Allocate the next fold id and store `payload` for `/expand`.
-fn store_fold_payload(cache: &FoldCache, payload: &str) -> u64 {
-    let mut guard = cache.lock().unwrap_or_else(|e| e.into_inner());
-    let id = guard.len() as u64 + 1;
-    guard.insert(id, payload.to_string());
-    id
-}
 
 /// Minimum characters per chunk when relaying LLM text to a streaming draft.
 const STREAM_CHUNK_MIN_CHARS: usize = 80;
@@ -633,10 +623,7 @@ pub async fn run(
                     }
                     match id_str.parse::<u64>() {
                         Ok(id) => {
-                            let payload = {
-                                let guard = fold_cache.lock().unwrap_or_else(|e| e.into_inner());
-                                guard.get(&id).cloned()
-                            };
+                            let payload = get_fold_payload(&fold_cache, id);
                             match payload {
                                 Some(text) => {
                                     // Replay raw stored payload without re-rendering.
@@ -781,8 +768,10 @@ pub async fn run(
 
             let turn_cancel = CancellationToken::new();
             let esc_watch = crate::agent::double_esc::spawn_double_esc_watcher(turn_cancel.clone());
-            let progress_obs =
-                crate::agent::turn_progress::ProgressObserver::cli(Arc::clone(&observer));
+            let progress_obs = crate::agent::turn_progress::ProgressObserver::cli_with_fold(
+                Arc::clone(&observer),
+                Arc::clone(&fold_cache),
+            );
 
             let response = match run_tool_call_loop(
                 provider.as_ref(),

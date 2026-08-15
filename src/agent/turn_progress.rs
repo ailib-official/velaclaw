@@ -1,15 +1,34 @@
-//! Shared turn progress mapping for CLI and Web (VL-UX-STEP-001 / GOV-007).
-//! CLI 与 Web 共用 caption：同一函数，禁止把 stdout/完整脚本当步骤提示。
+//! Shared turn progress mapping for CLI and Web (VL-UX-STEP-001/002 / GOV-007).
+//! CLI 与 Web 共用 caption；展开正文同一 `progress_expand_body`，默认不刷 stdout。
 
 use crate::observability::traits::ObserverMetric;
 use crate::observability::{Observer, ObserverEvent};
 use serde_json::Value;
 use std::any::Any;
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc::Sender;
 use velaclaw_agent_runtime::scrub_credentials;
 
 const CAPTION_MAX_CHARS: usize = 80;
+const EXPAND_MAX_CHARS: usize = 4000;
+
+/// Session-scoped store for folded CLI payloads (`/expand <id>`).
+pub type FoldCache = Arc<Mutex<HashMap<u64, String>>>;
+
+/// Allocate the next fold id and store `payload` for `/expand`.
+pub fn store_fold_payload(cache: &FoldCache, payload: &str) -> u64 {
+    let mut guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+    let id = guard.len() as u64 + 1;
+    guard.insert(id, payload.to_string());
+    id
+}
+
+/// Look up a previously stored expand payload.
+pub fn get_fold_payload(cache: &FoldCache, id: u64) -> Option<String> {
+    let guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+    guard.get(&id).cloned()
+}
 
 /// User-facing progress during a tool-loop turn (not the final assistant reply).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,6 +42,8 @@ pub enum TurnProgress {
         tool: String,
         ok: bool,
         summary: String,
+        /// Scrubbed output for on-demand expand; omitted when empty.
+        expand: Option<String>,
     },
 }
 
@@ -92,6 +113,25 @@ pub fn progress_caption(tool: &str, args: &Value) -> String {
         other => default_caption(other, args),
     };
     truncate_chars(&scrub_credentials(&raw), CAPTION_MAX_CHARS)
+}
+
+/// Scrubbed tool output for on-demand expand. Same string CLI and Web show.
+#[must_use]
+pub fn progress_expand_body(raw: &str) -> Option<String> {
+    let scrubbed = scrub_credentials(raw);
+    if scrubbed.trim().is_empty() {
+        return None;
+    }
+    Some(truncate_expand(&scrubbed, EXPAND_MAX_CHARS))
+}
+
+fn truncate_expand(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    let mut out: String = text.chars().take(max.saturating_sub(1)).collect();
+    out.push('…');
+    out
 }
 
 fn first_str<'a>(args: &'a Value, keys: &[&str]) -> Option<&'a str> {
@@ -212,6 +252,7 @@ pub fn event_to_progress(event: &ObserverEvent) -> Option<TurnProgress> {
             tool,
             success,
             summary,
+            detail,
             ..
         } => {
             let cap = summary
@@ -223,6 +264,7 @@ pub fn event_to_progress(event: &ObserverEvent) -> Option<TurnProgress> {
                 tool: tool.clone(),
                 ok: *success,
                 summary: cap.to_string(),
+                expand: detail.clone(),
             })
         }
         _ => None,
@@ -234,6 +276,7 @@ pub struct ProgressObserver {
     inner: Arc<dyn Observer>,
     tx: Option<Sender<TurnProgress>>,
     print_cli: bool,
+    fold_cache: Option<FoldCache>,
 }
 
 impl ProgressObserver {
@@ -242,6 +285,7 @@ impl ProgressObserver {
             inner,
             tx: Some(tx),
             print_cli: false,
+            fold_cache: None,
         }
     }
 
@@ -250,6 +294,16 @@ impl ProgressObserver {
             inner,
             tx: None,
             print_cli: true,
+            fold_cache: None,
+        }
+    }
+
+    pub fn cli_with_fold(inner: Arc<dyn Observer>, fold_cache: FoldCache) -> Self {
+        Self {
+            inner,
+            tx: None,
+            print_cli: true,
+            fold_cache: Some(fold_cache),
         }
     }
 }
@@ -262,7 +316,7 @@ impl Observer for ProgressObserver {
                 let _ = tx.try_send(progress.clone());
             }
             if self.print_cli {
-                print_cli_progress(&progress);
+                print_cli_progress(&progress, self.fold_cache.as_ref());
             }
         }
     }
@@ -285,15 +339,27 @@ impl Observer for ProgressObserver {
 }
 
 /// Dim status / distinct step lines (not Markdown assistant output).
-/// Renders the same strings Web shows — no second captioner.
-pub fn print_cli_progress(progress: &TurnProgress) {
+/// Caption is the default line; expand body is stored for `/expand` when a cache is present.
+pub fn print_cli_progress(progress: &TurnProgress, fold_cache: Option<&FoldCache>) {
     match progress {
         TurnProgress::Status { detail, .. } => {
             eprintln!("{}", console::style(format!("· {detail}")).dim());
         }
-        TurnProgress::Step { ok, summary, .. } => {
+        TurnProgress::Step {
+            ok,
+            summary,
+            expand,
+            ..
+        } => {
             let tag = if *ok { "ok" } else { "fail" };
-            eprintln!("{}", console::style(format!("  [{tag}] {summary}")).cyan());
+            let line = match (expand.as_deref(), fold_cache) {
+                (Some(body), Some(cache)) => {
+                    let id = store_fold_payload(cache, body);
+                    format!("  [{tag}] {summary}  (/expand {id})")
+                }
+                _ => format!("  [{tag}] {summary}"),
+            };
+            eprintln!("{}", console::style(line).cyan());
         }
     }
 }
@@ -401,14 +467,32 @@ mod tests {
             duration: Duration::from_millis(1),
             success: true,
             summary: Some("git status".into()),
+            detail: Some("On branch main".into()),
         })
         .expect("step");
         match step {
-            TurnProgress::Step { summary, ok, .. } => {
+            TurnProgress::Step {
+                summary,
+                ok,
+                expand,
+                ..
+            } => {
                 assert_eq!(summary, "git status");
                 assert!(ok);
+                assert_eq!(expand.as_deref(), Some("On branch main"));
             }
             TurnProgress::Status { .. } => panic!("expected step"),
         }
+    }
+
+    #[test]
+    fn expand_body_scrubs_and_caps() {
+        let out = progress_expand_body("api_key=sk-secretvalue123\nrest").expect("body");
+        assert!(!out.contains("sk-secretvalue123"));
+        let long = "a".repeat(5000);
+        let capped = progress_expand_body(&long).expect("long");
+        assert!(capped.chars().count() <= EXPAND_MAX_CHARS);
+        assert!(capped.ends_with('…'));
+        assert!(progress_expand_body("   ").is_none());
     }
 }

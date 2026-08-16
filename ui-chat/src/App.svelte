@@ -716,7 +716,7 @@
                   <details>
                     <summary>
                       <span class="step-cap">{msg.content}</span>
-                      <span class="step-more">expand</span>
+                      <span class="step-more" aria-hidden="true"></span>
                     </summary>
                     <pre class="step-expand">{msg.expand}</pre>
                   </details>
@@ -1377,6 +1377,12 @@
     color: #64748b;
     font-size: 0.75rem;
     text-transform: lowercase;
+  }
+  article.step .step-more::after {
+    content: "expand";
+  }
+  article.step details[open] .step-more::after {
+    content: "collapse";
   }
   article.step pre.step-expand {
     margin: 0.45rem 0 0;

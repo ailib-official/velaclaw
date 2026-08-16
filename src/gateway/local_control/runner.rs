@@ -10,7 +10,6 @@ use crate::protocol_registry::{
 };
 use crate::providers::ChatMessage;
 use anyhow::{anyhow, Context, Result};
-use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
 use tokio_util::sync::CancellationToken;
@@ -172,8 +171,12 @@ fn seed_prior_messages(agent: &mut Agent, messages: &[ChatMessageInput]) -> Resu
 }
 
 /// Append the latest user turn and assistant reply to a persisted session, if `session_id` is set.
+///
+/// After three user turns, runs one short LLM call to replace the provisional
+/// first-message title with a concise session label (best-effort; never fails
+/// the chat turn).
 pub async fn persist_chat_turn(
-    workspace_dir: &Path,
+    config: &Config,
     session_id: Option<&str>,
     req: &ChatApiRequest,
     assistant_content: &str,
@@ -183,7 +186,7 @@ pub async fn persist_chat_turn(
     };
 
     let user_message = extract_last_user_message(&req.messages)?;
-    let store = ChatSessionStore::new(workspace_dir);
+    let store = ChatSessionStore::new(&config.workspace_dir);
     let to_store = vec![
         ChatMessageInput {
             role: "user".into(),
@@ -194,9 +197,77 @@ pub async fn persist_chat_turn(
             content: assistant_content.to_string(),
         },
     ];
-    store
+    let append = store
         .append_messages(id, &to_store, req.model_id.as_deref())
+        .await?;
+
+    if append.needs_title_refine {
+        maybe_refine_session_title(config, req, &store, id).await;
+    }
+    Ok(())
+}
+
+const TITLE_SYSTEM: &str = "You name chat sessions. Reply with ONLY a concise title \
+(max ~40 characters). No quotes, no punctuation wrapper, no explanation.";
+
+async fn maybe_refine_session_title(
+    config: &Config,
+    req: &ChatApiRequest,
+    store: &ChatSessionStore,
+    session_id: &str,
+) {
+    let Some(session) = (match store.get(session_id).await {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!(error = %format!("{e:#}"), "title refine: load session failed");
+            let _ = store.mark_title_refined(session_id).await;
+            return;
+        }
+    }) else {
+        return;
+    };
+
+    let transcript = super::sessions::title_refine_transcript(
+        &session.messages,
+        super::sessions::TITLE_REFINE_AFTER_USER_TURNS,
+    );
+    if transcript.trim().is_empty() {
+        let _ = store.mark_title_refined(session_id).await;
+        return;
+    }
+
+    let effective = apply_chat_overrides(config.clone(), req);
+    let assembled = match crate::agent::assemble::assemble_runtime(
+        &effective,
+        crate::config::BootstrapOptions {
+            with_embedding_routes: false,
+        },
+    ) {
+        Ok(a) => a,
+        Err(e) => {
+            tracing::warn!(error = %format!("{e:#}"), "title refine: assemble failed");
+            let _ = store.mark_title_refined(session_id).await;
+            return;
+        }
+    };
+
+    let user_prompt =
+        format!("Summarize this conversation into a short session title:\n\n{transcript}");
+    match assembled
+        .provider
+        .chat_with_system(Some(TITLE_SYSTEM), &user_prompt, &assembled.model_name, 0.2)
         .await
+    {
+        Ok(raw) => {
+            if let Err(e) = store.set_refined_title(session_id, &raw).await {
+                tracing::warn!(error = %format!("{e:#}"), "title refine: save failed");
+            }
+        }
+        Err(e) => {
+            tracing::warn!(error = %format!("{e:#}"), "title refine: LLM failed");
+            let _ = store.mark_title_refined(session_id).await;
+        }
+    }
 }
 
 /// User-visible text for a failed Web/API chat turn.

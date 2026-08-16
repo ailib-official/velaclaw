@@ -239,13 +239,8 @@ async fn handle_ws_socket(socket: WebSocket, state: AppState) {
 
         match chat_result {
             Ok(resp) => {
-                if let Err(e) = persist_chat_turn(
-                    &config.workspace_dir,
-                    req.session_id.as_deref(),
-                    &req,
-                    &resp.content,
-                )
-                .await
+                if let Err(e) =
+                    persist_chat_turn(&config, req.session_id.as_deref(), &req, &resp.content).await
                 {
                     tracing::warn!("session persist failed: {e:#}");
                 }

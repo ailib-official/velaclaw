@@ -4,6 +4,7 @@ import {
   appendSystemNotice,
   applyStatusFrame,
   applyStepFrame,
+  clearStatusMessages,
   lastAssistantHasVelaClawNotice,
   looksLikeVelaClawNotice,
   outboundChatHistory,
@@ -27,6 +28,34 @@ describe("appendAssistantDelta", () => {
       "lo",
     );
     expect(next[1].content).toBe("Hello");
+  });
+
+  it("drops trailing status when assistant reply starts", () => {
+    const next = appendAssistantDelta(
+      [
+        { role: "user", content: "hi" },
+        { role: "status", content: "nvidia/nemotron-x" },
+      ],
+      "Hello",
+    );
+    expect(next).toEqual([
+      { role: "user", content: "hi" },
+      { role: "assistant", content: "Hello" },
+    ]);
+  });
+});
+
+describe("clearStatusMessages", () => {
+  it("removes status roles only", () => {
+    const next = clearStatusMessages([
+      { role: "user", content: "hi" },
+      { role: "status", content: "model/x" },
+      { role: "assistant", content: "ok" },
+    ]);
+    expect(next).toEqual([
+      { role: "user", content: "hi" },
+      { role: "assistant", content: "ok" },
+    ]);
   });
 });
 

@@ -5,6 +5,7 @@
     appendSystemNotice,
     applyStatusFrame,
     applyStepFrame,
+    clearStatusMessages,
     lastAssistantHasVelaClawNotice,
     looksLikeVelaClawNotice,
     outboundChatHistory,
@@ -538,7 +539,7 @@
       onCancelled: (msg) => {
         streaming = false;
         cancelStream = null;
-        messages = appendSystemNotice(messages, msg || "Stopped.");
+        messages = clearStatusMessages(appendSystemNotice(messages, msg || "Stopped."));
         scrollToBottom();
         pendingApprovals = [];
         pendingHumanInput = null;
@@ -547,6 +548,7 @@
       onDone: () => {
         streaming = false;
         cancelStream = null;
+        messages = clearStatusMessages(messages);
         scrollToBottom();
         loadSessions();
         if (lastAssistantHasVelaClawNotice(messages)) {
@@ -562,6 +564,7 @@
       onError: (msg) => {
         streaming = false;
         cancelStream = null;
+        messages = clearStatusMessages(messages);
         if (looksLikeVelaClawNotice(msg)) {
           surfaceSoftFailUx(msg);
         } else {

@@ -128,7 +128,9 @@ impl PromptSection for IdentitySection {
             "TOOLS.md",
             "IDENTITY.md",
             "USER.md",
-            "HEARTBEAT.md",
+            // HEARTBEAT.md is for PromptPhase::Heartbeat / the heartbeat engine only.
+            // Injecting it into interactive chat causes one-shot UX to be over-proposed
+            // as cron/session-log work.
             "BOOTSTRAP.md",
             "MEMORY.md",
         ] {

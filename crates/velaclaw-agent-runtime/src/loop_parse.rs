@@ -776,15 +776,9 @@ pub fn parse_tool_calls(response: &str) -> (String, Vec<ParsedToolCall>) {
         }
     }
 
-    // SECURITY: We do NOT fall back to extracting arbitrary JSON from the response
-    // here. That would enable prompt injection attacks where malicious content
-    // (e.g., in emails, files, or web pages) could include JSON that mimics a
-    // tool call. Tool calls MUST be explicitly wrapped in either:
-    // 1. OpenAI-style JSON with a "tool_calls" array
-    // 2. VelaClaw tool-call tags (<tool_call>, <toolcall>, <tool-call>)
-    // 3. Markdown code blocks with tool_call/toolcall/tool-call language
-    // 4. Explicit GLM line-based call formats (e.g. `shell/command>...`)
-    // This ensures only the LLM's intentional tool calls are executed.
+    // SECURITY: do not extract arbitrary JSON here (injection via email/file/web).
+    // VL-TTC-015: line-isolated {name,arguments} IR is decoded later in the host
+    // tool loop from this assistant turn only (registered names + isolation).
 
     // Remaining text after last tool call
     if !remaining.trim().is_empty() {

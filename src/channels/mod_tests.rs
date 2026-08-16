@@ -417,13 +417,23 @@ impl Provider for RawToolArtifactProvider {
 
     async fn chat_with_history(
         &self,
-        _messages: &[ChatMessage],
+        messages: &[ChatMessage],
         _model: &str,
         _temperature: f64,
     ) -> anyhow::Result<String> {
+        // VL-TTC-015: isolated {name,arguments} is executed. After tool results,
+        // return prose only so the loop terminates (do not re-emit IR every turn).
+        let saw_tool_results = messages.iter().any(|msg| {
+            msg.role == "user" && msg.content.contains("[Tool results]")
+                || msg.role == "tool"
+                || msg.content.contains("<tool_result")
+        });
+        if saw_tool_results {
+            return Ok("BTC is currently around $65,000 based on latest tool output.".to_string());
+        }
         Ok(r#"{"name":"mock_price","parameters":{"symbol":"BTC"}}
-{"result":{"symbol":"BTC","price_usd":65000}}
-BTC is currently around $65,000 based on latest tool output."#
+入入
+出出"#
             .to_string())
     }
 }
@@ -690,7 +700,7 @@ async fn process_channel_message_executes_tool_calls_instead_of_sending_raw_json
 }
 
 #[tokio::test]
-async fn process_channel_message_strips_unexecuted_tool_json_artifacts_from_reply() {
+async fn process_channel_message_executes_unwrapped_tool_ir_and_hides_carrier() {
     let channel_impl = Arc::new(RecordingChannel::default());
     let channel: Arc<dyn Channel> = channel_impl.clone();
 
@@ -758,7 +768,8 @@ async fn process_channel_message_strips_unexecuted_tool_json_artifacts_from_repl
     assert!(sent_messages[0].starts_with("chat-raw:"));
     assert!(sent_messages[0].contains("BTC is currently around"));
     assert!(!sent_messages[0].contains("\"name\":\"mock_price\""));
-    assert!(!sent_messages[0].contains("\"result\""));
+    assert!(!sent_messages[0].contains("入入"));
+    assert!(!sent_messages[0].contains("出出"));
 }
 
 #[tokio::test]

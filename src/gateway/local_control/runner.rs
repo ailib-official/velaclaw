@@ -199,6 +199,34 @@ pub async fn persist_chat_turn(
         .await
 }
 
+/// User-visible text for a failed Web/API chat turn.
+///
+/// `anyhow::Error::to_string()` only prints the outermost `.context()`, which
+/// hid quota/limit notices behind `"agent turn failed"`.
+pub fn user_facing_turn_error(err: &anyhow::Error, model: Option<&str>) -> String {
+    for cause in err.chain() {
+        let s = cause.to_string();
+        if s.contains("VelaClaw notice:") {
+            return s;
+        }
+    }
+    let full = format!("{err:#}");
+    let sanitized = crate::providers::sanitize_api_error(&full);
+    if velaclaw_agent_runtime::looks_like_provider_limit(&full) {
+        let model = model
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("the selected model");
+        velaclaw_agent_runtime::provider_limit_user_message(
+            &sanitized,
+            model,
+            velaclaw_agent_runtime::SoftFailSurface::Web,
+        )
+    } else {
+        sanitized
+    }
+}
+
 /// Split assistant text into stream-sized chunks for WebSocket `delta` frames.
 /// Phase 1 emits post-turn chunks; token-level streaming arrives with EVO-001.
 pub fn chunk_text_for_stream(text: &str, chunk_size: usize) -> Vec<String> {
@@ -392,5 +420,29 @@ metadata:
             .expect("user");
         assert_eq!(last_user_idx, 2);
         assert_eq!(messages[..last_user_idx].len(), 2);
+    }
+
+    #[test]
+    fn user_facing_turn_error_unwraps_quota_notice_from_context() {
+        let err = anyhow::anyhow!(
+            "VelaClaw notice: provider limit or quota failure for model `deepseek/deepseek-v4-pro`."
+        )
+        .context("agent turn failed");
+        let msg = user_facing_turn_error(&err, Some("deepseek/deepseek-v4-pro"));
+        assert!(msg.contains("VelaClaw notice:"));
+        assert!(!msg.starts_with("agent turn failed"));
+        assert_eq!(err.to_string(), "agent turn failed");
+    }
+
+    #[test]
+    fn user_facing_turn_error_maps_raw_402_quota() {
+        let err = anyhow::anyhow!(
+            "Protocol provider error: Remote error: HTTP 402 (insufficient_quota): Insufficient Balance"
+        )
+        .context("agent turn failed");
+        let msg = user_facing_turn_error(&err, Some("deepseek/deepseek-v4-pro"));
+        assert!(msg.contains("VelaClaw notice:"));
+        assert!(msg.contains("deepseek/deepseek-v4-pro"));
+        assert!(msg.contains("model picker"));
     }
 }

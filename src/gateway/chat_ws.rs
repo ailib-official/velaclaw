@@ -2,7 +2,9 @@
 //! GET `/ws` — 经 agent 循环的 WebSocket 流式对话（VL-UI-002）。
 
 use super::local_control::auth::{check_pairing_auth, unauthorized_response};
-use super::local_control::runner::{chunk_text_for_stream, persist_chat_turn, run_agent_chat};
+use super::local_control::runner::{
+    chunk_text_for_stream, persist_chat_turn, run_agent_chat, user_facing_turn_error,
+};
 use super::local_control::types::{ChatApiRequest, WsClientMessage, WsServerMessage};
 use super::AppState;
 use crate::agent::loop_::is_tool_loop_cancelled;
@@ -272,8 +274,9 @@ async fn handle_ws_socket(socket: WebSocket, state: AppState) {
                         break;
                     }
                 } else {
+                    tracing::warn!(error = %format!("{e:#}"), "websocket chat turn failed");
                     let frame = WsServerMessage::Error {
-                        message: e.to_string(),
+                        message: user_facing_turn_error(&e, req.model_id.as_deref()),
                     };
                     if send_frame(sink.clone(), &frame).await.is_err() {
                         break;

@@ -5,6 +5,7 @@
     appendSystemNotice,
     applyStatusFrame,
     applyStepFrame,
+    clearStatusMessages,
     lastAssistantHasVelaClawNotice,
     looksLikeVelaClawNotice,
     outboundChatHistory,
@@ -538,7 +539,7 @@
       onCancelled: (msg) => {
         streaming = false;
         cancelStream = null;
-        messages = appendSystemNotice(messages, msg || "Stopped.");
+        messages = clearStatusMessages(appendSystemNotice(messages, msg || "Stopped."));
         scrollToBottom();
         pendingApprovals = [];
         pendingHumanInput = null;
@@ -547,8 +548,11 @@
       onDone: () => {
         streaming = false;
         cancelStream = null;
+        messages = clearStatusMessages(messages);
         scrollToBottom();
-        loadSessions();
+        // Immediate refresh + deferred picks up async session-title refine.
+        void loadSessions();
+        window.setTimeout(() => void loadSessions(), 2500);
         if (lastAssistantHasVelaClawNotice(messages)) {
           showToast(
             "Model soft-fail notice in reply — consider switching model in the picker.",
@@ -562,6 +566,7 @@
       onError: (msg) => {
         streaming = false;
         cancelStream = null;
+        messages = clearStatusMessages(messages);
         if (looksLikeVelaClawNotice(msg)) {
           surfaceSoftFailUx(msg);
         } else {
@@ -716,7 +721,7 @@
                   <details>
                     <summary>
                       <span class="step-cap">{msg.content}</span>
-                      <span class="step-more">expand</span>
+                      <span class="step-more" aria-hidden="true"></span>
                     </summary>
                     <pre class="step-expand">{msg.expand}</pre>
                   </details>
@@ -1377,6 +1382,12 @@
     color: #64748b;
     font-size: 0.75rem;
     text-transform: lowercase;
+  }
+  article.step .step-more::after {
+    content: "expand";
+  }
+  article.step details[open] .step-more::after {
+    content: "collapse";
   }
   article.step pre.step-expand {
     margin: 0.45rem 0 0;

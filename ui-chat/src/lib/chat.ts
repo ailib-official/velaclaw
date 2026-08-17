@@ -189,6 +189,10 @@ export function streamChat(opts: StreamChatOptions): () => void {
 /** Pure reducer for tests — append streaming delta to assistant message. */
 export function appendAssistantDelta(messages: ChatMessage[], delta: string): ChatMessage[] {
   const out = [...messages];
+  // In-flight model/run status is ephemeral; drop it once the reply starts.
+  while (out.length > 0 && out[out.length - 1]?.role === "status") {
+    out.pop();
+  }
   const last = out[out.length - 1];
   if (last?.role === "assistant") {
     out[out.length - 1] = { role: "assistant", content: last.content + delta };
@@ -196,6 +200,11 @@ export function appendAssistantDelta(messages: ChatMessage[], delta: string): Ch
     out.push({ role: "assistant", content: delta });
   }
   return out;
+}
+
+/** Drop ephemeral status lines (e.g. after done / cancel). */
+export function clearStatusMessages(messages: ChatMessage[]): ChatMessage[] {
+  return messages.filter((m) => m.role !== "status");
 }
 
 /** History sent to the model: user + assistant only. */

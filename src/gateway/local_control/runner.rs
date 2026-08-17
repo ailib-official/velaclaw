@@ -10,7 +10,6 @@ use crate::protocol_registry::{
 };
 use crate::providers::ChatMessage;
 use anyhow::{anyhow, Context, Result};
-use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
 use tokio_util::sync::CancellationToken;
@@ -172,8 +171,12 @@ fn seed_prior_messages(agent: &mut Agent, messages: &[ChatMessageInput]) -> Resu
 }
 
 /// Append the latest user turn and assistant reply to a persisted session, if `session_id` is set.
+///
+/// After three user turns, schedules a **background** title completion (does not
+/// block the chat `done` frame). Model preference: local (ollama / llamacpp /
+/// lmstudio) → `nvidia/nemotron-mini-4b-instruct`.
 pub async fn persist_chat_turn(
-    workspace_dir: &Path,
+    config: &Config,
     session_id: Option<&str>,
     req: &ChatApiRequest,
     assistant_content: &str,
@@ -183,7 +186,7 @@ pub async fn persist_chat_turn(
     };
 
     let user_message = extract_last_user_message(&req.messages)?;
-    let store = ChatSessionStore::new(workspace_dir);
+    let store = ChatSessionStore::new(&config.workspace_dir);
     let to_store = vec![
         ChatMessageInput {
             role: "user".into(),
@@ -194,9 +197,164 @@ pub async fn persist_chat_turn(
             content: assistant_content.to_string(),
         },
     ];
-    store
+    let append = store
         .append_messages(id, &to_store, req.model_id.as_deref())
-        .await
+        .await?;
+
+    if append.needs_title_refine {
+        // Claim the one-shot refine slot before spawn so a later turn cannot double-fire.
+        if store.mark_title_refined(id).await.is_ok() {
+            let config = config.clone();
+            let session_id = id.to_string();
+            tokio::spawn(async move {
+                refine_session_title_background(config, session_id).await;
+            });
+        }
+    }
+    Ok(())
+}
+
+const TITLE_SYSTEM: &str = "You name chat sessions. Reply with ONLY a concise title \
+(max ~40 characters). No quotes, no punctuation wrapper, no explanation.";
+
+/// Smallest NVIDIA Nemotron chat model in the protocol catalog (title-task fallback).
+const TITLE_NEMOTRON_FALLBACK: &str = "nvidia/nemotron-mini-4b-instruct";
+
+fn is_local_title_provider(provider: &str) -> bool {
+    matches!(
+        provider.to_ascii_lowercase().as_str(),
+        "ollama" | "llamacpp" | "lmstudio"
+    )
+}
+
+fn tcp_open_quick(host_port: &str) -> bool {
+    use std::net::{TcpStream, ToSocketAddrs};
+    use std::time::Duration;
+    let Ok(mut addrs) = host_port.to_socket_addrs() else {
+        return false;
+    };
+    let Some(addr) = addrs.next() else {
+        return false;
+    };
+    TcpStream::connect_timeout(&addr, Duration::from_millis(150)).is_ok()
+}
+
+/// Strip optional `http(s)://` so `OLLAMA_HOST` can be probed over TCP.
+fn host_port_from_urlish(raw: &str) -> String {
+    let trimmed = raw.trim();
+    let without_scheme = trimmed
+        .strip_prefix("http://")
+        .or_else(|| trimmed.strip_prefix("https://"))
+        .unwrap_or(trimmed);
+    without_scheme
+        .split('/')
+        .next()
+        .unwrap_or(without_scheme)
+        .to_string()
+}
+
+/// Prefer a reachable local runtime; do not treat keyless providers as "present".
+fn detected_local_title_model() -> Option<String> {
+    let ollama_host = std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "127.0.0.1:11434".into());
+    if tcp_open_quick(&host_port_from_urlish(&ollama_host)) {
+        return Some("ollama/llama3.2".into());
+    }
+    // LM Studio default OpenAI-compatible port.
+    if tcp_open_quick("127.0.0.1:1234") {
+        return Some("lmstudio/local-model".into());
+    }
+    None
+}
+
+/// Ordered candidates: local (configured or detected) → smallest Nemotron.
+#[must_use]
+pub(crate) fn title_refine_model_candidates(config: &Config) -> Vec<String> {
+    let mut out = Vec::new();
+
+    let configured = crate::execution::logical_model_id_from_config(config);
+    let configured_provider = provider_id_from_logical(&configured);
+    if is_local_title_provider(configured_provider) {
+        out.push(configured);
+    } else if let Some(local) = detected_local_title_model() {
+        out.push(local);
+    }
+
+    if !out.iter().any(|m| m == TITLE_NEMOTRON_FALLBACK) {
+        out.push(TITLE_NEMOTRON_FALLBACK.to_string());
+    }
+    out
+}
+
+async fn refine_session_title_background(config: Config, session_id: String) {
+    let store = ChatSessionStore::new(&config.workspace_dir);
+    let Some(session) = (match store.get(&session_id).await {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!(error = %format!("{e:#}"), "title refine: load session failed");
+            return;
+        }
+    }) else {
+        return;
+    };
+
+    let transcript = super::sessions::title_refine_transcript(
+        &session.messages,
+        super::sessions::TITLE_REFINE_AFTER_USER_TURNS,
+    );
+    if transcript.trim().is_empty() {
+        return;
+    }
+
+    let user_prompt =
+        format!("Summarize this conversation into a short session title:\n\n{transcript}");
+    let candidates = title_refine_model_candidates(&config);
+
+    for logical in candidates {
+        let mut effective = config.clone();
+        effective.default_model = Some(logical.clone());
+        effective.default_provider = Some(provider_id_from_logical(&logical).to_string());
+
+        let assembled = match crate::agent::assemble::assemble_runtime(
+            &effective,
+            crate::config::BootstrapOptions {
+                with_embedding_routes: false,
+            },
+        ) {
+            Ok(a) => a,
+            Err(e) => {
+                tracing::debug!(
+                    model = %logical,
+                    error = %format!("{e:#}"),
+                    "title refine: assemble skipped candidate"
+                );
+                continue;
+            }
+        };
+
+        match assembled
+            .provider
+            .chat_with_system(Some(TITLE_SYSTEM), &user_prompt, &assembled.model_name, 0.2)
+            .await
+        {
+            Ok(raw) => {
+                if let Err(e) = store.set_refined_title(&session_id, &raw).await {
+                    tracing::warn!(error = %format!("{e:#}"), "title refine: save failed");
+                } else {
+                    tracing::info!(model = %logical, "title refine: updated session title");
+                }
+                return;
+            }
+            Err(e) => {
+                tracing::debug!(
+                    model = %logical,
+                    error = %format!("{e:#}"),
+                    "title refine: candidate failed"
+                );
+            }
+        }
+    }
+
+    tracing::warn!("title refine: all candidates failed; keeping provisional title");
 }
 
 /// User-visible text for a failed Web/API chat turn.
@@ -420,6 +578,42 @@ metadata:
             .expect("user");
         assert_eq!(last_user_idx, 2);
         assert_eq!(messages[..last_user_idx].len(), 2);
+    }
+
+    #[test]
+    fn host_port_from_urlish_strips_scheme_and_path() {
+        assert_eq!(
+            host_port_from_urlish("http://127.0.0.1:11434"),
+            "127.0.0.1:11434"
+        );
+        assert_eq!(
+            host_port_from_urlish("https://localhost:11434/"),
+            "localhost:11434"
+        );
+        assert_eq!(
+            host_port_from_urlish("192.168.1.2:11434"),
+            "192.168.1.2:11434"
+        );
+    }
+
+    #[test]
+    fn title_refine_candidates_end_with_nemotron_mini() {
+        let mut cfg = Config::default();
+        cfg.default_model = Some("deepseek/deepseek-v4-flash".into());
+        cfg.default_provider = Some("deepseek".into());
+        let c = title_refine_model_candidates(&cfg);
+        assert_eq!(c.last().map(String::as_str), Some(TITLE_NEMOTRON_FALLBACK));
+        assert!(c.iter().any(|m| m == TITLE_NEMOTRON_FALLBACK));
+    }
+
+    #[test]
+    fn title_refine_candidates_prefer_configured_local() {
+        let mut cfg = Config::default();
+        cfg.default_model = Some("ollama/llama3.2".into());
+        cfg.default_provider = Some("ollama".into());
+        let c = title_refine_model_candidates(&cfg);
+        assert_eq!(c.first().map(String::as_str), Some("ollama/llama3.2"));
+        assert_eq!(c.last().map(String::as_str), Some(TITLE_NEMOTRON_FALLBACK));
     }
 
     #[test]

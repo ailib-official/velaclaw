@@ -767,6 +767,22 @@ pub(crate) fn append_execution_policy_to_prompt(
             "- HTTP LAN access: enabled for private/local hosts when `autonomy.level = full`.\n\n",
         );
     }
+    append_hitl_continuity_guidance(system_prompt);
+}
+
+/// Web/CLI HITL: keep the agent in the loop; modals are for short credentials/choices only.
+pub(crate) fn append_hitl_continuity_guidance(system_prompt: &mut String) {
+    system_prompt.push_str(
+        "## Human-in-the-loop (keep task continuity)\n\n\
+         - You are the agent: run work with tools (`shell`, etc.). When policy needs approval, \
+           the UI shows Deny / Allow once / Always — wait for that, then continue the same turn.\n\
+         - Use `request_human_input` only for short operator input: `choice` (buttons), \
+           `secret` (password/token → secret_slot), or `text` (short codes ≤128 chars).\n\
+         - Do **not** ask the human to run terminal commands and paste results back into chat \
+           or a modal. That is not an agent workflow.\n\
+         - Prefer `shell` + approval over `handoff`. Never collect command logs via \
+           `request_human_input`.\n\n",
+    );
 }
 
 fn self_adjust_prompt_fields(config: &Config) -> (Vec<String>, Vec<String>) {
@@ -866,5 +882,20 @@ mod peer_continue_tests {
             select_peer_continue_model("only", &[String::from("only")]),
             None
         );
+    }
+}
+
+#[cfg(test)]
+mod hitl_prompt_tests {
+    use super::append_hitl_continuity_guidance;
+
+    #[test]
+    fn hitl_guidance_rejects_paste_results_workflow() {
+        let mut prompt = String::new();
+        append_hitl_continuity_guidance(&mut prompt);
+        assert!(prompt.contains("Human-in-the-loop"));
+        assert!(prompt.contains("request_human_input"));
+        assert!(prompt.contains("Do **not** ask the human to run terminal commands"));
+        assert!(prompt.contains("shell") && prompt.contains("approval"));
     }
 }

@@ -28,11 +28,13 @@ const WORKSPACE_RETRIEVE_NAMES: &[&str] = &["NOTES.md", "MEMORY.md", "CONTEXT.md
 const WORKSPACE_FILE_CHAR_CAP: usize = 4_096;
 
 /// Where retrieved chunks come from (may be issued more than once per turn).
+/// `Session` is declared for the M0 contract shape; M1 has no session retriever yet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RetrieveKind {
     Workspace,
     Memory,
+    /// Placeholder (M0 inventory). Not retrieved in M1; do not treat as wired.
     Session,
 }
 
@@ -290,7 +292,7 @@ mod tests {
             .iter()
             .map(|m| match &m.content {
                 ai_lib_rust::types::message::MessageContent::Text(t) => t.clone(),
-                _ => String::new(),
+                ai_lib_rust::types::message::MessageContent::Blocks(_) => String::new(),
             })
             .collect();
         assert!(joined.contains("[retrieve:workspace"));

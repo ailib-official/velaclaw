@@ -81,6 +81,15 @@ pub async fn prepare_turn_history(
     }
 
     // Kill-switch / non-ai-protocol: hard message-count cap.
+    // extra_chunks are Layer 0–5 retrieve and only enter assemble_layered;
+    // they are intentionally unused here (emergency trim, not a second inject).
+    #[cfg(feature = "ai-protocol")]
+    if !opts.extra_chunks.is_empty() {
+        tracing::debug!(
+            extra = opts.extra_chunks.len(),
+            "envelope kill-switch: skipping retrieved extra_chunks"
+        );
+    }
     trim_history(history, opts.max_history);
     Ok(report)
 }

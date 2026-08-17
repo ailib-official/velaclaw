@@ -244,6 +244,8 @@ mod tests {
 
     #[test]
     fn short_text_limit_is_tight() {
-        assert!(MAX_SHORT_TEXT_CHARS <= 128);
+        const {
+            assert!(MAX_SHORT_TEXT_CHARS <= 128);
+        }
     }
 }

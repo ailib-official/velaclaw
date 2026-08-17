@@ -1,5 +1,5 @@
-//! Interactive human-input tool for HITL escalation (choice / text / secret / handoff).
-//! 人机交互工具：需要密码、选项或交用户自助时调用，避免任务半途放弃。
+//! Interactive human-input tool for HITL escalation (choice / short text / secret).
+//! 人机交互工具：短选择、短明文、密钥；禁止把「去终端干活再交结果」当成 agent 流程。
 
 use super::traits::{Tool, ToolExecutionContext, ToolResult};
 use crate::approval::{HumanInputHub, HumanInputKind, HumanInputOutcome, HumanInputRequest};
@@ -7,6 +7,9 @@ use async_trait::async_trait;
 use parking_lot::Mutex;
 use serde_json::json;
 use std::sync::Arc;
+
+/// Max chars for `kind=text` — codes / short labels only, not command output dumps.
+pub const MAX_SHORT_TEXT_CHARS: usize = 128;
 
 /// Tool that blocks until the operator answers via Web UI (or reports unavailable).
 pub struct RequestHumanInputTool {
@@ -52,10 +55,15 @@ impl Tool for RequestHumanInputTool {
     }
 
     fn description(&self) -> &str {
-        "Ask the human operator for interactive help when a task cannot proceed alone \
-         (sudo password, API token, choose among options, or hand off a command for them to run). \
-         Prefer this over giving up. For secrets, the value never enters model context — you receive \
-         a secret_slot id to pass to shell."
+        "Ask the human for a short interactive decision or credential when the task cannot \
+         proceed alone. YOU remain the agent: run commands yourself via `shell` (the Web UI \
+         will show Deny / Allow once / Always). Use this tool only for: \
+         (1) kind=choice — Abort vs short options; \
+         (2) kind=secret — sudo password / API token (returned as secret_slot, never in model context); \
+         (3) kind=text — short codes only (pairing PIN, one-line id; not logs or command output). \
+         Do NOT use this tool to make the human run terminal work and paste results back — \
+         that is not an agent workflow. Prefer `shell` + approval. kind=handoff is legacy/rare \
+         (off-machine physical steps only); never ask for pasted command output."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -65,20 +73,20 @@ impl Tool for RequestHumanInputTool {
                 "kind": {
                     "type": "string",
                     "enum": ["choice", "text", "secret", "handoff"],
-                    "description": "choice=pick option; text=non-secret string; secret=password/token (slot only); handoff=user runs something externally"
+                    "description": "choice=short buttons; secret=password/token slot; text=short code only (≤128 chars); handoff=legacy rare off-machine confirm (avoid)"
                 },
                 "prompt": {
                     "type": "string",
-                    "description": "Clear instruction shown to the operator (include exact commands for handoff)"
+                    "description": "Clear short instruction for the modal (what is needed and why)"
                 },
                 "options": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "Required for kind=choice — short labels the operator can pick"
+                    "description": "Required for kind=choice — short labels (include an Abort-style option when useful)"
                 },
                 "risk_note": {
                     "type": "string",
-                    "description": "Shown for secret/handoff — warn about password/token exposure risk"
+                    "description": "Optional risk line for secret (password stays on the local daemon)"
                 }
             },
             "required": ["kind", "prompt"]
@@ -143,7 +151,8 @@ impl Tool for RequestHumanInputTool {
                 output: String::new(),
                 error: Some(
                     "Interactive human input is not available on this channel. \
-                     Tell the user the exact command to run themselves, then wait for their reply."
+                     Do not ask the user to paste terminal output. Use `shell` where allowed, \
+                     or explain what credential/config change is needed and wait for a short reply."
                         .into(),
                 ),
             });
@@ -161,22 +170,40 @@ impl Tool for RequestHumanInputTool {
         let (success, output) = match outcome {
             HumanInputOutcome::Cancelled => (
                 false,
-                "Operator cancelled the interactive prompt. Offer an alternative path.".to_string(),
+                "Operator cancelled the interactive prompt. Offer an alternative path \
+                 (different approach via tools), or stop that step cleanly."
+                    .to_string(),
             ),
             HumanInputOutcome::TimedOut => (
                 false,
-                "Operator did not respond in time. Summarize what is blocked and ask again \
-                 with a shorter handoff command."
+                "Operator did not respond in time. Summarize what is blocked; \
+                 retry with a shorter choice/secret prompt, or continue via `shell` + approval."
                     .to_string(),
             ),
             HumanInputOutcome::Choice(v) => (
                 true,
-                format!("Operator selected: {v}\nContinue the task using this choice."),
+                format!("Operator selected: {v}\nContinue the task using this choice via tools."),
             ),
-            HumanInputOutcome::Text(v) => (
-                true,
-                format!("Operator provided text: {v}\nContinue the task using this value."),
-            ),
+            HumanInputOutcome::Text(v) => {
+                let trimmed = v.trim();
+                if trimmed.chars().count() > MAX_SHORT_TEXT_CHARS {
+                    return Ok(ToolResult {
+                        success: false,
+                        output: String::new(),
+                        error: Some(format!(
+                            "Operator text exceeded {MAX_SHORT_TEXT_CHARS} characters. \
+                             kind=text is for short codes only — do not collect command output \
+                             via this tool. Use `shell` yourself after approval."
+                        )),
+                    });
+                }
+                (
+                    true,
+                    format!(
+                        "Operator provided short text: {trimmed}\nContinue the task using this value via tools."
+                    ),
+                )
+            }
             HumanInputOutcome::SecretSlot(slot) => (
                 true,
                 format!(
@@ -185,13 +212,13 @@ impl Tool for RequestHumanInputTool {
                      To use with sudo, call shell with:\n\
                      - command: a `sudo -S ...` command (reads password from stdin)\n\
                      - secret_slot: {slot}\n\
-                     The slot is one-shot and wiped after use."
+                     The slot is one-shot and wiped after use. Do not ask the operator to run sudo themselves."
                 ),
             ),
             HumanInputOutcome::HandoffDone => (
                 true,
-                "Operator confirmed they completed the handoff action. \
-                 Re-check the system state with a non-privileged command and continue."
+                "Operator confirmed a rare off-machine step. Re-check state with tools and continue. \
+                 Do not ask them to paste command output; prefer `shell` + approval for machine work."
                     .to_string(),
             ),
         };
@@ -201,5 +228,22 @@ impl Tool for RequestHumanInputTool {
             output,
             error: None,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_kind_accepts_known_values() {
+        assert_eq!(parse_kind("secret"), Some(HumanInputKind::Secret));
+        assert_eq!(parse_kind("CHOICE"), Some(HumanInputKind::Choice));
+        assert!(parse_kind("paste_results").is_none());
+    }
+
+    #[test]
+    fn short_text_limit_is_tight() {
+        assert!(MAX_SHORT_TEXT_CHARS <= 128);
     }
 }

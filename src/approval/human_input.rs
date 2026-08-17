@@ -1,5 +1,5 @@
-//! Interactive human-input hub for Web UI HITL (choice / text / secret / handoff).
-//! Web 人机交互：选项、明文、密钥、交用户自助处理。
+//! Interactive human-input hub for Web UI HITL (choice / short text / secret / rare handoff).
+//! Web 人机交互：短选项、短明文、密钥；handoff 仅保留罕见机外确认。
 
 use super::secret_slots::SecretSlotStore;
 use parking_lot::Mutex;
@@ -16,13 +16,13 @@ const DEFAULT_INPUT_TIMEOUT: Duration = Duration::from_secs(600);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HumanInputKind {
-    /// Pick one of `options`.
+    /// Pick one of `options` (short labels).
     Choice,
-    /// Free-form non-secret text.
+    /// Free-form non-secret **short** text (codes / ids — not command dumps).
     Text,
     /// Secret (password / token / pairing code) — stored in a local slot only.
     Secret,
-    /// Operator will perform an external action; UI confirms done/cancel.
+    /// Rare off-machine confirmation; not for “run this in your terminal”.
     Handoff,
 }
 

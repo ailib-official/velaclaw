@@ -359,6 +359,10 @@
       showToast("Enter a value");
       return;
     }
+    if ([...text].length > 128) {
+      showToast("Short codes only (max 128 characters)");
+      return;
+    }
     const id = pendingHumanInput.id;
     try {
       await respondHumanInput(token, id, { text });
@@ -739,10 +743,11 @@
         <footer>
           <textarea
             bind:this={inputEl}
-            rows="3"
+            class="composer"
+            rows="4"
             bind:value={input}
             onkeydown={onKeydown}
-            placeholder="Message… (Enter to send)"
+            placeholder="Message… (Enter to send, Shift+Enter for newline)"
             disabled={streaming}
           ></textarea>
           {#if streaming}
@@ -923,8 +928,17 @@
   {#if pendingHumanInput}
     <div class="modal-backdrop" role="presentation">
       <div class="modal" role="dialog" aria-labelledby="human-input-title">
-        <h2 id="human-input-title">Operator input needed</h2>
-        <p class="hint">Kind: {pendingHumanInput.kind}</p>
+        <h2 id="human-input-title">
+          {#if pendingHumanInput.kind === "secret"}
+            Enter secret
+          {:else if pendingHumanInput.kind === "choice"}
+            Choose an option
+          {:else if pendingHumanInput.kind === "text"}
+            Short code
+          {:else}
+            Confirm external step
+          {/if}
+        </h2>
         <pre class="approval-args">{pendingHumanInput.prompt}</pre>
         {#if pendingHumanInput.risk_note}
           <p class="risk-note">{pendingHumanInput.risk_note}</p>
@@ -938,9 +952,16 @@
             <button type="button" class="danger" onclick={handleHumanInputCancel}>Cancel</button>
           </div>
         {:else if pendingHumanInput.kind === "text"}
+          <p class="hint">Short values only (pairing code / id). Not for command output.</p>
           <label class="modal-field">
-            Response
-            <input type="text" bind:value={humanInputText} autocomplete="off" />
+            Short response
+            <input
+              type="text"
+              bind:value={humanInputText}
+              autocomplete="off"
+              maxlength="128"
+              placeholder="e.g. pairing code"
+            />
           </label>
           <div class="modal-actions">
             <button type="button" class="danger" onclick={handleHumanInputCancel}>Cancel</button>
@@ -948,8 +969,9 @@
           </div>
         {:else if pendingHumanInput.kind === "secret"}
           <p class="risk-note">
-            Secret is sent only to this local daemon, stored in a one-shot memory slot, and never
-            shown to the model. Prefer handoff if you do not want to enter a password here.
+            Sent only to this local daemon into a one-shot slot; never shown to the model. After
+            submit, the agent continues with tools (e.g. sudo via secret_slot) — you should not run
+            the command yourself.
           </p>
           <label class="modal-field">
             Password / token
@@ -960,10 +982,13 @@
             <button type="button" onclick={handleHumanInputSecretSubmit}>Submit secret</button>
           </div>
         {:else}
-          <p class="hint">Complete the action above in your own terminal, then confirm.</p>
+          <p class="hint">
+            Rare off-machine steps only. Machine work should use tool approval so the agent runs
+            the command. Cancel to send the agent back to tools.
+          </p>
           <div class="modal-actions">
             <button type="button" class="danger" onclick={handleHumanInputCancel}>Cancel</button>
-            <button type="button" onclick={handleHumanInputHandoffDone}>I completed it</button>
+            <button type="button" onclick={handleHumanInputHandoffDone}>Confirm external step</button>
           </div>
         {/if}
       </div>
@@ -1342,6 +1367,10 @@
   textarea {
     flex: 1;
     resize: vertical;
+  }
+  textarea.composer {
+    min-height: 5.5rem;
+    line-height: 1.45;
   }
 
   article.status .role,

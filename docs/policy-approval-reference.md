@@ -39,6 +39,19 @@ The shell tool schema **does not** expose an `approved` parameter. Human consent
 | **Gateway** (Web UI) | `ApprovalHub` modal / async request | Gateway hub prompt when shell policy requires it | Requires pairing when `require_pairing = true` |
 | **Channel** (Telegram, Discord, …) | Controlled by `approval_mode` (see below) | Inline mode only; `deny` blocks interactive approval | Default: `inline` with timeout (300s) |
 
+### Web `request_human_input` (short credentials / choices)
+
+Separate from tool/shell **approval**: the agent may call `request_human_input` when it needs a **short** operator value so the **same turn** can continue.
+
+| Kind | Intended use | Not for |
+|---|---|---|
+| `choice` | Abort vs short option buttons | Long free-form answers |
+| `secret` | Password / token → one-shot `secret_slot` for `shell` | Asking the human to run sudo themselves |
+| `text` | Short codes only (≤128 chars) | Pasting command output / logs |
+| `handoff` | Rare off-machine confirm only | “Run this in your terminal and paste results” |
+
+Normative UX: machine work uses **`shell` + ApprovalHub** (Deny / Allow once / Always). Collecting terminal results via a modal is not an agent workflow.
+
 ### Channel `approval_mode`
 
 Set on each channel table, for example `[channels_config.telegram]`:

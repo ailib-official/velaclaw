@@ -14,6 +14,7 @@ VelaClaw 的行为很大程度由 **文档驱动**：workspace 内短 Markdown �
 | **运行时代码** | 工具、SSH 执行、解析、安全策略 | VelaClaw 二进制 |
 | **`config.toml`** | 限额、白名单、自治级别、Provider | `~/.velaclaw*/config.toml` |
 | **Workspace Markdown** | 人格、工具习惯、主机索引、用户偏好 | `…/workspace/*.md` |
+| **Web 会话** | 聊天记录 | `<workspace>/.velaclaw/chat_sessions`（不在 config 目录） |
 
 **本稿非目标：** 重做 onboard UX、在安装器里直接下发 seed 包、或立刻改代码注入列表（仅作后续项列出）。
 

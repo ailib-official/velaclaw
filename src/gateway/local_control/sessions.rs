@@ -52,7 +52,7 @@ pub struct ChatSessionStore {
 impl ChatSessionStore {
     pub fn new(workspace_dir: &Path) -> Self {
         Self {
-            root: workspace_dir.join(".velaclaw").join("chat_sessions"),
+            root: crate::agent::context_contract::chat_sessions_dir(workspace_dir),
         }
     }
 

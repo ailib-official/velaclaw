@@ -10,6 +10,8 @@ Config path resolution at startup:
 2. persisted `~/.velaclaw/active_workspace.toml` marker (if present)
 3. default `~/.velaclaw/config.toml`
 
+**Path layout (VL-MA-001):** config/credentials live in the config directory (`VELACLAW_CONFIG_DIR` / `~/.velaclaw`). Agent **workspace** is a separate tree (`workspace_dir`). Web chat sessions are stored at `<workspace_dir>/.velaclaw/chat_sessions` — inside the workspace, not in the config directory.
+
 VelaClaw logs the resolved config on startup at `INFO` level:
 
 - `Config loaded` with fields: `path`, `workspace`, `source`, `initialized`

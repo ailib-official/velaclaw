@@ -546,6 +546,9 @@ impl Agent {
             provider: self.provider.as_ref(),
             model: &self.model_name,
         };
+        let extra_chunks =
+            crate::agent::context_contract::retrieve_workspace_files(&self.workspace_dir)
+                .unwrap_or_default();
         crate::agent::context_orch::prepare_turn_history(
             &mut chat_hist,
             crate::agent::context_orch::PrepareHistoryOpts {
@@ -553,6 +556,7 @@ impl Agent {
                 compact_context: self.config.compact_context,
                 async_pool: self.config.envelope_assemble_async,
                 max_history: self.config.max_history_messages,
+                extra_chunks: &extra_chunks,
                 summarizer: Some(&summarizer),
             },
         )

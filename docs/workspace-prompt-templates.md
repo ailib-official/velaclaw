@@ -14,6 +14,7 @@ VelaClaw behavior is largely **document-driven**: short Markdown files in the ag
 | **Runtime code** | Tools, SSH execution, parsers, security policy | VelaClaw binary |
 | **`config.toml`** | Limits, allowlists, autonomy, providers | `~/.velaclaw*/config.toml` |
 | **Workspace Markdown** | Persona, tool habits, host indexes, user prefs | `…/workspace/*.md` |
+| **Web sessions** | Chat transcripts | `<workspace>/.velaclaw/chat_sessions` (not the config dir) |
 
 **Non-goals of this draft:** full onboard UX redesign, shipping a seed tarball in the installer, or changing the inject list in code (called out as follow-ups).
 

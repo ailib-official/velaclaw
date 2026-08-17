@@ -20,6 +20,8 @@ pub mod assemble;
 #[cfg(feature = "ai-protocol")]
 pub mod candidate_dag;
 pub mod classifier;
+#[cfg(feature = "ai-protocol")]
+pub mod context_contract;
 pub mod context_orch;
 #[cfg(feature = "ai-protocol")]
 pub mod dag_runner;

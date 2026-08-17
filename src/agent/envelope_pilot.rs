@@ -32,11 +32,20 @@ pub fn assemble_history_layered(
     history: &[ChatMessage],
     compact_context: bool,
 ) -> Result<Vec<ChatMessage>> {
-    if history.is_empty() {
+    assemble_history_layered_with_extra(history, &[], compact_context)
+}
+
+/// Same as [`assemble_history_layered`] plus host-retrieved chunks (VL-MA-001).
+pub fn assemble_history_layered_with_extra(
+    history: &[ChatMessage],
+    extra: &[MessageChunk],
+    compact_context: bool,
+) -> Result<Vec<ChatMessage>> {
+    let chunks = merge_history_and_extra(history, extra);
+    if chunks.is_empty() {
         return Ok(Vec::new());
     }
 
-    let chunks = chat_history_to_chunks(history);
     let options = layered_options(compact_context);
     let report =
         MessageAssembler::assemble_layered(&chunks, &options).map_err(map_assemble_error)?;
@@ -57,11 +66,19 @@ pub async fn assemble_history_layered_async(
     history: &[ChatMessage],
     compact_context: bool,
 ) -> Result<Vec<ChatMessage>> {
-    if history.is_empty() {
+    assemble_history_layered_async_with_extra(history, &[], compact_context).await
+}
+
+pub async fn assemble_history_layered_async_with_extra(
+    history: &[ChatMessage],
+    extra: &[MessageChunk],
+    compact_context: bool,
+) -> Result<Vec<ChatMessage>> {
+    let chunks = merge_history_and_extra(history, extra);
+    if chunks.is_empty() {
         return Ok(Vec::new());
     }
 
-    let chunks = chat_history_to_chunks(history);
     let options = layered_options(compact_context);
     let report = MessageAssembler::assemble_layered_async(chunks, options, assemble_pool())
         .await
@@ -111,7 +128,13 @@ fn map_assemble_error(err: AssembleError) -> anyhow::Error {
     }
 }
 
-fn chat_history_to_chunks(history: &[ChatMessage]) -> Vec<MessageChunk> {
+fn merge_history_and_extra(history: &[ChatMessage], extra: &[MessageChunk]) -> Vec<MessageChunk> {
+    let mut chunks = extra.to_vec();
+    chunks.extend(chat_history_to_chunks(history));
+    chunks
+}
+
+pub(crate) fn chat_history_to_chunks(history: &[ChatMessage]) -> Vec<MessageChunk> {
     let last_user_idx = history
         .iter()
         .rposition(|m| m.role == "user")
@@ -184,10 +207,19 @@ pub fn apply_envelope_pilot(
     enabled: bool,
     compact_context: bool,
 ) -> Result<()> {
-    if !enabled || history.is_empty() {
+    apply_envelope_pilot_with_extra(history, &[], enabled, compact_context)
+}
+
+pub fn apply_envelope_pilot_with_extra(
+    history: &mut Vec<ChatMessage>,
+    extra: &[MessageChunk],
+    enabled: bool,
+    compact_context: bool,
+) -> Result<()> {
+    if !enabled || (history.is_empty() && extra.is_empty()) {
         return Ok(());
     }
-    let assembled = assemble_history_layered(history, compact_context)
+    let assembled = assemble_history_layered_with_extra(history, extra, compact_context)
         .with_context(|| "CR-L1 envelope pilot assemble_layered")?;
     if assembled.is_empty() {
         bail!("envelope pilot produced empty history");
@@ -207,15 +239,26 @@ pub async fn apply_envelope_pilot_async(
     compact_context: bool,
     use_async_pool: bool,
 ) -> Result<()> {
-    if !enabled || history.is_empty() {
+    apply_envelope_pilot_async_with_extra(history, &[], enabled, compact_context, use_async_pool)
+        .await
+}
+
+pub async fn apply_envelope_pilot_async_with_extra(
+    history: &mut Vec<ChatMessage>,
+    extra: &[MessageChunk],
+    enabled: bool,
+    compact_context: bool,
+    use_async_pool: bool,
+) -> Result<()> {
+    if !enabled || (history.is_empty() && extra.is_empty()) {
         return Ok(());
     }
     let assembled = if use_async_pool {
-        assemble_history_layered_async(history, compact_context)
+        assemble_history_layered_async_with_extra(history, extra, compact_context)
             .await
             .with_context(|| "CR-L3-003 envelope pilot assemble_layered_async")?
     } else {
-        assemble_history_layered(history, compact_context)
+        assemble_history_layered_with_extra(history, extra, compact_context)
             .with_context(|| "CR-L1 envelope pilot assemble_layered")?
     };
     if assembled.is_empty() {

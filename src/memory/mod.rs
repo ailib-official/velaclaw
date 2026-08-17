@@ -108,6 +108,59 @@ pub fn should_inject_for_session(entry: &MemoryEntry, current_session: Option<&s
     }
 }
 
+/// How many newest Conversation rows to keep when consolidating.
+pub const CONSOLIDATION_CONVERSATION_KEEP: usize = 2;
+
+/// Deterministic Conversation fold. **Not** hygiene (file archive) and **not** LLM summarization.
+///
+/// Keeps every Core decision; collapses older Conversation rows into one summary entry.
+#[must_use]
+pub fn consolidate_entries(entries: &[MemoryEntry], conversation_keep: usize) -> Vec<MemoryEntry> {
+    let mut core = Vec::new();
+    let mut daily = Vec::new();
+    let mut conversation = Vec::new();
+    let mut custom = Vec::new();
+    for entry in entries {
+        match entry.category {
+            MemoryCategory::Core => core.push(entry.clone()),
+            MemoryCategory::Daily => daily.push(entry.clone()),
+            MemoryCategory::Conversation => conversation.push(entry.clone()),
+            MemoryCategory::Custom(_) => custom.push(entry.clone()),
+        }
+    }
+    conversation.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+    let folded_conversation = if conversation.len() <= conversation_keep {
+        conversation
+    } else {
+        let drop_n = conversation.len() - conversation_keep;
+        let (old, recent) = conversation.split_at(drop_n);
+        let summary_body = old
+            .iter()
+            .map(|entry| format!("{}: {}", entry.key, entry.content))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut out = vec![MemoryEntry {
+            id: "consolidated-conversation".into(),
+            key: "consolidated_conversation".into(),
+            content: summary_body,
+            category: MemoryCategory::Conversation,
+            timestamp: old
+                .last()
+                .map(|entry| entry.timestamp.clone())
+                .unwrap_or_default(),
+            session_id: old.first().and_then(|entry| entry.session_id.clone()),
+            score: None,
+        }];
+        out.extend(recent.iter().cloned());
+        out
+    };
+    let mut out = core;
+    out.extend(daily);
+    out.extend(custom);
+    out.extend(folded_conversation);
+    out
+}
+
 /// Allocate a fresh interactive / one-shot session id (VL-MEM-001).
 #[must_use]
 pub fn new_session_id() -> String {
@@ -461,6 +514,66 @@ mod tests {
         assert!(!should_inject_for_session(&other, Some("sess-a")));
         assert!(!should_inject_for_session(&legacy, Some("sess-a")));
         assert!(should_inject_for_session(&legacy, None));
+    }
+
+    #[test]
+    fn consolidate_shrinks_conversation_and_keeps_core() {
+        let entries = vec![
+            MemoryEntry {
+                id: "c".into(),
+                key: "gate_default".into(),
+                content: "landlock stays optional".into(),
+                category: MemoryCategory::Core,
+                timestamp: "2026-08-01T00:00:00Z".into(),
+                session_id: None,
+                score: None,
+            },
+            MemoryEntry {
+                id: "1".into(),
+                key: "user_msg_1".into(),
+                content: "noise one".into(),
+                category: MemoryCategory::Conversation,
+                timestamp: "2026-08-01T01:00:00Z".into(),
+                session_id: Some("sess-a".into()),
+                score: None,
+            },
+            MemoryEntry {
+                id: "2".into(),
+                key: "user_msg_2".into(),
+                content: "noise two".into(),
+                category: MemoryCategory::Conversation,
+                timestamp: "2026-08-01T02:00:00Z".into(),
+                session_id: Some("sess-a".into()),
+                score: None,
+            },
+            MemoryEntry {
+                id: "3".into(),
+                key: "user_msg_3".into(),
+                content: "noise three".into(),
+                category: MemoryCategory::Conversation,
+                timestamp: "2026-08-01T03:00:00Z".into(),
+                session_id: Some("sess-a".into()),
+                score: None,
+            },
+            MemoryEntry {
+                id: "4".into(),
+                key: "user_msg_4".into(),
+                content: "keep recent".into(),
+                category: MemoryCategory::Conversation,
+                timestamp: "2026-08-01T04:00:00Z".into(),
+                session_id: Some("sess-a".into()),
+                score: None,
+            },
+        ];
+        let after = consolidate_entries(&entries, CONSOLIDATION_CONVERSATION_KEEP);
+        assert!(after.len() < entries.len());
+        assert!(after.iter().any(|e| e.key == "gate_default"));
+        assert!(should_inject_for_session(
+            after.iter().find(|e| e.key == "gate_default").unwrap(),
+            Some("sess-later")
+        ));
+        assert!(after.iter().any(|e| e.key == "consolidated_conversation"));
+        assert!(after.iter().any(|e| e.content.contains("keep recent")));
     }
 
     #[test]

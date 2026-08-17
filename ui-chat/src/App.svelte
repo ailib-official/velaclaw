@@ -550,7 +550,9 @@
         cancelStream = null;
         messages = clearStatusMessages(messages);
         scrollToBottom();
-        loadSessions();
+        // Immediate refresh + deferred picks up async session-title refine.
+        void loadSessions();
+        window.setTimeout(() => void loadSessions(), 2500);
         if (lastAssistantHasVelaClawNotice(messages)) {
           showToast(
             "Model soft-fail notice in reply — consider switching model in the picker.",

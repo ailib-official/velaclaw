@@ -28,6 +28,9 @@ pub struct PrepareHistoryOpts<'a> {
     pub async_pool: bool,
     pub max_history: usize,
     pub summarizer: Option<&'a HistorySummarizer<'a>>,
+    /// Host-retrieved Layer chunks (workspace / memory-shaped). Empty = history only.
+    #[cfg(feature = "ai-protocol")]
+    pub extra_chunks: &'a [ai_lib_rust::context::MessageChunk],
 }
 
 /// Outcome of [`prepare_turn_history`] for observability / CLI notices.
@@ -45,7 +48,14 @@ pub async fn prepare_turn_history(
     let mut report = PrepareHistoryReport::default();
 
     if history.is_empty() {
-        return Ok(report);
+        #[cfg(feature = "ai-protocol")]
+        if opts.extra_chunks.is_empty() {
+            return Ok(report);
+        }
+        #[cfg(not(feature = "ai-protocol"))]
+        {
+            return Ok(report);
+        }
     }
 
     if let Some(summarizer) = opts.summarizer {
@@ -57,8 +67,9 @@ pub async fn prepare_turn_history(
     #[cfg(feature = "ai-protocol")]
     {
         if opts.layered {
-            crate::agent::envelope_pilot::apply_envelope_pilot_async(
+            crate::agent::envelope_pilot::apply_envelope_pilot_async_with_extra(
                 history,
+                opts.extra_chunks,
                 true,
                 opts.compact_context,
                 opts.async_pool,
@@ -70,6 +81,15 @@ pub async fn prepare_turn_history(
     }
 
     // Kill-switch / non-ai-protocol: hard message-count cap.
+    // extra_chunks are Layer 0–5 retrieve and only enter assemble_layered;
+    // they are intentionally unused here (emergency trim, not a second inject).
+    #[cfg(feature = "ai-protocol")]
+    if !opts.extra_chunks.is_empty() {
+        tracing::debug!(
+            extra = opts.extra_chunks.len(),
+            "envelope kill-switch: skipping retrieved extra_chunks"
+        );
+    }
     trim_history(history, opts.max_history);
     Ok(report)
 }
@@ -177,6 +197,7 @@ mod tests {
                 compact_context: false,
                 async_pool: false,
                 max_history: 4,
+                extra_chunks: &[],
                 summarizer: None,
             },
         )
@@ -210,6 +231,7 @@ mod tests {
                 compact_context: false,
                 async_pool: false,
                 max_history: 10,
+                extra_chunks: &[],
                 summarizer: Some(&summarizer),
             },
         )
@@ -246,6 +268,7 @@ mod tests {
                 compact_context: false,
                 async_pool: false,
                 max_history: 8,
+                extra_chunks: &[],
                 summarizer: Some(&summarizer),
             },
         )
@@ -256,5 +279,30 @@ mod tests {
         assert!(history
             .iter()
             .any(|m| m.content.contains("[Compaction summary]")));
+    }
+
+    #[cfg(feature = "ai-protocol")]
+    #[tokio::test]
+    async fn prepare_merges_extra_chunks_through_layered_entry() {
+        let extra =
+            crate::agent::context_contract::memory_fixture_chunks(&[("k", "fixture-memory")]);
+        let mut history = vec![ChatMessage::system("sys"), ChatMessage::user("ask")];
+        let report = prepare_turn_history(
+            &mut history,
+            PrepareHistoryOpts {
+                layered: true,
+                compact_context: false,
+                async_pool: false,
+                max_history: 32,
+                extra_chunks: &extra,
+                summarizer: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert!(report.layered_applied);
+        assert!(history
+            .iter()
+            .any(|m| m.content.contains("[retrieve:memory")));
     }
 }

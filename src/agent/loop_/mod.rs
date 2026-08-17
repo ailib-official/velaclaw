@@ -499,6 +499,9 @@ pub async fn run(
             provider: provider.as_ref(),
             model: &model_name,
         };
+        let extra_chunks =
+            crate::agent::context_contract::retrieve_workspace_files(&config.workspace_dir)
+                .unwrap_or_default();
         crate::agent::context_orch::prepare_turn_history(
             &mut history,
             crate::agent::context_orch::PrepareHistoryOpts {
@@ -506,6 +509,7 @@ pub async fn run(
                 compact_context: config.agent.compact_context,
                 async_pool: config.agent.envelope_assemble_async,
                 max_history: config.agent.max_history_messages,
+                extra_chunks: &extra_chunks,
                 summarizer: Some(&summarizer),
             },
         )
@@ -739,6 +743,9 @@ pub async fn run(
                 provider: provider.as_ref(),
                 model: &session_model,
             };
+            let extra_chunks =
+                crate::agent::context_contract::retrieve_workspace_files(&config.workspace_dir)
+                    .unwrap_or_default();
             let prepare_report = crate::agent::context_orch::prepare_turn_history(
                 &mut history,
                 crate::agent::context_orch::PrepareHistoryOpts {
@@ -746,6 +753,7 @@ pub async fn run(
                     compact_context: config.agent.compact_context,
                     async_pool: config.agent.envelope_assemble_async,
                     max_history: config.agent.max_history_messages,
+                    extra_chunks: &extra_chunks,
                     summarizer: Some(&summarizer),
                 },
             )
@@ -843,6 +851,9 @@ pub async fn run(
                 provider: provider.as_ref(),
                 model: &session_model,
             };
+            let extra_chunks =
+                crate::agent::context_contract::retrieve_workspace_files(&config.workspace_dir)
+                    .unwrap_or_default();
             if let Ok(report) = crate::agent::context_orch::prepare_turn_history(
                 &mut history,
                 crate::agent::context_orch::PrepareHistoryOpts {
@@ -850,6 +861,7 @@ pub async fn run(
                     compact_context: config.agent.compact_context,
                     async_pool: config.agent.envelope_assemble_async,
                     max_history: config.agent.max_history_messages,
+                    extra_chunks: &extra_chunks,
                     summarizer: Some(&summarizer),
                 },
             )

@@ -154,6 +154,91 @@ impl EmbeddingProvider for OpenAiEmbedding {
     }
 }
 
+/// Where the configured embedder string came from (doctor R7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EmbedderSource {
+    /// Empty or `"none"` — schema / code default (`default_embedding_provider`).
+    CodeDefault,
+    /// Any other configured value (including unknown keys that fall back to Noop).
+    ConfigExplicit,
+}
+
+impl EmbedderSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::CodeDefault => "code_default",
+            Self::ConfigExplicit => "config_explicit",
+        }
+    }
+}
+
+/// Honest description of the embedder that `create_embedding_provider` will use.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EffectiveEmbedder {
+    pub configured: String,
+    pub effective_name: String,
+    pub source: EmbedderSource,
+    /// True when the factory selects a real HTTP embedder, not Noop.
+    pub production_path: bool,
+}
+
+/// Map config `memory.embedding_provider` to effective name + production flag.
+///
+/// Does **not** change schema defaults. `"none"` / empty is a valid Noop result.
+pub fn describe_effective_embedder(configured: &str) -> EffectiveEmbedder {
+    let configured = configured.trim().to_string();
+    let is_schema_default = configured.is_empty() || configured == "none";
+    let source = if is_schema_default {
+        EmbedderSource::CodeDefault
+    } else {
+        EmbedderSource::ConfigExplicit
+    };
+    let key = if configured.is_empty() {
+        "none"
+    } else {
+        configured.as_str()
+    };
+    let boxed = create_embedding_provider(key, None, "unused", 8);
+    let effective_name = boxed.name().to_string();
+    let production_path = effective_name != "none";
+    EffectiveEmbedder {
+        configured,
+        effective_name,
+        source,
+        production_path,
+    }
+}
+
+// ── Test-only deterministic embedder (not a schema default) ────
+
+#[cfg(test)]
+pub struct FixtureEmbedding;
+
+#[cfg(test)]
+#[async_trait]
+impl EmbeddingProvider for FixtureEmbedding {
+    fn name(&self) -> &str {
+        "fixture"
+    }
+
+    fn dimensions(&self) -> usize {
+        8
+    }
+
+    async fn embed(&self, texts: &[&str]) -> anyhow::Result<Vec<Vec<f32>>> {
+        Ok(texts
+            .iter()
+            .map(|text| {
+                let mut vec = vec![0.0_f32; 8];
+                for (i, byte) in text.as_bytes().iter().enumerate() {
+                    vec[i % 8] += f32::from(*byte) / 255.0;
+                }
+                vec
+            })
+            .collect())
+    }
+}
+
 // ── Factory ──────────────────────────────────────────────────
 
 pub fn create_embedding_provider(
@@ -162,6 +247,11 @@ pub fn create_embedding_provider(
     model: &str,
     dims: usize,
 ) -> Box<dyn EmbeddingProvider> {
+    #[cfg(test)]
+    if provider == "fixture" {
+        return Box::new(FixtureEmbedding);
+    }
+
     match provider {
         "openai" => {
             let key = api_key.unwrap_or("");
@@ -212,6 +302,43 @@ mod tests {
     fn factory_none() {
         let p = create_embedding_provider("none", None, "model", 1536);
         assert_eq!(p.name(), "none");
+    }
+
+    #[test]
+    fn describe_none_is_code_default_not_production() {
+        let report = describe_effective_embedder("none");
+        assert_eq!(report.effective_name, "none");
+        assert_eq!(report.source, EmbedderSource::CodeDefault);
+        assert!(!report.production_path);
+        let empty = describe_effective_embedder("  ");
+        assert_eq!(empty.source, EmbedderSource::CodeDefault);
+        assert!(!empty.production_path);
+        assert_eq!(
+            crate::config::MemoryConfig::default().embedding_provider,
+            "none"
+        );
+    }
+
+    #[test]
+    fn describe_openai_is_config_explicit_production_path() {
+        let report = describe_effective_embedder("openai");
+        assert_eq!(report.effective_name, "openai");
+        assert_eq!(report.source, EmbedderSource::ConfigExplicit);
+        assert!(report.production_path);
+    }
+
+    #[tokio::test]
+    async fn fixture_embedder_is_deterministic_and_not_default() {
+        let p = create_embedding_provider("fixture", None, "n/a", 8);
+        assert_eq!(p.name(), "fixture");
+        let a = p.embed(&["gate"]).await.unwrap();
+        let b = p.embed(&["gate"]).await.unwrap();
+        assert_eq!(a, b);
+        assert_ne!(a[0], vec![0.0; 8]);
+        assert_eq!(
+            crate::config::MemoryConfig::default().embedding_provider,
+            "none"
+        );
     }
 
     #[test]

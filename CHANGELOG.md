@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Memory retrieve + doctor embedder** (VL-MA-002): `Memory::recall` fills `retrieve_kind=memory` extra chunks on the same `assemble_layered` entry when envelope assemble is on. `velaclaw doctor` reports effective embedder, source, and whether the path is production. Default `embedding_provider` stays `"none"` (Noop). Deterministic consolidation folds Conversation volume and keeps Core.
+
 - **Context Contract retrieve** (VL-MA-001): host declares `layers` / `retrieve_kind` / budget intent, fills workspace (and memory-shaped) chunks, then calls the existing `prepare_turn_history` → `MessageAssembler::assemble_layered` entry. No second assembler. Prompt P0–P3 stays in `prompt_composer`.
 
 ### Fixed

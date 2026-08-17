@@ -546,9 +546,18 @@ impl Agent {
             provider: self.provider.as_ref(),
             model: &self.model_name,
         };
-        let extra_chunks =
-            crate::agent::context_contract::retrieve_workspace_files(&self.workspace_dir)
-                .unwrap_or_default();
+        let extra_chunks = crate::agent::context_contract::retrieve_turn_extra_chunks(
+            &self.workspace_dir,
+            self.memory.as_ref(),
+            chat_hist
+                .iter()
+                .rev()
+                .find(|m| m.role == "user")
+                .map(|m| m.content.as_str())
+                .unwrap_or(""),
+            Some(self.session_id.as_str()),
+        )
+        .await;
         crate::agent::context_orch::prepare_turn_history(
             &mut chat_hist,
             crate::agent::context_orch::PrepareHistoryOpts {

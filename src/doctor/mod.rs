@@ -447,6 +447,27 @@ fn check_config_semantics(config: &Config, items: &mut Vec<DiagItem>) {
         }
     }
 
+    // VL-MA-002 / R7: report effective embedder; Noop is honest, not a hard fail.
+    {
+        let report = crate::memory::embeddings::describe_effective_embedder(
+            &config.memory.embedding_provider,
+        );
+        let production = if report.production_path { "yes" } else { "no" };
+        let msg = format!(
+            "memory embedder={} source={} production_path={production}",
+            report.effective_name,
+            report.source.as_str()
+        );
+        if report.production_path {
+            items.push(DiagItem::ok("memory", msg));
+        } else {
+            items.push(DiagItem::warn(
+                "memory",
+                format!("{msg} (Noop; allowed — not a production embedder)"),
+            ));
+        }
+    }
+
     // Channel: at least one configured
     let cc = &config.channels_config;
     let has_channel = cc.telegram.is_some()
@@ -1092,6 +1113,37 @@ mod tests {
         let ch_item = items.iter().find(|i| i.message.contains("channel"));
         assert!(ch_item.is_some());
         assert_eq!(ch_item.unwrap().severity, Severity::Warn);
+    }
+
+    #[test]
+    fn doctor_reports_default_embedder_as_noop_not_production() {
+        let config = Config::default();
+        let mut items = Vec::new();
+        check_config_semantics(&config, &mut items);
+        let item = items
+            .iter()
+            .find(|i| i.message.contains("memory embedder="))
+            .expect("embedder line");
+        assert_eq!(item.severity, Severity::Warn);
+        assert!(item.message.contains("embedder=none"));
+        assert!(item.message.contains("source=code_default"));
+        assert!(item.message.contains("production_path=no"));
+    }
+
+    #[test]
+    fn doctor_reports_openai_embedder_as_production_path() {
+        let mut config = Config::default();
+        config.memory.embedding_provider = "openai".into();
+        let mut items = Vec::new();
+        check_config_semantics(&config, &mut items);
+        let item = items
+            .iter()
+            .find(|i| i.message.contains("memory embedder="))
+            .expect("embedder line");
+        assert_eq!(item.severity, Severity::Ok);
+        assert!(item.message.contains("embedder=openai"));
+        assert!(item.message.contains("source=config_explicit"));
+        assert!(item.message.contains("production_path=yes"));
     }
 
     #[test]

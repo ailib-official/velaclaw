@@ -471,13 +471,17 @@ pub async fn run(
         }
 
         // Inject memory + hardware RAG context into user message
-        let mem_context = build_context(
-            mem.as_ref(),
-            &msg,
-            config.memory.min_relevance_score,
-            Some(session_id.as_str()),
-        )
-        .await;
+        let mem_context = if config.agent.envelope_assemble {
+            String::new()
+        } else {
+            build_context(
+                mem.as_ref(),
+                &msg,
+                config.memory.min_relevance_score,
+                Some(session_id.as_str()),
+            )
+            .await
+        };
         let rag_limit = if config.agent.compact_context { 2 } else { 5 };
         let hw_context = hardware_rag
             .as_ref()
@@ -499,9 +503,13 @@ pub async fn run(
             provider: provider.as_ref(),
             model: &model_name,
         };
-        let extra_chunks =
-            crate::agent::context_contract::retrieve_workspace_files(&config.workspace_dir)
-                .unwrap_or_default();
+        let extra_chunks = crate::agent::context_contract::retrieve_turn_extra_chunks(
+            &config.workspace_dir,
+            mem.as_ref(),
+            &msg,
+            Some(session_id.as_str()),
+        )
+        .await;
         crate::agent::context_orch::prepare_turn_history(
             &mut history,
             crate::agent::context_orch::PrepareHistoryOpts {
@@ -718,13 +726,17 @@ pub async fn run(
             }
 
             // Inject memory + hardware RAG context into user message
-            let mem_context = build_context(
-                mem.as_ref(),
-                &user_input,
-                config.memory.min_relevance_score,
-                Some(session_id.as_str()),
-            )
-            .await;
+            let mem_context = if config.agent.envelope_assemble {
+                String::new()
+            } else {
+                build_context(
+                    mem.as_ref(),
+                    &user_input,
+                    config.memory.min_relevance_score,
+                    Some(session_id.as_str()),
+                )
+                .await
+            };
             let rag_limit = if config.agent.compact_context { 2 } else { 5 };
             let hw_context = hardware_rag
                 .as_ref()
@@ -743,9 +755,13 @@ pub async fn run(
                 provider: provider.as_ref(),
                 model: &session_model,
             };
-            let extra_chunks =
-                crate::agent::context_contract::retrieve_workspace_files(&config.workspace_dir)
-                    .unwrap_or_default();
+            let extra_chunks = crate::agent::context_contract::retrieve_turn_extra_chunks(
+                &config.workspace_dir,
+                mem.as_ref(),
+                &user_input,
+                Some(session_id.as_str()),
+            )
+            .await;
             let prepare_report = crate::agent::context_orch::prepare_turn_history(
                 &mut history,
                 crate::agent::context_orch::PrepareHistoryOpts {
@@ -851,9 +867,13 @@ pub async fn run(
                 provider: provider.as_ref(),
                 model: &session_model,
             };
-            let extra_chunks =
-                crate::agent::context_contract::retrieve_workspace_files(&config.workspace_dir)
-                    .unwrap_or_default();
+            let extra_chunks = crate::agent::context_contract::retrieve_turn_extra_chunks(
+                &config.workspace_dir,
+                mem.as_ref(),
+                &user_input,
+                Some(session_id.as_str()),
+            )
+            .await;
             if let Ok(report) = crate::agent::context_orch::prepare_turn_history(
                 &mut history,
                 crate::agent::context_orch::PrepareHistoryOpts {

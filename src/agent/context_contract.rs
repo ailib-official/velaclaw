@@ -171,14 +171,39 @@ pub fn memory_fixture_chunks(pairs: &[(&str, &str)]) -> Vec<MessageChunk> {
 }
 
 /// Sync-shaped recall via the existing Memory trait (production backend for kind=memory).
+///
+/// Recalls without SQL session filter so Core (`session_id=None`) stays visible,
+/// then applies [`crate::memory::should_inject_for_session`].
 pub async fn retrieve_memory_chunks(
     mem: &dyn Memory,
     query: &str,
     limit: usize,
     session_id: Option<&str>,
 ) -> Result<Vec<MessageChunk>> {
-    let entries = mem.recall(query, limit, session_id).await?;
-    Ok(chunks_from_memory_entries(&entries))
+    let entries = mem.recall(query, limit, None).await?;
+    let filtered: Vec<_> = entries
+        .into_iter()
+        .filter(|entry| crate::memory::should_inject_for_session(entry, session_id))
+        .filter(|entry| !crate::memory::is_assistant_autosave_key(&entry.key))
+        .collect();
+    Ok(chunks_from_memory_entries(&filtered))
+}
+
+/// Workspace notes + memory recall for one `assemble_layered` extra set (GOV-007).
+pub async fn retrieve_turn_extra_chunks(
+    workspace_dir: &Path,
+    mem: &dyn Memory,
+    query: &str,
+    session_id: Option<&str>,
+) -> Vec<MessageChunk> {
+    let mut extra = retrieve_workspace_files(workspace_dir).unwrap_or_default();
+    match retrieve_memory_chunks(mem, query, 5, session_id).await {
+        Ok(memory_chunks) => extra.extend(memory_chunks),
+        Err(error) => {
+            tracing::debug!(error = %error, "memory retrieve skipped for extra_chunks");
+        }
+    }
+    extra
 }
 
 /// Host fill + **the** assemble entry (sync). Callers may retry after HardBudget with a
@@ -319,5 +344,54 @@ mod tests {
         assert_eq!(chunks.len(), 1);
         assert!(chunks[0].chunk_id.starts_with("ws-"));
         assert!(!chunks.iter().any(|c| c.chunk_id.contains("AGENTS")));
+    }
+
+    #[tokio::test]
+    async fn recall_becomes_memory_chunks_on_same_assemble_entry() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cfg = crate::config::MemoryConfig {
+            backend: "sqlite".into(),
+            ..crate::config::MemoryConfig::default()
+        };
+        let mem = crate::memory::create_memory(&cfg, dir.path(), None).expect("sqlite");
+        mem.store(
+            "gate_decision",
+            "keep landlock optional",
+            crate::memory::MemoryCategory::Core,
+            None,
+        )
+        .await
+        .unwrap();
+        mem.store(
+            "other_chat",
+            "unrelated chatter",
+            crate::memory::MemoryCategory::Conversation,
+            Some("sess-other"),
+        )
+        .await
+        .unwrap();
+        let extra =
+            retrieve_turn_extra_chunks(dir.path(), mem.as_ref(), "landlock", Some("sess-now"))
+                .await;
+        assert!(
+            extra.iter().any(|c| c.chunk_id.contains("gate_decision")),
+            "core recall missing: {:?}",
+            extra.iter().map(|c| &c.chunk_id).collect::<Vec<_>>()
+        );
+        assert!(!extra.iter().any(|c| c.chunk_id.contains("other_chat")));
+        let history = history_chunks();
+        let report =
+            assemble_contract_chunks(&history, &extra, BudgetIntent::Large.to_context_budget())
+                .expect("assemble");
+        let joined: String = report
+            .messages
+            .iter()
+            .map(|m| match &m.content {
+                ai_lib_rust::types::message::MessageContent::Text(t) => t.clone(),
+                ai_lib_rust::types::message::MessageContent::Blocks(_) => String::new(),
+            })
+            .collect();
+        assert!(joined.contains("[retrieve:memory"));
+        assert!(joined.contains("keep landlock optional"));
     }
 }

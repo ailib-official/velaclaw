@@ -90,8 +90,9 @@ impl Sandbox for FailClosedSandbox {
     fn wrap_command(&self, _cmd: &mut Command) -> std::io::Result<()> {
         Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
-            "sandbox required but Landlock is unavailable; set sandbox.enabled=false or \
-             backend=none to opt out (YOLO)",
+            "sandbox required but the selected backend is unavailable; \
+             set sandbox.enabled=false or backend=none to opt out (YOLO), \
+             then confirm with velaclaw doctor",
         ))
     }
 

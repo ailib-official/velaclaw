@@ -45,7 +45,7 @@ curl -sS http://127.0.0.1:3000/health | jq '{version,status}'
 - [ ] `config.toml` not replaced by a scaffold (merge profiles like `examples/profiles/ops-readonly.toml` only when intended)
 - [ ] `daemon.env` mode stays `600`; contents untouched
 - [ ] `AI_PROTOCOL_DIR` still resolves
-- [ ] After restart: `velaclaw doctor` / channel doctor as needed
+- [ ] After restart: `velaclaw doctor` — `sandbox=landlock` or explicit YOLO (`source=explicit_yolo`), never accidental `fail-closed`
 
 ## Fresh install (not upgrade)
 

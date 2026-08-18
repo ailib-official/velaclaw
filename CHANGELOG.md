@@ -9,11 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Linux shell sandbox is fail-closed** (VL-MA-003): production `ShellTool` always calls `Sandbox::wrap_command`. Linux `backend=auto` is Landlock (child `pre_exec` only) or **fail-closed** — not silent Noop. **Hosts without Landlock refuse even allowlisted shell** until YOLO opt-out (`sandbox.enabled=false` or `backend=none`). Confirm with `velaclaw doctor` (`sandbox=landlock` or explicit YOLO). Non-Linux Auto stays application-layer Noop. See [config-reference.md](docs/config-reference.md#securitysandbox) and [troubleshooting.md](docs/troubleshooting.md).
+
 - **Unwrapped tool IR** (VL-TTC-015): Decode order is native `tool_calls` → envelope codec (XML/DSML/invoke) → line-isolated `{name, arguments}` on the **assistant** turn only. Same `run_tool_call_loop` for CLI/Web/Channel. Display strips carriers before streaming. Unregistered isolated IR is dropped with a continue notice (conversation does not abort).
 
 ### Added
 
-- **Linux default sandbox + receipts** (VL-MA-003): production `ShellTool` calls `Sandbox::wrap_command`. Linux Auto is Landlock (child `pre_exec` only) or fail-closed — not silent Noop. YOLO opt-out is `sandbox.enabled=false` or `backend=none`. Allowlisted commands are still isolated. Approval does not widen `allowed_commands` (SEC-009). Workspace `.velaclaw/tool_receipts.jsonl` records allow/deny/sandbox_fail without secrets. `velaclaw doctor` reports sandbox name, source, and `production_path`. Autonomy Full does not disable the sandbox.
+- **Linux default sandbox + receipts** (VL-MA-003): allowlisted commands are still isolated. Approval does not widen `allowed_commands` (SEC-009). Workspace `.velaclaw/tool_receipts.jsonl` records allow/deny/sandbox_fail without secrets. `velaclaw doctor` reports sandbox name, source, and `production_path`. Autonomy Full does not disable the sandbox. `sandbox-landlock` is now a default Cargo feature.
 
 - **Memory retrieve + doctor embedder** (VL-MA-002): `Memory::recall` fills `retrieve_kind=memory` extra chunks on the same `assemble_layered` entry when envelope assemble is on. `velaclaw doctor` reports effective embedder, source, and whether the path is production. Default `embedding_provider` stays `"none"` (Noop). Deterministic consolidation folds Conversation volume and keeps Core.
 

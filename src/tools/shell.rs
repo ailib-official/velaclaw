@@ -1,6 +1,6 @@
 use super::traits::{Tool, ToolExecutionContext, ToolResult};
 use crate::runtime::RuntimeAdapter;
-use crate::security::PolicyHandle;
+use crate::security::{NoopSandbox, PolicyHandle, ReceiptDecision, Sandbox, ToolReceiptLog};
 use async_trait::async_trait;
 use serde_json::json;
 use std::sync::Arc;
@@ -20,11 +20,48 @@ const SAFE_ENV_VARS: &[&str] = &[
 pub struct ShellTool {
     security: PolicyHandle,
     runtime: Arc<dyn RuntimeAdapter>,
+    sandbox: Arc<dyn Sandbox>,
+    receipts: Option<ToolReceiptLog>,
 }
 
 impl ShellTool {
+    /// Test and default-tools constructor: Noop sandbox, no receipts.
     pub fn new(security: PolicyHandle, runtime: Arc<dyn RuntimeAdapter>) -> Self {
-        Self { security, runtime }
+        Self {
+            security,
+            runtime,
+            sandbox: Arc::new(NoopSandbox),
+            receipts: None,
+        }
+    }
+
+    /// Production constructor: OS sandbox + workspace receipts.
+    pub fn with_isolation(
+        security: PolicyHandle,
+        runtime: Arc<dyn RuntimeAdapter>,
+        sandbox: Arc<dyn Sandbox>,
+        receipts: Option<ToolReceiptLog>,
+    ) -> Self {
+        Self {
+            security,
+            runtime,
+            sandbox,
+            receipts,
+        }
+    }
+
+    fn record_receipt(&self, decision: ReceiptDecision, command: &str, human_approved: bool) {
+        if let Some(log) = &self.receipts {
+            if let Err(e) = log.record(
+                "shell",
+                decision,
+                command,
+                self.sandbox.name(),
+                human_approved,
+            ) {
+                tracing::warn!("tool receipt write failed: {e}");
+            }
+        }
     }
 }
 
@@ -81,6 +118,7 @@ impl Tool for ShellTool {
         {
             Ok(_) => {}
             Err(reason) => {
+                self.record_receipt(ReceiptDecision::Deny, command, human_approved);
                 return Ok(ToolResult {
                     success: false,
                     output: String::new(),
@@ -120,6 +158,17 @@ impl Tool for ShellTool {
                 cmd.env(var, val);
             }
         }
+
+        if let Err(e) = self.sandbox.wrap_command(cmd.as_std_mut()) {
+            self.record_receipt(ReceiptDecision::SandboxFail, command, human_approved);
+            return Ok(ToolResult {
+                success: false,
+                output: String::new(),
+                error: Some(format!("Sandbox wrap failed: {e}")),
+            });
+        }
+
+        self.record_receipt(ReceiptDecision::Allow, command, human_approved);
 
         let stdin_secret = ctx.stdin_secret.clone();
         let result = tokio::time::timeout(Duration::from_secs(SHELL_TIMEOUT_SECS), async {
@@ -527,5 +576,138 @@ mod tests {
             .expect("cat with stdin");
         assert!(result.success, "{:?}", result.error);
         assert!(result.output.contains("slot-secret"));
+    }
+
+    struct RecordingSandbox {
+        wraps: std::sync::atomic::AtomicU32,
+    }
+
+    impl crate::security::Sandbox for RecordingSandbox {
+        fn wrap_command(&self, _cmd: &mut std::process::Command) -> std::io::Result<()> {
+            self.wraps.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        }
+
+        fn is_available(&self) -> bool {
+            true
+        }
+
+        fn name(&self) -> &str {
+            "recording"
+        }
+
+        fn description(&self) -> &str {
+            "test double"
+        }
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn allowlisted_command_still_wraps_sandbox() {
+        let recorder = Arc::new(RecordingSandbox {
+            wraps: std::sync::atomic::AtomicU32::new(0),
+        });
+        let tool = ShellTool::with_isolation(
+            test_security(AutonomyLevel::Supervised),
+            test_runtime(),
+            recorder.clone(),
+            None,
+        );
+        let result = tool
+            .execute(
+                json!({"command": "echo hello"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .expect("echo");
+        assert!(result.success, "{:?}", result.error);
+        assert_eq!(recorder.wraps.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn non_allowlisted_denied_when_approved_does_not_wrap() {
+        let recorder = Arc::new(RecordingSandbox {
+            wraps: std::sync::atomic::AtomicU32::new(0),
+        });
+        let security = PolicyHandle::new(SecurityPolicy {
+            autonomy: AutonomyLevel::Supervised,
+            workspace_dir: std::env::temp_dir(),
+            allowed_commands: vec!["echo".into()],
+            ..SecurityPolicy::default()
+        });
+        let tool = ShellTool::with_isolation(security, test_runtime(), recorder.clone(), None);
+        let result = tool
+            .execute(
+                json!({"command": "python3 -c 'print(1)'"}),
+                &ToolExecutionContext::with_shell_human_approved(true),
+            )
+            .await
+            .expect("deny");
+        assert!(!result.success);
+        assert_eq!(recorder.wraps.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn fail_closed_sandbox_blocks_allowlisted_command() {
+        let tool = ShellTool::with_isolation(
+            test_security(AutonomyLevel::Supervised),
+            test_runtime(),
+            Arc::new(crate::security::FailClosedSandbox),
+            None,
+        );
+        let result = tool
+            .execute(
+                json!({"command": "echo hello"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .expect("result");
+        assert!(!result.success);
+        assert!(result
+            .error
+            .as_deref()
+            .unwrap_or("")
+            .to_lowercase()
+            .contains("sandbox"));
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn receipts_record_allow_and_deny() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = tmp.path().to_path_buf();
+        let receipts = crate::security::ToolReceiptLog::in_workspace(&workspace);
+        let security = PolicyHandle::new(SecurityPolicy {
+            autonomy: AutonomyLevel::Supervised,
+            workspace_dir: workspace.clone(),
+            allowed_commands: vec!["echo".into()],
+            ..SecurityPolicy::default()
+        });
+        let tool = ShellTool::with_isolation(
+            security,
+            test_runtime(),
+            Arc::new(crate::security::NoopSandbox),
+            Some(receipts.clone()),
+        );
+        let allowed = tool
+            .execute(
+                json!({"command": "echo hello"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
+        assert!(allowed.success);
+        let denied = tool
+            .execute(
+                json!({"command": "python3 -c 'print(1)'"}),
+                &ToolExecutionContext::with_shell_human_approved(true),
+            )
+            .await
+            .unwrap();
+        assert!(!denied.success);
+        let body = std::fs::read_to_string(receipts.path()).unwrap();
+        assert!(body.contains("\"decision\":\"allow\""));
+        assert!(body.contains("\"decision\":\"deny\""));
+        assert!(!body.contains("slot-secret"));
     }
 }

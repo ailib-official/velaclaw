@@ -79,6 +79,35 @@ impl Sandbox for NoopSandbox {
     }
 }
 
+/// Refuse to wrap or run a command when OS isolation is required but unavailable.
+///
+/// Linux Auto uses this instead of silent [`NoopSandbox`]. YOLO opt-out is
+/// `sandbox.enabled = false` or `backend = "none"`.
+#[derive(Debug, Clone, Default)]
+pub struct FailClosedSandbox;
+
+impl Sandbox for FailClosedSandbox {
+    fn wrap_command(&self, _cmd: &mut Command) -> std::io::Result<()> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "sandbox required but Landlock is unavailable; set sandbox.enabled=false or \
+             backend=none to opt out (YOLO)",
+        ))
+    }
+
+    fn is_available(&self) -> bool {
+        true
+    }
+
+    fn name(&self) -> &str {
+        "fail-closed"
+    }
+
+    fn description(&self) -> &str {
+        "Fail closed: refuse shell until Landlock is available or operator opts out"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -91,6 +120,16 @@ mod tests {
     #[test]
     fn noop_sandbox_is_always_available() {
         assert!(NoopSandbox.is_available());
+    }
+
+    #[test]
+    fn fail_closed_sandbox_wrap_command_errors() {
+        let mut cmd = Command::new("echo");
+        let err = FailClosedSandbox
+            .wrap_command(&mut cmd)
+            .expect_err("fail-closed must not wrap");
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+        assert_eq!(FailClosedSandbox.name(), "fail-closed");
     }
 
     #[test]

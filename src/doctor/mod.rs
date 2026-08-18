@@ -468,6 +468,29 @@ fn check_config_semantics(config: &Config, items: &mut Vec<DiagItem>) {
         }
     }
 
+    // VL-MA-003: report effective sandbox; YOLO/fail-closed are honest, not hidden Noop.
+    {
+        let report = crate::security::describe_effective_sandbox(&config.security);
+        let production = if report.production_path { "yes" } else { "no" };
+        let msg = format!(
+            "sandbox={} source={} production_path={production}",
+            report.name, report.source
+        );
+        if report.production_path {
+            items.push(DiagItem::ok("security", msg));
+        } else if report.name == "fail-closed" {
+            items.push(DiagItem::warn(
+                "security",
+                format!("{msg} (shell refused until Landlock or explicit YOLO opt-out)"),
+            ));
+        } else {
+            items.push(DiagItem::warn(
+                "security",
+                format!("{msg} (no OS isolation; YOLO if explicit_yolo)"),
+            ));
+        }
+    }
+
     // Channel: at least one configured
     let cc = &config.channels_config;
     let has_channel = cc.telegram.is_some()
@@ -1127,6 +1150,43 @@ mod tests {
         assert_eq!(item.severity, Severity::Warn);
         assert!(item.message.contains("embedder=none"));
         assert!(item.message.contains("source=code_default"));
+        assert!(item.message.contains("production_path=no"));
+    }
+
+    #[test]
+    fn doctor_reports_sandbox_backend() {
+        let config = Config::default();
+        let mut items = Vec::new();
+        check_config_semantics(&config, &mut items);
+        let item = items
+            .iter()
+            .find(|i| i.message.contains("sandbox="))
+            .expect("sandbox line");
+        assert!(item.message.contains("production_path="));
+        assert!(item.message.contains("source="));
+        #[cfg(target_os = "linux")]
+        {
+            assert!(
+                item.message.contains("sandbox=landlock")
+                    || item.message.contains("sandbox=fail-closed")
+            );
+            assert!(!item.message.contains("sandbox=none"));
+        }
+    }
+
+    #[test]
+    fn doctor_reports_explicit_yolo_sandbox() {
+        let mut config = Config::default();
+        config.security.sandbox.enabled = Some(false);
+        config.security.sandbox.backend = crate::config::SandboxBackend::None;
+        let mut items = Vec::new();
+        check_config_semantics(&config, &mut items);
+        let item = items
+            .iter()
+            .find(|i| i.message.contains("sandbox="))
+            .expect("sandbox line");
+        assert!(item.message.contains("sandbox=none"));
+        assert!(item.message.contains("source=explicit_yolo"));
         assert!(item.message.contains("production_path=no"));
     }
 

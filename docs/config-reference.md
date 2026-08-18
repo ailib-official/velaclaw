@@ -196,6 +196,31 @@ Notes:
 - In CLI, gateway, and channel tool loops, multiple independent tool calls are executed concurrently by default when the pending calls do not require approval gating; result order remains stable.
 - `parallel_tools` applies to the `Agent::turn()` API surface (Web Local Control). CLI and channel handlers use their own concurrent batching when calls do not require approval gating.
 
+## `[security.sandbox]`
+
+OS isolation for production `shell` (wired in `all_tools_with_runtime`). Unit tests that construct `ShellTool::new` keep Noop.
+
+| Key | Default | Purpose |
+|---|---|---|
+| `enabled` | unset (auto) | `false` is YOLO: Noop sandbox. Unset/`true` follows `backend`. |
+| `backend` | `auto` | Linux `auto`: Landlock when the `sandbox-landlock` feature and kernel support it, otherwise **fail-closed** (shell refused). `none` is YOLO Noop. Explicit `landlock` / `firejail` / `docker` / `bubblewrap` stay available; missing explicit backend is fail-closed, not silent Noop. |
+| `firejail_args` | `[]` | Extra args when `backend = "firejail"` |
+
+Notes:
+
+- Allowlisted commands still go through `Sandbox::wrap_command`.
+- Human approval does **not** enlarge `allowed_commands` (SEC-009).
+- Autonomy `full` does not disable the sandbox.
+- Landlock applies in the child (`pre_exec`), not the agent parent.
+- Receipts: `<workspace>/.velaclaw/tool_receipts.jsonl` (truncated command; no secrets).
+
+```toml
+[security.sandbox]
+# Default Auto. YOLO opt-out:
+# enabled = false
+# backend = "none"
+```
+
 ## `[agents.<name>]`
 
 Delegate sub-agent configurations. Each key under `[agents]` defines a named sub-agent that the primary agent can delegate to.

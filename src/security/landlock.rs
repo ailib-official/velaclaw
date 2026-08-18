@@ -61,7 +61,8 @@ impl LandlockSandbox {
                     | AccessFs::MakeFifo
                     | AccessFs::MakeBlock
                     | AccessFs::MakeReg
-                    | AccessFs::MakeSym,
+                    | AccessFs::MakeSym
+                    | AccessFs::Execute,
             )
             .and_then(|ruleset| ruleset.create())
             .map_err(|e| std::io::Error::other(e.to_string()))?;
@@ -90,46 +91,61 @@ impl LandlockSandbox {
             ))
             .map_err(|e| std::io::Error::other(e.to_string()))?;
 
-        // Allow /usr and /bin for executing commands
-        let usr_fd =
-            PathFd::new(Path::new("/usr")).map_err(|e| std::io::Error::other(e.to_string()))?;
-        ruleset = ruleset
-            .add_rule(PathBeneath::new(
-                usr_fd,
-                AccessFs::ReadFile | AccessFs::ReadDir,
-            ))
-            .map_err(|e| std::io::Error::other(e.to_string()))?;
-
         let bin_fd =
             PathFd::new(Path::new("/bin")).map_err(|e| std::io::Error::other(e.to_string()))?;
         ruleset = ruleset
             .add_rule(PathBeneath::new(
                 bin_fd,
-                AccessFs::ReadFile | AccessFs::ReadDir,
+                AccessFs::ReadFile | AccessFs::ReadDir | AccessFs::Execute,
             ))
             .map_err(|e| std::io::Error::other(e.to_string()))?;
 
-        // Apply the ruleset
+        let usr_fd =
+            PathFd::new(Path::new("/usr")).map_err(|e| std::io::Error::other(e.to_string()))?;
+        ruleset = ruleset
+            .add_rule(PathBeneath::new(
+                usr_fd,
+                AccessFs::ReadFile | AccessFs::ReadDir | AccessFs::Execute,
+            ))
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
+
+        for extra in ["/lib", "/lib64", "/etc", "/dev"] {
+            let p = Path::new(extra);
+            if p.exists() {
+                let fd = PathFd::new(p).map_err(|e| std::io::Error::other(e.to_string()))?;
+                ruleset = ruleset
+                    .add_rule(PathBeneath::new(
+                        fd,
+                        AccessFs::ReadFile | AccessFs::ReadDir | AccessFs::Execute,
+                    ))
+                    .map_err(|e| std::io::Error::other(e.to_string()))?;
+            }
+        }
+
         match ruleset.restrict_self() {
-            Ok(_) => {
-                tracing::debug!("Landlock restrictions applied successfully");
-                Ok(())
-            }
-            Err(e) => {
-                tracing::warn!("Failed to apply Landlock restrictions: {}", e);
-                Err(std::io::Error::other(e.to_string()))
-            }
+            Ok(_) => Ok(()),
+            Err(e) => Err(std::io::Error::other(e.to_string())),
         }
     }
 }
 
 #[cfg(all(feature = "sandbox-landlock", target_os = "linux"))]
 impl Sandbox for LandlockSandbox {
-    fn wrap_command(&self, _cmd: &mut std::process::Command) -> std::io::Result<()> {
-        // Apply Landlock restrictions before executing the command
-        // Note: This affects the current process, not the child process
-        // Child processes inherit the Landlock restrictions
-        self.apply_restrictions()
+    fn wrap_command(&self, cmd: &mut std::process::Command) -> std::io::Result<()> {
+        use std::os::unix::process::CommandExt;
+
+        let workspace = self.workspace_dir.clone();
+        // SAFETY: `pre_exec` runs in the child after fork and before exec.
+        // Landlock must not be applied to the agent parent process.
+        unsafe {
+            cmd.pre_exec(move || {
+                LandlockSandbox {
+                    workspace_dir: workspace.clone(),
+                }
+                .apply_restrictions()
+            });
+        }
+        Ok(())
     }
 
     fn is_available(&self) -> bool {
@@ -205,6 +221,22 @@ mod tests {
 
     #[cfg(all(feature = "sandbox-landlock", target_os = "linux"))]
     #[test]
+    fn landlock_wrap_command_does_not_restrict_parent() {
+        let Ok(sandbox) = LandlockSandbox::with_workspace(None) else {
+            return;
+        };
+        let mut cmd = std::process::Command::new("true");
+        sandbox.wrap_command(&mut cmd).unwrap();
+        let probe = std::env::current_dir()
+            .unwrap()
+            .join(".vl_ma_003_landlock_parent_probe");
+        std::fs::write(&probe, b"ok")
+            .expect("parent process must still write outside Landlock allowlist");
+        let _ = std::fs::remove_file(&probe);
+    }
+
+    #[cfg(all(feature = "sandbox-landlock", target_os = "linux"))]
+    #[test]
     fn landlock_sandbox_name() {
         if let Ok(sandbox) = LandlockSandbox::new() {
             assert_eq!(sandbox.name(), "landlock");
@@ -225,10 +257,9 @@ mod tests {
         // Result depends on platform and feature flag
         match result {
             Ok(sandbox) => assert!(sandbox.is_available()),
-            Err(_) => assert!(!cfg!(all(
-                feature = "sandbox-landlock",
-                target_os = "linux"
-            ))),
+            Err(_) => {
+                // Feature off, non-Linux, or kernel without Landlock.
+            }
         }
     }
 

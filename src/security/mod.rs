@@ -9,9 +9,8 @@
 //!
 //! OS-level isolation is provided through the [`Sandbox`] trait defined in
 //! [`traits`], with pluggable backends including Docker, Firejail, Bubblewrap,
-//! and Landlock. The [`create_sandbox`] function selects the best available
-//! backend at runtime. An [`AuditLogger`] records security-relevant events for
-//! forensic review.
+//! and Landlock. [`create_sandbox`] selects Linux Auto as Landlock or
+//! fail-closed. [`ToolReceiptLog`] records allow/deny/sandbox_fail lines.
 //!
 //! # Extension
 //!
@@ -31,13 +30,14 @@ pub mod landlock;
 pub mod pairing;
 pub mod policy;
 pub mod policy_handle;
+pub mod receipts;
 pub mod secrets;
 pub mod traits;
 
 #[allow(unused_imports)]
 pub use audit::{AuditEvent, AuditEventType, AuditLogger};
 #[allow(unused_imports)]
-pub use detect::create_sandbox;
+pub use detect::{create_sandbox, describe_effective_sandbox, EffectiveSandbox};
 #[allow(unused_imports)]
 pub use pairing::PairingGuard;
 pub use policy::{
@@ -45,9 +45,11 @@ pub use policy::{
 };
 pub use policy_handle::PolicyHandle;
 #[allow(unused_imports)]
+pub use receipts::{ReceiptDecision, ToolReceipt, ToolReceiptLog};
+#[allow(unused_imports)]
 pub use secrets::SecretStore;
 #[allow(unused_imports)]
-pub use traits::{NoopSandbox, Sandbox};
+pub use traits::{FailClosedSandbox, NoopSandbox, Sandbox};
 
 /// Redact sensitive values for safe logging. Shows first 4 chars + "***" suffix.
 /// This function intentionally breaks the data-flow taint chain for static analysis.

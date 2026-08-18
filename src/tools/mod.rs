@@ -218,7 +218,12 @@ pub fn all_tools_with_runtime(
     let human_input_attach = human_input.hub_slot();
     let mut tool_arcs: Vec<Arc<dyn Tool>> = vec![
         human_input,
-        Arc::new(ShellTool::new(security.clone(), runtime)),
+        Arc::new(ShellTool::with_isolation(
+            security.clone(),
+            runtime,
+            crate::security::create_sandbox(&root_config.security, Some(workspace_dir)),
+            Some(crate::security::ToolReceiptLog::in_workspace(workspace_dir)),
+        )),
         Arc::new(FileReadTool::new(security.clone())),
         Arc::new(FileWriteTool::new(security.clone())),
         Arc::new(GlobSearchTool::new(security.clone())),

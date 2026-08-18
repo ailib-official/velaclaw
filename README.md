@@ -146,7 +146,7 @@ endpoint = "https://api.prism.ailib.info"
 | `remote-deploy` | SSH-based remote deployment |
 | `memory-postgres` | PostgreSQL memory backend |
 | `observability-otel` | OpenTelemetry metrics |
-| `sandbox-landlock` | Linux Landlock sandboxing |
+| `sandbox-landlock` | Linux Landlock sandboxing (**on by default**) |
 | `whatsapp-web` | Native WhatsApp Web client |
 | `probe` | probe-rs for Nucleo memory |
 | `rag-pdf` | PDF ingestion for RAG |

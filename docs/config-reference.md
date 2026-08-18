@@ -242,7 +242,8 @@ Notes:
 
 - `agentic = false` preserves existing single prompt→response delegate behavior.
 - `agentic = true` requires at least one matching entry in `allowed_tools`.
-- The `delegate` tool is excluded from sub-agent allowlists to prevent re-entrant delegation loops.
+- Allowlisted names must exist on the parent registry. Unknown names and nested `delegate` fail closed (the child cannot escalate).
+- Agentic runs use the same host tool-loop; dispatch/aggregate lines include a `run_id`.
 
 ```toml
 [agents.researcher]

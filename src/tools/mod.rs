@@ -365,7 +365,7 @@ pub fn all_tools_with_runtime(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{BrowserConfig, Config, MemoryConfig};
+    use crate::config::{BrowserConfig, Config, DelegateAgentConfig, MemoryConfig};
     use crate::security::SecurityPolicy;
     use tempfile::TempDir;
 
@@ -638,5 +638,70 @@ mod tests {
         );
         let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
         assert!(!names.contains(&"delegate"));
+    }
+
+    #[test]
+    fn all_tools_with_runtime_names_are_pinned_for_plan() {
+        use crate::agent::host_phase::{is_mutating_tool, pinned_plan_mutating};
+
+        let tmp = TempDir::new().unwrap();
+        let security = PolicyHandle::new(SecurityPolicy::default());
+        let mem_cfg = MemoryConfig {
+            backend: "markdown".into(),
+            ..MemoryConfig::default()
+        };
+        let mem: Arc<dyn Memory> =
+            Arc::from(crate::memory::create_memory(&mem_cfg, tmp.path(), None).unwrap());
+
+        let mut browser = BrowserConfig::default();
+        browser.enabled = true;
+        let mut http = crate::config::HttpRequestConfig::default();
+        http.enabled = true;
+        let cfg = test_config(&tmp);
+        let mut agents = HashMap::new();
+        agents.insert(
+            "researcher".into(),
+            DelegateAgentConfig {
+                provider: "openai".into(),
+                model: "test".into(),
+                system_prompt: None,
+                api_key: None,
+                temperature: None,
+                max_depth: 1,
+                agentic: false,
+                allowed_tools: Vec::new(),
+                max_iterations: 4,
+            },
+        );
+
+        let (tools, _) = all_tools_with_runtime(
+            Arc::new(Config::default()),
+            &security,
+            Arc::new(NativeRuntime),
+            mem,
+            Some("composio-test-key"),
+            None,
+            &browser,
+            &http,
+            tmp.path(),
+            &agents,
+            None,
+            &cfg,
+        );
+
+        for tool in &tools {
+            let name = tool.name();
+            let pinned = pinned_plan_mutating(name).unwrap_or_else(|| {
+                panic!(
+                    "tool '{name}' is not pinned as mutating or intentional read-only \
+                     (add it to REGISTRY_PLAN_CLASS)"
+                )
+            });
+            assert_eq!(
+                is_mutating_tool(name),
+                pinned,
+                "Plan class mismatch for {name}"
+            );
+        }
     }
 }

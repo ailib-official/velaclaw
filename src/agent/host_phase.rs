@@ -52,30 +52,55 @@ impl HostPhase {
     }
 }
 
-fn is_mutating_tool(name: &str) -> bool {
-    matches!(
-        name,
-        "shell"
-            | "file_write"
-            | "git_operations"
-            | "browser"
-            | "browser_open"
-            | "cron_add"
-            | "cron_remove"
-            | "cron_run"
-            | "cron_update"
-            | "memory_store"
-            | "memory_forget"
-            | "delegate"
-            | "http_request"
-            | "composio"
-            | "policy_patch"
-            | "proxy_config"
-            | "schedule"
-            | "pushover"
-            | "screenshot"
-            | "generative"
-    )
+/// Explicit Plan classification for known registry names (VL-MA-005 / #257).
+/// `true` = mutating (blocked in Plan). Names must match live `Tool::name()`.
+pub(crate) const REGISTRY_PLAN_CLASS: &[(&str, bool)] = &[
+    ("request_human_input", false),
+    ("shell", true),
+    ("file_read", false),
+    ("file_write", true),
+    ("glob_search", false),
+    ("cron_add", true),
+    ("cron_list", false),
+    ("cron_remove", true),
+    ("cron_update", true),
+    ("cron_run", true),
+    ("cron_runs", false),
+    ("memory_store", true),
+    ("memory_recall", false),
+    ("memory_forget", true),
+    ("schedule", true),
+    ("proxy_config", true),
+    ("git_operations", true),
+    ("pushover", true),
+    ("browser_open", true),
+    ("browser", true),
+    ("http_request", true),
+    ("web_search_tool", false),
+    ("pdf_read", false),
+    ("screenshot", true),
+    ("image_info", false),
+    ("composio", true),
+    ("delegate", true),
+    ("policy_patch", true),
+    ("generative_capability", true),
+    ("hardware_board_info", false),
+    ("hardware_memory_map", false),
+    ("hardware_memory_read", false),
+];
+
+pub(crate) fn pinned_plan_mutating(name: &str) -> Option<bool> {
+    REGISTRY_PLAN_CLASS
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, mutating)| *mutating)
+}
+
+pub(crate) fn is_mutating_tool(name: &str) -> bool {
+    pinned_plan_mutating(name).unwrap_or_else(|| {
+        // Legacy alias from #257; live tool name is `generative_capability`.
+        name == "generative"
+    })
 }
 
 #[cfg(test)]
@@ -103,5 +128,15 @@ mod tests {
         assert_eq!(HostPhase::parse_opt(None), HostPhase::Build);
         assert_eq!(HostPhase::parse_opt(Some("PLAN")), HostPhase::Plan);
         assert_eq!(HostPhase::parse_opt(Some("nope")), HostPhase::Build);
+    }
+
+    #[test]
+    fn pin_table_agrees_with_is_mutating_tool() {
+        for (name, mutating) in REGISTRY_PLAN_CLASS {
+            assert_eq!(is_mutating_tool(name), *mutating, "pin mismatch for {name}");
+        }
+        assert!(is_mutating_tool("generative_capability"));
+        assert!(is_mutating_tool("generative"));
+        assert!(!is_mutating_tool("web_search_tool"));
     }
 }

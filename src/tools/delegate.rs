@@ -1,5 +1,8 @@
 use super::traits::{Tool, ToolExecutionContext, ToolResult};
+use crate::agent::host_phase::HostPhase;
 use crate::agent::loop_::run_tool_call_loop;
+use crate::agent::subagent::{resolve_subagent_scope, SubAgentAggregate, SubAgentDispatch};
+use crate::agent::tool_batch::ToolBatchGateExtras;
 use crate::cli_render::{RenderOpts, RenderStyle};
 use crate::config::DelegateAgentConfig;
 use crate::observability::traits::{Observer, ObserverEvent, ObserverMetric};
@@ -363,41 +366,51 @@ impl DelegateTool {
             });
         }
 
-        let allowed = agent_config
-            .allowed_tools
-            .iter()
-            .map(|name| name.trim())
-            .filter(|name| !name.is_empty())
-            .collect::<std::collections::HashSet<_>>();
+        let parent_names: Vec<&str> = self.parent_tools.iter().map(|tool| tool.name()).collect();
+        let scoped_names = match resolve_subagent_scope(&parent_names, &agent_config.allowed_tools)
+        {
+            Ok(names) => names,
+            Err(err) => {
+                return Ok(ToolResult {
+                    success: false,
+                    output: String::new(),
+                    error: Some(format!("Agent '{agent_name}' {msg}", msg = err.message)),
+                });
+            }
+        };
 
-        let sub_tools: Vec<Box<dyn Tool>> = self
-            .parent_tools
+        let sub_tools: Vec<Box<dyn Tool>> = scoped_names
             .iter()
-            .filter(|tool| allowed.contains(tool.name()))
-            .filter(|tool| tool.name() != "delegate")
-            .map(|tool| Box::new(ToolArcRef::new(tool.clone())) as Box<dyn Tool>)
+            .filter_map(|name| {
+                self.parent_tools
+                    .iter()
+                    .find(|tool| tool.name() == name)
+                    .map(|tool| Box::new(ToolArcRef::new(tool.clone())) as Box<dyn Tool>)
+            })
             .collect();
 
-        if sub_tools.is_empty() {
+        if sub_tools.len() != scoped_names.len() {
             return Ok(ToolResult {
                 success: false,
                 output: String::new(),
                 error: Some(format!(
-                    "Agent '{agent_name}' has no executable tools after filtering allowlist ({})",
-                    agent_config.allowed_tools.join(", ")
+                    "Agent '{agent_name}' privilege: scoped tools could not be materialized"
                 )),
             });
         }
+
+        let dispatch = SubAgentDispatch {
+            run_id: format!("subagent-{}", uuid::Uuid::new_v4()),
+            agent_name: agent_name.to_string(),
+            parent_depth: self.depth,
+            tool_names: scoped_names.clone(),
+        };
 
         let mut history = Vec::new();
         let system_prompt = if let Some(custom) = agent_config.system_prompt.as_ref() {
             custom.clone()
         } else {
-            let allowed: Vec<&str> = agent_config
-                .allowed_tools
-                .iter()
-                .map(String::as_str)
-                .collect();
+            let allowed: Vec<&str> = scoped_names.iter().map(String::as_str).collect();
             crate::agent::prompt_composer::build_delegate_subagent_prompt(
                 &allowed,
                 provider.supports_native_tools(),
@@ -407,6 +420,10 @@ impl DelegateTool {
         history.push(ChatMessage::user(full_prompt.to_string()));
 
         let noop_observer = NoopObserver;
+        let gate_extras = ToolBatchGateExtras {
+            host_phase: HostPhase::Build,
+            ..ToolBatchGateExtras::default()
+        };
 
         let result = tokio::time::timeout(
             Duration::from_secs(DELEGATE_AGENTIC_TIMEOUT_SECS),
@@ -426,7 +443,7 @@ impl DelegateTool {
                 None,
                 None,
                 None,
-                None,
+                Some(&self.security),
                 None,
                 false,
                 RenderOpts {
@@ -439,42 +456,61 @@ impl DelegateTool {
                 },
                 None,
                 None,
-                None,
+                Some(&gate_extras),
             ),
         )
         .await;
 
-        match result {
+        let aggregate = match result {
             Ok(Ok(response)) => {
                 let rendered = if response.trim().is_empty() {
                     "[Empty response]".to_string()
                 } else {
                     response
                 };
-
-                Ok(ToolResult {
+                SubAgentAggregate {
+                    run_id: dispatch.run_id.clone(),
                     success: true,
-                    output: format!(
-                        "[Agent '{agent_name}' ({provider}/{model}, agentic)]\n{rendered}",
-                        provider = agent_config.provider,
-                        model = agent_config.model
-                    ),
+                    output: rendered,
                     error: None,
-                })
+                }
             }
-            Ok(Err(e)) => Ok(ToolResult {
+            Ok(Err(e)) => SubAgentAggregate {
+                run_id: dispatch.run_id.clone(),
                 success: false,
                 output: String::new(),
                 error: Some(format!("Agent '{agent_name}' failed: {e}")),
-            }),
-            Err(_) => Ok(ToolResult {
+            },
+            Err(_) => SubAgentAggregate {
+                run_id: dispatch.run_id.clone(),
                 success: false,
                 output: String::new(),
                 error: Some(format!(
                     "Agent '{agent_name}' timed out after {DELEGATE_AGENTIC_TIMEOUT_SECS}s"
                 )),
-            }),
+            },
+        };
+
+        if !aggregate.success {
+            return Ok(ToolResult {
+                success: false,
+                output: format!("{}\n{}", dispatch.header_line(), aggregate.footer_line()),
+                error: aggregate.error,
+            });
         }
+
+        Ok(ToolResult {
+            success: true,
+            output: format!(
+                "{dispatch}\n[Agent '{agent_name}' ({provider}/{model}, agentic)]\n{body}\n{footer}",
+                dispatch = dispatch.header_line(),
+                provider = agent_config.provider,
+                model = agent_config.model,
+                body = aggregate.output,
+                footer = aggregate.footer_line()
+            ),
+            error: None,
+        })
     }
 }
 
@@ -1093,7 +1129,7 @@ mod tests {
             .error
             .as_deref()
             .unwrap_or("")
-            .contains("no executable tools"));
+            .contains("not in the parent registry"));
     }
 
     #[tokio::test]
@@ -1113,6 +1149,9 @@ mod tests {
             .unwrap();
 
         assert!(result.success);
+        assert!(result.output.contains("[SubAgent dispatch run_id="));
+        assert!(result.output.contains("[SubAgent aggregate run_id="));
+        assert!(result.output.contains("tools=echo_tool"));
         assert!(result.output.contains("(openai-codex/model-test, agentic)"));
         assert!(result.output.contains("done"));
     }
@@ -1139,7 +1178,7 @@ mod tests {
             .error
             .as_deref()
             .unwrap_or("")
-            .contains("no executable tools"));
+            .contains("nested delegate"));
     }
 
     #[tokio::test]

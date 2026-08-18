@@ -2,6 +2,7 @@
 //! 统一工具批执行：批准门 + 并行/串行调度。
 
 use crate::agent::dispatcher::ParsedToolCall as GateToolCall;
+use crate::agent::host_phase::HostPhase;
 use crate::approval::{
     ApprovalGate, ApprovalHub, ApprovalManager, ChannelApprovalSession, GateDecision, HumanInputHub,
 };
@@ -35,6 +36,7 @@ pub struct ToolBatchResult {
 pub(crate) struct ToolBatchGateExtras {
     pub approval_hub: Option<Arc<ApprovalHub>>,
     pub human_input_hub: Option<Arc<HumanInputHub>>,
+    pub host_phase: HostPhase,
 }
 
 fn find_tool<'a>(tools: &'a [Box<dyn Tool>], name: &str) -> Option<&'a dyn Tool> {
@@ -84,6 +86,15 @@ fn build_tool_execution_context(
         ToolExecutionContext::with_shell_human_approved(shell_human_approved)
             .with_stdin_secret(stdin_secret),
     )
+}
+
+fn plan_blocked(phase: HostPhase, tool_name: &str) -> Option<ToolBatchResult> {
+    phase
+        .blocked_output(tool_name)
+        .map(|output| ToolBatchResult {
+            output,
+            success: false,
+        })
 }
 
 async fn execute_one_tool(
@@ -188,23 +199,49 @@ async fn execute_tools_parallel(
     tools_registry: &[Box<dyn Tool>],
     observer: &dyn Observer,
     cancellation_token: Option<&CancellationToken>,
+    host_phase: HostPhase,
 ) -> Result<Vec<ToolBatchResult>> {
-    let ctx_default = ToolExecutionContext::default();
-    let futures: Vec<_> = tool_calls
-        .iter()
-        .map(|call| {
-            execute_one_tool(
-                &call.name,
-                call.arguments.clone(),
-                tools_registry,
-                observer,
-                cancellation_token,
-                &ctx_default,
+    let mut blocked: Vec<(usize, ToolBatchResult)> = Vec::new();
+    let mut runnable: Vec<(usize, ParsedToolCall)> = Vec::new();
+    for (i, call) in tool_calls.iter().enumerate() {
+        if let Some(b) = plan_blocked(host_phase, &call.name) {
+            blocked.push((i, b));
+        } else {
+            runnable.push((i, call.clone()));
+        }
+    }
+    let futures: Vec<_> = runnable
+        .into_iter()
+        .map(|(i, call)| async move {
+            let ctx = ToolExecutionContext::default();
+            (
+                i,
+                execute_one_tool(
+                    &call.name,
+                    call.arguments,
+                    tools_registry,
+                    observer,
+                    cancellation_token,
+                    &ctx,
+                )
+                .await,
             )
         })
         .collect();
-
-    Ok(futures_util::future::join_all(futures).await)
+    let mut out = vec![
+        ToolBatchResult {
+            output: String::new(),
+            success: false,
+        };
+        tool_calls.len()
+    ];
+    for (i, b) in blocked {
+        out[i] = b;
+    }
+    for (i, r) in futures_util::future::join_all(futures).await {
+        out[i] = r;
+    }
+    Ok(out)
 }
 
 async fn execute_tools_sequential_no_gate(
@@ -213,10 +250,15 @@ async fn execute_tools_sequential_no_gate(
     observer: &dyn Observer,
     cancellation_token: Option<&CancellationToken>,
     human_input_hub: Option<&HumanInputHub>,
+    host_phase: HostPhase,
 ) -> Result<Vec<ToolBatchResult>> {
     let mut results = Vec::with_capacity(tool_calls.len());
 
     for call in tool_calls {
+        if let Some(blocked) = plan_blocked(host_phase, &call.name) {
+            results.push(blocked);
+            continue;
+        }
         let mut args = normalize_tool_arguments(&call.name, call.arguments.clone());
         let ctx = match build_tool_execution_context(&call.name, &mut args, false, human_input_hub)
         {
@@ -249,10 +291,15 @@ async fn execute_tools_sequential_with_gate(
     gate: &ApprovalGate<'_>,
     cancellation_token: Option<&CancellationToken>,
     human_input_hub: Option<&HumanInputHub>,
+    host_phase: HostPhase,
 ) -> Result<Vec<ToolBatchResult>> {
     let mut results = Vec::with_capacity(tool_calls.len());
 
     for call in tool_calls {
+        if let Some(blocked) = plan_blocked(host_phase, &call.name) {
+            results.push(blocked);
+            continue;
+        }
         let mut args = normalize_tool_arguments(&call.name, call.arguments.clone());
         let gate_call = GateToolCall {
             name: call.name.clone(),
@@ -333,6 +380,7 @@ pub(crate) async fn execute_tool_batch(
     let human_input = gate_extras
         .and_then(|e| e.human_input_hub.as_ref())
         .map(std::convert::AsRef::as_ref);
+    let host_phase = gate_extras.map(|e| e.host_phase).unwrap_or_default();
 
     // secret_slot resolution requires sequential execution (HITL store is not
     // safe to consume concurrently across a parallel batch).
@@ -340,8 +388,14 @@ pub(crate) async fn execute_tool_batch(
         should_execute_tools_in_parallel(tool_calls, gate_ref) && human_input.is_none();
 
     if should_parallel {
-        return execute_tools_parallel(tool_calls, tools_registry, observer, cancellation_token)
-            .await;
+        return execute_tools_parallel(
+            tool_calls,
+            tools_registry,
+            observer,
+            cancellation_token,
+            host_phase,
+        )
+        .await;
     }
 
     if let Some(gate) = gate_ref {
@@ -352,6 +406,7 @@ pub(crate) async fn execute_tool_batch(
             gate,
             cancellation_token,
             human_input,
+            host_phase,
         )
         .await
     } else {
@@ -361,6 +416,7 @@ pub(crate) async fn execute_tool_batch(
             observer,
             cancellation_token,
             human_input,
+            host_phase,
         )
         .await
     }
@@ -398,6 +454,35 @@ mod tests {
         let gate = ApprovalGate::new(&approval_mgr, "cli", None);
 
         assert!(!should_execute_tools_in_parallel(&calls, Some(&gate)));
+    }
+
+    #[tokio::test]
+    async fn plan_phase_blocks_shell_without_executing() {
+        let calls = vec![ParsedToolCall {
+            name: "shell".to_string(),
+            arguments: serde_json::json!({"command": "true"}),
+        }];
+        let extras = ToolBatchGateExtras {
+            host_phase: HostPhase::Plan,
+            ..Default::default()
+        };
+        let observer = crate::observability::NoopObserver;
+        let results = execute_tool_batch(
+            &calls,
+            &[],
+            &observer,
+            None,
+            None,
+            "cli",
+            None,
+            None,
+            Some(&extras),
+        )
+        .await
+        .unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(!results[0].success);
+        assert!(results[0].output.contains("Plan phase"));
     }
 
     #[test]

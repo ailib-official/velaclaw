@@ -206,19 +206,40 @@ pub async fn dispatch_configured_command(command: Commands, config: Config) -> R
             peripheral,
             no_color,
             no_fold,
-        } => agent::run(
-            config,
-            message,
-            provider,
-            model,
-            temperature,
-            peripheral,
-            no_color,
-            no_fold,
-            &[],
-        )
-        .await
-        .map(|_| ()),
+            plan,
+            session_id,
+        } => {
+            let host_phase = if plan {
+                velaclaw::agent::host_phase::HostPhase::Plan
+            } else {
+                velaclaw::agent::host_phase::HostPhase::Build
+            };
+            agent::run(
+                config,
+                message,
+                provider,
+                model,
+                temperature,
+                peripheral,
+                no_color,
+                no_fold,
+                velaclaw::agent::AgentRunOpts {
+                    extra_prompt_phases: &[],
+                    host_phase,
+                    chat_session_id: session_id,
+                    persist_chat_session: true,
+                },
+            )
+            .await
+            .map(|_| ())
+        }
+
+        Commands::Undo => {
+            let msg =
+                velaclaw::agent::workspace_undo::restore_tracked_if_git(&config.workspace_dir)?;
+            println!("{msg}");
+            Ok(())
+        }
 
         Commands::Gateway { port, host } => {
             let port = port.unwrap_or(config.gateway.port);

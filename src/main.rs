@@ -133,7 +133,9 @@ Examples:
   velaclaw agent                              # interactive session
   velaclaw agent -m \"Summarize today's logs\"  # single message
   velaclaw agent -p anthropic --model claude-sonnet-4-20250514
-  velaclaw agent --peripheral nucleo-f401re:/dev/ttyACM0")]
+  velaclaw agent --peripheral nucleo-f401re:/dev/ttyACM0
+  velaclaw agent --plan -m \"Propose a change without writing files\"
+  velaclaw agent --session-id <id> -m \"Continue\"")]
     Agent {
         /// Single message mode (don't enter interactive mode)
         #[arg(short, long)]
@@ -162,7 +164,18 @@ Examples:
         /// Disable long-output folding in interactive REPL
         #[arg(long, default_value_t = false)]
         no_fold: bool,
+
+        /// Plan phase: mutating tools are blocked (default is Build)
+        #[arg(long, default_value_t = false)]
+        plan: bool,
+
+        /// Resume ChatSessionStore id under workspace/.velaclaw/chat_sessions
+        #[arg(long)]
+        session_id: Option<String>,
     },
+
+    /// Restore tracked workspace files to HEAD when `.git` already exists (VL-MA-004)
+    Undo,
 
     /// Start the gateway server (webhooks, websockets)
     #[command(long_about = "\

@@ -20,6 +20,9 @@ pub struct ChatApiRequest {
     pub temperature: Option<f64>,
     #[serde(default)]
     pub max_tokens: Option<u32>,
+    /// `plan` or `build` (default). Plan blocks mutating tools (VL-MA-004).
+    #[serde(default)]
+    pub host_phase: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -77,6 +80,8 @@ pub struct WsClientMessage {
     pub model_id: Option<String>,
     #[serde(default)]
     pub temperature: Option<f64>,
+    #[serde(default)]
+    pub host_phase: Option<String>,
 }
 
 /// Server → client WebSocket payload (externally tagged by `type`).

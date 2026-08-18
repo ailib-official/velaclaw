@@ -205,7 +205,9 @@ async fn run_heartbeat_worker(config: Config) -> Result<()> {
                 vec![],
                 false,
                 false,
-                &[crate::agent::prompt_composer::PromptPhase::Heartbeat],
+                crate::agent::AgentRunOpts::phases(&[
+                    crate::agent::prompt_composer::PromptPhase::Heartbeat,
+                ]),
             )
             .await
             {

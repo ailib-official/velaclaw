@@ -107,6 +107,9 @@ pub async fn run_agent_chat(
         agent.set_session_id(sid.to_string());
     }
     agent.set_explicit_model(explicit_model);
+    agent.set_host_phase(crate::agent::host_phase::HostPhase::parse_opt(
+        req.host_phase.as_deref(),
+    ));
     if let Some(hub) = approval_hub {
         agent
             .enable_gateway_approval(Arc::clone(hub), &effective_config)
@@ -479,6 +482,7 @@ mod tests {
             model_id: Some("deepseek/deepseek-v4-pro".into()),
             temperature: Some(0.2),
             max_tokens: None,
+            host_phase: None,
         };
         let updated = apply_chat_overrides(base, &req);
         assert_eq!(
@@ -500,6 +504,7 @@ mod tests {
             model_id: Some("deepseek-chat".into()),
             temperature: None,
             max_tokens: None,
+            host_phase: None,
         };
         let updated = apply_chat_overrides(base, &req);
         assert_eq!(
@@ -547,6 +552,7 @@ metadata:
             model_id: Some("deepseek-ai/deepseek-v4-flash".into()),
             temperature: None,
             max_tokens: None,
+            host_phase: None,
         };
         let updated = apply_chat_overrides(base, &req);
         assert_eq!(

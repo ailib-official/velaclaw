@@ -265,6 +265,7 @@ temperature = 0.2
 
 | Key | Default | Purpose |
 |---|---|---|
+| `kind` | `native` | Shell runtime adapter: `native`, `docker`, or `wasm` (no shell). Default stays `native`. |
 | `reasoning_enabled` | unset (`None`) | Global reasoning/thinking override for providers that support explicit controls |
 
 Notes:
@@ -272,6 +273,25 @@ Notes:
 - `reasoning_enabled = false` explicitly disables provider-side reasoning for supported providers (currently `ollama`, via request field `think: false`).
 - `reasoning_enabled = true` explicitly requests reasoning for supported providers (`think: true` on `ollama`).
 - Unset keeps provider defaults.
+- Do **not** set `kind = "wasm"` to load plugins: that adapter has no shell. Plugins are a sidecar under `[runtime.wasm]`.
+
+## `[runtime.wasm]`
+
+| Key | Default | Purpose |
+|---|---|---|
+| `enabled` | `false` | Register the `wasm_invoke` tool (GOV-006: off by default) |
+| `tools_dir` | `tools/wasm` | Workspace-relative directory of `*.wasm` modules |
+| `fuel_limit` | `1000000` | Interpreter fuel budget (`0` = unlimited; not recommended) |
+| `memory_limit_mb` | `64` | Guest memory ceiling in MiB |
+| `allow_workspace_read` | `false` | Reserved; WASI filesystem is not mapped in this release |
+| `allow_workspace_write` | `false` | Reserved; WASI filesystem is not mapped in this release |
+| `allowed_hosts` | `[]` | Reserved; guest HTTP is not wired in this release |
+
+Notes:
+
+- Guest ABI is `wit/velaclaw-plugin.wit`: core WebAssembly export `run() -> s32`, interpreted by **wasmi**. This is **not** a wasmtime Component Model runtime.
+- Execution requires a build with `--features runtime-wasm`. Without the feature, `wasm_invoke` still registers when `enabled = true` but module execution fails closed.
+- `wasm_invoke` uses the existing tool loop and Plan mutating pin (blocked in Plan). Module names are ASCII alphanumeric / `_` / `-` only.
 
 ## `[skills]`
 

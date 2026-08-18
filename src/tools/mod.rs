@@ -50,6 +50,7 @@ pub mod schema;
 pub mod screenshot;
 pub mod shell;
 pub mod traits;
+pub mod wasm_invoke;
 pub mod web_search_tool;
 
 pub use browser::{BrowserTool, ComputerUseConfig};
@@ -90,6 +91,7 @@ pub use shell::ShellTool;
 pub use traits::Tool;
 #[allow(unused_imports)]
 pub use traits::{ToolExecutionContext, ToolResult, ToolSpec};
+pub use wasm_invoke::WasmInvokeTool;
 pub use web_search_tool::WebSearchTool;
 
 use crate::config::{Config, DelegateAgentConfig};
@@ -357,6 +359,17 @@ pub fn all_tools_with_runtime(
         tool_arcs.push(Arc::new(
             crate::tools::generative::GenerativeCapabilityTool::new(security.clone()),
         ));
+    }
+
+    if root_config.runtime.wasm.enabled {
+        tool_arcs.push(Arc::new(WasmInvokeTool::new(
+            security.clone(),
+            crate::runtime::WasmRuntime::with_workspace(
+                root_config.runtime.wasm.clone(),
+                workspace_dir.to_path_buf(),
+            ),
+            workspace_dir.to_path_buf(),
+        )));
     }
 
     (boxed_registry_from_arcs(tool_arcs), human_input_attach)
@@ -703,5 +716,69 @@ mod tests {
                 "Plan class mismatch for {name}"
             );
         }
+    }
+
+    #[test]
+    fn wasm_invoke_absent_from_default_registry() {
+        let tmp = TempDir::new().unwrap();
+        let security = PolicyHandle::new(SecurityPolicy::default());
+        let mem_cfg = MemoryConfig {
+            backend: "markdown".into(),
+            ..MemoryConfig::default()
+        };
+        let mem: Arc<dyn Memory> =
+            Arc::from(crate::memory::create_memory(&mem_cfg, tmp.path(), None).unwrap());
+        let browser = BrowserConfig::default();
+        let http = crate::config::HttpRequestConfig::default();
+        let cfg = test_config(&tmp);
+        let (tools, _) = all_tools_with_runtime(
+            Arc::new(Config::default()),
+            &security,
+            Arc::new(NativeRuntime),
+            mem,
+            None,
+            None,
+            &browser,
+            &http,
+            tmp.path(),
+            &HashMap::new(),
+            None,
+            &cfg,
+        );
+        let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
+        assert!(!names.contains(&"wasm_invoke"));
+    }
+
+    #[test]
+    fn wasm_invoke_present_when_enabled() {
+        let tmp = TempDir::new().unwrap();
+        let security = PolicyHandle::new(SecurityPolicy::default());
+        let mem_cfg = MemoryConfig {
+            backend: "markdown".into(),
+            ..MemoryConfig::default()
+        };
+        let mem: Arc<dyn Memory> =
+            Arc::from(crate::memory::create_memory(&mem_cfg, tmp.path(), None).unwrap());
+        let browser = BrowserConfig::default();
+        let http = crate::config::HttpRequestConfig::default();
+        let mut cfg = test_config(&tmp);
+        cfg.runtime.wasm.enabled = true;
+        let (tools, _) = all_tools_with_runtime(
+            Arc::new(Config::default()),
+            &security,
+            Arc::new(NativeRuntime),
+            mem,
+            None,
+            None,
+            &browser,
+            &http,
+            tmp.path(),
+            &HashMap::new(),
+            None,
+            &cfg,
+        );
+        let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
+        assert!(names.contains(&"wasm_invoke"));
+        assert!(crate::agent::host_phase::is_mutating_tool("wasm_invoke"));
     }
 }

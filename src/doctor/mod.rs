@@ -501,6 +501,16 @@ fn check_config_semantics(config: &Config, items: &mut Vec<DiagItem>) {
         }
     }
 
+    // VL-MA-006: WASM plugin sidecar (not default runtime.kind).
+    {
+        let line = crate::runtime::WasmRuntime::doctor_line(&config.runtime);
+        if config.runtime.wasm.enabled && !crate::runtime::WasmRuntime::is_available() {
+            items.push(DiagItem::warn("runtime", line));
+        } else {
+            items.push(DiagItem::ok("runtime", line));
+        }
+    }
+
     // Channel: at least one configured
     let cc = &config.channels_config;
     let has_channel = cc.telegram.is_some()
@@ -1212,6 +1222,21 @@ mod tests {
         assert!(
             item.message.contains("unavailable") || item.message.contains("git-restore-tracked")
         );
+    }
+
+    #[test]
+    fn doctor_reports_wasm_plugin_status() {
+        let config = Config::default();
+        let mut items = Vec::new();
+        check_config_semantics(&config, &mut items);
+        let item = items
+            .iter()
+            .find(|i| i.message.contains("wasm="))
+            .expect("wasm line");
+        assert!(item.message.contains("wasm=disabled"));
+        assert!(item.message.contains("feature="));
+        assert!(item.message.contains("tools_dir="));
+        assert!(!item.message.to_lowercase().contains("key"));
     }
 
     #[test]

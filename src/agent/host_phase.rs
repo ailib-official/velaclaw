@@ -87,6 +87,7 @@ pub(crate) const REGISTRY_PLAN_CLASS: &[(&str, bool)] = &[
     ("hardware_board_info", false),
     ("hardware_memory_map", false),
     ("hardware_memory_read", false),
+    ("wasm_invoke", true),
 ];
 
 pub(crate) fn pinned_plan_mutating(name: &str) -> Option<bool> {
@@ -137,6 +138,7 @@ mod tests {
         }
         assert!(is_mutating_tool("generative_capability"));
         assert!(is_mutating_tool("generative"));
+        assert!(is_mutating_tool("wasm_invoke"));
         assert!(!is_mutating_tool("web_search_tool"));
     }
 }

@@ -1,15 +1,8 @@
+//! WASM 沙箱运行时：wasmi 进程内解释 WIT 合同模块。
 //! WASM sandbox runtime — in-process tool isolation via `wasmi`.
 //!
-//! Provides capability-based sandboxing without Docker or external runtimes.
-//! Each WASM module runs with:
-//! - **Fuel limits**: prevents infinite loops (each instruction costs 1 fuel)
-//! - **Memory caps**: configurable per-module memory ceiling
-//! - **No filesystem access**: by default, tools are pure computation
-//! - **No network access**: unless explicitly allowlisted hosts are configured
-//!
-//! # Feature gate
-//! This module is only compiled when `--features runtime-wasm` is enabled.
-//! The default VelaClaw binary excludes it to maintain the 4.6 MB size target.
+//! The module is always compiled. Executing guest code requires `--features runtime-wasm`
+//! so the default binary stays small. Guest ABI: `wit/velaclaw-plugin.wit` (`run: func() -> s32`).
 
 use super::traits::RuntimeAdapter;
 use crate::config::WasmRuntimeConfig;
@@ -71,6 +64,19 @@ impl WasmRuntime {
     /// Check if the WASM runtime feature is available in this build.
     pub fn is_available() -> bool {
         cfg!(feature = "runtime-wasm")
+    }
+
+    /// Module stems must be workspace-relative filenames, not paths.
+    #[must_use]
+    pub fn is_safe_module_name(name: &str) -> bool {
+        !name.is_empty()
+            && name.len() <= 64
+            && !name.contains("..")
+            && !name.contains('/')
+            && !name.contains('\\')
+            && name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
     }
 
     /// Validate the WASM config for common misconfigurations.
@@ -143,6 +149,10 @@ impl WasmRuntime {
     ) -> Result<WasmExecutionResult> {
         use wasmi::{Engine, Linker, Module, Store};
 
+        if !Self::is_safe_module_name(module_name) {
+            bail!("invalid WASM module name '{module_name}'");
+        }
+
         // Resolve module path
         let tools_path = self.tools_dir(workspace_dir);
         let module_path = tools_path.join(format!("{module_name}.wasm"));
@@ -181,8 +191,8 @@ impl WasmRuntime {
         let mut store = Store::new(&engine, ());
         let fuel = self.effective_fuel(caps);
         if fuel > 0 {
-            store.set_fuel(fuel).with_context(|| {
-                format!("Failed to set fuel budget ({fuel}) for module: {module_name}")
+            store.add_fuel(fuel).map_err(|e| {
+                anyhow::anyhow!("Failed to set fuel budget ({fuel}) for module {module_name}: {e}")
             })?;
         }
 
@@ -206,13 +216,12 @@ impl WasmRuntime {
             })?;
 
         // Execute with fuel accounting
-        let fuel_before = store.get_fuel().unwrap_or(0);
+        let consumed_before = store.fuel_consumed().unwrap_or(0);
         let exit_code = match run_fn.call(&mut store, ()) {
             Ok(code) => code,
             Err(e) => {
-                // Check if we ran out of fuel (infinite loop protection)
-                let fuel_after = store.get_fuel().unwrap_or(0);
-                if fuel_after == 0 && fuel > 0 {
+                let consumed = store.fuel_consumed().unwrap_or(0);
+                if fuel > 0 && consumed >= fuel {
                     return Ok(WasmExecutionResult {
                         stdout: String::new(),
                         stderr: format!(
@@ -225,11 +234,11 @@ impl WasmRuntime {
                 bail!("WASM execution error in '{module_name}': {e}");
             }
         };
-        let fuel_after = store.get_fuel().unwrap_or(0);
-        let fuel_consumed = fuel_before.saturating_sub(fuel_after);
+        let consumed_after = store.fuel_consumed().unwrap_or(0);
+        let fuel_consumed = consumed_after.saturating_sub(consumed_before);
 
         Ok(WasmExecutionResult {
-            stdout: String::new(),  // No WASI stdout yet — pure computation
+            stdout: String::new(), // No WASI stdout yet — pure computation
             stderr: String::new(),
             exit_code,
             fuel_consumed,
@@ -244,6 +253,9 @@ impl WasmRuntime {
         _workspace_dir: &Path,
         _caps: &WasmCapabilities,
     ) -> Result<WasmExecutionResult> {
+        if !Self::is_safe_module_name(module_name) {
+            bail!("invalid WASM module name '{module_name}'");
+        }
         bail!(
             "WASM runtime is not available in this build. \
              Rebuild with `cargo build --features runtime-wasm` to enable WASM sandbox support. \
@@ -266,12 +278,41 @@ impl WasmRuntime {
             let path = entry.path();
             if path.extension().is_some_and(|ext| ext == "wasm") {
                 if let Some(stem) = path.file_stem() {
-                    modules.push(stem.to_string_lossy().to_string());
+                    let name = stem.to_string_lossy().to_string();
+                    if Self::is_safe_module_name(&name) {
+                        modules.push(name);
+                    }
                 }
             }
         }
         modules.sort();
         Ok(modules)
+    }
+
+    /// Doctor line: enabled/feature/tools_dir without secrets.
+    #[must_use]
+    pub fn doctor_line(config: &crate::config::RuntimeConfig) -> String {
+        let feature = if Self::is_available() {
+            "runtime-wasm"
+        } else {
+            "missing"
+        };
+        if !config.wasm.enabled {
+            return format!(
+                "wasm=disabled feature={feature} tools_dir={}",
+                config.wasm.tools_dir
+            );
+        }
+        if !Self::is_available() {
+            return format!(
+                "wasm=unavailable feature={feature} (rebuild --features runtime-wasm) tools_dir={}",
+                config.wasm.tools_dir
+            );
+        }
+        format!(
+            "wasm=wasmi feature={feature} tools_dir={}",
+            config.wasm.tools_dir
+        )
     }
 }
 
@@ -379,7 +420,10 @@ mod tests {
         let rt = WasmRuntime::new(default_config());
         let result = rt.build_shell_command("echo hello", Path::new("/tmp"));
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("does not support shell"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("does not support shell"));
     }
 
     #[test]
@@ -391,7 +435,10 @@ mod tests {
     #[test]
     fn wasm_storage_path_with_workspace() {
         let rt = WasmRuntime::with_workspace(default_config(), PathBuf::from("/home/user/project"));
-        assert_eq!(rt.storage_path(), PathBuf::from("/home/user/project/.velaclaw"));
+        assert_eq!(
+            rt.storage_path(),
+            PathBuf::from("/home/user/project/.velaclaw")
+        );
     }
 
     // ── Config validation ──────────────────────────────────────
@@ -636,10 +683,7 @@ mod tests {
         let rt = WasmRuntime::new(default_config());
         let caps = WasmCapabilities::default();
         let mem_bytes = rt.effective_memory_bytes(&caps);
-        assert!(
-            mem_bytes > 0,
-            "default memory limit must be > 0"
-        );
+        assert!(mem_bytes > 0, "default memory limit must be > 0");
         assert!(
             mem_bytes <= 4096 * 1024 * 1024,
             "default memory must not exceed 4 GB safety limit"
@@ -683,5 +727,31 @@ mod tests {
             assert!(result.is_err());
             assert!(result.unwrap_err().to_string().contains("not available"));
         }
+    }
+
+    #[test]
+    fn wit_contract_documents_run_export() {
+        let wit = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/wit/velaclaw-plugin.wit"
+        ));
+        assert!(wit.contains("world tool"));
+        assert!(wit.contains("export run"));
+    }
+
+    #[cfg(feature = "runtime-wasm")]
+    #[test]
+    fn execute_module_honors_wit_run_export() {
+        let wasm = wat::parse_str(r#"(module (func (export "run") (result i32) i32.const 42))"#)
+            .expect("wat");
+        let dir = tempfile::tempdir().unwrap();
+        let tools_dir = dir.path().join("tools/wasm");
+        std::fs::create_dir_all(&tools_dir).unwrap();
+        std::fs::write(tools_dir.join("answer.wasm"), wasm).unwrap();
+        let rt = WasmRuntime::new(default_config());
+        let result = rt
+            .execute_module("answer", dir.path(), &WasmCapabilities::default())
+            .expect("execute");
+        assert_eq!(result.exit_code, 42);
     }
 }

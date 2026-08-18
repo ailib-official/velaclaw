@@ -68,6 +68,9 @@ urlencoding = "2.1"
 # Optional Rust-native browser automation backend
 fantoccini = { version = "0.22.1", optional = true, default-features = false, features = ["rustls-tls"] }
 
+# Optional WASM interpreter (VL-MA-006). Off the default binary for size.
+wasmi = { version = "0.31", optional = true }
+
 # Error handling
 anyhow = "1.0"
 thiserror = "2.0"
@@ -226,6 +229,8 @@ prism-router = ["dep:prism-core-routing"]
 routing_mvp = ["ai-protocol", "ai-lib-rust/routing_mvp"]
 # remote-deploy = Controlled remote deployment via SSH
 remote-deploy = []
+# runtime-wasm = in-process wasmi interpreter for WIT-documented plugin modules (not default)
+runtime-wasm = ["dep:wasmi"]
 
 [profile.release]
 opt-level = "z"      # Optimize for size
@@ -250,6 +255,7 @@ panic = "abort"
 
 [dev-dependencies]
 tempfile = "3.27"
+wat = "1"
 criterion = { version = "0.8", features = ["async_tokio"] }
 tokio-stream = { version = "0.1.18", default-features = false, features = ["fs"] }
 

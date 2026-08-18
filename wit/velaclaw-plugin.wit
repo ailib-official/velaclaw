@@ -1,0 +1,8 @@
+package velaclaw:plugin@0.1.0;
+
+/// Guest contract for workspace `*.wasm` modules (`runtime.wasm.tools_dir`).
+/// The host interprets this as a core WebAssembly export via wasmi — not a
+/// Component Model runtime. Keep the surface identical to `run: func() -> s32`.
+world tool {
+    export run: func() -> s32;
+}

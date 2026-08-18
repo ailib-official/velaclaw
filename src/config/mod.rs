@@ -32,8 +32,8 @@ pub use schema::{
     QueryClassificationConfig, ReliabilityConfig, ResourceLimitsConfig, RuntimeConfig,
     SandboxBackend, SandboxConfig, SchedulerConfig, SecretsConfig, SecurityConfig, SkillsConfig,
     SkillsPromptInjectionMode, SlackConfig, StorageConfig, StorageProviderConfig,
-    StorageProviderSection, StreamMode, TelegramConfig, TunnelConfig, WebSearchConfig,
-    WebhookConfig,
+    StorageProviderSection, StreamMode, TelegramConfig, TunnelConfig, WasmRuntimeConfig,
+    WebSearchConfig, WebhookConfig,
 };
 
 #[cfg(feature = "ai-protocol")]

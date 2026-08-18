@@ -1942,7 +1942,7 @@ impl Default for AutonomyConfig {
 /// Runtime adapter configuration (`[runtime]` section).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct RuntimeConfig {
-    /// Runtime kind (`native` | `docker`).
+    /// Runtime kind (`native` | `docker` | `wasm`).
     #[serde(default = "default_runtime_kind")]
     pub kind: String,
 
@@ -1950,12 +1950,68 @@ pub struct RuntimeConfig {
     #[serde(default)]
     pub docker: DockerRuntimeConfig,
 
+    /// WASM plugin sandbox (`[runtime.wasm]`). Default off; does not change `kind`.
+    #[serde(default)]
+    pub wasm: WasmRuntimeConfig,
+
     /// Global reasoning override for providers that expose explicit controls.
     /// - `None`: provider default behavior
     /// - `Some(true)`: request reasoning/thinking when supported
     /// - `Some(false)`: disable reasoning/thinking when supported
     #[serde(default)]
     pub reasoning_enabled: Option<bool>,
+}
+
+/// WASM plugin loader (`[runtime.wasm]`). Guest ABI is `wit/velaclaw-plugin.wit`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct WasmRuntimeConfig {
+    /// Register the `wasm_invoke` tool. Default `false` (GOV-006).
+    #[serde(default)]
+    pub enabled: bool,
+    /// Directory under the workspace that holds `*.wasm` modules.
+    #[serde(default = "default_wasm_tools_dir")]
+    pub tools_dir: String,
+    /// Instruction fuel budget (0 = unlimited; not recommended).
+    #[serde(default = "default_wasm_fuel_limit")]
+    pub fuel_limit: u64,
+    /// Memory ceiling in MiB.
+    #[serde(default = "default_wasm_memory_limit_mb")]
+    pub memory_limit_mb: u64,
+    /// Allow guest to read workspace files (host still does not map WASI yet).
+    #[serde(default)]
+    pub allow_workspace_read: bool,
+    /// Allow guest to write workspace files (host still does not map WASI yet).
+    #[serde(default)]
+    pub allow_workspace_write: bool,
+    /// HTTP hosts the guest may use (empty = no network; not wired in v0).
+    #[serde(default)]
+    pub allowed_hosts: Vec<String>,
+}
+
+fn default_wasm_tools_dir() -> String {
+    "tools/wasm".into()
+}
+
+fn default_wasm_fuel_limit() -> u64 {
+    1_000_000
+}
+
+fn default_wasm_memory_limit_mb() -> u64 {
+    64
+}
+
+impl Default for WasmRuntimeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            tools_dir: default_wasm_tools_dir(),
+            fuel_limit: default_wasm_fuel_limit(),
+            memory_limit_mb: default_wasm_memory_limit_mb(),
+            allow_workspace_read: false,
+            allow_workspace_write: false,
+            allowed_hosts: Vec::new(),
+        }
+    }
 }
 
 /// Docker runtime configuration (`[runtime.docker]` section).
@@ -2029,6 +2085,7 @@ impl Default for RuntimeConfig {
         Self {
             kind: default_runtime_kind(),
             docker: DockerRuntimeConfig::default(),
+            wasm: WasmRuntimeConfig::default(),
             reasoning_enabled: None,
         }
     }

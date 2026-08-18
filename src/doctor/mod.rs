@@ -491,6 +491,16 @@ fn check_config_semantics(config: &Config, items: &mut Vec<DiagItem>) {
         }
     }
 
+    // VL-MA-004: undo is git-restore only when workspace already has .git.
+    {
+        let line = crate::agent::workspace_undo::doctor_line(&config.workspace_dir);
+        if crate::agent::workspace_undo::workspace_has_git(&config.workspace_dir) {
+            items.push(DiagItem::ok("workspace", line));
+        } else {
+            items.push(DiagItem::warn("workspace", line));
+        }
+    }
+
     // Channel: at least one configured
     let cc = &config.channels_config;
     let has_channel = cc.telegram.is_some()
@@ -1188,6 +1198,20 @@ mod tests {
         assert!(item.message.contains("sandbox=none"));
         assert!(item.message.contains("source=explicit_yolo"));
         assert!(item.message.contains("production_path=no"));
+    }
+
+    #[test]
+    fn doctor_reports_undo_availability() {
+        let config = Config::default();
+        let mut items = Vec::new();
+        check_config_semantics(&config, &mut items);
+        let item = items
+            .iter()
+            .find(|i| i.message.contains("undo="))
+            .expect("undo line");
+        assert!(
+            item.message.contains("unavailable") || item.message.contains("git-restore-tracked")
+        );
     }
 
     #[test]

@@ -170,6 +170,26 @@ pub(crate) use tool_loop::{
     agent_turn, append_execution_policy_to_prompt, append_text_tool_prompt,
     logical_ids_from_config, resolve_cli_turn_model, run_tool_call_loop, SoftFailLoopCtx,
 };
+
+/// Extra CLI/daemon options for [`run`] (keeps the argument list clippy-clean).
+pub struct AgentRunOpts<'a> {
+    pub extra_prompt_phases: &'a [crate::agent::prompt_composer::PromptPhase],
+    pub host_phase: crate::agent::host_phase::HostPhase,
+    pub chat_session_id: Option<String>,
+    pub persist_chat_session: bool,
+}
+
+impl<'a> AgentRunOpts<'a> {
+    pub fn phases(extra_prompt_phases: &'a [crate::agent::prompt_composer::PromptPhase]) -> Self {
+        Self {
+            extra_prompt_phases,
+            host_phase: crate::agent::host_phase::HostPhase::Build,
+            chat_session_id: None,
+            persist_chat_session: false,
+        }
+    }
+}
+
 pub async fn run(
     mut config: Config,
     message: Option<String>,
@@ -179,8 +199,12 @@ pub async fn run(
     peripheral_overrides: Vec<String>,
     no_color: bool,
     no_fold: bool,
-    extra_prompt_phases: &[crate::agent::prompt_composer::PromptPhase],
+    opts: AgentRunOpts<'_>,
 ) -> Result<String> {
+    let extra_prompt_phases = opts.extra_prompt_phases;
+    let host_phase = opts.host_phase;
+    let chat_session_id = opts.chat_session_id;
+    let persist_chat_session = opts.persist_chat_session;
     // CLI `-p/--model` must win over config for both protocol and legacy paths.
     // (Previously the ai-protocol branch discarded these and always used config.)
     let cli_explicit_flags = provider_override
@@ -439,6 +463,10 @@ pub async fn run(
         &mut system_prompt,
         &crate::agent::prompt_composer::default_run_prompt_phases(extra_prompt_phases),
     );
+    if let Some(note) = host_phase.system_note() {
+        system_prompt.push_str("\n\n");
+        system_prompt.push_str(note);
+    }
 
     let tool_dispatcher_ref = tool_dispatcher.as_deref();
 
@@ -446,6 +474,11 @@ pub async fn run(
     let effective_autonomy = crate::config::resolve_effective_autonomy(&config)?;
     let approval_wiring = crate::config::ApprovalManagerWiring::from_config(&config)?;
     let approval_manager = approval_wiring.spawn_manager(&effective_autonomy);
+    let cli_gate_extras = crate::agent::tool_batch::ToolBatchGateExtras {
+        approval_hub: None,
+        human_input_hub: None,
+        host_phase,
+    };
 
     // ── Execute ──────────────────────────────────────────────────
     let start = Instant::now();
@@ -453,9 +486,21 @@ pub async fn run(
     let mut final_output = String::new();
 
     if let Some(msg) = message {
-        // One-shot also gets an isolated session so legacy Conversation rows
-        // (session_id=None) do not bleed into -m turns.
-        let session_id = memory::new_session_id();
+        // One-shot: memory session stays isolated; optional ChatSessionStore resume (R8).
+        let (chat_store_id, prior_chat) = if persist_chat_session {
+            crate::agent::session_resume::load_or_create_session(
+                &config.workspace_dir,
+                chat_session_id.as_deref(),
+            )
+            .await?
+        } else {
+            (String::new(), Vec::new())
+        };
+        let session_id = if persist_chat_session && !chat_store_id.is_empty() {
+            chat_store_id.clone()
+        } else {
+            memory::new_session_id()
+        };
 
         // Auto-save user message to memory (skip short/trivial messages)
         if config.memory.auto_save && msg.chars().count() >= AUTOSAVE_MIN_MESSAGE_CHARS {
@@ -494,10 +539,9 @@ pub async fn run(
             format!("{context}{msg}")
         };
 
-        let mut history = vec![
-            ChatMessage::system(&system_prompt),
-            ChatMessage::user(&enriched),
-        ];
+        let mut history = vec![ChatMessage::system(&system_prompt)];
+        history.extend(prior_chat);
+        history.push(ChatMessage::user(&enriched));
 
         let summarizer = crate::agent::context_orch::HistorySummarizer {
             provider: provider.as_ref(),
@@ -567,12 +611,23 @@ pub async fn run(
                 surface: velaclaw_agent_runtime::SoftFailSurface::Cli,
                 peer_logical_ids: &[],
             }),
-            None,
+            Some(&cli_gate_extras),
         )
         .await?;
         final_output = response.clone();
         let rendered = render_opts.render(&response);
         println!("{}", prefix_agent_lines(&rendered, render_opts.style));
+        if persist_chat_session && !chat_store_id.is_empty() {
+            let _ = crate::agent::session_resume::append_user_assistant_turn(
+                &config.workspace_dir,
+                &chat_store_id,
+                &msg,
+                &response,
+                Some(turn_model.as_str()),
+            )
+            .await;
+            eprintln!("session-id: {chat_store_id} (reuse with --session-id)");
+        }
         observer.record_event(&ObserverEvent::TurnComplete);
     } else {
         println!("🦀 VelaClaw Interactive Mode");
@@ -583,8 +638,24 @@ pub async fn run(
         let mut history = vec![ChatMessage::system(&system_prompt)];
         let mut session_model = model_name.clone();
         let session_provider = provider_name.to_string();
-        // VL-MEM-001: default new session unless user later resumes (no resume UI yet).
-        let mut session_id = memory::new_session_id();
+        let (chat_store_id, prior_chat) = if persist_chat_session {
+            crate::agent::session_resume::load_or_create_session(
+                &config.workspace_dir,
+                chat_session_id.as_deref(),
+            )
+            .await?
+        } else {
+            (String::new(), Vec::new())
+        };
+        history.extend(prior_chat);
+        let mut session_id = if persist_chat_session && !chat_store_id.is_empty() {
+            chat_store_id.clone()
+        } else {
+            memory::new_session_id()
+        };
+        if persist_chat_session && !chat_store_id.is_empty() {
+            eprintln!("session-id: {chat_store_id} (reuse with --session-id)");
+        }
         let mut session_explicit = cli_explicit_flags;
 
         loop {
@@ -827,7 +898,7 @@ pub async fn run(
                     surface: velaclaw_agent_runtime::SoftFailSurface::Cli,
                     peer_logical_ids: &[],
                 }),
-                None,
+                Some(&cli_gate_extras),
             )
             .await
             {
@@ -861,6 +932,16 @@ pub async fn run(
                 eprintln!("\nError sending CLI response: {e}\n");
             }
             observer.record_event(&ObserverEvent::TurnComplete);
+            if persist_chat_session && !chat_store_id.is_empty() {
+                let _ = crate::agent::session_resume::append_user_assistant_turn(
+                    &config.workspace_dir,
+                    &chat_store_id,
+                    &user_input,
+                    &response,
+                    Some(turn_model.as_str()),
+                )
+                .await;
+            }
 
             // Post-turn prepare: compact overflow + layered (or trim kill-switch).
             let summarizer = crate::agent::context_orch::HistorySummarizer {

@@ -29,14 +29,17 @@ pub mod dispatcher;
 pub mod double_esc;
 #[cfg(feature = "ai-protocol")]
 pub mod envelope_pilot;
+pub mod host_phase;
 #[cfg(feature = "ai-protocol")]
 pub mod intent_route;
 pub mod loop_;
 pub mod memory_loader;
 pub mod prompt;
 pub mod prompt_composer;
+pub mod session_resume;
 pub mod tool_batch;
 pub mod turn_progress;
+pub mod workspace_undo;
 
 #[cfg(test)]
 mod tests;
@@ -44,4 +47,4 @@ mod tests;
 #[allow(unused_imports)]
 pub use agent::{Agent, AgentBuilder};
 #[allow(unused_imports)]
-pub use loop_::{process_message, run};
+pub use loop_::{process_message, run, AgentRunOpts};

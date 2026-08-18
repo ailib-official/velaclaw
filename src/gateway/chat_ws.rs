@@ -133,6 +133,7 @@ async fn handle_ws_socket(socket: WebSocket, state: AppState) {
             model_id: client.model_id,
             temperature: client.temperature,
             max_tokens: None,
+            host_phase: client.host_phase,
         };
 
         let config = state.config.lock().clone();

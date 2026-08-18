@@ -13,7 +13,7 @@ mod chat_api;
 mod chat_ws;
 mod config_api;
 mod http_router;
-mod local_control;
+pub(crate) mod local_control;
 mod memory_api;
 mod ops_api;
 mod providers_api;

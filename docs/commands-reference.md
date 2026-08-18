@@ -54,6 +54,9 @@ Last verified: **July 30, 2026**.
 - `velaclaw agent --peripheral <board:path>`
 - `velaclaw agent --no-color`
 - `velaclaw agent --no-fold`
+- `velaclaw agent --plan -m "Propose a change"` — Plan phase: mutating tools are blocked (default is Build)
+- `velaclaw agent --session-id <id> -m "Continue"` — load/save `workspace/.velaclaw/chat_sessions`
+- `velaclaw undo` — restore tracked files to HEAD if workspace already has `.git`
 
 Interactive REPL (no `-m`) starts a **new memory session** each launch (VL-MEM-001). Conversation/Daily autosave is scoped to that session; prior sessions and legacy unscoped Conversation rows are not injected. Core (long-term) memories may still appear. `/new` / `/clear` clears this session's Conversation/Daily and rotates to another new session (Core preserved). Resume prior chat sessions in the browser via `/chat` (Sessions tab or sidebar; deep link `?session=<id>`).
 

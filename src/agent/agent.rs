@@ -63,6 +63,8 @@ pub struct Agent {
     cancellation_token: Option<tokio_util::sync::CancellationToken>,
     /// Optional progress fan-out for Web WS frames.
     progress_tx: Option<tokio::sync::mpsc::Sender<crate::agent::turn_progress::TurnProgress>>,
+    /// VL-MA-004: Plan blocks mutating tools; default Build.
+    host_phase: crate::agent::host_phase::HostPhase,
 }
 
 pub struct AgentBuilder {
@@ -327,6 +329,7 @@ impl AgentBuilder {
             last_turn_model: None,
             cancellation_token: None,
             progress_tx: None,
+            host_phase: crate::agent::host_phase::HostPhase::Build,
         })
     }
 }
@@ -397,6 +400,10 @@ impl Agent {
         tx: Option<tokio::sync::mpsc::Sender<crate::agent::turn_progress::TurnProgress>>,
     ) {
         self.progress_tx = tx;
+    }
+
+    pub fn set_host_phase(&mut self, phase: crate::agent::host_phase::HostPhase) {
+        self.host_phase = phase;
     }
 
     /// Enable interactive tool approval for gateway/Web chat (`VL-UI-004`).
@@ -586,7 +593,12 @@ impl Agent {
             identity_config: Some(&self.identity_config),
             dispatcher_instructions: &instructions,
         };
-        self.prompt_builder.build(&ctx)
+        let mut prompt = self.prompt_builder.build(&ctx)?;
+        if let Some(note) = self.host_phase.system_note() {
+            prompt.push_str("\n\n");
+            prompt.push_str(note);
+        }
+        Ok(prompt)
     }
 
     fn classify_model(&self, user_message: &str) -> Result<String> {
@@ -717,6 +729,7 @@ impl Agent {
                 .as_ref()
                 .map(|(_, hub)| Arc::clone(hub)),
             human_input_hub: self.human_input_hub.clone(),
+            host_phase: self.host_phase,
         };
         let approval_mgr = self.gateway_approval.as_ref().map(|(mgr, _)| mgr);
 

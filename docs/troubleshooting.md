@@ -315,6 +315,25 @@ Fix:
 - Approve via CLI stdin, gateway Web UI, or channel inline prompt.
 - See [migration-policy-v0.7.0.md](migration-policy-v0.7.0.md).
 
+### Shell refused after upgrade (sandbox fail-closed)
+
+Symptoms:
+
+- Allowlisted commands fail with `Sandbox wrap failed` / fail-closed
+- `velaclaw doctor` shows `sandbox=fail-closed`
+
+Cause:
+
+- Linux Auto now refuses shell when Landlock is unavailable (no silent Noop).
+- Non-Linux Auto is still Noop; this symptom is Linux-specific.
+
+Fix (pick one):
+
+1. Use a kernel with Landlock (typically 5.13+) and a default-feature build (`sandbox-landlock`).
+2. Intentional YOLO: `[security.sandbox] enabled = false` and/or `backend = "none"`, then confirm doctor shows `source=explicit_yolo`.
+
+See [config-reference.md](config-reference.md#securitysandbox).
+
 ### Session allowlist lost after restart (pre-0.7)
 
 On **0.7.0+**, **Always** decisions persist to `<workspace>/.velaclaw/policy-overrides.yaml`. Verify the file exists and `[security.audit]` / workspace path is correct.

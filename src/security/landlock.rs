@@ -109,7 +109,7 @@ impl LandlockSandbox {
             ))
             .map_err(|e| std::io::Error::other(e.to_string()))?;
 
-        for extra in ["/lib", "/lib64", "/etc", "/dev"] {
+        for extra in ["/lib", "/lib64"] {
             let p = Path::new(extra);
             if p.exists() {
                 let fd = PathFd::new(p).map_err(|e| std::io::Error::other(e.to_string()))?;
@@ -118,6 +118,16 @@ impl LandlockSandbox {
                         fd,
                         AccessFs::ReadFile | AccessFs::ReadDir | AccessFs::Execute,
                     ))
+                    .map_err(|e| std::io::Error::other(e.to_string()))?;
+            }
+        }
+
+        for extra in ["/etc", "/dev"] {
+            let p = Path::new(extra);
+            if p.exists() {
+                let fd = PathFd::new(p).map_err(|e| std::io::Error::other(e.to_string()))?;
+                ruleset = ruleset
+                    .add_rule(PathBeneath::new(fd, AccessFs::ReadFile | AccessFs::ReadDir))
                     .map_err(|e| std::io::Error::other(e.to_string()))?;
             }
         }

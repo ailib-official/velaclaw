@@ -44,10 +44,12 @@ These strings must match after upgrade. If they disagree, multiple binaries are 
 velaclaw status
 ```
 
-2. Verify diagnostics:
+2. Verify diagnostics (after VL-MA-003, the doctor line must not be accidental fail-closed):
 
 ```bash
 velaclaw doctor
+# Expect sandbox=landlock production_path=yes
+# or sandbox=none source=explicit_yolo (intentional YOLO)
 velaclaw channel doctor
 ```
 

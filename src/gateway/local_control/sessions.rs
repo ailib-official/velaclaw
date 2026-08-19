@@ -272,6 +272,19 @@ pub fn sanitize_generated_title(raw: &str) -> String {
     truncate_title(t)
 }
 
+/// Reject one-word filler titles common from small models (`yes`, `ok`, …).
+pub fn is_acceptable_generated_title(title: &str) -> bool {
+    let t = title.trim();
+    if t.chars().count() < 4 {
+        return false;
+    }
+    const WEAK: &[&str] = &[
+        "yes", "no", "ok", "okay", "sure", "done", "thanks", "hello", "hi", "好的", "是的", "好",
+    ];
+    let lower = t.to_ascii_lowercase();
+    !WEAK.iter().any(|w| lower.as_str() == *w)
+}
+
 /// Compact transcript of the first N user turns (plus replies) for a title prompt.
 pub fn title_refine_transcript(messages: &[ChatMessageInput], max_user_turns: usize) -> String {
     let mut out = String::new();
@@ -350,6 +363,13 @@ mod tests {
     fn sanitize_generated_title_strips_wrapping() {
         assert_eq!(sanitize_generated_title("  \"Topic A\"  "), "Topic A");
         assert_eq!(sanitize_generated_title("Title: topic-b"), "topic-b");
+    }
+
+    #[test]
+    fn is_acceptable_generated_title_rejects_filler() {
+        assert!(!is_acceptable_generated_title("yes"));
+        assert!(!is_acceptable_generated_title("ok"));
+        assert!(is_acceptable_generated_title("Piubt Xray health"));
     }
 
     #[test]

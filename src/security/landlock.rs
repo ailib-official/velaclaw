@@ -150,10 +150,7 @@ impl LandlockSandbox {
             if ssh_dir.is_dir() {
                 let fd = PathFd::new(&ssh_dir).map_err(|e| std::io::Error::other(e.to_string()))?;
                 ruleset = ruleset
-                    .add_rule(PathBeneath::new(
-                        fd,
-                        AccessFs::ReadFile | AccessFs::ReadDir,
-                    ))
+                    .add_rule(PathBeneath::new(fd, AccessFs::ReadFile | AccessFs::ReadDir))
                     .map_err(|e| std::io::Error::other(e.to_string()))?;
             }
         }
@@ -258,19 +255,46 @@ mod tests {
     #[cfg(all(feature = "sandbox-landlock", target_os = "linux"))]
     #[test]
     fn landlock_child_can_open_dev_null_for_write() {
-        use std::os::unix::process::CommandExt;
         use std::process::{Command, Stdio};
 
-        if LandlockSandbox::with_workspace(None).is_err() {
+        let Ok(sandbox) = LandlockSandbox::with_workspace(None) else {
             return;
-        }
+        };
         let mut cmd = Command::new("sh");
         cmd.args(["-c", "echo ok >/dev/null"])
             .stdout(Stdio::null())
             .stderr(Stdio::piped());
-        unsafe {
-            cmd.pre_exec(|| LandlockSandbox::with_workspace(None).unwrap().apply_restrictions());
+        sandbox.wrap_command(&mut cmd).unwrap();
+        let output = cmd.output().expect("landlock child should run");
+        assert!(
+            output.status.success(),
+            "stderr={}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[cfg(all(feature = "sandbox-landlock", target_os = "linux"))]
+    #[test]
+    fn landlock_child_can_read_ssh_dir_when_home_set() {
+        use std::process::{Command, Stdio};
+
+        let Ok(home) = std::env::var("HOME") else {
+            return;
+        };
+        let ssh_dir = Path::new(&home).join(".ssh");
+        if !ssh_dir.is_dir() {
+            return;
         }
+
+        let Ok(sandbox) = LandlockSandbox::with_workspace(None) else {
+            return;
+        };
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", "test -r \"$HOME/.ssh/config\" -o -r \"$HOME/.ssh/id_ed25519\" -o -n \"$(ls -A \"$HOME/.ssh\" 2>/dev/null)\""])
+            .env("HOME", &home)
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped());
+        sandbox.wrap_command(&mut cmd).unwrap();
         let output = cmd.output().expect("landlock child should run");
         assert!(
             output.status.success(),

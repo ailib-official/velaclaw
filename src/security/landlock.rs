@@ -132,6 +132,32 @@ impl LandlockSandbox {
             }
         }
 
+        // ssh(1), bash redirects, and many CLIs open /dev/null for stderr suppression.
+        let dev_null = Path::new("/dev/null");
+        if dev_null.exists() {
+            let fd = PathFd::new(dev_null).map_err(|e| std::io::Error::other(e.to_string()))?;
+            ruleset = ruleset
+                .add_rule(PathBeneath::new(
+                    fd,
+                    AccessFs::ReadFile | AccessFs::WriteFile,
+                ))
+                .map_err(|e| std::io::Error::other(e.to_string()))?;
+        }
+
+        // Allowlisted shell tools such as ssh/scp need read-only access to operator keys.
+        if let Ok(home) = std::env::var("HOME") {
+            let ssh_dir = Path::new(&home).join(".ssh");
+            if ssh_dir.is_dir() {
+                let fd = PathFd::new(&ssh_dir).map_err(|e| std::io::Error::other(e.to_string()))?;
+                ruleset = ruleset
+                    .add_rule(PathBeneath::new(
+                        fd,
+                        AccessFs::ReadFile | AccessFs::ReadDir,
+                    ))
+                    .map_err(|e| std::io::Error::other(e.to_string()))?;
+            }
+        }
+
         match ruleset.restrict_self() {
             Ok(_) => Ok(()),
             Err(e) => Err(std::io::Error::other(e.to_string())),
@@ -228,6 +254,30 @@ impl Sandbox for LandlockSandbox {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(all(feature = "sandbox-landlock", target_os = "linux"))]
+    #[test]
+    fn landlock_child_can_open_dev_null_for_write() {
+        use std::os::unix::process::CommandExt;
+        use std::process::{Command, Stdio};
+
+        if LandlockSandbox::with_workspace(None).is_err() {
+            return;
+        }
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", "echo ok >/dev/null"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped());
+        unsafe {
+            cmd.pre_exec(|| LandlockSandbox::with_workspace(None).unwrap().apply_restrictions());
+        }
+        let output = cmd.output().expect("landlock child should run");
+        assert!(
+            output.status.success(),
+            "stderr={}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 
     #[cfg(all(feature = "sandbox-landlock", target_os = "linux"))]
     #[test]

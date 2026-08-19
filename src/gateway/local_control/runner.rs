@@ -179,7 +179,7 @@ fn seed_prior_messages(agent: &mut Agent, messages: &[ChatMessageInput]) -> Resu
 ///
 /// After three user turns, schedules a **background** title completion (does not
 /// block the chat `done` frame). Model preference: local (ollama / llamacpp /
-/// lmstudio) → `nvidia/nemotron-mini-4b-instruct`.
+/// lmstudio) → `nvidia/nemotron-3-ultra-550b-a55b` → `nvidia/nemotron-mini-4b-instruct`.
 pub async fn persist_chat_turn(
     config: &Config,
     session_id: Option<&str>,
@@ -222,7 +222,9 @@ pub async fn persist_chat_turn(
 const TITLE_SYSTEM: &str = "You name chat sessions. Reply with ONLY a concise title \
 (max ~40 characters). No quotes, no punctuation wrapper, no explanation.";
 
-/// Smallest NVIDIA Nemotron chat model in the protocol catalog (title-task fallback).
+/// Primary NVIDIA Nemotron for background title tasks (free tier, strong instruction following).
+const TITLE_NEMOTRON_PRIMARY: &str = "nvidia/nemotron-3-ultra-550b-a55b";
+/// Last-resort smallest Nemotron when primary is unavailable.
 const TITLE_NEMOTRON_FALLBACK: &str = "nvidia/nemotron-mini-4b-instruct";
 
 fn is_local_title_provider(provider: &str) -> bool {
@@ -284,6 +286,9 @@ pub(crate) fn title_refine_model_candidates(config: &Config) -> Vec<String> {
         out.push(local);
     }
 
+    if !out.iter().any(|m| m == TITLE_NEMOTRON_PRIMARY) {
+        out.push(TITLE_NEMOTRON_PRIMARY.to_string());
+    }
     if !out.iter().any(|m| m == TITLE_NEMOTRON_FALLBACK) {
         out.push(TITLE_NEMOTRON_FALLBACK.to_string());
     }
@@ -342,7 +347,16 @@ async fn refine_session_title_background(config: Config, session_id: String) {
             .await
         {
             Ok(raw) => {
-                if let Err(e) = store.set_refined_title(&session_id, &raw).await {
+                let cleaned = super::sessions::sanitize_generated_title(&raw);
+                if cleaned.is_empty() || !super::sessions::is_acceptable_generated_title(&cleaned) {
+                    tracing::debug!(
+                        model = %logical,
+                        raw = %raw,
+                        "title refine: rejected weak title"
+                    );
+                    continue;
+                }
+                if let Err(e) = store.set_refined_title(&session_id, &cleaned).await {
                     tracing::warn!(error = %format!("{e:#}"), "title refine: save failed");
                 } else {
                     tracing::info!(model = %logical, "title refine: updated session title");
@@ -605,13 +619,13 @@ metadata:
     }
 
     #[test]
-    fn title_refine_candidates_end_with_nemotron_mini() {
+    fn title_refine_candidates_prefer_nvidia_ultra_then_mini() {
         let mut cfg = Config::default();
         cfg.default_model = Some("deepseek/deepseek-v4-flash".into());
         cfg.default_provider = Some("deepseek".into());
         let c = title_refine_model_candidates(&cfg);
+        assert_eq!(c.first().map(String::as_str), Some(TITLE_NEMOTRON_PRIMARY));
         assert_eq!(c.last().map(String::as_str), Some(TITLE_NEMOTRON_FALLBACK));
-        assert!(c.iter().any(|m| m == TITLE_NEMOTRON_FALLBACK));
     }
 
     #[test]
@@ -621,6 +635,7 @@ metadata:
         cfg.default_provider = Some("ollama".into());
         let c = title_refine_model_candidates(&cfg);
         assert_eq!(c.first().map(String::as_str), Some("ollama/llama3.2"));
+        assert!(c.iter().any(|m| m == TITLE_NEMOTRON_PRIMARY));
         assert_eq!(c.last().map(String::as_str), Some(TITLE_NEMOTRON_FALLBACK));
     }
 

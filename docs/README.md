@@ -19,6 +19,7 @@ Localized hubs: [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · 
 | Understand policy / approval (0.7.0+) | [policy-approval-reference.md](policy-approval-reference.md) |
 | Upgrade policy behavior to 0.7.0 | [migration-policy-v0.7.0.md](migration-policy-v0.7.0.md) |
 | Format CLI terminal output (Markdown / fold) | [cli-render.md](cli-render.md) |
+| Stop a running turn (Web / CLI / REST) | [cancel-contract.md](cancel-contract.md) |
 | Configure custom providers/endpoints | [custom-providers.md](custom-providers.md) |
 | Configure Z.AI / GLM provider | [zai-glm-setup.md](zai-glm-setup.md) |
 | Use LangGraph integration patterns | [langgraph-integration.md](langgraph-integration.md) |
@@ -54,6 +55,7 @@ Localized hubs: [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · 
 ### Users / Operators
 
 - [commands-reference.md](commands-reference.md) — command lookup by workflow
+- [cancel-contract.md](cancel-contract.md) — stop a running turn (Web / CLI / REST)
 - [providers-reference.md](providers-reference.md) — provider IDs, aliases, credential env vars
 - [channels-reference.md](channels-reference.md) — channel capabilities and setup paths
 - [matrix-e2ee-guide.md](matrix-e2ee-guide.md) — Matrix encrypted-room (E2EE) setup and no-response diagnostics

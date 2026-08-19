@@ -102,6 +102,11 @@ impl ApprovalHub {
         }
     }
 
+    /// Drop all waiting approvals (turn Stop). Callers must treat this as cancel, not user deny.
+    pub fn abort_all_pending(&self) {
+        self.pending.lock().clear();
+    }
+
     /// Resolve a pending approval from HTTP (`POST /api/approvals/:id/respond`).
     pub fn respond(&self, id: &str, approved: bool, always: bool) -> bool {
         let entry = self.pending.lock().remove(id);
@@ -149,5 +154,23 @@ mod tests {
 
         let decision = handle.await.expect("join");
         assert_eq!(decision, ApprovalResponse::Yes);
+    }
+
+    #[tokio::test]
+    async fn abort_all_pending_unblocks_request() {
+        let hub = ApprovalHub::new();
+        let hub_wait = hub.clone();
+        let req = ApprovalRequest {
+            tool_name: "shell".into(),
+            arguments: serde_json::json!({"command": "ls"}),
+        };
+
+        let handle = tokio::spawn(async move { hub_wait.request(&req, "command: ls").await });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(hub.pending.lock().len(), 1);
+        hub.abort_all_pending();
+        let decision = handle.await.expect("join");
+        assert_eq!(decision, ApprovalResponse::No);
+        assert!(hub.pending.lock().is_empty());
     }
 }

@@ -206,6 +206,11 @@ impl HumanInputHub {
         }
         entry.respond_tx.send(body).is_ok()
     }
+
+    /// Drop all waiting human-input prompts (turn Stop).
+    pub fn abort_all_pending(&self) {
+        self.pending.lock().clear();
+    }
 }
 
 #[cfg(test)]
@@ -286,5 +291,28 @@ mod tests {
             }
             other => panic!("expected SecretSlot, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn abort_all_pending_unblocks_request() {
+        let slots = Arc::new(SecretSlotStore::new());
+        let hub = HumanInputHub::new(slots);
+        let hub2 = hub.clone();
+        let waiter = tokio::spawn(async move {
+            hub2.request(HumanInputRequest {
+                kind: HumanInputKind::Text,
+                prompt: "short id".into(),
+                options: vec![],
+                risk_note: None,
+            })
+            .await
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        hub.abort_all_pending();
+        let outcome = waiter.await.expect("join");
+        assert!(matches!(
+            outcome,
+            HumanInputOutcome::TimedOut | HumanInputOutcome::Cancelled
+        ));
     }
 }

@@ -19,6 +19,7 @@
 | 策略与批准运行时合同（0.7.0+） | [policy-approval-reference.md](policy-approval-reference.md) |
 | 升级至 0.7.0 策略行为 | [migration-policy-v0.7.0.md](migration-policy-v0.7.0.md) |
 | CLI 终端渲染（Markdown / 折叠） | [cli-render.md](cli-render.md) |
+| 停止进行中的 turn（Web / CLI / REST） | [cancel-contract.md](cancel-contract.md) |
 | 接入自定义 Provider / endpoint | [custom-providers.md](custom-providers.md) |
 | 配置 Z.AI / GLM Provider | [zai-glm-setup.md](zai-glm-setup.md) |
 | 使用 LangGraph 工具调用集成 | [langgraph-integration.md](langgraph-integration.md) |
@@ -57,6 +58,7 @@
 - [channels-reference.md](channels-reference.md)
 - [config-reference.md](config-reference.md)
 - [cli-render.md](cli-render.md)
+- [cancel-contract.md](cancel-contract.md)
 - [custom-providers.md](custom-providers.md)
 - [zai-glm-setup.md](zai-glm-setup.md)
 - [langgraph-integration.md](langgraph-integration.md)

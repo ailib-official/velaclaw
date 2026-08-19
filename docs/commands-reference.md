@@ -121,8 +121,8 @@ velaclaw doctor intent-route [--message <text>] [--hint <hint>] [--tag <Tag>] [-
 Interactive REPL extras:
 
 - `/expand <id>` — replay scrubbed tool output for a step caption from this session
-- **Esc Esc** (TTY, within 500ms) — stop the current turn and return to the prompt
-- Web Chat: while a turn is running, **Stop** cancels it (same `CancellationToken` as CLI)
+- **Esc Esc** (TTY, within 500ms) — stop the current turn and return to the prompt (same classify/persist contract as Web)
+- Web Chat: while a turn is running, **Stop** cancels it (same `CancellationToken` + [`cancel-contract.md`](cancel-contract.md))
 - Long tool outputs fold after `[cli_render].fold_lines` (default `10`) when stdout is a TTY and `--no-fold` is not set
 - `--no-color` forces plain output (also honors `NO_COLOR`); non-TTY/pipe already strips ANSI
 
@@ -163,7 +163,7 @@ After the gateway is listening (default `http://127.0.0.1:8080`):
 | `/pair` | POST | Pairing code header | Exchange one-time code → bearer token |
 | `/webhook` | POST | Bearer (when pairing on) | Simple prompt webhook |
 | `/ws` | GET | Bearer query `?token=` (when pairing on) | Streaming chat WebSocket |
-| `/api/chat` | POST | Bearer | Non-streaming chat completion |
+| `/api/chat` | POST | Bearer | Non-streaming chat completion (**no turn-cancel**; use `/ws` Stop) |
 | `/api/providers` | GET | Bearer | BYOK provider/model availability |
 | `/api/providers/{id}/test` | POST | Bearer | Provider connectivity probe |
 | `/api/sessions` | GET, POST | Bearer | List / create chat sessions |

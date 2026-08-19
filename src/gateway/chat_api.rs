@@ -1,5 +1,9 @@
 //! POST `/api/chat` — non-streaming agent-loop chat (VL-UI-002).
 //! POST `/api/chat` — 非流式 agent 循环对话（VL-UI-002）。
+//!
+//! **No turn-cancel:** this handler passes `cancellation = None`. Stop a running
+//! turn via WebSocket `GET /ws` (`type: cancel` or Close). See
+//! `docs/cancel-contract.md`. Do not add a second REST cancel protocol.
 
 use super::local_control::auth::check_pairing_auth;
 use super::local_control::runner::{persist_chat_turn, run_agent_chat, user_facing_turn_error};

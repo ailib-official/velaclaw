@@ -819,24 +819,17 @@ impl Agent {
         });
 
         while let Some(msg) = rx.recv().await {
-            let token = tokio_util::sync::CancellationToken::new();
-            self.set_cancellation_token(Some(token.clone()));
-            let watch = crate::agent::double_esc::spawn_double_esc_watcher(token.clone());
-            let response = match self.turn(&msg.content).await {
-                Ok(resp) => {
-                    token.cancel();
-                    let _ = watch.await;
-                    self.set_cancellation_token(None);
-                    resp
+            let cancel = crate::agent::turn_cancel::CliTurnCancel::begin();
+            self.set_cancellation_token(Some(cancel.token()));
+            let result = self.turn(&msg.content).await;
+            self.set_cancellation_token(None);
+            let response = match cancel.conclude(result).await {
+                crate::agent::turn_cancel::TurnFinish::Completed(resp) => resp,
+                crate::agent::turn_cancel::TurnFinish::Cancelled => {
+                    eprintln!("{}\n", crate::agent::turn_cancel::STOPPED_USER_MESSAGE);
+                    continue;
                 }
-                Err(e) => {
-                    token.cancel();
-                    let _ = watch.await;
-                    self.set_cancellation_token(None);
-                    if crate::agent::loop_::is_tool_loop_cancelled(&e) {
-                        eprintln!("Stopped.\n");
-                        continue;
-                    }
+                crate::agent::turn_cancel::TurnFinish::Failed(e) => {
                     eprintln!("\nError: {e}\n");
                     continue;
                 }

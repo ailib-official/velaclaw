@@ -862,14 +862,13 @@ pub async fn run(
                 &available_hints,
             )?;
 
-            let turn_cancel = CancellationToken::new();
-            let esc_watch = crate::agent::double_esc::spawn_double_esc_watcher(turn_cancel.clone());
+            let cancel = crate::agent::turn_cancel::CliTurnCancel::begin();
             let progress_obs = crate::agent::turn_progress::ProgressObserver::cli_with_fold(
                 Arc::clone(&observer),
                 Arc::clone(&fold_cache),
             );
 
-            let response = match run_tool_call_loop(
+            let loop_result = run_tool_call_loop(
                 provider.as_ref(),
                 &mut history,
                 &tools_registry,
@@ -882,7 +881,7 @@ pub async fn run(
                 "cli",
                 &config.multimodal,
                 config.agent.max_tool_iterations,
-                Some(turn_cancel.clone()),
+                Some(cancel.token()),
                 None,
                 tool_dispatcher_ref,
                 Some(&security),
@@ -900,20 +899,14 @@ pub async fn run(
                 }),
                 Some(&cli_gate_extras),
             )
-            .await
-            {
-                Ok(resp) => {
-                    turn_cancel.cancel();
-                    let _ = esc_watch.await;
-                    resp
+            .await;
+            let response = match cancel.conclude(loop_result).await {
+                crate::agent::turn_cancel::TurnFinish::Completed(resp) => resp,
+                crate::agent::turn_cancel::TurnFinish::Cancelled => {
+                    eprintln!("{}\n", crate::agent::turn_cancel::STOPPED_USER_MESSAGE);
+                    continue;
                 }
-                Err(e) => {
-                    turn_cancel.cancel();
-                    let _ = esc_watch.await;
-                    if is_tool_loop_cancelled(&e) {
-                        eprintln!("Stopped.\n");
-                        continue;
-                    }
+                crate::agent::turn_cancel::TurnFinish::Failed(e) => {
                     eprintln!("\nError: {e}\n");
                     continue;
                 }

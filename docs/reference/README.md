@@ -11,6 +11,7 @@ Structured reference index for commands, providers, channels, config, and integr
 - Config defaults and keys: [../config-reference.md](../config-reference.md)
 - Config/policy externalization contract: [../config-externalization.md](../config-externalization.md)
 - CLI terminal render (Markdown / fold): [../cli-render.md](../cli-render.md)
+- Cancel / Stop contract: [../cancel-contract.md](../cancel-contract.md)
 - Policy & approval runtime contract: [../policy-approval-reference.md](../policy-approval-reference.md)
 - Policy upgrade (0.7.0): [../migration-policy-v0.7.0.md](../migration-policy-v0.7.0.md)
 

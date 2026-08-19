@@ -175,6 +175,8 @@ fn seed_prior_messages(agent: &mut Agent, messages: &[ChatMessageInput]) -> Resu
 
 /// Append the latest user turn and assistant reply to a persisted session, if `session_id` is set.
 ///
+/// Callers must not invoke this for cancelled turns (`TurnFinish::Cancelled`).
+///
 /// After three user turns, schedules a **background** title completion (does not
 /// block the chat `done` frame). Model preference: local (ollama / llamacpp /
 /// lmstudio) → `nvidia/nemotron-mini-4b-instruct`.

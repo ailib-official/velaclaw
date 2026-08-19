@@ -39,6 +39,7 @@ pub mod prompt_composer;
 pub mod session_resume;
 pub mod subagent;
 pub mod tool_batch;
+pub mod turn_cancel;
 pub mod turn_progress;
 pub mod workspace_undo;
 

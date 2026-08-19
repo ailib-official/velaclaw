@@ -37,6 +37,7 @@ Last refreshed: **February 18, 2026**.
 - [config-reference.md](config-reference.md)
 - [config-externalization.md](config-externalization.md) — config/policy vs rebuild operator contract
 - [cli-render.md](cli-render.md)
+- Cancel / Stop contract: [cancel-contract.md](cancel-contract.md)
 - Policy & approval runtime contract: [policy-approval-reference.md](policy-approval-reference.md)
 - Upgrade guide (0.7.0 policy): [migration-policy-v0.7.0.md](migration-policy-v0.7.0.md)
 - [custom-providers.md](custom-providers.md)

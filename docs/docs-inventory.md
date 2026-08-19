@@ -53,6 +53,7 @@ Last reviewed: **February 18, 2026**.
 | `docs/policy-approval-reference.md` | Current Reference | operators |
 | `docs/migration-policy-v0.7.0.md` | Current Guide | operators |
 | `docs/cli-render.md` | Current Reference | users/operators |
+| `docs/cancel-contract.md` | Current Reference | users/operators |
 | `docs/custom-providers.md` | Current Integration Guide | integration developers |
 | `docs/zai-glm-setup.md` | Current Provider Setup Guide | users/operators |
 | `docs/langgraph-integration.md` | Current Integration Guide | integration developers |

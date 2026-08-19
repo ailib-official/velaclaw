@@ -7,7 +7,7 @@ use super::local_control::runner::{
 };
 use super::local_control::types::{ChatApiRequest, WsClientMessage, WsServerMessage};
 use super::AppState;
-use crate::agent::loop_::is_tool_loop_cancelled;
+use crate::agent::turn_cancel::{classify_turn_result, ws_inbound_cancels_turn, TurnFinish};
 use crate::agent::turn_progress::TurnProgress;
 use crate::approval::HumanInputKind;
 use axum::extract::ws::{Message, WebSocket};
@@ -219,10 +219,11 @@ async fn handle_ws_socket(socket: WebSocket, state: AppState) {
                             cancel.cancel();
                         }
                         Some(Ok(Message::Text(text))) => {
-                            if let Ok(frame) = serde_json::from_str::<WsClientMessage>(&text) {
-                                if frame.msg_type == "cancel" {
-                                    cancel.cancel();
-                                }
+                            let cancel_frame = serde_json::from_str::<WsClientMessage>(&text)
+                                .ok()
+                                .is_some_and(|frame| frame.msg_type == "cancel");
+                            if ws_inbound_cancels_turn(false, cancel_frame, false) {
+                                cancel.cancel();
                             }
                         }
                         Some(Err(e)) => {
@@ -238,8 +239,8 @@ async fn handle_ws_socket(socket: WebSocket, state: AppState) {
         forwarder.abort();
         hitl_forwarder.abort();
 
-        match chat_result {
-            Ok(resp) => {
+        match classify_turn_result(chat_result) {
+            TurnFinish::Completed(resp) => {
                 if let Err(e) =
                     persist_chat_turn(&config, req.session_id.as_deref(), &req, &resp.content).await
                 {
@@ -261,22 +262,21 @@ async fn handle_ws_socket(socket: WebSocket, state: AppState) {
                     return;
                 }
             }
-            Err(e) => {
-                if is_tool_loop_cancelled(&e) {
-                    let frame = WsServerMessage::Cancelled {
-                        message: Some("Stopped.".into()),
-                    };
-                    if send_frame(sink.clone(), &frame).await.is_err() {
-                        break;
-                    }
-                } else {
-                    tracing::warn!(error = %format!("{e:#}"), "websocket chat turn failed");
-                    let frame = WsServerMessage::Error {
-                        message: user_facing_turn_error(&e, req.model_id.as_deref()),
-                    };
-                    if send_frame(sink.clone(), &frame).await.is_err() {
-                        break;
-                    }
+            TurnFinish::Cancelled => {
+                let frame = WsServerMessage::Cancelled {
+                    message: Some(crate::agent::turn_cancel::STOPPED_USER_MESSAGE.into()),
+                };
+                if send_frame(sink.clone(), &frame).await.is_err() {
+                    break;
+                }
+            }
+            TurnFinish::Failed(e) => {
+                tracing::warn!(error = %format!("{e:#}"), "websocket chat turn failed");
+                let frame = WsServerMessage::Error {
+                    message: user_facing_turn_error(&e, req.model_id.as_deref()),
+                };
+                if send_frame(sink.clone(), &frame).await.is_err() {
+                    break;
                 }
             }
         }

@@ -13,7 +13,7 @@ use anyhow::Result;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio_util::sync::CancellationToken;
-use velaclaw_agent_runtime::normalize_tool_arguments;
+use velaclaw_agent_runtime::{normalize_tool_arguments, ToolLoopCancelled};
 
 pub(crate) use velaclaw_agent_runtime::scrub_credentials;
 
@@ -37,6 +37,21 @@ pub(crate) struct ToolBatchGateExtras {
     pub approval_hub: Option<Arc<ApprovalHub>>,
     pub human_input_hub: Option<Arc<HumanInputHub>>,
     pub host_phase: HostPhase,
+}
+
+fn abort_hitl(extras: Option<&ToolBatchGateExtras>) {
+    if let Some(extras) = extras {
+        if let Some(hub) = &extras.approval_hub {
+            hub.abort_all_pending();
+        }
+        if let Some(hub) = &extras.human_input_hub {
+            hub.abort_all_pending();
+        }
+    }
+}
+
+fn cancelled_err() -> anyhow::Error {
+    ToolLoopCancelled.into()
 }
 
 fn find_tool<'a>(tools: &'a [Box<dyn Tool>], name: &str) -> Option<&'a dyn Tool> {
@@ -104,14 +119,15 @@ async fn execute_one_tool(
     observer: &dyn Observer,
     cancellation_token: Option<&CancellationToken>,
     ctx: &ToolExecutionContext,
-) -> ToolBatchResult {
+    extras: Option<&ToolBatchGateExtras>,
+) -> Result<ToolBatchResult> {
     let call_arguments = normalize_tool_arguments(call_name, call_arguments);
     let caption = crate::agent::turn_progress::progress_caption(call_name, &call_arguments);
     let Some(tool) = find_tool(tools_registry, call_name) else {
-        return ToolBatchResult {
+        return Ok(ToolBatchResult {
             output: format!("Unknown tool: {call_name}"),
             success: false,
-        };
+        });
     };
 
     observer.record_event(&ObserverEvent::ToolCallStart {
@@ -124,16 +140,19 @@ async fn execute_one_tool(
     let tool_result = if let Some(token) = cancellation_token {
         tokio::select! {
             () = token.cancelled() => {
-                return ToolBatchResult {
-                    output: "tool loop cancelled".into(),
-                    success: false,
-                };
+                abort_hitl(extras);
+                return Err(cancelled_err());
             }
             result = tool_future => result,
         }
     } else {
         tool_future.await
     };
+
+    if cancellation_token.is_some_and(CancellationToken::is_cancelled) {
+        abort_hitl(extras);
+        return Err(cancelled_err());
+    }
 
     match tool_result {
         Ok(r) => {
@@ -150,10 +169,10 @@ async fn execute_one_tool(
                 summary: Some(caption.clone()),
                 detail: expand,
             });
-            ToolBatchResult {
+            Ok(ToolBatchResult {
                 output,
                 success: r.success,
-            }
+            })
         }
         Err(e) => {
             let output = format!("Error executing {call_name}: {e}");
@@ -165,10 +184,10 @@ async fn execute_one_tool(
                 summary: Some(caption),
                 detail: expand,
             });
-            ToolBatchResult {
+            Ok(ToolBatchResult {
                 output,
                 success: false,
-            }
+            })
         }
     }
 }
@@ -200,7 +219,12 @@ async fn execute_tools_parallel(
     observer: &dyn Observer,
     cancellation_token: Option<&CancellationToken>,
     host_phase: HostPhase,
+    extras: Option<&ToolBatchGateExtras>,
 ) -> Result<Vec<ToolBatchResult>> {
+    if cancellation_token.is_some_and(CancellationToken::is_cancelled) {
+        abort_hitl(extras);
+        return Err(cancelled_err());
+    }
     let mut blocked: Vec<(usize, ToolBatchResult)> = Vec::new();
     let mut runnable: Vec<(usize, ParsedToolCall)> = Vec::new();
     for (i, call) in tool_calls.iter().enumerate() {
@@ -223,6 +247,7 @@ async fn execute_tools_parallel(
                     observer,
                     cancellation_token,
                     &ctx,
+                    extras,
                 )
                 .await,
             )
@@ -239,7 +264,17 @@ async fn execute_tools_parallel(
         out[i] = b;
     }
     for (i, r) in futures_util::future::join_all(futures).await {
-        out[i] = r;
+        match r {
+            Ok(batch) => out[i] = batch,
+            Err(e) => {
+                abort_hitl(extras);
+                return Err(e);
+            }
+        }
+    }
+    if cancellation_token.is_some_and(CancellationToken::is_cancelled) {
+        abort_hitl(extras);
+        return Err(cancelled_err());
     }
     Ok(out)
 }
@@ -249,12 +284,19 @@ async fn execute_tools_sequential_no_gate(
     tools_registry: &[Box<dyn Tool>],
     observer: &dyn Observer,
     cancellation_token: Option<&CancellationToken>,
-    human_input_hub: Option<&HumanInputHub>,
+    extras: Option<&ToolBatchGateExtras>,
     host_phase: HostPhase,
 ) -> Result<Vec<ToolBatchResult>> {
+    let human_input_hub = extras
+        .and_then(|e| e.human_input_hub.as_ref())
+        .map(std::convert::AsRef::as_ref);
     let mut results = Vec::with_capacity(tool_calls.len());
 
     for call in tool_calls {
+        if cancellation_token.is_some_and(CancellationToken::is_cancelled) {
+            abort_hitl(extras);
+            return Err(cancelled_err());
+        }
         if let Some(blocked) = plan_blocked(host_phase, &call.name) {
             results.push(blocked);
             continue;
@@ -276,8 +318,9 @@ async fn execute_tools_sequential_no_gate(
                 observer,
                 cancellation_token,
                 &ctx,
+                extras,
             )
-            .await,
+            .await?,
         );
     }
 
@@ -290,12 +333,19 @@ async fn execute_tools_sequential_with_gate(
     observer: &dyn Observer,
     gate: &ApprovalGate<'_>,
     cancellation_token: Option<&CancellationToken>,
-    human_input_hub: Option<&HumanInputHub>,
+    extras: Option<&ToolBatchGateExtras>,
     host_phase: HostPhase,
 ) -> Result<Vec<ToolBatchResult>> {
+    let human_input_hub = extras
+        .and_then(|e| e.human_input_hub.as_ref())
+        .map(std::convert::AsRef::as_ref);
     let mut results = Vec::with_capacity(tool_calls.len());
 
     for call in tool_calls {
+        if cancellation_token.is_some_and(CancellationToken::is_cancelled) {
+            abort_hitl(extras);
+            return Err(cancelled_err());
+        }
         if let Some(blocked) = plan_blocked(host_phase, &call.name) {
             results.push(blocked);
             continue;
@@ -307,7 +357,24 @@ async fn execute_tools_sequential_with_gate(
             tool_call_id: None,
         };
 
-        let (shell_human_approved, proceed) = match gate.decide_async(&gate_call).await {
+        let decision = if let Some(token) = cancellation_token {
+            tokio::select! {
+                () = token.cancelled() => {
+                    abort_hitl(extras);
+                    return Err(cancelled_err());
+                }
+                decision = gate.decide_async(&gate_call) => decision,
+            }
+        } else {
+            gate.decide_async(&gate_call).await
+        };
+
+        if cancellation_token.is_some_and(CancellationToken::is_cancelled) {
+            abort_hitl(extras);
+            return Err(cancelled_err());
+        }
+
+        let (shell_human_approved, proceed) = match decision {
             GateDecision::Denied { message } => {
                 results.push(ToolBatchResult {
                     output: message,
@@ -344,8 +411,9 @@ async fn execute_tools_sequential_with_gate(
                 observer,
                 cancellation_token,
                 &ctx,
+                extras,
             )
-            .await,
+            .await?,
         );
     }
 
@@ -377,15 +445,14 @@ pub(crate) async fn execute_tool_batch(
     });
 
     let gate_ref: Option<&ApprovalGate<'_>> = managed_gate.as_ref();
-    let human_input = gate_extras
-        .and_then(|e| e.human_input_hub.as_ref())
-        .map(std::convert::AsRef::as_ref);
     let host_phase = gate_extras.map(|e| e.host_phase).unwrap_or_default();
 
     // secret_slot resolution requires sequential execution (HITL store is not
     // safe to consume concurrently across a parallel batch).
-    let should_parallel =
-        should_execute_tools_in_parallel(tool_calls, gate_ref) && human_input.is_none();
+    let should_parallel = should_execute_tools_in_parallel(tool_calls, gate_ref)
+        && gate_extras
+            .and_then(|e| e.human_input_hub.as_ref())
+            .is_none();
 
     if should_parallel {
         return execute_tools_parallel(
@@ -394,6 +461,7 @@ pub(crate) async fn execute_tool_batch(
             observer,
             cancellation_token,
             host_phase,
+            gate_extras,
         )
         .await;
     }
@@ -405,7 +473,7 @@ pub(crate) async fn execute_tool_batch(
             observer,
             gate,
             cancellation_token,
-            human_input,
+            gate_extras,
             host_phase,
         )
         .await
@@ -415,7 +483,7 @@ pub(crate) async fn execute_tool_batch(
             tools_registry,
             observer,
             cancellation_token,
-            human_input,
+            gate_extras,
             host_phase,
         )
         .await
@@ -483,6 +551,62 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert!(!results[0].success);
         assert!(results[0].output.contains("Plan phase"));
+    }
+
+    struct HangTool;
+
+    #[async_trait::async_trait]
+    impl Tool for HangTool {
+        fn name(&self) -> &str {
+            "hang"
+        }
+
+        fn description(&self) -> &str {
+            "blocks until cancelled"
+        }
+
+        fn parameters_schema(&self) -> serde_json::Value {
+            serde_json::json!({"type": "object", "properties": {}})
+        }
+
+        async fn execute(
+            &self,
+            _args: serde_json::Value,
+            _ctx: &ToolExecutionContext,
+        ) -> anyhow::Result<crate::tools::ToolResult> {
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            Ok(crate::tools::ToolResult {
+                success: true,
+                output: "should not finish".into(),
+                error: None,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn mid_tool_cancel_promotes_to_tool_loop_cancelled() {
+        let calls = vec![ParsedToolCall {
+            name: "hang".to_string(),
+            arguments: serde_json::json!({}),
+        }];
+        let token = CancellationToken::new();
+        token.cancel();
+        let observer = crate::observability::NoopObserver;
+        let tools: Vec<Box<dyn Tool>> = vec![Box::new(HangTool)];
+        let err = execute_tool_batch(
+            &calls,
+            &tools,
+            &observer,
+            None,
+            None,
+            "cli",
+            None,
+            Some(&token),
+            None,
+        )
+        .await
+        .expect_err("cancel must not return tool results");
+        assert!(crate::agent::loop_::is_tool_loop_cancelled(&err));
     }
 
     #[test]

@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Turn cancel contract** (VL-UX-CANCEL-002): CLI Esc Esc and Web Stop share `classify_turn_result` (persist only on Completed). Mid-tool cancel promotes to `ToolLoopCancelled`. Shell uses `kill_on_drop`. Stop aborts ApprovalHub / HITL waiters. `POST /api/chat` remains uncancellable. See [cancel-contract.md](docs/cancel-contract.md).
+
 - **Linux default sandbox + receipts** (VL-MA-003): allowlisted commands are still isolated. Approval does not widen `allowed_commands` (SEC-009). Workspace `.velaclaw/tool_receipts.jsonl` records allow/deny/sandbox_fail without secrets. `velaclaw doctor` reports sandbox name, source, and `production_path`. Autonomy Full does not disable the sandbox. `sandbox-landlock` is now a default Cargo feature.
 
 - **Memory retrieve + doctor embedder** (VL-MA-002): `Memory::recall` fills `retrieve_kind=memory` extra chunks on the same `assemble_layered` entry when envelope assemble is on. `velaclaw doctor` reports effective embedder, source, and whether the path is production. Default `embedding_provider` stays `"none"` (Noop). Deterministic consolidation folds Conversation volume and keeps Core.

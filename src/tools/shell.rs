@@ -226,6 +226,9 @@ async fn run_shell_command(
     use std::process::Stdio;
     use tokio::io::AsyncWriteExt;
 
+    // Turn Stop drops this future; kill the child of *this* turn (not an allowlist change).
+    cmd.kill_on_drop(true);
+
     if stdin_secret.is_some() {
         cmd.stdin(Stdio::piped());
         cmd.stdout(Stdio::piped());

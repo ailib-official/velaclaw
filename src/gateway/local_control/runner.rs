@@ -179,7 +179,7 @@ fn seed_prior_messages(agent: &mut Agent, messages: &[ChatMessageInput]) -> Resu
 ///
 /// After three user turns, schedules a **background** title completion (does not
 /// block the chat `done` frame). Model preference: local (ollama / llamacpp /
-/// lmstudio) → `nvidia/nemotron-3-ultra-550b-a55b` → `nvidia/nemotron-mini-4b-instruct`.
+/// lmstudio) → `nvidia/nemotron-3-super-120b-a12b` → `nvidia/nemotron-mini-4b-instruct`.
 pub async fn persist_chat_turn(
     config: &Config,
     session_id: Option<&str>,
@@ -223,7 +223,7 @@ const TITLE_SYSTEM: &str = "You name chat sessions. Reply with ONLY a concise ti
 (max ~40 characters). No quotes, no punctuation wrapper, no explanation.";
 
 /// Primary NVIDIA Nemotron for background title tasks (free tier, strong instruction following).
-const TITLE_NEMOTRON_PRIMARY: &str = "nvidia/nemotron-3-ultra-550b-a55b";
+const TITLE_NEMOTRON_PRIMARY: &str = "nvidia/nemotron-3-super-120b-a12b";
 /// Last-resort smallest Nemotron when primary is unavailable.
 const TITLE_NEMOTRON_FALLBACK: &str = "nvidia/nemotron-mini-4b-instruct";
 
@@ -619,7 +619,7 @@ metadata:
     }
 
     #[test]
-    fn title_refine_candidates_prefer_nvidia_ultra_then_mini() {
+    fn title_refine_candidates_prefer_nvidia_super_then_mini() {
         let mut cfg = Config::default();
         cfg.default_model = Some("deepseek/deepseek-v4-flash".into());
         cfg.default_provider = Some("deepseek".into());

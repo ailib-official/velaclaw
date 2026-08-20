@@ -532,18 +532,55 @@ pub(crate) fn command_requires_privilege_hint(command: &str) -> bool {
 }
 
 /// Credential / PAT / key files the agent must never dump into tool results.
+/// Matches path **basenames** (and a few well-known relative paths), not raw substrings
+/// (`raid_rsa` must not trip `id_rsa`).
 fn command_touches_secret_material(command: &str) -> bool {
-    const NEEDLES: &[&str] = &[
-        "github_token_list.txt",
-        "github-tokens.md",
-        ".netrc",
-        "id_rsa",
-        "id_ed25519",
-        ".aws/credentials",
-        ".gnupg/",
-    ];
-    let lower = command.to_ascii_lowercase();
-    NEEDLES.iter().any(|n| lower.contains(n))
+    for raw in command.split_whitespace() {
+        let token = raw.trim_matches(|c| c == '\'' || c == '"' || c == '`');
+        if token.is_empty() {
+            continue;
+        }
+        let lower = token.to_ascii_lowercase();
+        if lower.ends_with("/.aws/credentials") || lower == ".aws/credentials" {
+            return true;
+        }
+        if lower.contains("/.gnupg/")
+            || lower.ends_with("/.gnupg")
+            || lower == ".gnupg"
+            || lower.starts_with(".gnupg/")
+        {
+            return true;
+        }
+        let base = lower.rsplit('/').next().unwrap_or(lower.as_str());
+        if secret_basename(base) {
+            return true;
+        }
+    }
+    false
+}
+
+fn secret_basename(base: &str) -> bool {
+    matches!(
+        base,
+        "github_token_list.txt"
+            | "github-tokens.md"
+            | ".netrc"
+            | "_netrc"
+            | "id_rsa"
+            | "id_rsa.pub"
+            | "id_ecdsa"
+            | "id_ecdsa.pub"
+            | "id_ed25519"
+            | "id_ed25519.pub"
+            | "id_ed25519_sk"
+            | "id_ed25519_sk.pub"
+            | "id_ecdsa_sk"
+            | "id_ecdsa_sk.pub"
+    ) || base.starts_with("id_rsa.")
+        || base.starts_with("id_ed25519.")
+        || base.starts_with("id_ed25519_")
+        || base.starts_with("id_ecdsa.")
+        || base.starts_with("id_ecdsa_")
 }
 
 /// Bases that need human approval (even under Full) when `escape_on_approval` is on,
@@ -1583,6 +1620,13 @@ mod tests {
         assert!(err.contains("secret or credential"));
         let ls_ok = p.validate_command_execution("ls /home/alex/github_token_list.txt", false);
         assert!(ls_ok.is_err(), "ls of token file must also be hard-denied");
+        assert!(p
+            .validate_command_execution("cat ./id_ed25519_lan", true)
+            .is_err());
+        assert!(
+            p.validate_command_execution("cat ./raid_rsa", true).is_ok(),
+            "id_rsa must not match as a substring of raid_rsa"
+        );
     }
 
     #[test]

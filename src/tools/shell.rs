@@ -227,7 +227,15 @@ impl Tool for ShellTool {
 
                 let success = output.status.success();
                 let combined = format!("{stdout}\n{stderr}");
-                if !success && looks_like_sandbox_permission_denied(&combined) {
+                if !success
+                    && should_label_child_sandbox_deny(
+                        sandbox_name,
+                        skip_sandbox,
+                        command,
+                        &self.security.workspace_dir(),
+                        &combined,
+                    )
+                {
                     return Ok(ToolResult {
                         success: false,
                         output: stdout,
@@ -289,11 +297,96 @@ async fn run_shell_command(
     cmd.output().await
 }
 
-fn looks_like_sandbox_permission_denied(text: &str) -> bool {
+fn looks_like_eacces_or_nnp(text: &str) -> bool {
     let lower = text.to_ascii_lowercase();
     lower.contains("permission denied")
         || lower.contains("operation not permitted")
         || lower.contains("no new privileges")
+}
+
+/// Relabel child stderr as `[sandbox_deny]` only when the OS sandbox is active and
+/// the failure is NNP or a path outside typical Landlock roots — not every DAC EACCES.
+fn should_label_child_sandbox_deny(
+    sandbox_name: &str,
+    skip_sandbox: bool,
+    command: &str,
+    workspace_dir: &std::path::Path,
+    combined_output: &str,
+) -> bool {
+    if skip_sandbox || sandbox_name == "none" || sandbox_name.starts_with("none(") {
+        return false;
+    }
+    if !looks_like_eacces_or_nnp(combined_output) {
+        return false;
+    }
+    let lower = combined_output.to_ascii_lowercase();
+    if lower.contains("no new privileges") {
+        return true;
+    }
+    command_has_path_outside_typical_landlock_roots(command, workspace_dir)
+}
+
+/// Keep aligned with `src/security/landlock.rs` `apply_restrictions` (classification only).
+fn command_has_path_outside_typical_landlock_roots(
+    command: &str,
+    workspace_dir: &std::path::Path,
+) -> bool {
+    let home = std::env::var("HOME").ok();
+    for raw in command.split_whitespace() {
+        let token = raw.trim_matches(|c| c == '\'' || c == '"' || c == '`');
+        if token.is_empty() || token == "-" || token.starts_with('-') {
+            continue;
+        }
+        let expanded = if let Some(rest) = token.strip_prefix("~/") {
+            match &home {
+                Some(h) => format!("{h}/{rest}"),
+                None => continue,
+            }
+        } else if token == "~" {
+            match &home {
+                Some(h) => h.clone(),
+                None => continue,
+            }
+        } else if let Some(rest) = token.strip_prefix("./") {
+            workspace_dir.join(rest).to_string_lossy().into_owned()
+        } else if token.starts_with('/') {
+            token.to_string()
+        } else {
+            // Bare filename: shell cwd is the workspace; do not treat as host escape.
+            continue;
+        };
+        let path = std::path::Path::new(&expanded);
+        if !path_typically_allowed_under_landlock(path, workspace_dir, home.as_deref()) {
+            return true;
+        }
+    }
+    false
+}
+
+fn path_typically_allowed_under_landlock(
+    path: &std::path::Path,
+    workspace_dir: &std::path::Path,
+    home: Option<&str>,
+) -> bool {
+    let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let mut roots: Vec<std::path::PathBuf> = vec![workspace_dir.to_path_buf()];
+    for p in [
+        "/tmp",
+        "/bin",
+        "/usr",
+        "/lib",
+        "/lib64",
+        "/etc",
+        "/dev",
+        "/var/lib/apt",
+        "/var/lib/dpkg",
+    ] {
+        roots.push(std::path::PathBuf::from(p));
+    }
+    if let Some(h) = home {
+        roots.push(std::path::Path::new(h).join(".ssh"));
+    }
+    roots.iter().any(|root| path.starts_with(root))
 }
 
 fn sandbox_deny_message(detail: &str, sandbox_name: &str) -> String {
@@ -786,6 +879,51 @@ mod tests {
             .as_deref()
             .unwrap_or("")
             .contains("[sandbox_deny]"));
+    }
+
+    #[test]
+    fn child_permission_denied_in_workspace_is_not_sandbox_deny() {
+        let ws = std::env::temp_dir();
+        assert!(!should_label_child_sandbox_deny(
+            "landlock",
+            false,
+            "cat ./chmod-000-file",
+            &ws,
+            "cat: ./chmod-000-file: Permission denied",
+        ));
+    }
+
+    #[test]
+    fn child_permission_denied_on_home_path_is_sandbox_deny() {
+        assert!(should_label_child_sandbox_deny(
+            "landlock",
+            false,
+            "cat /home/alex/notes.txt",
+            &std::env::temp_dir(),
+            "cat: /home/alex/notes.txt: Permission denied",
+        ));
+    }
+
+    #[test]
+    fn noop_sandbox_does_not_relabel_permission_denied() {
+        assert!(!should_label_child_sandbox_deny(
+            "none",
+            false,
+            "cat /home/alex/notes.txt",
+            &std::env::temp_dir(),
+            "Permission denied",
+        ));
+    }
+
+    #[test]
+    fn nnp_sudo_message_is_sandbox_deny() {
+        assert!(should_label_child_sandbox_deny(
+            "landlock",
+            false,
+            "sudo apt update",
+            &std::env::temp_dir(),
+            "sudo: The \"no new privileges\" flag is set, which prevents sudo from running as root.",
+        ));
     }
 
     #[tokio::test]

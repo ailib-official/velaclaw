@@ -5,6 +5,7 @@ use crate::security::{
 };
 use async_trait::async_trait;
 use serde_json::json;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -86,7 +87,7 @@ fn first_executable_is_github_cli(command: &str) -> bool {
     )
 }
 
-fn apply_shell_child_env(cmd: &mut tokio::process::Command, command: &str) {
+fn apply_shell_child_env(cmd: &mut tokio::process::Command, command: &str, workspace: &Path) {
     for var in SAFE_ENV_VARS {
         if let Ok(val) = std::env::var(var) {
             cmd.env(var, val);
@@ -102,6 +103,13 @@ fn apply_shell_child_env(cmd: &mut tokio::process::Command, command: &str) {
             }
         }
     }
+    // Landlock does not allow ~/.config/gh; gh still opens hosts.yml and fails with EACCES
+    // even when GH_TOKEN is set. Point config at the workspace (already in the sandbox).
+    let gh_config = workspace.join(".velaclaw").join("gh-config");
+    if let Err(e) = std::fs::create_dir_all(&gh_config) {
+        tracing::warn!("could not create GH_CONFIG_DIR: {e}");
+    }
+    cmd.env("GH_CONFIG_DIR", &gh_config);
 }
 
 #[async_trait]
@@ -196,7 +204,7 @@ impl Tool for ShellTool {
             }
         };
         cmd.env_clear();
-        apply_shell_child_env(&mut cmd, command);
+        apply_shell_child_env(&mut cmd, command, &self.security.workspace_dir());
 
         let skip_sandbox = self.skip_os_sandbox(human_approved);
         let sandbox_name = if skip_sandbox {
@@ -788,7 +796,11 @@ mod tests {
         let stub_dir = std::env::temp_dir().join(format!("vl-gh-stub-{}", std::process::id()));
         std::fs::create_dir_all(&stub_dir).expect("stub dir");
         let stub = stub_dir.join("gh");
-        std::fs::write(&stub, "#!/bin/sh\nprintf '%s' \"$GH_TOKEN\"\n").expect("stub gh");
+        std::fs::write(
+            &stub,
+            "#!/bin/sh\nprintf '%s\\n' \"$GH_TOKEN\"\nprintf '%s\\n' \"$GH_CONFIG_DIR\"\n",
+        )
+        .expect("stub gh");
         {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).expect("chmod");
@@ -829,6 +841,11 @@ mod tests {
         assert!(
             result.output.contains("test-gh-token-fixture"),
             "gh child must inherit GH_TOKEN; got {:?}",
+            result.output
+        );
+        assert!(
+            result.output.contains("gh-config"),
+            "gh child must get workspace GH_CONFIG_DIR; got {:?}",
             result.output
         );
     }

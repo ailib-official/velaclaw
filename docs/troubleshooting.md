@@ -385,6 +385,7 @@ Cause:
 
 - Shell children start from `env_clear()`. `PATH`/`HOME`/locale are always restored. `GH_TOKEN` / `GITHUB_TOKEN` are restored **only** when the first allowlist segment is `gh` / `gh.exe`. `~/.config/gh` is not in the Landlock home extras (only `~/.ssh`).
 - `echo $GH_TOKEN` / `env` do **not** receive the PAT. `gh … | jq` and `gh … && echo …` still share one `sh -c` environment (inherent).
+- Landlock cannot read `~/.config/gh`. For `gh` invocations the shell child gets `GH_CONFIG_DIR=<workspace>/.velaclaw/gh-config` so hosts.yml EACCES does not mask a valid `GH_TOKEN`.
 - Credential **files** stay hard-denied even after Approve.
 
 Fix:

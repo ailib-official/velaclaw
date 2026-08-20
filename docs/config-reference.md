@@ -217,7 +217,7 @@ Notes:
 - Receipts: `<workspace>/.velaclaw/tool_receipts.jsonl` (truncated command; no secrets). Approved escapes record `sandbox=none(approved-escape)`.
 - Shell `tool_result` errors use classified prefixes on the existing `error` string (GOV-007, no second API): `[policy_deny]`, `[needs_approval]`, `[sandbox_deny]`. Models must not retry equivalent `ls`/`find`/`cat` after `[sandbox_deny]`/`[policy_deny]`.
 - Known credential **basenames** (`github_token_list.txt`, `id_rsa`, `id_ed25519`, …) are hard-denied even when approved (SEC-009). Substring false positives (`raid_rsa`) are not matched. Do not widen Landlock to `$HOME` as a product default.
-- **GitHub CLI:** put `GH_TOKEN` or `GITHUB_TOKEN` in the daemon `EnvironmentFile` (`daemon.env`, mode `600`). Those names are restored after `env_clear` **only** when the first policy segment is `gh` / `gh.exe` (same `base_executables` as the allowlist). Pipelines/`&&` after `gh` still share the `sh -c` env. Do not `cat` PAT files. Landlock still cannot read `~/.config/gh`.
+- **GitHub CLI:** put `GH_TOKEN` or `GITHUB_TOKEN` in the daemon `EnvironmentFile` (`daemon.env`, mode `600`). Those names are restored after `env_clear` **only** when the first policy segment is `gh` / `gh.exe` (same `base_executables` as the allowlist). The child also gets `GH_CONFIG_DIR` under the workspace so Landlock is not asked to read `~/.config/gh`. Pipelines/`&&` after `gh` still share the `sh -c` env. Do not `cat` PAT files.
 
 ```toml
 [security.sandbox]

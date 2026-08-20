@@ -1565,7 +1565,7 @@ mod tests {
     }
 
     #[test]
-    fn should_execute_tools_in_parallel_returns_true_when_cli_has_no_interactive_approvals() {
+    fn should_execute_tools_in_parallel_returns_false_for_shell_even_under_full() {
         use crate::approval::ApprovalGate;
 
         let calls = vec![
@@ -1585,7 +1585,7 @@ mod tests {
         let approval_mgr = ApprovalManager::from_config(&approval_cfg);
         let gate = ApprovalGate::new(&approval_mgr, "cli", None);
 
-        assert!(tool_batch::should_execute_tools_in_parallel(
+        assert!(!tool_batch::should_execute_tools_in_parallel(
             &calls,
             Some(&gate)
         ));

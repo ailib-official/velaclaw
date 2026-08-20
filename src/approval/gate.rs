@@ -50,6 +50,10 @@ impl<'a> ApprovalGate<'a> {
         self.inner().decide_async(call).await
     }
 
+    pub async fn decide_elevation_async(&self, call: &ParsedToolCall) -> GateDecision {
+        self.inner().decide_elevation_async(call).await
+    }
+
     fn inner(&self) -> InnerGate<'_, ManagerApprovalBackend<'a>> {
         let hook_ref = self
             .shell_hook

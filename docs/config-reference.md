@@ -196,6 +196,23 @@ Notes:
 - In CLI, gateway, and channel tool loops, multiple independent tool calls are executed concurrently by default when the pending calls do not require approval gating; result order remains stable.
 - `parallel_tools` applies to the `Agent::turn()` API surface (Web Local Control). CLI and channel handlers use their own concurrent batching when calls do not require approval gating.
 
+## `[security]`
+
+User-facing **profile** (VL-SEC-011) plus optional env inherit. Profiles **unfold** existing knobs; they do not add a second tool loop (GOV-007). Unset `profile` leaves sandbox/autonomy as written.
+
+| Key | Default | Purpose |
+|---|---|---|
+| `profile` | unset | `isolated` — Landlock/fail-closed, scrubbed shell env, credential paths **Ask** (Once). `local` — Noop sandbox, inherit daemon env, do not treat `/home` as a file ban, credential paths **Allow** (output scrubbed; secrets can enter the model). `readonly` — `autonomy.level = read_only`. |
+| `inherit_process_env` | unset | Override: `true` copies daemon env into every shell child inside `apply_shell_child_env`. Unset + `profile = local` implies true. Isolated keeps `env_clear` + functional allowlist. |
+
+```toml
+[security]
+# profile = "isolated"
+# inherit_process_env = false
+```
+
+`velaclaw doctor` prints `security.profile=` and whether inherit is on.
+
 ## `[security.sandbox]`
 
 OS isolation for production `shell` (wired in `all_tools_with_runtime`). Unit tests that construct `ShellTool::new` keep Noop.
@@ -216,7 +233,7 @@ Notes:
 - Landlock applies in the child (`pre_exec`), not the agent parent.
 - Receipts: `<workspace>/.velaclaw/tool_receipts.jsonl` (truncated command; no secrets). Approved escapes record `sandbox=none(approved-escape)`.
 - Shell `tool_result` errors use classified prefixes on the existing `error` string (GOV-007, no second API): `[policy_deny]`, `[needs_approval]`, `[sandbox_deny]`. Models must not retry equivalent `ls`/`find`/`cat` after `[sandbox_deny]`/`[policy_deny]`.
-- Known credential **basenames** (`github_token_list.txt`, `id_rsa`, `id_ed25519`, …) are hard-denied even when approved (SEC-009). Substring false positives (`raid_rsa`) are not matched. Do not widen Landlock to `$HOME` as a product default.
+- Known credential **basenames** (`github_token_list.txt`, `id_rsa`, `id_ed25519`, …): unset `profile` still hard-denies even when approved. `isolated` asks Once (Always is not persisted for those paths). `local` allows under `allowed_commands` (scrubbed). Substring false positives (`raid_rsa`) are not matched.
 
 ```toml
 [security.sandbox]

@@ -53,6 +53,8 @@ pub enum ApprovalResponse {
     No,
     /// Execute and add tool to session-scoped allowlist (shell: also remember executable basename).
     Always,
+    /// Persist denylist; do not prompt again for this tool/basename until cleared.
+    Never,
 }
 
 /// A single audit log entry for an approval decision.
@@ -83,6 +85,13 @@ pub struct ApprovalManager {
     session_allowlist: Mutex<HashSet<String>>,
     /// Session-scoped shell executable basenames from shell-policy "Always" (VL-SEC-009).
     session_shell_binaries: Mutex<HashSet<String>>,
+    /// Persistent Never (tools).
+    session_denylist: Mutex<HashSet<String>>,
+    /// Persistent Never (shell basenames).
+    session_shell_denylist: Mutex<HashSet<String>>,
+    /// Last seen `[security.profile]` — change drops in-memory Always grants.
+    last_profile: Mutex<Option<crate::config::SecurityProfile>>,
+    profile_seen: Mutex<bool>,
     /// Audit trail of approval decisions.
     audit_log: Mutex<Vec<ApprovalLogEntry>>,
     /// L2.5 persistence for "Always" decisions (VL-SEC-004).
@@ -100,6 +109,10 @@ impl ApprovalManager {
             autonomy_level: config.level,
             session_allowlist: Mutex::new(HashSet::new()),
             session_shell_binaries: Mutex::new(HashSet::new()),
+            session_denylist: Mutex::new(HashSet::new()),
+            session_shell_denylist: Mutex::new(HashSet::new()),
+            last_profile: Mutex::new(None),
+            profile_seen: Mutex::new(false),
             audit_log: Mutex::new(Vec::new()),
             overrides_store: None,
             security_audit: None,
@@ -128,6 +141,61 @@ impl ApprovalManager {
                 set.insert(trimmed.to_string());
             }
         }
+    }
+
+    pub fn seed_session_denylist<I>(&self, tools: I)
+    where
+        I: IntoIterator<Item = String>,
+    {
+        let mut set = self.session_denylist.lock();
+        for t in tools {
+            let trimmed = t.trim();
+            if !trimmed.is_empty() {
+                set.insert(trimmed.to_string());
+            }
+        }
+    }
+
+    pub fn seed_session_shell_denylist<I>(&self, binaries: I)
+    where
+        I: IntoIterator<Item = String>,
+    {
+        let mut set = self.session_shell_denylist.lock();
+        for b in binaries {
+            let trimmed = b.trim();
+            if !trimmed.is_empty() {
+                set.insert(trimmed.to_string());
+            }
+        }
+    }
+
+    /// Drop in-memory Always grants when `[security.profile]` changes.
+    pub fn sync_security_profile(&self, profile: Option<crate::config::SecurityProfile>) {
+        let mut seen = self.profile_seen.lock();
+        let mut last = self.last_profile.lock();
+        if !*seen {
+            *last = profile;
+            *seen = true;
+            return;
+        }
+        if *last != profile {
+            self.session_allowlist.lock().clear();
+            self.session_shell_binaries.lock().clear();
+            *last = profile;
+        }
+    }
+
+    pub fn is_never_tool(&self, tool_name: &str) -> bool {
+        self.session_denylist.lock().contains(tool_name)
+    }
+
+    pub fn shell_session_never_covers(&self, command: &str) -> bool {
+        let bases = crate::security::SecurityPolicy::base_executables(command);
+        if bases.is_empty() {
+            return false;
+        }
+        let denied = self.session_shell_denylist.lock();
+        bases.iter().any(|b| denied.contains(b))
     }
 
     /// Check whether a tool call requires interactive approval.
@@ -172,22 +240,66 @@ impl ApprovalManager {
         decision: ApprovalResponse,
         channel: &str,
     ) {
-        if decision == ApprovalResponse::Always {
-            let mut allowlist = self.session_allowlist.lock();
-            allowlist.insert(tool_name.to_string());
-            drop(allowlist);
+        if decision == ApprovalResponse::Never {
+            let mut denylist = self.session_denylist.lock();
+            denylist.insert(tool_name.to_string());
+            drop(denylist);
             if let Some(store) = &self.overrides_store {
-                if let Err(err) = store.persist_session_allowlist_add(tool_name) {
+                if let Err(err) = store.persist_session_denylist_add(tool_name) {
                     tracing::warn!(
                         tool = tool_name,
                         error = %err,
-                        "failed to persist session allowlist to policy-overrides.yaml"
+                        "failed to persist session denylist to policy-overrides.yaml"
                     );
+                }
+            }
+            if velaclaw_agent_runtime::is_shell_policy_tool(tool_name) {
+                if let Some(command) = args.get("command").and_then(|v| v.as_str()) {
+                    let bases = crate::security::SecurityPolicy::base_executables(command);
+                    {
+                        let mut bins = self.session_shell_denylist.lock();
+                        for b in &bases {
+                            bins.insert(b.clone());
+                        }
+                    }
+                    if let Some(store) = &self.overrides_store {
+                        for b in &bases {
+                            if let Err(err) = store.persist_session_shell_denylist_add(b) {
+                                tracing::warn!(
+                                    binary = %b,
+                                    error = %err,
+                                    "failed to persist session shell denylist"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if decision == ApprovalResponse::Always {
+            let persist_secrets = args
+                .get("command")
+                .and_then(|v| v.as_str())
+                .map_or(true, |c| {
+                    !crate::security::policy::command_touches_secret_material(c)
+                });
+            if persist_secrets {
+                let mut allowlist = self.session_allowlist.lock();
+                allowlist.insert(tool_name.to_string());
+                if let Some(store) = &self.overrides_store {
+                    if let Err(err) = store.persist_session_allowlist_add(tool_name) {
+                        tracing::warn!(
+                            tool = tool_name,
+                            error = %err,
+                            "failed to persist session allowlist to policy-overrides.yaml"
+                        );
+                    }
                 }
             }
 
             // Shell-policy Always: remember executable basenames only (VL-SEC-009 / H).
-            if velaclaw_agent_runtime::is_shell_policy_tool(tool_name) {
+            if persist_secrets && velaclaw_agent_runtime::is_shell_policy_tool(tool_name) {
                 if let Some(command) = args.get("command").and_then(|v| v.as_str()) {
                     let bases = crate::security::SecurityPolicy::base_executables(command);
                     if !bases.is_empty() {
@@ -226,7 +338,7 @@ impl ApprovalManager {
         log.push(entry);
 
         if let Some(audit) = &self.security_audit {
-            let approved = decision != ApprovalResponse::No;
+            let approved = !matches!(decision, ApprovalResponse::No | ApprovalResponse::Never);
             if let Err(err) = audit.log_tool_approval(
                 channel,
                 tool_name,
@@ -305,7 +417,7 @@ fn prompt_cli_interactive(request: &ApprovalRequest) -> ApprovalResponse {
         } else {
             eprintln!("   {summary}");
         }
-        eprintln!("   [Y]es = once, [A]lways = skip risk prompts for this executable this session, [N]o = deny");
+        eprintln!("   [Y]es = once, [A]lways = remember this executable, [N]o = deny this call, [!] Never = persist deny");
     } else {
         eprintln!(
             "🔒 Security policy requires approval for tool: {}",
@@ -313,7 +425,10 @@ fn prompt_cli_interactive(request: &ApprovalRequest) -> ApprovalResponse {
         );
         eprintln!("   {summary}");
     }
-    eprint!("   [Y]es / [N]o / [A]lways for {}: ", request.tool_name);
+    eprint!(
+        "   [Y]es / [N]o / [A]lways / [!]Never for {}: ",
+        request.tool_name
+    );
     let _ = io::stderr().flush();
 
     let stdin = io::stdin();
@@ -325,6 +440,7 @@ fn prompt_cli_interactive(request: &ApprovalRequest) -> ApprovalResponse {
     match line.trim().to_ascii_lowercase().as_str() {
         "y" | "yes" => ApprovalResponse::Yes,
         "a" | "always" => ApprovalResponse::Always,
+        "!" | "never" => ApprovalResponse::Never,
         _ => ApprovalResponse::No,
     }
 }
@@ -334,6 +450,7 @@ fn approval_decision_label(decision: ApprovalResponse) -> &'static str {
         ApprovalResponse::Yes => "yes",
         ApprovalResponse::No => "no",
         ApprovalResponse::Always => "always",
+        ApprovalResponse::Never => "never",
     }
 }
 
@@ -452,6 +569,33 @@ mod tests {
 
         // Now file_write should be in session allowlist.
         assert!(!mgr.needs_approval("file_write"));
+    }
+
+    #[test]
+    fn never_response_denies_tool_without_prompt_path() {
+        let mgr = ApprovalManager::from_config(&supervised_config());
+        mgr.record_decision(
+            "file_write",
+            &serde_json::json!({"path": "x"}),
+            ApprovalResponse::Never,
+            "cli",
+        );
+        assert!(mgr.is_never_tool("file_write"));
+    }
+
+    #[test]
+    fn profile_change_clears_session_allowlist() {
+        let mgr = ApprovalManager::from_config(&supervised_config());
+        mgr.sync_security_profile(Some(crate::config::SecurityProfile::Isolated));
+        mgr.record_decision(
+            "file_write",
+            &serde_json::json!({"path": "test.txt"}),
+            ApprovalResponse::Always,
+            "cli",
+        );
+        assert!(!mgr.needs_approval("file_write"));
+        mgr.sync_security_profile(Some(crate::config::SecurityProfile::Local));
+        assert!(mgr.needs_approval("file_write"));
     }
 
     #[test]
@@ -598,6 +742,8 @@ mod tests {
         assert_eq!(json, "\"always\"");
         let parsed: ApprovalResponse = serde_json::from_str("\"no\"").unwrap();
         assert_eq!(parsed, ApprovalResponse::No);
+        let never: ApprovalResponse = serde_json::from_str("\"never\"").unwrap();
+        assert_eq!(never, ApprovalResponse::Never);
     }
 
     // ── ApprovalRequest ──────────────────────────────────────
@@ -722,7 +868,7 @@ mod tests {
                 .expect("approval event timeout")
                 .expect("approval broadcast");
             assert_eq!(ev.tool_name, "shell");
-            assert!(hub_respond.respond(&ev.id, true, false));
+            assert!(hub_respond.respond(&ev.id, true, false, false));
         });
 
         let decision = gate.decide_async(&call).await;
@@ -894,7 +1040,7 @@ mod tests {
                 .expect("approval event timeout")
                 .expect("approval broadcast");
             assert_eq!(ev.tool_name, "shell");
-            assert!(hub_respond.respond(&ev.id, true, false));
+            assert!(hub_respond.respond(&ev.id, true, false, false));
             assert!(
                 tokio::time::timeout(Duration::from_millis(200), sub.recv())
                     .await

@@ -11,6 +11,10 @@ use std::sync::Arc;
 use std::time::Duration;
 use velaclaw_agent_runtime::{shell_command_from_args, HumanApprovalBackend, ShellPolicyHook};
 
+fn decision_proceeds(decision: ApprovalResponse) -> bool {
+    matches!(decision, ApprovalResponse::Yes | ApprovalResponse::Always)
+}
+
 /// Per-message channel approval context (VL-SEC-003).
 #[derive(Clone)]
 pub struct ChannelApprovalSession {
@@ -99,7 +103,7 @@ impl HumanApprovalBackend for ManagerApprovalBackend<'_> {
         };
         self.manager
             .record_decision(tool_name, arguments, decision, self.channel);
-        decision != ApprovalResponse::No
+        decision_proceeds(decision)
     }
 
     async fn approve_tool_async(&self, tool_name: &str, arguments: &serde_json::Value) -> bool {
@@ -118,7 +122,7 @@ impl HumanApprovalBackend for ManagerApprovalBackend<'_> {
         };
         self.manager
             .record_decision(tool_name, arguments, decision, self.channel);
-        decision != ApprovalResponse::No
+        decision_proceeds(decision)
     }
 
     fn interactive_shell_approval(&self) -> bool {
@@ -134,6 +138,14 @@ impl HumanApprovalBackend for ManagerApprovalBackend<'_> {
         self.manager.shell_session_always_covers(command)
     }
 
+    fn never_tool(&self, tool_name: &str) -> bool {
+        self.manager.is_never_tool(tool_name)
+    }
+
+    fn shell_session_never(&self, command: &str) -> bool {
+        self.manager.shell_session_never_covers(command)
+    }
+
     fn approve_shell_command_sync(&self, command: &str) -> bool {
         let request = ApprovalRequest {
             tool_name: "shell".into(),
@@ -146,7 +158,7 @@ impl HumanApprovalBackend for ManagerApprovalBackend<'_> {
         };
         self.manager
             .record_decision("shell", &request.arguments, decision, self.channel);
-        decision != ApprovalResponse::No
+        decision_proceeds(decision)
     }
 
     async fn approve_shell_command_async(&self, command: &str) -> bool {
@@ -161,7 +173,7 @@ impl HumanApprovalBackend for ManagerApprovalBackend<'_> {
             let decision = self.prompt_channel(&request, Some(command)).await;
             self.manager
                 .record_decision("shell", &request.arguments, decision, self.channel);
-            return decision != ApprovalResponse::No;
+            return decision_proceeds(decision);
         }
         // Gateway / Web UI: use ApprovalHub (same path as approve_tool_async).
         // Previously fell through to sync, which auto-denies non-CLI channels —
@@ -175,7 +187,7 @@ impl HumanApprovalBackend for ManagerApprovalBackend<'_> {
             let decision = self.manager.prompt_gateway(hub, &request).await;
             self.manager
                 .record_decision("shell", &request.arguments, decision, self.channel);
-            return decision != ApprovalResponse::No;
+            return decision_proceeds(decision);
         }
         if self.channel != "cli" {
             tracing::warn!(

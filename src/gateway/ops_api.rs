@@ -260,6 +260,8 @@ pub struct ApprovalRespondBody {
     pub approved: bool,
     #[serde(default)]
     pub always: bool,
+    #[serde(default)]
+    pub never: bool,
 }
 
 pub async fn handle_respond_approval(
@@ -272,7 +274,10 @@ pub async fn handle_respond_approval(
     if let Err(e) = authorize(&state, peer_addr, &headers) {
         return e.into_response();
     }
-    if state.approval_hub.respond(&id, body.approved, body.always) {
+    if state
+        .approval_hub
+        .respond(&id, body.approved, body.always, body.never)
+    {
         (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response()
     } else {
         api_error(StatusCode::NOT_FOUND, "Unknown or expired approval id").into_response()

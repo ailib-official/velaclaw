@@ -30,6 +30,12 @@ pub struct ApprovalOverridesSection {
     /// Not merged into `auto_approve`; hydrated into runtime session state.
     #[serde(default)]
     pub session_shell_binaries: Vec<String>,
+    /// Tools the operator marked "Never".
+    #[serde(default)]
+    pub session_denylist: Vec<String>,
+    /// Shell basenames the operator marked "Never".
+    #[serde(default)]
+    pub session_shell_denylist: Vec<String>,
 }
 
 /// Enforces `self_adjust.allowed_writes` / `denied_writes` for policy patch paths.

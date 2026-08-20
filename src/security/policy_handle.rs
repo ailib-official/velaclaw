@@ -109,4 +109,12 @@ impl PolicyHandle {
     pub fn escape_on_approval(&self) -> bool {
         self.read().escape_on_approval
     }
+
+    pub fn inherit_process_env(&self) -> bool {
+        self.read().inherit_process_env
+    }
+
+    pub fn profile(&self) -> Option<crate::config::SecurityProfile> {
+        self.read().profile
+    }
 }

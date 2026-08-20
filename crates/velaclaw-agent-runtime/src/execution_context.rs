@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 pub struct ToolExecutionContext {
     /// Human confirmed medium/high-risk shell policy for this invocation.
     pub human_shell_approved: bool,
+    /// This invocation is a post-deny elevation (same ApprovalGate). May skip OS wrap.
+    pub sandbox_elevated: bool,
     /// Optional secret piped to the process stdin (e.g. `sudo -S`).
     /// Never sourced from model JSON; agent resolves opaque `secret_slot` ids.
     #[serde(skip)]
@@ -20,8 +22,14 @@ impl ToolExecutionContext {
     pub fn with_shell_human_approved(approved: bool) -> Self {
         Self {
             human_shell_approved: approved,
+            sandbox_elevated: false,
             stdin_secret: None,
         }
+    }
+
+    pub fn with_sandbox_elevated(mut self, elevated: bool) -> Self {
+        self.sandbox_elevated = elevated;
+        self
     }
 
     pub fn with_stdin_secret(mut self, secret: Option<String>) -> Self {
@@ -37,6 +45,7 @@ mod tests {
     #[test]
     fn default_context_denies_shell_approval() {
         assert!(!ToolExecutionContext::default().human_shell_approved);
+        assert!(!ToolExecutionContext::default().sandbox_elevated);
         assert!(ToolExecutionContext::default().stdin_secret.is_none());
     }
 

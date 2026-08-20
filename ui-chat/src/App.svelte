@@ -310,12 +310,12 @@
     }
   }
 
-  async function handleApproval(approved: boolean, always = false) {
+  async function handleApproval(approved: boolean, always = false, never = false) {
     const current = pendingApprovals[0];
     if (!current) return;
     const id = current.id;
     try {
-      await respondApproval(token, id, approved, always);
+      await respondApproval(token, id, approved, always, never);
       pendingApprovals = pendingApprovals.slice(1);
       if (!streaming && pendingApprovals.length === 0) await focusChatInput();
     } catch (e) {
@@ -928,6 +928,7 @@
           <button type="button" class="danger" onclick={() => handleApproval(false)}>Deny</button>
           <button type="button" onclick={() => handleApproval(true)}>Allow once</button>
           <button type="button" onclick={() => handleApproval(true, true)}>Always allow</button>
+          <button type="button" class="danger" onclick={() => handleApproval(false, false, true)}>Never</button>
         </div>
       </div>
     </div>

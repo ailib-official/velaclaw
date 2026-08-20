@@ -108,12 +108,14 @@ impl ApprovalHub {
     }
 
     /// Resolve a pending approval from HTTP (`POST /api/approvals/:id/respond`).
-    pub fn respond(&self, id: &str, approved: bool, always: bool) -> bool {
+    pub fn respond(&self, id: &str, approved: bool, always: bool, never: bool) -> bool {
         let entry = self.pending.lock().remove(id);
         let Some(entry) = entry else {
             return false;
         };
-        let decision = if approved {
+        let decision = if never {
+            ApprovalResponse::Never
+        } else if approved {
             if always {
                 ApprovalResponse::Always
             } else {
@@ -150,7 +152,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(20)).await;
         let pending: Vec<_> = hub.pending.lock().keys().cloned().collect();
         assert_eq!(pending.len(), 1);
-        assert!(hub.respond(&pending[0], true, false));
+        assert!(hub.respond(&pending[0], true, false, false));
 
         let decision = handle.await.expect("join");
         assert_eq!(decision, ApprovalResponse::Yes);

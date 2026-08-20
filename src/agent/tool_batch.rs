@@ -13,7 +13,7 @@ use anyhow::Result;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio_util::sync::CancellationToken;
-use velaclaw_agent_runtime::{normalize_tool_arguments, ToolLoopCancelled};
+use velaclaw_agent_runtime::{is_shell_policy_tool, normalize_tool_arguments, ToolLoopCancelled};
 
 pub(crate) use velaclaw_agent_runtime::scrub_credentials;
 
@@ -204,7 +204,7 @@ pub(crate) fn should_execute_tools_in_parallel(
     if let Some(gate) = gate {
         if tool_calls
             .iter()
-            .any(|call| gate.needs_approval(&call.name))
+            .any(|call| is_shell_policy_tool(&call.name) || gate.needs_approval(&call.name))
         {
             return false;
         }
@@ -415,9 +415,71 @@ async fn execute_tools_sequential_with_gate(
             )
             .await?,
         );
+        if let Some(first) = results.last().cloned() {
+            if should_retry_shell_elevation(&call.name, &first) {
+                let elevation = if let Some(token) = cancellation_token {
+                    tokio::select! {
+                        () = token.cancelled() => {
+                            abort_hitl(extras);
+                            return Err(cancelled_err());
+                        }
+                        decision = gate.decide_elevation_async(&gate_call) => decision,
+                    }
+                } else {
+                    gate.decide_elevation_async(&gate_call).await
+                };
+                match elevation {
+                    GateDecision::Denied { message } => {
+                        results.pop();
+                        results.push(ToolBatchResult {
+                            output: message,
+                            success: false,
+                        });
+                    }
+                    GateDecision::Proceed {
+                        shell_human_approved,
+                    } => {
+                        let mut retry_args =
+                            normalize_tool_arguments(&call.name, call.arguments.clone());
+                        let retry_ctx = match build_tool_execution_context(
+                            &call.name,
+                            &mut retry_args,
+                            shell_human_approved,
+                            human_input_hub,
+                        ) {
+                            Ok(ctx) => ctx.with_sandbox_elevated(true),
+                            Err(err) => {
+                                results.pop();
+                                results.push(err);
+                                continue;
+                            }
+                        };
+                        results.pop();
+                        results.push(
+                            execute_one_tool(
+                                &call.name,
+                                retry_args,
+                                tools_registry,
+                                observer,
+                                cancellation_token,
+                                &retry_ctx,
+                                extras,
+                            )
+                            .await?,
+                        );
+                    }
+                }
+            }
+        }
     }
 
     Ok(results)
+}
+
+fn should_retry_shell_elevation(call_name: &str, result: &ToolBatchResult) -> bool {
+    call_name == "shell"
+        && !result.success
+        && (result.output.contains("[sandbox_deny]") || result.output.contains("[needs_approval]"))
 }
 
 /// Execute a batch of tool calls with optional approval manager and security policy gate.
@@ -432,6 +494,9 @@ pub(crate) async fn execute_tool_batch(
     cancellation_token: Option<&CancellationToken>,
     gate_extras: Option<&ToolBatchGateExtras>,
 ) -> Result<Vec<ToolBatchResult>> {
+    if let (Some(mgr), Some(policy)) = (approval, security) {
+        mgr.sync_security_profile(policy.profile());
+    }
     let policy = security.cloned();
     let managed_gate = approval.map(|mgr| {
         let mut gate = ApprovalGate::new(mgr, channel_name, policy.clone());
@@ -522,6 +587,45 @@ mod tests {
         let gate = ApprovalGate::new(&approval_mgr, "cli", None);
 
         assert!(!should_execute_tools_in_parallel(&calls, Some(&gate)));
+    }
+
+    #[test]
+    fn should_execute_tools_in_parallel_returns_false_for_shell_under_full() {
+        let calls = vec![
+            ParsedToolCall {
+                name: "shell".to_string(),
+                arguments: serde_json::json!({"command": "pwd"}),
+            },
+            ParsedToolCall {
+                name: "file_read".to_string(),
+                arguments: serde_json::json!({"path": "a.txt"}),
+            },
+        ];
+        let mut approval_cfg = AutonomyConfig::default();
+        approval_cfg.level = crate::security::AutonomyLevel::Full;
+        approval_cfg.always_ask.clear();
+        let approval_mgr = ApprovalManager::from_config(&approval_cfg);
+        let gate = ApprovalGate::new(&approval_mgr, "cli", None);
+        assert!(!approval_mgr.needs_approval("shell"));
+        assert!(!should_execute_tools_in_parallel(&calls, Some(&gate)));
+    }
+
+    #[test]
+    fn elevation_retry_detects_sandbox_deny() {
+        let result = ToolBatchResult {
+            output: "Error: [sandbox_deny] blocked".into(),
+            success: false,
+        };
+        assert!(should_retry_shell_elevation("shell", &result));
+        assert!(!should_retry_shell_elevation("file_read", &result));
+        let deny = ToolBatchResult {
+            output: "Error: [policy_deny] not allowed".into(),
+            success: false,
+        };
+        assert!(
+            !should_retry_shell_elevation("shell", &deny),
+            "allowlist policy_deny is not elevation"
+        );
     }
 
     #[tokio::test]

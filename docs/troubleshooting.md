@@ -364,15 +364,16 @@ Symptoms:
 
 Cause:
 
-- Allowlisted shell still runs under Landlock (policy A). `$HOME` is not in the OS sandbox allowlist.
-- Credential **basenames** (`github_token_list.txt`, `id_rsa`, `id_ed25519`, …) are **policy** hard-denies (`[policy_deny]`), even after Approve. Substrings like `raid_rsa` are not matched.
+- Allowlisted shell still runs under Landlock unless `profile = local` or an elevation Once skips wrap.
+- Credential **basenames**: unset `profile` → `[policy_deny]` even after Approve. `isolated` → `[needs_approval]` then Once. `local` → allowed under `allowed_commands` (scrubbed). Substrings like `raid_rsa` are not matched.
 - `[sandbox_deny]` is applied on wrap failure, Landlock `no new privileges`, or EACCES on a path outside typical Landlock roots (workspace, `/usr`, `/tmp`, …). A `Permission denied` **inside** the workspace stays a normal DAC error.
 
 Fix:
 
-1. Copy the file into the workspace and use `file_read`.
-2. Power users: `escape_on_approval = true` + Approve once for **that** command (not YOLO).
-3. Do not ask the agent to `cat` PAT/key files.
+1. Approve Once in the same ApprovalHub modal (VL-SEC-011) — do not invent another tool.
+2. For a Cursor-like host: `[security] profile = "local"` (inherits daemon env; home readable).
+3. Isolated operators: `escape_on_approval = true` + Approve, or copy files into the workspace.
+4. **Never** persists a denylist in L2.5 until you clear it.
 
 ### Session allowlist lost after restart (pre-0.7)
 

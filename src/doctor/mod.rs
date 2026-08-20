@@ -495,6 +495,40 @@ fn check_config_semantics(config: &Config, items: &mut Vec<DiagItem>) {
                 "sandbox escape_on_approval=true (approved shell skips Landlock/NNP; default is false)",
             ));
         }
+        match config.security.profile {
+            Some(crate::config::SecurityProfile::Isolated) => {
+                items.push(DiagItem::ok(
+                    "security",
+                    "security.profile=isolated (Landlock/fail-closed; scrubbed shell env; secrets Ask)",
+                ));
+            }
+            Some(crate::config::SecurityProfile::Local) => {
+                items.push(DiagItem::warn(
+                    "security",
+                    "security.profile=local (no OS sandbox; inherit daemon env; home readable — secrets enter model context)",
+                ));
+            }
+            Some(crate::config::SecurityProfile::Readonly) => {
+                items.push(DiagItem::ok(
+                    "security",
+                    "security.profile=readonly (no shell elevation)",
+                ));
+            }
+            None => {
+                items.push(DiagItem::ok(
+                    "security",
+                    "security.profile=unset (knobs as written; set isolated|local|readonly)",
+                ));
+            }
+        }
+        if config.security.inherit_process_env == Some(true)
+            || config.security.profile == Some(crate::config::SecurityProfile::Local)
+        {
+            items.push(DiagItem::warn(
+                "security",
+                "inherit_process_env=true (shell children see daemon.env secrets)",
+            ));
+        }
     }
 
     // Runtime kind honesty: native host vs docker wrapper (avoid model/container confusion).

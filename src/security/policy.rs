@@ -531,6 +531,21 @@ pub(crate) fn command_requires_privilege_hint(command: &str) -> bool {
         || lower.contains(" pkexec")
 }
 
+/// Credential / PAT / key files the agent must never dump into tool results.
+fn command_touches_secret_material(command: &str) -> bool {
+    const NEEDLES: &[&str] = &[
+        "github_token_list.txt",
+        "github-tokens.md",
+        ".netrc",
+        "id_rsa",
+        "id_ed25519",
+        ".aws/credentials",
+        ".gnupg/",
+    ];
+    let lower = command.to_ascii_lowercase();
+    NEEDLES.iter().any(|n| lower.contains(n))
+}
+
 /// Bases that need human approval (even under Full) when `escape_on_approval` is on,
 /// so the approved path can skip Landlock/NNP for real package/privilege work.
 fn command_requires_sandbox_escape_approval(command: &str) -> bool {
@@ -701,6 +716,15 @@ impl SecurityPolicy {
             ));
         }
 
+        // Secret material: human approval cannot widen this surface (VL-SEC-010 / SEC-009).
+        if command_touches_secret_material(command) {
+            return Err(self.format_command_policy_error(
+                "Command blocked: secret or credential path is not readable by the agent.",
+                command,
+                false,
+            ));
+        }
+
         // Hard allowlist: human approval cannot widen allowed_commands (VL-SEC-009 / H).
         if !self.segments_are_allowlisted(command) {
             return Err(self.format_command_policy_error(
@@ -855,7 +879,12 @@ impl SecurityPolicy {
         command: &str,
         approval_eligible: bool,
     ) -> String {
-        let mut msg = format!("{headline}\n   Command: {command}");
+        let kind = if approval_eligible {
+            "[needs_approval]"
+        } else {
+            "[policy_deny]"
+        };
+        let mut msg = format!("{kind} {headline}\n   Command: {command}");
         if approval_eligible {
             msg.push_str(
                 "\n\n   Interactive approval: [Y]es = run once, [A]lways = skip risk prompts for this \
@@ -1166,7 +1195,7 @@ self_adjust, use the `policy_patch` tool; otherwise edit config.toml (no silent 
              - When the user asks you to run a command, read a file, or check connectivity, ALWAYS invoke the matching tool first.\n\
              - NEVER claim a command or path is blocked without a real `<tool_result>` error from an attempted tool call.\n\
              - If a tool fails, quote the exact error to the user in plain language and say what to change in `config.toml` — do not ask the user to edit source code.\n\
-             - For files outside the workspace, use `shell` with `find`, `ls`, or `cat` when those commands are allowed.\n\
+             - If a `<tool_result>` starts with `[sandbox_deny]` or `[policy_deny]`, do **not** retry equivalent `ls`/`find`/`cat` on the same path. Copy into the workspace, or tell the operator which config/approval step is required.\n\
              - Optional local tool catalog: a workspace `tools/` directory (or symlink) when present.\n\n",
         );
     }
@@ -1536,6 +1565,24 @@ mod tests {
         assert!(prompt.contains("OS sandbox: `landlock`"));
         assert!(prompt.contains("escape_on_approval: disabled"));
         assert!(prompt.contains("NEVER claim a command or path is blocked"));
+        assert!(prompt.contains("[sandbox_deny]"));
+    }
+
+    #[test]
+    fn secret_material_denied_even_when_approved() {
+        let p = SecurityPolicy {
+            autonomy: AutonomyLevel::Full,
+            allowed_commands: vec!["cat".into(), "ls".into()],
+            escape_on_approval: true,
+            ..SecurityPolicy::default()
+        };
+        let denied = p.validate_command_execution("cat /home/alex/github_token_list.txt", true);
+        assert!(denied.is_err());
+        let err = denied.unwrap_err();
+        assert!(err.contains("[policy_deny]"), "{err}");
+        assert!(err.contains("secret or credential"));
+        let ls_ok = p.validate_command_execution("ls /home/alex/github_token_list.txt", false);
+        assert!(ls_ok.is_err(), "ls of token file must also be hard-denied");
     }
 
     #[test]

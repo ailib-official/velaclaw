@@ -187,7 +187,10 @@ impl Tool for ShellTool {
                 return Ok(ToolResult {
                     success: false,
                     output: String::new(),
-                    error: Some(format!("Sandbox wrap failed: {e}")),
+                    error: Some(sandbox_deny_message(
+                        &format!("Sandbox wrap failed: {e}"),
+                        sandbox_name,
+                    )),
                 });
             }
         }
@@ -222,8 +225,17 @@ impl Tool for ShellTool {
                     stderr.push_str("\n... [stderr truncated at 1MB]");
                 }
 
+                let success = output.status.success();
+                let combined = format!("{stdout}\n{stderr}");
+                if !success && looks_like_sandbox_permission_denied(&combined) {
+                    return Ok(ToolResult {
+                        success: false,
+                        output: stdout,
+                        error: Some(sandbox_deny_message(stderr.trim(), sandbox_name)),
+                    });
+                }
                 Ok(ToolResult {
-                    success: output.status.success(),
+                    success,
                     output: stdout,
                     error: if stderr.is_empty() {
                         None
@@ -275,6 +287,30 @@ async fn run_shell_command(
     }
 
     cmd.output().await
+}
+
+fn looks_like_sandbox_permission_denied(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("permission denied")
+        || lower.contains("operation not permitted")
+        || lower.contains("no new privileges")
+}
+
+fn sandbox_deny_message(detail: &str, sandbox_name: &str) -> String {
+    let detail = if detail.is_empty() {
+        "(no stderr)".to_string()
+    } else {
+        detail.to_string()
+    };
+    format!(
+        "[sandbox_deny] OS sandbox (`{sandbox_name}`) blocked this command.\n\
+         Detail: {detail}\n\n\
+         Next steps:\n\
+         1. Copy the needed file into the workspace and use `file_read` (or `cat` there).\n\
+         2. Operators who need host sudo/apt: set `[security.sandbox] escape_on_approval = true`, then Approve once.\n\
+         3. Do not retry `ls`/`find`/`cat` on the same path — the sandbox result will not change.\n\
+         Human approval does not enlarge `allowed_commands` (VL-SEC-009)."
+    )
 }
 
 #[cfg(test)]
@@ -749,8 +785,7 @@ mod tests {
             .error
             .as_deref()
             .unwrap_or("")
-            .to_lowercase()
-            .contains("sandbox"));
+            .contains("[sandbox_deny]"));
     }
 
     #[tokio::test]

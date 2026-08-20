@@ -402,9 +402,7 @@ fn has_ollama_cloud_credential(config_api_key: Option<&str>) -> bool {
 
     ["OLLAMA_API_KEY", "VELACLAW_API_KEY", "API_KEY"]
         .iter()
-        .any(|name| {
-            std::env::var(name).is_ok_and(|value| !value.trim().is_empty())
-        })
+        .any(|name| std::env::var(name).is_ok_and(|value| !value.trim().is_empty()))
 }
 
 impl Config {

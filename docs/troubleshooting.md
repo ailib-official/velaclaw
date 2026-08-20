@@ -383,7 +383,8 @@ Symptoms:
 
 Cause:
 
-- Shell children start from `env_clear()`. Only `PATH`/`HOME`/locale plus **operator passthrough** `GH_TOKEN` / `GITHUB_TOKEN` are restored. `~/.config/gh` is not in the Landlock home extras (only `~/.ssh`).
+- Shell children start from `env_clear()`. `PATH`/`HOME`/locale are always restored. `GH_TOKEN` / `GITHUB_TOKEN` are restored **only** when the first allowlist segment is `gh` / `gh.exe`. `~/.config/gh` is not in the Landlock home extras (only `~/.ssh`).
+- `echo $GH_TOKEN` / `env` do **not** receive the PAT. `gh … | jq` and `gh … && echo …` still share one `sh -c` environment (inherent).
 - Credential **files** stay hard-denied even after Approve.
 
 Fix:

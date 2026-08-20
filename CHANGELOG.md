@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Sandbox escape on approval** (opt-in policy B): `[security.sandbox] escape_on_approval = true` lets human-approved shell skip Landlock/`no_new_privs` for that invocation (sudo/apt parity). Default remains `false` (always sandboxed). Privilege/package commands require ApprovalHub even under Full when enabled. See [config-reference.md](docs/config-reference.md#securitysandbox).
 - **Classified shell failures** (VL-SEC-010): `[policy_deny]` / `[needs_approval]` / `[sandbox_deny]` on the existing `ToolResult.error` string (no second HITL or wrap path). Credential paths are hard-denied even when approved. Prompt tells the model not to retry equivalent `ls`/`find`/`cat`.
-- **GitHub CLI token passthrough:** shell children inherit `GH_TOKEN` / `GITHUB_TOKEN` from the daemon environment (systemd `EnvironmentFile`). Values are not logged. PAT files remain `[policy_deny]`. See [troubleshooting.md](docs/troubleshooting.md).
+- **GitHub CLI token passthrough:** `GH_TOKEN` / `GITHUB_TOKEN` from the daemon `EnvironmentFile` are injected into shell children **only** when the first policy segment is `gh` / `gh.exe` (same `base_executables` as the allowlist). Values are not logged. PAT files remain `[policy_deny]`. See [troubleshooting.md](docs/troubleshooting.md).
 
 ## [1.1.0] - 2026-08-19
 

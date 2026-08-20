@@ -15,6 +15,9 @@ const MAX_OUTPUT_BYTES: usize = 1_048_576;
 const SAFE_ENV_VARS: &[&str] = &[
     "PATH", "HOME", "TERM", "LANG", "LC_ALL", "LC_CTYPE", "USER", "SHELL", "TMPDIR",
 ];
+/// Operator-supplied tokens from the daemon process env (e.g. systemd `EnvironmentFile`).
+/// Kept off `SAFE_ENV_VARS` so the secret-name lint stays honest. Values are never logged.
+const OPERATOR_PASSTHROUGH_ENV_VARS: &[&str] = &["GH_TOKEN", "GITHUB_TOKEN"];
 
 /// Shell command execution tool with sandboxing
 pub struct ShellTool {
@@ -67,6 +70,21 @@ impl ShellTool {
     /// Skip OS sandbox when policy B is on and this invocation was human-approved.
     fn skip_os_sandbox(&self, human_approved: bool) -> bool {
         human_approved && self.security.escape_on_approval()
+    }
+}
+
+fn apply_shell_child_env(cmd: &mut tokio::process::Command) {
+    for var in SAFE_ENV_VARS {
+        if let Ok(val) = std::env::var(var) {
+            cmd.env(var, val);
+        }
+    }
+    for var in OPERATOR_PASSTHROUGH_ENV_VARS {
+        if let Ok(val) = std::env::var(var) {
+            if !val.is_empty() {
+                cmd.env(var, val);
+            }
+        }
     }
 }
 
@@ -145,9 +163,8 @@ impl Tool for ShellTool {
             });
         }
 
-        // Execute with timeout to prevent hanging commands.
-        // Clear the environment to prevent leaking API keys and other secrets
-        // (CWE-200), then re-add only safe, functional variables.
+        // Clear the environment to prevent leaking unrelated secrets (CWE-200),
+        // then restore SAFE_ENV_VARS plus operator GH_TOKEN/GITHUB_TOKEN.
         let mut cmd = match self
             .runtime
             .build_shell_command(command, &self.security.workspace_dir())
@@ -162,12 +179,7 @@ impl Tool for ShellTool {
             }
         };
         cmd.env_clear();
-
-        for var in SAFE_ENV_VARS {
-            if let Ok(val) = std::env::var(var) {
-                cmd.env(var, val);
-            }
-        }
+        apply_shell_child_env(&mut cmd);
 
         let skip_sandbox = self.skip_os_sandbox(human_approved);
         let sandbox_name = if skip_sandbox {
@@ -695,6 +707,48 @@ mod tests {
         assert!(
             SAFE_ENV_VARS.contains(&"TERM"),
             "TERM must be in safe env vars"
+        );
+    }
+
+    #[test]
+    fn shell_operator_passthrough_is_gh_tokens_only() {
+        assert_eq!(OPERATOR_PASSTHROUGH_ENV_VARS, &["GH_TOKEN", "GITHUB_TOKEN"]);
+        for var in OPERATOR_PASSTHROUGH_ENV_VARS {
+            assert!(
+                !SAFE_ENV_VARS.contains(var),
+                "{var} must stay off SAFE_ENV_VARS"
+            );
+        }
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn shell_passes_gh_token_from_parent_env() {
+        let prev = std::env::var("GH_TOKEN").ok();
+        std::env::set_var("GH_TOKEN", "test-gh-token-fixture");
+        let security = PolicyHandle::new(SecurityPolicy {
+            autonomy: AutonomyLevel::Full,
+            allowed_commands: vec!["echo".into()],
+            workspace_dir: std::env::temp_dir(),
+            ..SecurityPolicy::default()
+        });
+        let tool = ShellTool::new(security, test_runtime());
+        let result = tool
+            .execute(
+                json!({"command": "echo $GH_TOKEN"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .expect("echo GH_TOKEN");
+        match prev {
+            Some(v) => std::env::set_var("GH_TOKEN", v),
+            None => std::env::remove_var("GH_TOKEN"),
+        }
+        assert!(result.success, "{:?}", result.error);
+        assert!(
+            result.output.contains("test-gh-token-fixture"),
+            "child must inherit GH_TOKEN; got {:?}",
+            result.output
         );
     }
 

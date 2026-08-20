@@ -374,6 +374,23 @@ Fix:
 2. Power users: `escape_on_approval = true` + Approve once for **that** command (not YOLO).
 3. Do not ask the agent to `cat` PAT/key files.
 
+### `gh` cannot authenticate (PAT / hosts.yml)
+
+Symptoms:
+
+- `gh` asks to authenticate, or cannot read `~/.config/gh/hosts.yml` (`[sandbox_deny]` / permission denied)
+- Agent tries to `cat ~/github_token_list.txt` → `[policy_deny]`
+
+Cause:
+
+- Shell children start from `env_clear()`. Only `PATH`/`HOME`/locale plus **operator passthrough** `GH_TOKEN` / `GITHUB_TOKEN` are restored. `~/.config/gh` is not in the Landlock home extras (only `~/.ssh`).
+- Credential **files** stay hard-denied even after Approve.
+
+Fix:
+
+1. Add `GH_TOKEN=…` (or `GITHUB_TOKEN`) to the daemon `EnvironmentFile` (mode `600`). Restart the daemon. Ask the agent to run `gh …`, not to print the token.
+2. Do not expand Landlock to all of `$HOME` or `~/.config` as a product default.
+
 ### Session allowlist lost after restart (pre-0.7)
 
 On **0.7.0+**, **Always** decisions persist to `<workspace>/.velaclaw/policy-overrides.yaml`. Verify the file exists and `[security.audit]` / workspace path is correct.

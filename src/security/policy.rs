@@ -1233,6 +1233,7 @@ self_adjust, use the `policy_patch` tool; otherwise edit config.toml (no silent 
              - NEVER claim a command or path is blocked without a real `<tool_result>` error from an attempted tool call.\n\
              - If a tool fails, quote the exact error to the user in plain language and say what to change in `config.toml` — do not ask the user to edit source code.\n\
              - If a `<tool_result>` starts with `[sandbox_deny]` or `[policy_deny]`, do **not** retry equivalent `ls`/`find`/`cat` on the same path. Copy into the workspace, or tell the operator which config/approval step is required.\n\
+             - GitHub CLI: call `gh` (allowlisted). Auth is `GH_TOKEN`/`GITHUB_TOKEN` from the daemon environment when the operator set them. Never `cat` PAT/key files (`[policy_deny]`).\n\
              - Optional local tool catalog: a workspace `tools/` directory (or symlink) when present.\n\n",
         );
     }

@@ -355,6 +355,24 @@ Fix (opt-in policy B — power users only):
 
 Do **not** set `backend = "none"` unless you intentionally want YOLO for every shell.
 
+### `[sandbox_deny]` vs `[policy_deny]` (do not retry)
+
+Symptoms:
+
+- `cat ~/some-file` → `Permission denied` or `[sandbox_deny]`
+- Agent retries `ls`/`find`/`cat` on the same path and burns tokens
+
+Cause:
+
+- Allowlisted shell still runs under Landlock (policy A). `$HOME` is not in the OS sandbox allowlist.
+- Credential filenames are **policy** hard-denies (`[policy_deny]`), even after Approve.
+
+Fix:
+
+1. Copy the file into the workspace and use `file_read`.
+2. Power users: `escape_on_approval = true` + Approve once for **that** command (not YOLO).
+3. Do not ask the agent to `cat` PAT/key files.
+
 ### Session allowlist lost after restart (pre-0.7)
 
 On **0.7.0+**, **Always** decisions persist to `<workspace>/.velaclaw/policy-overrides.yaml`. Verify the file exists and `[security.audit]` / workspace path is correct.

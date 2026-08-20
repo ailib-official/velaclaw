@@ -130,6 +130,7 @@ impl Clone for ActionTracker {
 }
 
 /// Security policy enforced on all tool executions
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone)]
 pub struct SecurityPolicy {
     pub autonomy: AutonomyLevel,
@@ -141,6 +142,8 @@ pub struct SecurityPolicy {
     pub max_cost_per_day_cents: u32,
     pub require_approval_for_medium_risk: bool,
     pub block_high_risk_commands: bool,
+    /// When true, human-approved shell skips OS sandbox wrap (see `[security.sandbox]`).
+    pub escape_on_approval: bool,
     pub tracker: ActionTracker,
 }
 
@@ -191,6 +194,7 @@ impl Default for SecurityPolicy {
             max_cost_per_day_cents: 500,
             require_approval_for_medium_risk: true,
             block_high_risk_commands: true,
+            escape_on_approval: false,
             tracker: ActionTracker::new(),
         }
     }
@@ -527,6 +531,32 @@ pub(crate) fn command_requires_privilege_hint(command: &str) -> bool {
         || lower.contains(" pkexec")
 }
 
+/// Bases that need human approval (even under Full) when `escape_on_approval` is on,
+/// so the approved path can skip Landlock/NNP for real package/privilege work.
+fn command_requires_sandbox_escape_approval(command: &str) -> bool {
+    if command_requires_privilege_hint(command) {
+        return true;
+    }
+    for segment in split_unquoted_segments(command) {
+        let cmd_part = skip_env_assignments(&segment);
+        let Some(base_raw) = cmd_part.split_whitespace().next() else {
+            continue;
+        };
+        let base = base_raw
+            .rsplit('/')
+            .next()
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if matches!(
+            base.as_str(),
+            "sudo" | "su" | "pkexec" | "runuser" | "apt" | "apt-get" | "dpkg"
+        ) {
+            return true;
+        }
+    }
+    false
+}
+
 impl SecurityPolicy {
     // ── Risk Classification ──────────────────────────────────────────────
     // Risk is assessed per-segment (split on shell operators), and the
@@ -681,6 +711,18 @@ impl SecurityPolicy {
         }
 
         let risk = self.command_risk_level(command);
+
+        // Policy B: privilege/package commands always need ApprovalHub even under Full,
+        // so the approved invocation can skip Landlock/NNP.
+        if self.escape_on_approval && command_requires_sandbox_escape_approval(command) && !approved
+        {
+            return Err(self.format_command_policy_error(
+                "Command requires explicit human approval: privileged/package operation \
+                 (sandbox escape_on_approval).",
+                command,
+                true,
+            ));
+        }
 
         if risk == CommandRiskLevel::High {
             let needs_prompt = self.autonomy == AutonomyLevel::Supervised
@@ -1040,6 +1082,17 @@ self_adjust, use the `policy_patch` tool; otherwise edit config.toml (no silent 
                 extras.sandbox_name
             );
         }
+        if self.escape_on_approval {
+            prompt.push_str(
+                "- Sandbox escape_on_approval: **enabled** — after human approval, shell skips \
+                 OS Landlock/NNP for that invocation (sudo/apt can work). Unapproved shell stays sandboxed.\n",
+            );
+        } else if !extras.sandbox_name.is_empty() {
+            prompt.push_str(
+                "- Sandbox escape_on_approval: disabled (default) — human approval does **not** \
+                 remove Landlock; sudo may fail with no-new-privileges.\n",
+            );
+        }
         let _ = writeln!(
             prompt,
             "- `workspace_only`: {} — file tools (`file_read`, `glob_search`, etc.) only accept paths relative to the workspace unless you use the `shell` tool.",
@@ -1130,14 +1183,14 @@ self_adjust, use the `policy_patch` tool; otherwise edit config.toml (no silent 
     /// Build from L1 `config.toml` merged with L2 `agent-policy.yaml` when present.
     pub fn from_workspace_config(config: &crate::config::Config) -> anyhow::Result<Self> {
         #[cfg(feature = "ai-protocol")]
-        {
+        let mut policy = {
             let autonomy = crate::config::resolve_effective_autonomy(config)?;
-            Ok(Self::from_config(&autonomy, &config.workspace_dir))
-        }
+            Self::from_config(&autonomy, &config.workspace_dir)
+        };
         #[cfg(not(feature = "ai-protocol"))]
-        {
-            Ok(Self::from_config(&config.autonomy, &config.workspace_dir))
-        }
+        let mut policy = Self::from_config(&config.autonomy, &config.workspace_dir);
+        policy.escape_on_approval = config.security.sandbox.escape_on_approval;
+        Ok(policy)
     }
 
     fn from_normalized(effective: &crate::config::AutonomyConfig, workspace_dir: &Path) -> Self {
@@ -1151,6 +1204,7 @@ self_adjust, use the `policy_patch` tool; otherwise edit config.toml (no silent 
             max_cost_per_day_cents: effective.max_cost_per_day_cents,
             require_approval_for_medium_risk: effective.require_approval_for_medium_risk,
             block_high_risk_commands: effective.block_high_risk_commands,
+            escape_on_approval: false,
             tracker: ActionTracker::new(),
         }
     }
@@ -1480,7 +1534,44 @@ mod tests {
         assert!(prompt.contains("Allowed shell commands: echo, curl"));
         assert!(prompt.contains("Runtime kind: `native`"));
         assert!(prompt.contains("OS sandbox: `landlock`"));
+        assert!(prompt.contains("escape_on_approval: disabled"));
         assert!(prompt.contains("NEVER claim a command or path is blocked"));
+    }
+
+    #[test]
+    fn escape_on_approval_forces_approval_for_apt_under_full() {
+        let p = SecurityPolicy {
+            autonomy: AutonomyLevel::Full,
+            allowed_commands: vec!["apt".into(), "sudo".into()],
+            escape_on_approval: true,
+            ..SecurityPolicy::default()
+        };
+        let denied = p.validate_command_execution("apt update", false);
+        assert!(denied.is_err(), "apt must prompt when escape_on_approval");
+        assert!(denied.unwrap_err().contains("escape_on_approval"));
+        assert!(p.validate_command_execution("apt update", true).is_ok());
+        assert!(p
+            .validate_command_execution("sudo apt update", true)
+            .is_ok());
+        // Unrelated allowlisted low-risk still auto-runs under Full.
+        let p2 = SecurityPolicy {
+            autonomy: AutonomyLevel::Full,
+            allowed_commands: vec!["echo".into()],
+            escape_on_approval: true,
+            ..SecurityPolicy::default()
+        };
+        assert!(p2.validate_command_execution("echo hi", false).is_ok());
+    }
+
+    #[test]
+    fn escape_on_approval_off_lets_full_run_apt_without_approval() {
+        let p = SecurityPolicy {
+            autonomy: AutonomyLevel::Full,
+            allowed_commands: vec!["apt".into()],
+            escape_on_approval: false,
+            ..SecurityPolicy::default()
+        };
+        assert!(p.validate_command_execution("apt update", false).is_ok());
     }
 
     #[test]

@@ -138,6 +138,7 @@ mod tests {
                 enabled: None,
                 backend: SandboxBackend::Auto,
                 firejail_args: Vec::new(),
+                ..Default::default()
             },
             ..Default::default()
         }
@@ -156,6 +157,7 @@ mod tests {
                 enabled: Some(false),
                 backend: SandboxBackend::None,
                 firejail_args: Vec::new(),
+                ..Default::default()
             },
             ..Default::default()
         };

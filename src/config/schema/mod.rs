@@ -3037,6 +3037,12 @@ pub struct SandboxConfig {
     /// Custom Firejail arguments (when backend = firejail)
     #[serde(default)]
     pub firejail_args: Vec<String>,
+
+    /// When true, human-approved shell invocations skip OS sandbox wrap (Landlock/NNP).
+    /// Default false keeps beginners sandboxed; operators opt in for sudo/apt parity.
+    /// Does not widen `allowed_commands` (SEC-009).
+    #[serde(default)]
+    pub escape_on_approval: bool,
 }
 
 impl Default for SandboxConfig {
@@ -3045,6 +3051,7 @@ impl Default for SandboxConfig {
             enabled: None, // Auto-detect
             backend: SandboxBackend::Auto,
             firejail_args: Vec::new(),
+            escape_on_approval: false,
         }
     }
 }

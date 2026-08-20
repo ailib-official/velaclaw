@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Sandbox escape on approval** (opt-in policy B): `[security.sandbox] escape_on_approval = true` lets human-approved shell skip Landlock/`no_new_privs` for that invocation (sudo/apt parity). Default remains `false` (always sandboxed). Privilege/package commands require ApprovalHub even under Full when enabled. See [config-reference.md](docs/config-reference.md#securitysandbox).
+
 ## [1.1.0] - 2026-08-19
 
 ### Changed

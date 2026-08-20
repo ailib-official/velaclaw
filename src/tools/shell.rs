@@ -50,18 +50,23 @@ impl ShellTool {
         }
     }
 
-    fn record_receipt(&self, decision: ReceiptDecision, command: &str, human_approved: bool) {
+    fn record_receipt(
+        &self,
+        decision: ReceiptDecision,
+        command: &str,
+        human_approved: bool,
+        sandbox_name: &str,
+    ) {
         if let Some(log) = &self.receipts {
-            if let Err(e) = log.record(
-                "shell",
-                decision,
-                command,
-                self.sandbox.name(),
-                human_approved,
-            ) {
+            if let Err(e) = log.record("shell", decision, command, sandbox_name, human_approved) {
                 tracing::warn!("tool receipt write failed: {e}");
             }
         }
+    }
+
+    /// Skip OS sandbox when policy B is on and this invocation was human-approved.
+    fn skip_os_sandbox(&self, human_approved: bool) -> bool {
+        human_approved && self.security.escape_on_approval()
     }
 }
 
@@ -118,7 +123,12 @@ impl Tool for ShellTool {
         {
             Ok(_) => {}
             Err(reason) => {
-                self.record_receipt(ReceiptDecision::Deny, command, human_approved);
+                self.record_receipt(
+                    ReceiptDecision::Deny,
+                    command,
+                    human_approved,
+                    self.sandbox.name(),
+                );
                 return Ok(ToolResult {
                     success: false,
                     output: String::new(),
@@ -159,16 +169,35 @@ impl Tool for ShellTool {
             }
         }
 
-        if let Err(e) = self.sandbox.wrap_command(cmd.as_std_mut()) {
-            self.record_receipt(ReceiptDecision::SandboxFail, command, human_approved);
-            return Ok(ToolResult {
-                success: false,
-                output: String::new(),
-                error: Some(format!("Sandbox wrap failed: {e}")),
-            });
+        let skip_sandbox = self.skip_os_sandbox(human_approved);
+        let sandbox_name = if skip_sandbox {
+            "none(approved-escape)"
+        } else {
+            self.sandbox.name()
+        };
+
+        if !skip_sandbox {
+            if let Err(e) = self.sandbox.wrap_command(cmd.as_std_mut()) {
+                self.record_receipt(
+                    ReceiptDecision::SandboxFail,
+                    command,
+                    human_approved,
+                    sandbox_name,
+                );
+                return Ok(ToolResult {
+                    success: false,
+                    output: String::new(),
+                    error: Some(format!("Sandbox wrap failed: {e}")),
+                });
+            }
         }
 
-        self.record_receipt(ReceiptDecision::Allow, command, human_approved);
+        self.record_receipt(
+            ReceiptDecision::Allow,
+            command,
+            human_approved,
+            sandbox_name,
+        );
 
         let stdin_secret = ctx.stdin_secret.clone();
         let result = tokio::time::timeout(Duration::from_secs(SHELL_TIMEOUT_SECS), async {
@@ -616,6 +645,56 @@ mod tests {
             recorder.clone(),
             None,
         );
+        let result = tool
+            .execute(
+                json!({"command": "echo hello"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .expect("echo");
+        assert!(result.success, "{:?}", result.error);
+        assert_eq!(recorder.wraps.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn approved_escape_skips_sandbox_wrap() {
+        let recorder = Arc::new(RecordingSandbox {
+            wraps: std::sync::atomic::AtomicU32::new(0),
+        });
+        let security = PolicyHandle::new(SecurityPolicy {
+            autonomy: AutonomyLevel::Full,
+            workspace_dir: std::env::temp_dir(),
+            allowed_commands: vec!["echo".into()],
+            escape_on_approval: true,
+            ..SecurityPolicy::default()
+        });
+        let tool = ShellTool::with_isolation(security, test_runtime(), recorder.clone(), None);
+        let result = tool
+            .execute(
+                json!({"command": "echo hello"}),
+                &ToolExecutionContext::with_shell_human_approved(true),
+            )
+            .await
+            .expect("echo");
+        assert!(result.success, "{:?}", result.error);
+        assert_eq!(recorder.wraps.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn escape_on_approval_without_human_still_wraps() {
+        let recorder = Arc::new(RecordingSandbox {
+            wraps: std::sync::atomic::AtomicU32::new(0),
+        });
+        let security = PolicyHandle::new(SecurityPolicy {
+            autonomy: AutonomyLevel::Full,
+            workspace_dir: std::env::temp_dir(),
+            allowed_commands: vec!["echo".into()],
+            escape_on_approval: true,
+            ..SecurityPolicy::default()
+        });
+        let tool = ShellTool::with_isolation(security, test_runtime(), recorder.clone(), None);
         let result = tool
             .execute(
                 json!({"command": "echo hello"}),

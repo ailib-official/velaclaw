@@ -334,6 +334,27 @@ Fix (pick one):
 
 See [config-reference.md](config-reference.md#securitysandbox).
 
+### `sudo` / `apt` fails under Landlock (no-new-privileges)
+
+Symptoms:
+
+- `sudo: The "no new privileges" flag is set…`
+- Package managers cannot write under `/var` despite allowlist
+
+Cause:
+
+- Default Landlock wrap sets `PR_SET_NO_NEW_PRIVS` on the shell child (policy A).
+- Approval alone does not remove the OS sandbox.
+
+Fix (opt-in policy B — power users only):
+
+1. Set `[security.sandbox] escape_on_approval = true`.
+2. Keep `sudo` / `apt` in `allowed_commands`.
+3. Approve the shell-policy prompt in Web/CLI; that invocation skips Landlock.
+4. Prefer `sudo -S` + `request_human_input` secret_slot over embedding passwords.
+
+Do **not** set `backend = "none"` unless you intentionally want YOLO for every shell.
+
 ### Session allowlist lost after restart (pre-0.7)
 
 On **0.7.0+**, **Always** decisions persist to `<workspace>/.velaclaw/policy-overrides.yaml`. Verify the file exists and `[security.audit]` / workspace path is correct.

@@ -205,21 +205,24 @@ OS isolation for production `shell` (wired in `all_tools_with_runtime`). Unit te
 | `enabled` | unset (auto) | `false` is YOLO: Noop sandbox. Unset/`true` follows `backend`. |
 | `backend` | `auto` | Linux `auto`: Landlock when the `sandbox-landlock` feature and kernel support it, otherwise **fail-closed** (shell refused). **Non-Linux `auto` stays Noop** (no Landlock; other OS backends are not the default). `none` is YOLO Noop. Explicit `landlock` / `firejail` / `docker` / `bubblewrap`: missing backend is fail-closed, not silent Noop. |
 | `firejail_args` | `[]` | Extra args when `backend = "firejail"` |
+| `escape_on_approval` | `false` | **Policy B (opt-in):** after human ApprovalHub/CLI approval, that shell invocation skips OS sandbox wrap (Landlock/`no_new_privs`). Default **false** keeps beginners sandboxed (policy A). Does not widen `allowed_commands`. When enabled, `sudo`/`apt`/`apt-get`/`dpkg` (and privilege hints) require approval even under `autonomy.level = full`. |
 
 Notes:
 
 - **Migration:** after upgrading a Linux install, run `velaclaw doctor` and check `sandbox=… production_path=`. If you see `fail-closed`, either enable Landlock or set YOLO explicitly — otherwise **all shell is refused**, including allowlisted commands.
-- Allowlisted commands still go through `Sandbox::wrap_command`.
+- Allowlisted commands still go through `Sandbox::wrap_command` unless `escape_on_approval` and the invocation is human-approved.
 - Human approval does **not** enlarge `allowed_commands` (SEC-009).
 - Autonomy `full` does not disable the sandbox.
 - Landlock applies in the child (`pre_exec`), not the agent parent.
-- Receipts: `<workspace>/.velaclaw/tool_receipts.jsonl` (truncated command; no secrets).
+- Receipts: `<workspace>/.velaclaw/tool_receipts.jsonl` (truncated command; no secrets). Approved escapes record `sandbox=none(approved-escape)`.
 
 ```toml
 [security.sandbox]
 # Default Auto. YOLO opt-out:
 # enabled = false
 # backend = "none"
+# Power-user sudo/apt (after ApprovalHub Yes):
+# escape_on_approval = true
 ```
 
 ## `[agents.<name>]`

@@ -552,8 +552,11 @@ fn execution_environment_json(config: &crate::config::Config) -> serde_json::Val
         "docker_active": docker_active,
         "sandbox": sandbox.name,
         "sandbox_source": sandbox.source,
+        "escape_on_approval": config.security.sandbox.escape_on_approval,
         "note": if docker_active {
             "Shell uses [runtime.docker]."
+        } else if config.security.sandbox.escape_on_approval {
+            "Shell runs on the host under the OS sandbox by default; human-approved shell may skip Landlock/NNP (escape_on_approval)."
         } else {
             "Shell runs on the host under the OS sandbox; [runtime.docker] is unused."
         },

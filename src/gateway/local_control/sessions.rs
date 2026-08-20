@@ -282,7 +282,7 @@ pub fn is_acceptable_generated_title(title: &str) -> bool {
         "yes", "no", "ok", "okay", "sure", "done", "thanks", "hello", "hi", "好的", "是的", "好",
     ];
     let lower = t.to_ascii_lowercase();
-    !WEAK.iter().any(|w| lower.as_str() == *w)
+    !WEAK.contains(&lower.as_str())
 }
 
 /// Compact transcript of the first N user turns (plus replies) for a title prompt.

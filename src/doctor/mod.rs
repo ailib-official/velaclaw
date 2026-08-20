@@ -489,6 +489,12 @@ fn check_config_semantics(config: &Config, items: &mut Vec<DiagItem>) {
                 format!("{msg} (no OS isolation; YOLO if explicit_yolo)"),
             ));
         }
+        if config.security.sandbox.escape_on_approval {
+            items.push(DiagItem::warn(
+                "security",
+                "sandbox escape_on_approval=true (approved shell skips Landlock/NNP; default is false)",
+            ));
+        }
     }
 
     // Runtime kind honesty: native host vs docker wrapper (avoid model/container confusion).

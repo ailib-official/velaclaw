@@ -40,6 +40,22 @@ describe("dashboardViewFromPayload", () => {
     expect(view.executionSummary).toContain("kind=native");
     expect(view.executionSummary).toContain("docker_active=no");
     expect(view.executionSummary).toContain("sandbox=landlock");
+    expect(view.executionSummary).toContain("escape_on_approval=no");
+  });
+
+  it("shows escape_on_approval when enabled", () => {
+    const view = dashboardViewFromPayload({
+      health: {
+        status: "ok",
+        execution: {
+          runtime_kind: "native",
+          docker_active: false,
+          sandbox: "landlock",
+          escape_on_approval: true,
+        },
+      },
+    });
+    expect(view.executionSummary).toContain("escape_on_approval=yes");
   });
 
   it("handles missing cost tracker", () => {

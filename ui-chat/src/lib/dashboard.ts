@@ -18,6 +18,7 @@ export interface DashboardHealth {
     docker_active?: boolean;
     sandbox?: string;
     sandbox_source?: string;
+    escape_on_approval?: boolean;
     note?: string;
   };
 }
@@ -51,6 +52,7 @@ export function dashboardViewFromPayload(payload: DashboardPayload): DashboardVi
         `kind=${exec.runtime_kind ?? "unknown"}`,
         `docker_active=${exec.docker_active === true ? "yes" : "no"}`,
         `sandbox=${exec.sandbox ?? "unknown"}`,
+        `escape_on_approval=${exec.escape_on_approval === true ? "yes" : "no"}`,
         exec.note ? String(exec.note) : "",
       ]
         .filter(Boolean)

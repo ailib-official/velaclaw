@@ -104,4 +104,9 @@ impl PolicyHandle {
     pub fn append_execution_policy_prompt(&self, prompt: &mut String, extras: &PolicyPromptExtras) {
         self.read().append_execution_policy_prompt(prompt, extras);
     }
+
+    /// Whether human-approved shell may skip OS sandbox wrap (`[security.sandbox].escape_on_approval`).
+    pub fn escape_on_approval(&self) -> bool {
+        self.read().escape_on_approval
+    }
 }

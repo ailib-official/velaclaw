@@ -132,6 +132,17 @@ impl LandlockSandbox {
             }
         }
 
+        // Read-only apt/dpkg state for host package status (not a container filesystem).
+        for apt_state in ["/var/lib/apt", "/var/lib/dpkg"] {
+            let p = Path::new(apt_state);
+            if p.exists() {
+                let fd = PathFd::new(p).map_err(|e| std::io::Error::other(e.to_string()))?;
+                ruleset = ruleset
+                    .add_rule(PathBeneath::new(fd, AccessFs::ReadFile | AccessFs::ReadDir))
+                    .map_err(|e| std::io::Error::other(e.to_string()))?;
+            }
+        }
+
         // ssh(1), bash redirects, and many CLIs open /dev/null for stderr suppression.
         let dev_null = Path::new("/dev/null");
         if dev_null.exists() {
@@ -251,6 +262,31 @@ impl Sandbox for LandlockSandbox {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(all(feature = "sandbox-landlock", target_os = "linux"))]
+    #[test]
+    fn landlock_child_can_read_apt_lists_dir() {
+        use std::process::{Command, Stdio};
+
+        let apt_lists = Path::new("/var/lib/apt/lists");
+        if !apt_lists.is_dir() {
+            return;
+        }
+        let Ok(sandbox) = LandlockSandbox::with_workspace(None) else {
+            return;
+        };
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", "ls /var/lib/apt/lists >/dev/null"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped());
+        sandbox.wrap_command(&mut cmd).unwrap();
+        let output = cmd.output().expect("landlock child should run");
+        assert!(
+            output.status.success(),
+            "stderr={}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 
     #[cfg(all(feature = "sandbox-landlock", target_os = "linux"))]
     #[test]

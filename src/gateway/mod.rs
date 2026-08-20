@@ -474,11 +474,13 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
 
 /// GET /health — always public (no secrets leaked)
 async fn handle_health(State(state): State<AppState>) -> impl IntoResponse {
+    let config = state.config.lock().clone();
     let body = serde_json::json!({
         "status": "ok",
         "version": env!("CARGO_PKG_VERSION"),
         "paired": state.pairing.is_paired(),
         "runtime": crate::health::snapshot_json(),
+        "execution": execution_environment_json(&config),
     });
     Json(body)
 }
@@ -508,11 +510,13 @@ async fn handle_metrics(State(state): State<AppState>) -> impl IntoResponse {
 
 /// GET /api/dashboard — JSON with health, runtime, metrics summary, cost
 async fn handle_dashboard_api(State(state): State<AppState>) -> impl IntoResponse {
+    let config = state.config.lock().clone();
     let health = serde_json::json!({
         "status": "ok",
         "version": env!("CARGO_PKG_VERSION"),
         "paired": state.pairing.is_paired(),
         "runtime": crate::health::snapshot_json(),
+        "execution": execution_environment_json(&config),
     });
 
     let cost_summary = state
@@ -535,6 +539,25 @@ async fn handle_dashboard_api(State(state): State<AppState>) -> impl IntoRespons
         "cost": cost_summary,
     });
     Json(body)
+}
+
+/// Host execution surface for Web Overview /health (not component uptime).
+fn execution_environment_json(config: &crate::config::Config) -> serde_json::Value {
+    let kind = config.runtime.kind.trim();
+    let kind = if kind.is_empty() { "native" } else { kind };
+    let docker_active = kind.eq_ignore_ascii_case("docker");
+    let sandbox = crate::security::describe_effective_sandbox(&config.security);
+    serde_json::json!({
+        "runtime_kind": kind,
+        "docker_active": docker_active,
+        "sandbox": sandbox.name,
+        "sandbox_source": sandbox.source,
+        "note": if docker_active {
+            "Shell uses [runtime.docker]."
+        } else {
+            "Shell runs on the host under the OS sandbox; [runtime.docker] is unused."
+        },
+    })
 }
 
 /// GET /dashboard — redirect to SPA Overview tab (VL-UI-006)

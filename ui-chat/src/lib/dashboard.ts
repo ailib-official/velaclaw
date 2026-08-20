@@ -13,6 +13,13 @@ export interface DashboardHealth {
   status?: string;
   paired?: boolean;
   runtime?: Record<string, unknown>;
+  execution?: {
+    runtime_kind?: string;
+    docker_active?: boolean;
+    sandbox?: string;
+    sandbox_source?: string;
+    note?: string;
+  };
 }
 
 export interface DashboardPayload {
@@ -31,12 +38,24 @@ export interface DashboardView {
   totalTokens: number | null;
   requestCount: number | null;
   runtimeJson: string;
+  executionSummary: string | null;
 }
 
 export function dashboardViewFromPayload(payload: DashboardPayload): DashboardView {
   const health = payload.health ?? {};
   const cost = payload.cost ?? undefined;
   const hasCost = cost != null && cost.daily_cost_usd !== undefined;
+  const exec = health.execution;
+  const executionSummary = exec
+    ? [
+        `kind=${exec.runtime_kind ?? "unknown"}`,
+        `docker_active=${exec.docker_active === true ? "yes" : "no"}`,
+        `sandbox=${exec.sandbox ?? "unknown"}`,
+        exec.note ? String(exec.note) : "",
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : null;
 
   return {
     status: health.status ?? "unknown",
@@ -48,6 +67,7 @@ export function dashboardViewFromPayload(payload: DashboardPayload): DashboardVi
     totalTokens: cost?.total_tokens ?? null,
     requestCount: cost?.request_count ?? null,
     runtimeJson: JSON.stringify(health.runtime ?? {}, null, 2),
+    executionSummary,
   };
 }
 

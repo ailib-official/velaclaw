@@ -683,6 +683,14 @@
           {/if}
         </div>
         <div class="stat-card runtime-card">
+          <h2>Execution</h2>
+          {#if dashboardView.executionSummary}
+            <p class="hint">{dashboardView.executionSummary}</p>
+          {:else}
+            <p class="hint">No execution summary from gateway.</p>
+          {/if}
+        </div>
+        <div class="stat-card runtime-card">
           <h2>Runtime</h2>
           <pre>{dashboardView.runtimeJson}</pre>
         </div>

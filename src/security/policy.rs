@@ -29,9 +29,9 @@ pub enum CommandRiskLevel {
 /// Operators can still override by omitting names from their explicit allowlist only if they
 /// replace the entire default list; merged entries are additive for home-lab usability.
 pub const FULL_AUTONOMY_EXTRA_COMMANDS: &[&str] = &[
-    "awk", "bash", "chmod", "cp", "curl", "dig", "docker", "host", "make", "mkdir", "mv", "nc",
-    "node", "ping", "python", "python3", "rm", "rsync", "scp", "sed", "sh", "sort", "ssh", "tar",
-    "touch", "tr", "uniq", "unzip", "wget", "zip",
+    "apt", "apt-get", "awk", "bash", "chmod", "cp", "curl", "dig", "docker", "dpkg", "host",
+    "make", "mkdir", "mv", "nc", "node", "ping", "python", "python3", "rm", "rsync", "scp", "sed",
+    "sh", "sort", "ssh", "tar", "touch", "tr", "uniq", "unzip", "wget", "zip",
 ];
 
 /// Path prefixes dropped from `forbidden_paths` when `level = full` (too broad for owned machines).
@@ -71,6 +71,10 @@ pub struct PolicyPromptExtras {
     pub self_adjust_denied_writes: Vec<String>,
     /// Whether the `policy_patch` tool is registered for this session.
     pub policy_patch_enabled: bool,
+    /// Configured `[runtime].kind` (native / docker / wasm).
+    pub runtime_kind: String,
+    /// Effective OS sandbox name (landlock / none / fail-closed / …).
+    pub sandbox_name: String,
 }
 
 /// Classifies whether a tool operation is read-only or side-effecting.
@@ -1017,6 +1021,25 @@ self_adjust, use the `policy_patch` tool; otherwise edit config.toml (no silent 
                 .trim_matches('"')
         );
         let _ = writeln!(prompt, "- Workspace: `{}`", self.workspace_dir.display());
+        if !extras.runtime_kind.is_empty() {
+            let docker_note = if extras.runtime_kind == "docker" {
+                "shell runs inside the configured Docker runtime"
+            } else {
+                "[runtime.docker] is unused; shell runs on the host process"
+            };
+            let _ = writeln!(
+                prompt,
+                "- Runtime kind: `{}` — {docker_note}. Do **not** describe the host as a container unless kind is `docker`.",
+                extras.runtime_kind
+            );
+        }
+        if !extras.sandbox_name.is_empty() {
+            let _ = writeln!(
+                prompt,
+                "- OS sandbox: `{}` — Permission denied on paths outside the sandbox allowlist is Landlock (or the configured backend), not Docker.",
+                extras.sandbox_name
+            );
+        }
         let _ = writeln!(
             prompt,
             "- `workspace_only`: {} — file tools (`file_read`, `glob_search`, etc.) only accept paths relative to the workspace unless you use the `shell` tool.",
@@ -1446,8 +1469,17 @@ mod tests {
             ..SecurityPolicy::default()
         };
         let mut prompt = String::new();
-        policy.append_execution_policy_prompt(&mut prompt, &PolicyPromptExtras::default());
+        policy.append_execution_policy_prompt(
+            &mut prompt,
+            &PolicyPromptExtras {
+                runtime_kind: "native".into(),
+                sandbox_name: "landlock".into(),
+                ..PolicyPromptExtras::default()
+            },
+        );
         assert!(prompt.contains("Allowed shell commands: echo, curl"));
+        assert!(prompt.contains("Runtime kind: `native`"));
+        assert!(prompt.contains("OS sandbox: `landlock`"));
         assert!(prompt.contains("NEVER claim a command or path is blocked"));
     }
 

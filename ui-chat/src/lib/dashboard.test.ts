@@ -22,6 +22,24 @@ describe("dashboardViewFromPayload", () => {
     expect(view.hasCost).toBe(true);
     expect(view.dailyCostUsd).toBe(0.05);
     expect(view.runtimeJson).toContain("uptime_secs");
+    expect(view.executionSummary).toBeNull();
+  });
+
+  it("summarizes execution honesty fields", () => {
+    const view = dashboardViewFromPayload({
+      health: {
+        status: "ok",
+        execution: {
+          runtime_kind: "native",
+          docker_active: false,
+          sandbox: "landlock",
+          note: "Shell runs on the host under the OS sandbox; [runtime.docker] is unused.",
+        },
+      },
+    });
+    expect(view.executionSummary).toContain("kind=native");
+    expect(view.executionSummary).toContain("docker_active=no");
+    expect(view.executionSummary).toContain("sandbox=landlock");
   });
 
   it("handles missing cost tracker", () => {

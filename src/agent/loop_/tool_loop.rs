@@ -760,6 +760,10 @@ pub(crate) fn append_execution_policy_to_prompt(
         self_adjust_allowed_writes,
         self_adjust_denied_writes,
         policy_patch_enabled: cfg!(feature = "ai-protocol"),
+        runtime_kind: config.runtime.kind.clone(),
+        sandbox_name: crate::security::describe_effective_sandbox(&config.security)
+            .name
+            .to_string(),
     };
     security.append_execution_policy_prompt(system_prompt, &extras);
     if http.enabled && http.allow_private_hosts {

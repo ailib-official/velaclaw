@@ -491,6 +491,21 @@ fn check_config_semantics(config: &Config, items: &mut Vec<DiagItem>) {
         }
     }
 
+    // Runtime kind honesty: native host vs docker wrapper (avoid model/container confusion).
+    {
+        let kind = config.runtime.kind.trim();
+        let kind = if kind.is_empty() { "native" } else { kind };
+        let docker_active = kind.eq_ignore_ascii_case("docker");
+        let msg = if docker_active {
+            format!("runtime.kind={kind} docker_active=yes (shell uses [runtime.docker])")
+        } else {
+            format!(
+                "runtime.kind={kind} docker_active=no ([runtime.docker] present in config but unused)"
+            )
+        };
+        items.push(DiagItem::ok("runtime", msg));
+    }
+
     // VL-MA-004: undo is git-restore only when workspace already has .git.
     {
         let line = crate::agent::workspace_undo::doctor_line(&config.workspace_dir);
@@ -1192,6 +1207,21 @@ mod tests {
             );
             assert!(!item.message.contains("sandbox=none"));
         }
+    }
+
+    #[test]
+    fn doctor_reports_runtime_kind_docker_unused_when_native() {
+        let mut config = Config::default();
+        config.runtime.kind = "native".into();
+        let mut items = Vec::new();
+        check_config_semantics(&config, &mut items);
+        let item = items
+            .iter()
+            .find(|i| i.message.contains("runtime.kind="))
+            .expect("runtime.kind line");
+        assert!(item.message.contains("runtime.kind=native"));
+        assert!(item.message.contains("docker_active=no"));
+        assert!(item.message.contains("[runtime.docker]"));
     }
 
     #[test]

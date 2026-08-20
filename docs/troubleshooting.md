@@ -365,7 +365,8 @@ Symptoms:
 Cause:
 
 - Allowlisted shell still runs under Landlock (policy A). `$HOME` is not in the OS sandbox allowlist.
-- Credential filenames are **policy** hard-denies (`[policy_deny]`), even after Approve.
+- Credential **basenames** (`github_token_list.txt`, `id_rsa`, `id_ed25519`, …) are **policy** hard-denies (`[policy_deny]`), even after Approve. Substrings like `raid_rsa` are not matched.
+- `[sandbox_deny]` is applied on wrap failure, Landlock `no new privileges`, or EACCES on a path outside typical Landlock roots (workspace, `/usr`, `/tmp`, …). A `Permission denied` **inside** the workspace stays a normal DAC error.
 
 Fix:
 

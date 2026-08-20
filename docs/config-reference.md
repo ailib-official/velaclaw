@@ -216,7 +216,7 @@ Notes:
 - Landlock applies in the child (`pre_exec`), not the agent parent.
 - Receipts: `<workspace>/.velaclaw/tool_receipts.jsonl` (truncated command; no secrets). Approved escapes record `sandbox=none(approved-escape)`.
 - Shell `tool_result` errors use classified prefixes on the existing `error` string (GOV-007, no second API): `[policy_deny]`, `[needs_approval]`, `[sandbox_deny]`. Models must not retry equivalent `ls`/`find`/`cat` after `[sandbox_deny]`/`[policy_deny]`.
-- Known credential paths (`github_token_list.txt`, `id_rsa`, `.netrc`, …) are hard-denied even when approved (SEC-009). Do not widen Landlock to `$HOME` as a product default.
+- Known credential **basenames** (`github_token_list.txt`, `id_rsa`, `id_ed25519`, …) are hard-denied even when approved (SEC-009). Substring false positives (`raid_rsa`) are not matched. Do not widen Landlock to `$HOME` as a product default.
 
 ```toml
 [security.sandbox]

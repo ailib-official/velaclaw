@@ -151,6 +151,7 @@ async fn handle_ws_socket(socket: WebSocket, state: AppState) {
                             id: ev.id,
                             tool_name: ev.tool_name,
                             arguments_summary: ev.arguments_summary,
+                            elevation: ev.elevation,
                         };
                         if send_frame(sock_fwd.clone(), &frame).await.is_err() {
                             break;
@@ -220,8 +221,7 @@ async fn handle_ws_socket(socket: WebSocket, state: AppState) {
                         }
                         Some(Ok(Message::Text(text))) => {
                             let cancel_frame = serde_json::from_str::<WsClientMessage>(&text)
-                                .ok()
-                                .is_some_and(|frame| frame.msg_type == "cancel");
+                                .is_ok_and(|frame| frame.msg_type == "cancel");
                             if ws_inbound_cancels_turn(false, cancel_frame, false) {
                                 cancel.cancel();
                             }

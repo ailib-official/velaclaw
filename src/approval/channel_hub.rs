@@ -136,6 +136,7 @@ impl ChannelApprovalHub {
             "y" | "yes" => Some(ApprovalResponse::Yes),
             "n" | "no" => Some(ApprovalResponse::No),
             "a" | "always" => Some(ApprovalResponse::Always),
+            "!" | "never" => Some(ApprovalResponse::Never),
             _ => None,
         };
         let Some(decision) = decision else {
@@ -156,6 +157,7 @@ impl ChannelApprovalHub {
             "yes" => ApprovalResponse::Yes,
             "no" => ApprovalResponse::No,
             "always" => ApprovalResponse::Always,
+            "never" => ApprovalResponse::Never,
             _ => return false,
         };
         self.resolve(id, decision)

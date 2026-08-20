@@ -3010,6 +3010,16 @@ pub struct LarkConfig {
 /// Security configuration for sandboxing, resource limits, and audit logging
 #[derive(Debug, Clone, Serialize, Deserialize, Default, JsonSchema)]
 pub struct SecurityConfig {
+    /// User-facing profile: unfolds sandbox / inherit / path policy (VL-SEC-011).
+    /// Unset keeps existing knobs (no silent rewrite).
+    #[serde(default)]
+    pub profile: Option<SecurityProfile>,
+
+    /// When true, shell children inherit the daemon process environment.
+    /// Unset: `local` profile implies true; otherwise false (`env_clear` + allowlist).
+    #[serde(default)]
+    pub inherit_process_env: Option<bool>,
+
     /// Sandbox configuration
     #[serde(default)]
     pub sandbox: SandboxConfig,
@@ -3021,6 +3031,19 @@ pub struct SecurityConfig {
     /// Audit logging configuration
     #[serde(default)]
     pub audit: AuditConfig,
+}
+
+/// Operator-facing security posture (presets existing knobs; not a second pipeline).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum SecurityProfile {
+    /// Linux Landlock (or fail-closed); scrubbed shell env; home/secrets ask or deny.
+    #[default]
+    Isolated,
+    /// Cursor-like host: no OS sandbox, inherit daemon env, home readable under allowlist.
+    Local,
+    /// `autonomy.level = read_only` — no shell elevation.
+    Readonly,
 }
 
 /// Sandbox configuration for OS-level isolation

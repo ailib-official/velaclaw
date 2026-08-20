@@ -47,6 +47,7 @@ export interface WsServerFrame {
   id?: string;
   tool_name?: string;
   arguments_summary?: string;
+  elevation?: boolean;
   kind?: string;
   prompt?: string;
   options?: string[];
@@ -63,6 +64,7 @@ export interface ApprovalRequiredPayload {
   id: string;
   tool_name: string;
   arguments_summary: string;
+  elevation?: boolean;
 }
 
 export interface HumanInputRequiredPayload {
@@ -147,6 +149,7 @@ export function streamChat(opts: StreamChatOptions): () => void {
         id: frame.id,
         tool_name: frame.tool_name,
         arguments_summary: frame.arguments_summary ?? "",
+        elevation: frame.elevation === true,
       });
     } else if (frame.type === "input_required" && frame.id && frame.prompt) {
       opts.onInputRequired?.({

@@ -37,11 +37,14 @@ pub mod traits;
 #[allow(unused_imports)]
 pub use audit::{AuditEvent, AuditEventType, AuditLogger};
 #[allow(unused_imports)]
-pub use detect::{create_sandbox, describe_effective_sandbox, EffectiveSandbox};
+pub use detect::{
+    create_sandbox, describe_effective_sandbox, effective_sandbox_config, EffectiveSandbox,
+};
 #[allow(unused_imports)]
 pub use pairing::PairingGuard;
 pub use policy::{
-    normalize_autonomy_config, AutonomyLevel, PolicyPromptExtras, SecurityPolicy, ToolOperation,
+    normalize_autonomy_config, AutonomyLevel, PolicyPromptExtras, SecretPathMode, SecurityPolicy,
+    ToolOperation,
 };
 pub use policy_handle::PolicyHandle;
 #[allow(unused_imports)]

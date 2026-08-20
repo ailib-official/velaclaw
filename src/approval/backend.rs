@@ -11,6 +11,10 @@ use std::sync::Arc;
 use std::time::Duration;
 use velaclaw_agent_runtime::{shell_command_from_args, HumanApprovalBackend, ShellPolicyHook};
 
+fn decision_proceeds(decision: ApprovalResponse) -> bool {
+    matches!(decision, ApprovalResponse::Yes | ApprovalResponse::Always)
+}
+
 /// Per-message channel approval context (VL-SEC-003).
 #[derive(Clone)]
 pub struct ChannelApprovalSession {
@@ -38,6 +42,63 @@ impl<'a> ManagerApprovalBackend<'a> {
             channel,
             channel_session: None,
         }
+    }
+
+    fn shell_request(command: &str, elevation: bool) -> ApprovalRequest {
+        ApprovalRequest {
+            tool_name: "shell".into(),
+            arguments: serde_json::json!({"command": command}),
+            elevation,
+        }
+    }
+
+    fn prompt_cli_blocking(&self, request: &ApprovalRequest) -> ApprovalResponse {
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle)
+                if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::CurrentThread =>
+            {
+                self.manager.prompt_cli(request)
+            }
+            Ok(_) => tokio::task::block_in_place(|| self.manager.prompt_cli(request)),
+            Err(_) => self.manager.prompt_cli(request),
+        }
+    }
+
+    async fn approve_shell_async_inner(&self, command: &str, elevation: bool) -> bool {
+        let request = Self::shell_request(command, elevation);
+        if let Some(session) = &self.channel_session {
+            if session.mode != ChannelApprovalMode::Inline {
+                return false;
+            }
+            let decision = self.prompt_channel(&request, Some(command)).await;
+            self.manager
+                .record_decision("shell", &request.arguments, decision, self.channel);
+            return decision_proceeds(decision);
+        }
+        if let Some(hub) = &self.hub {
+            tracing::info!(
+                channel = self.channel,
+                command = %command,
+                elevation,
+                "shell-policy approval via ApprovalHub"
+            );
+            let decision = self.manager.prompt_gateway(hub, &request).await;
+            self.manager
+                .record_decision("shell", &request.arguments, decision, self.channel);
+            return decision_proceeds(decision);
+        }
+        if self.channel != "cli" {
+            tracing::warn!(
+                channel = self.channel,
+                command = %command,
+                "shell-policy approval has no hub; sync-deny (no UI modal)"
+            );
+            return false;
+        }
+        let decision = self.prompt_cli_blocking(&request);
+        self.manager
+            .record_decision("shell", &request.arguments, decision, self.channel);
+        decision_proceeds(decision)
     }
 
     pub fn with_hub(mut self, hub: Arc<ApprovalHub>) -> Self {
@@ -91,6 +152,7 @@ impl HumanApprovalBackend for ManagerApprovalBackend<'_> {
         let request = ApprovalRequest {
             tool_name: tool_name.to_string(),
             arguments: arguments.clone(),
+            elevation: false,
         };
         let decision = if self.channel == "cli" {
             self.manager.prompt_cli(&request)
@@ -99,26 +161,27 @@ impl HumanApprovalBackend for ManagerApprovalBackend<'_> {
         };
         self.manager
             .record_decision(tool_name, arguments, decision, self.channel);
-        decision != ApprovalResponse::No
+        decision_proceeds(decision)
     }
 
     async fn approve_tool_async(&self, tool_name: &str, arguments: &serde_json::Value) -> bool {
         let request = ApprovalRequest {
             tool_name: tool_name.to_string(),
             arguments: arguments.clone(),
+            elevation: false,
         };
         let decision = if self.channel_session.is_some() {
             self.prompt_channel(&request, None).await
         } else if let Some(hub) = &self.hub {
             self.manager.prompt_gateway(hub, &request).await
         } else if self.channel == "cli" {
-            self.manager.prompt_cli(&request)
+            self.prompt_cli_blocking(&request)
         } else {
             ApprovalResponse::No
         };
         self.manager
             .record_decision(tool_name, arguments, decision, self.channel);
-        decision != ApprovalResponse::No
+        decision_proceeds(decision)
     }
 
     fn interactive_shell_approval(&self) -> bool {
@@ -134,11 +197,16 @@ impl HumanApprovalBackend for ManagerApprovalBackend<'_> {
         self.manager.shell_session_always_covers(command)
     }
 
+    fn never_tool(&self, tool_name: &str) -> bool {
+        self.manager.is_never_tool(tool_name)
+    }
+
+    fn shell_session_never(&self, command: &str) -> bool {
+        self.manager.shell_session_never_covers(command)
+    }
+
     fn approve_shell_command_sync(&self, command: &str) -> bool {
-        let request = ApprovalRequest {
-            tool_name: "shell".into(),
-            arguments: serde_json::json!({"command": command}),
-        };
+        let request = Self::shell_request(command, false);
         let decision = if self.channel == "cli" {
             self.manager.prompt_cli(&request)
         } else {
@@ -146,45 +214,15 @@ impl HumanApprovalBackend for ManagerApprovalBackend<'_> {
         };
         self.manager
             .record_decision("shell", &request.arguments, decision, self.channel);
-        decision != ApprovalResponse::No
+        decision_proceeds(decision)
     }
 
     async fn approve_shell_command_async(&self, command: &str) -> bool {
-        let request = ApprovalRequest {
-            tool_name: "shell".into(),
-            arguments: serde_json::json!({"command": command}),
-        };
-        if let Some(session) = &self.channel_session {
-            if session.mode != ChannelApprovalMode::Inline {
-                return false;
-            }
-            let decision = self.prompt_channel(&request, Some(command)).await;
-            self.manager
-                .record_decision("shell", &request.arguments, decision, self.channel);
-            return decision != ApprovalResponse::No;
-        }
-        // Gateway / Web UI: use ApprovalHub (same path as approve_tool_async).
-        // Previously fell through to sync, which auto-denies non-CLI channels —
-        // so Web UI recorded shell [no] without ever showing the modal.
-        if let Some(hub) = &self.hub {
-            tracing::info!(
-                channel = self.channel,
-                command = %command,
-                "shell-policy approval via ApprovalHub"
-            );
-            let decision = self.manager.prompt_gateway(hub, &request).await;
-            self.manager
-                .record_decision("shell", &request.arguments, decision, self.channel);
-            return decision != ApprovalResponse::No;
-        }
-        if self.channel != "cli" {
-            tracing::warn!(
-                channel = self.channel,
-                command = %command,
-                "shell-policy approval has no hub; sync-deny (no UI modal)"
-            );
-        }
-        self.approve_shell_command_sync(command)
+        self.approve_shell_async_inner(command, false).await
+    }
+
+    async fn approve_shell_elevation_async(&self, command: &str) -> bool {
+        self.approve_shell_async_inner(command, true).await
     }
 }
 

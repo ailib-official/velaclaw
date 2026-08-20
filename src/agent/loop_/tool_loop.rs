@@ -778,8 +778,8 @@ pub(crate) fn append_execution_policy_to_prompt(
 pub(crate) fn append_hitl_continuity_guidance(system_prompt: &mut String) {
     system_prompt.push_str(
         "## Human-in-the-loop (keep task continuity)\n\n\
-         - You are the agent: run work with tools (`shell`, etc.). When policy needs approval, \
-           the UI shows Deny / Allow once / Always — wait for that, then continue the same turn.\n\
+             - You are the agent: run work with tools (`shell`, etc.). When policy needs approval, \
+           the UI shows Deny / Allow once / Always / Never — wait for that, then continue the same turn.\n\
          - Use `request_human_input` only for short operator input: `choice` (buttons), \
            `secret` (password/token → secret_slot), or `text` (short codes ≤128 chars).\n\
          - Do **not** ask the human to run terminal commands and paste results back into chat \

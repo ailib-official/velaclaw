@@ -19,6 +19,9 @@ pub struct ApprovalRequiredEvent {
     pub tool_name: String,
     pub arguments: serde_json::Value,
     pub arguments_summary: String,
+    /// Post-execute elevation after sandbox/policy miss (VL-SEC-011).
+    #[serde(default)]
+    pub elevation: bool,
 }
 
 struct PendingEntry {
@@ -59,6 +62,7 @@ impl ApprovalHub {
             tool_name: request.tool_name.clone(),
             arguments: request.arguments.clone(),
             arguments_summary: summary.to_string(),
+            elevation: request.elevation,
         };
         let receivers = self.events.receiver_count();
         match self.events.send(event) {
@@ -108,12 +112,14 @@ impl ApprovalHub {
     }
 
     /// Resolve a pending approval from HTTP (`POST /api/approvals/:id/respond`).
-    pub fn respond(&self, id: &str, approved: bool, always: bool) -> bool {
+    pub fn respond(&self, id: &str, approved: bool, always: bool, never: bool) -> bool {
         let entry = self.pending.lock().remove(id);
         let Some(entry) = entry else {
             return false;
         };
-        let decision = if approved {
+        let decision = if never {
+            ApprovalResponse::Never
+        } else if approved {
             if always {
                 ApprovalResponse::Always
             } else {
@@ -143,6 +149,7 @@ mod tests {
         let req = ApprovalRequest {
             tool_name: "shell".into(),
             arguments: serde_json::json!({"command": "ls"}),
+            elevation: false,
         };
 
         let handle = tokio::spawn(async move { hub_wait.request(&req, "command: ls").await });
@@ -150,7 +157,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(20)).await;
         let pending: Vec<_> = hub.pending.lock().keys().cloned().collect();
         assert_eq!(pending.len(), 1);
-        assert!(hub.respond(&pending[0], true, false));
+        assert!(hub.respond(&pending[0], true, false, false));
 
         let decision = handle.await.expect("join");
         assert_eq!(decision, ApprovalResponse::Yes);
@@ -163,6 +170,7 @@ mod tests {
         let req = ApprovalRequest {
             tool_name: "shell".into(),
             arguments: serde_json::json!({"command": "ls"}),
+            elevation: false,
         };
 
         let handle = tokio::spawn(async move { hub_wait.request(&req, "command: ls").await });

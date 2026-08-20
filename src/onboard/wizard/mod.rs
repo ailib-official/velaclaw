@@ -158,6 +158,7 @@ pub async fn run_wizard(force: bool) -> Result<Config> {
 
     print_step(5, 9, "Tool Mode & Security");
     let (composio_config, secrets_config) = setup_tool_mode()?;
+    let security_profile = setup_security_profile()?;
 
     print_step(6, 9, "Hardware (Physical World)");
     let hardware_config = setup_hardware()?;
@@ -217,7 +218,10 @@ pub async fn run_wizard(force: bool) -> Result<Config> {
         agents: std::collections::HashMap::new(),
         hardware: hardware_config,
         query_classification: crate::config::QueryClassificationConfig::default(),
-        security: crate::config::SecurityConfig::default(),
+        security: crate::config::SecurityConfig {
+            profile: Some(security_profile),
+            ..crate::config::SecurityConfig::default()
+        },
         cli_render: None,
     };
 
@@ -501,7 +505,10 @@ async fn run_quick_setup_with_home_inner(
         agents: std::collections::HashMap::new(),
         hardware: crate::config::HardwareConfig::default(),
         query_classification: crate::config::QueryClassificationConfig::default(),
-        security: crate::config::SecurityConfig::default(),
+        security: crate::config::SecurityConfig {
+            profile: Some(crate::config::SecurityProfile::Isolated),
+            ..crate::config::SecurityConfig::default()
+        },
         cli_render: None,
     };
 

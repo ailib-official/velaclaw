@@ -19,6 +19,9 @@ pub struct ApprovalRequiredEvent {
     pub tool_name: String,
     pub arguments: serde_json::Value,
     pub arguments_summary: String,
+    /// Post-execute elevation after sandbox/policy miss (VL-SEC-011).
+    #[serde(default)]
+    pub elevation: bool,
 }
 
 struct PendingEntry {
@@ -59,6 +62,7 @@ impl ApprovalHub {
             tool_name: request.tool_name.clone(),
             arguments: request.arguments.clone(),
             arguments_summary: summary.to_string(),
+            elevation: request.elevation,
         };
         let receivers = self.events.receiver_count();
         match self.events.send(event) {
@@ -145,6 +149,7 @@ mod tests {
         let req = ApprovalRequest {
             tool_name: "shell".into(),
             arguments: serde_json::json!({"command": "ls"}),
+            elevation: false,
         };
 
         let handle = tokio::spawn(async move { hub_wait.request(&req, "command: ls").await });
@@ -165,6 +170,7 @@ mod tests {
         let req = ApprovalRequest {
             tool_name: "shell".into(),
             arguments: serde_json::json!({"command": "ls"}),
+            elevation: false,
         };
 
         let handle = tokio::spawn(async move { hub_wait.request(&req, "command: ls").await });

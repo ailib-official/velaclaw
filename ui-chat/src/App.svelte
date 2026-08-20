@@ -918,7 +918,11 @@
   {#if pendingApprovals.length > 0}
     <div class="modal-backdrop" role="presentation">
       <div class="modal" role="dialog" aria-labelledby="approval-title">
-        <h2 id="approval-title">Tool approval required</h2>
+        <h2 id="approval-title">
+          {pendingApprovals[0].elevation
+            ? "Elevate this command?"
+            : "Tool approval required"}
+        </h2>
         {#if pendingApprovals.length > 1}
           <p class="hint">{pendingApprovals.length} approvals queued — showing the oldest first.</p>
         {/if}

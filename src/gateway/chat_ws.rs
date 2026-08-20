@@ -151,6 +151,7 @@ async fn handle_ws_socket(socket: WebSocket, state: AppState) {
                             id: ev.id,
                             tool_name: ev.tool_name,
                             arguments_summary: ev.arguments_summary,
+                            elevation: ev.elevation,
                         };
                         if send_frame(sock_fwd.clone(), &frame).await.is_err() {
                             break;

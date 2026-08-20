@@ -370,10 +370,11 @@ Cause:
 
 Fix:
 
-1. Approve Once in the same ApprovalHub modal (VL-SEC-011) — do not invent another tool.
+1. Approve Once in the same ApprovalHub modal **or** an interactive CLI stdin prompt (`Y` / `A` / `N` / `!`) — same `ApprovalGate` (VL-SEC-011). Do not invent another tool.
 2. For a Cursor-like host: `[security] profile = "local"` (inherits daemon env; home readable).
 3. Isolated operators: `escape_on_approval = true` + Approve, or copy files into the workspace.
 4. **Never** persists a denylist in L2.5 until you clear it.
+5. Cron and heartbeat reuse the CLI assemble path but are **not** interactive: elevation is denied (fail closed). Pipe/`systemd` CLI without a TTY also denies instead of hanging.
 
 ### Session allowlist lost after restart (pre-0.7)
 

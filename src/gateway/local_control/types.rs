@@ -108,6 +108,8 @@ pub enum WsServerMessage {
         id: String,
         tool_name: String,
         arguments_summary: String,
+        #[serde(default)]
+        elevation: bool,
     },
     /// Interactive human input (choice / text / secret / handoff).
     InputRequired {

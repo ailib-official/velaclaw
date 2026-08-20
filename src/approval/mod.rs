@@ -41,6 +41,9 @@ use std::sync::Arc;
 pub struct ApprovalRequest {
     pub tool_name: String,
     pub arguments: serde_json::Value,
+    /// True when this prompt is post-execute elevation (sandbox/policy miss).
+    #[serde(default)]
+    pub elevation: bool,
 }
 
 /// The user's response to an approval request.
@@ -380,10 +383,7 @@ impl ApprovalManager {
         self.session_shell_binaries.lock().clone()
     }
 
-    /// Prompt the user on the CLI and return their decision.
-    ///
-    /// For non-CLI channels, returns `Yes` automatically (interactive
-    /// approval is only supported on CLI for now).
+    /// Prompt the operator on a TTY (product CLI). Non-TTY fails closed (no auto-Yes).
     pub fn prompt_cli(&self, request: &ApprovalRequest) -> ApprovalResponse {
         prompt_cli_interactive(request)
     }
@@ -403,10 +403,25 @@ impl ApprovalManager {
 
 /// Display the approval prompt and read user input from stdin.
 fn prompt_cli_interactive(request: &ApprovalRequest) -> ApprovalResponse {
+    use std::io::IsTerminal;
+
+    if !std::io::stdin().is_terminal() {
+        eprintln!(
+            "🔒 Approval required for {} but stdin is not a TTY; denying. \
+             Use an interactive `velaclaw` session or the Web ApprovalHub.",
+            request.tool_name
+        );
+        return ApprovalResponse::No;
+    }
+
     let summary = summarize_args(&request.arguments);
     eprintln!();
     if request.tool_name == "shell" {
-        eprintln!("🔒 Security policy requires approval for shell command:");
+        if request.elevation {
+            eprintln!("🔒 Sandbox or policy blocked this command; elevate this invocation?");
+        } else {
+            eprintln!("🔒 Security policy requires approval for shell command:");
+        }
         if let Some(cmd) = request.arguments.get("command").and_then(|v| v.as_str()) {
             eprintln!("   {cmd}");
             if crate::security::policy::command_requires_privilege_hint(cmd) {
@@ -753,10 +768,26 @@ mod tests {
         let req = ApprovalRequest {
             tool_name: "shell".into(),
             arguments: serde_json::json!({"command": "echo hi"}),
+            elevation: false,
         };
         let json = serde_json::to_string(&req).unwrap();
         let parsed: ApprovalRequest = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.tool_name, "shell");
+        assert!(!parsed.elevation);
+        let legacy: ApprovalRequest =
+            serde_json::from_str(r#"{"tool_name":"shell","arguments":{}}"#).unwrap();
+        assert!(!legacy.elevation);
+    }
+
+    #[test]
+    fn cron_and_heartbeat_channels_are_not_interactive() {
+        use super::backend::ManagerApprovalBackend;
+        use velaclaw_agent_runtime::HumanApprovalBackend;
+
+        let mgr = ApprovalManager::from_config(&supervised_config());
+        assert!(ManagerApprovalBackend::new(&mgr, "cli").interactive_shell_approval());
+        assert!(!ManagerApprovalBackend::new(&mgr, "cron").interactive_shell_approval());
+        assert!(!ManagerApprovalBackend::new(&mgr, "heartbeat").interactive_shell_approval());
     }
 
     #[tokio::test]

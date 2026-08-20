@@ -528,12 +528,10 @@ pub(crate) fn setup_provider(
         let has_api_key = !api_key.trim().is_empty()
             || ((canonical_provider != "ollama" || ollama_remote)
                 && std::env::var(provider_env_var(provider_name))
-                    .ok()
-                    .is_some_and(|value| !value.trim().is_empty()))
+                    .is_ok_and(|value| !value.trim().is_empty()))
             || (provider_name == "minimax"
                 && std::env::var("MINIMAX_OAUTH_TOKEN")
-                    .ok()
-                    .is_some_and(|value| !value.trim().is_empty()));
+                    .is_ok_and(|value| !value.trim().is_empty()));
 
         if canonical_provider == "ollama" && ollama_remote && !has_api_key {
             print_bullet(&format!(

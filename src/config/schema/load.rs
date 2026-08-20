@@ -403,9 +403,7 @@ fn has_ollama_cloud_credential(config_api_key: Option<&str>) -> bool {
     ["OLLAMA_API_KEY", "VELACLAW_API_KEY", "API_KEY"]
         .iter()
         .any(|name| {
-            std::env::var(name)
-                .ok()
-                .is_some_and(|value| !value.trim().is_empty())
+            std::env::var(name).is_ok_and(|value| !value.trim().is_empty())
         })
 }
 
@@ -3307,9 +3305,7 @@ default_model = "legacy-model"
             std::env::var("HTTPS_PROXY").ok().as_deref(),
             Some("http://127.0.0.1:7891")
         );
-        assert!(std::env::var("NO_PROXY")
-            .ok()
-            .is_some_and(|value| value.contains("localhost")));
+        assert!(std::env::var("NO_PROXY").is_ok_and(|value| value.contains("localhost")));
 
         clear_proxy_env_test_vars();
     }

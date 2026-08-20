@@ -625,6 +625,7 @@ impl BrowserTool {
     }
 
     #[allow(clippy::unused_async)]
+    #[allow(unknown_lints, clippy::unused_async_trait_impl)]
     async fn execute_rust_native_action(
         &self,
         action: BrowserAction,

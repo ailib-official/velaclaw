@@ -221,8 +221,7 @@ async fn handle_ws_socket(socket: WebSocket, state: AppState) {
                         }
                         Some(Ok(Message::Text(text))) => {
                             let cancel_frame = serde_json::from_str::<WsClientMessage>(&text)
-                                .ok()
-                                .is_some_and(|frame| frame.msg_type == "cancel");
+                                .is_ok_and(|frame| frame.msg_type == "cancel");
                             if ws_inbound_cancels_turn(false, cancel_frame, false) {
                                 cancel.cancel();
                             }

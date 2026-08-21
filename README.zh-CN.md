@@ -13,7 +13,7 @@
 
 ## 概述
 
-VelaClaw 是一个 Rust 优先的自主 AI Agent 运行时，集成了 [ai-protocol](https://github.com/ailib-official/ai-protocol) 生态系统，实现智能的、协议驱动的 AI 操作。
+VelaClaw 是一个 Rust 优先的自主 AI Agent 运行时，也是 **ai-lib 参考应用**（能力路由 + 上下文 envelope + 单一 tool-loop）。集成 [ai-protocol](https://github.com/ailib-official/ai-protocol) 清单，无需硬编码 Provider。默认发行 **不** 以 WASM/MCP 加载器为主路径。
 
 ### 核心特性
 
@@ -45,6 +45,8 @@ cd velaclaw
 # 使用默认协议支持构建
 cargo build
 ```
+
+首次运行：`velaclaw onboard` 后执行 `velaclaw doctor`。Linux 默认有 OS 围栏（`escape_on_approval=false`）。不要为了「顺滑」把 `backend` 设成 `none`。`autonomy.level=full` **不等于** 无沙箱。
 
 ### 树莓派交叉编译 (aarch64)
 

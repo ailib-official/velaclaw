@@ -25,6 +25,8 @@ For first-time setup and quick orientation.
 - Existing config protection: reruns require explicit confirmation (or `--force` in non-interactive flows)
 - Ollama cloud models (`:cloud`) require a remote `api_url` and API key (for example `api_url = "https://ollama.com"`).
 - Validate environment: `velaclaw status` + `velaclaw doctor`
+- Doctor should show `envelope_assemble=true` and Contact live-select **off** unless you opted in. Linux default sandbox is Landlock/fail-closed — **not** YOLO. Public installs should keep `[security.sandbox] escape_on_approval = false`.
+- Classified shell errors: `[sandbox_deny]` / `[policy_deny]` / `[needs_approval]` — see [troubleshooting.md](../troubleshooting.md#sandbox_deny-vs-policy_deny-do-not-retry). Do not set `backend = "none"` for first-run convenience.
 
 ## Workspace persona & local indexes
 

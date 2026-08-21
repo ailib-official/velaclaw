@@ -41,6 +41,10 @@ describe("dashboardViewFromPayload", () => {
     expect(view.executionSummary).toContain("docker_active=no");
     expect(view.executionSummary).toContain("sandbox=landlock");
     expect(view.executionSummary).toContain("escape_on_approval=no");
+    expect(view.executionSummary).toContain("autonomy=unknown");
+    expect(view.executionSummary).toContain("envelope=off");
+    expect(view.executionSummary).toContain("host_decide=off");
+    expect(view.executionSummary).toContain("capability_route=off");
   });
 
   it("shows escape_on_approval when enabled", () => {
@@ -56,6 +60,26 @@ describe("dashboardViewFromPayload", () => {
       },
     });
     expect(view.executionSummary).toContain("escape_on_approval=yes");
+  });
+
+  it("summarizes envelope and contact flags when present", () => {
+    const view = dashboardViewFromPayload({
+      health: {
+        status: "ok",
+        execution: {
+          runtime_kind: "native",
+          docker_active: false,
+          sandbox: "landlock",
+          autonomy_level: "full",
+          envelope_assemble: true,
+          host_decide: false,
+          intent_capability_route: false,
+        },
+      },
+    });
+    expect(view.executionSummary).toContain("autonomy=full");
+    expect(view.executionSummary).toContain("envelope=on");
+    expect(view.executionSummary).toContain("host_decide=off");
   });
 
   it("handles missing cost tracker", () => {

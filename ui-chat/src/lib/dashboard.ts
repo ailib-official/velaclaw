@@ -19,6 +19,10 @@ export interface DashboardHealth {
     sandbox?: string;
     sandbox_source?: string;
     escape_on_approval?: boolean;
+    autonomy_level?: string;
+    envelope_assemble?: boolean;
+    host_decide?: boolean;
+    intent_capability_route?: boolean;
     note?: string;
   };
 }
@@ -53,6 +57,10 @@ export function dashboardViewFromPayload(payload: DashboardPayload): DashboardVi
         `docker_active=${exec.docker_active === true ? "yes" : "no"}`,
         `sandbox=${exec.sandbox ?? "unknown"}`,
         `escape_on_approval=${exec.escape_on_approval === true ? "yes" : "no"}`,
+        `autonomy=${exec.autonomy_level ?? "unknown"}`,
+        `envelope=${exec.envelope_assemble === true ? "on" : "off"}`,
+        `host_decide=${exec.host_decide === true ? "on" : "off"}`,
+        `capability_route=${exec.intent_capability_route === true ? "on" : "off"}`,
         exec.note ? String(exec.note) : "",
       ]
         .filter(Boolean)

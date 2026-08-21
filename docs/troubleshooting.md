@@ -346,7 +346,7 @@ Cause:
 - Default Landlock wrap sets `PR_SET_NO_NEW_PRIVS` on the shell child (policy A).
 - Approval alone does not remove the OS sandbox.
 
-Fix (opt-in policy B — power users only):
+Fix (opt-in policy B — **not** the public default; power users / local trial only):
 
 1. Set `[security.sandbox] escape_on_approval = true`.
 2. Keep `sudo` / `apt` in `allowed_commands`.
@@ -356,6 +356,8 @@ Fix (opt-in policy B — power users only):
 Do **not** set `backend = "none"` unless you intentionally want YOLO for every shell.
 
 ### `[sandbox_deny]` vs `[policy_deny]` (do not retry)
+
+These prefixes are the **public 1.1.x contract** (VL-SEC-010). Product default keeps the OS sandbox (`escape_on_approval = false`). Trial/operator YOLO (`escape_on_approval = true` or `backend = "none"`) is **not** the documented beginner path.
 
 Symptoms:
 

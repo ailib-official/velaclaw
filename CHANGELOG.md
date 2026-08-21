@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Native-app honesty (VL-NA-000):** `velaclaw doctor` reports `envelope_assemble`, Contact live-select flags (`host_decide` / `intent_capability_route`, default off), and `autonomy.level=full` does not mean unsandboxed. `/health` `execution` and Web Overview show the same fields. Default binary still does **not** compile `runtime-wasm`.
+
 - **Security profiles + retractable elevation** (VL-SEC-011): `[security.profile]` = `isolated` | `local` | `readonly` unfolds existing sandbox/autonomy knobs (no second tool loop). `[sandbox_deny]` / `[needs_approval]` re-enter the same `ApprovalGate` even under Full; **Once** dies after that `execute`. **Never** persists to L2.5. Local inherits daemon env in `apply_shell_child_env` only. Credential basenames: unset profile still hard-denies; isolated **Ask**; local **Allow** (scrubbed). CLI stdin uses the same gate as Web (`Y`/`A`/`N`/`!`); cron/heartbeat reuse `loop_::run` but are **not** labeled `cli`, so they cannot HITL-elevate or skip wrap. See [config-reference.md](docs/config-reference.md#security).
 
 - **Sandbox escape on approval** (opt-in policy B): `[security.sandbox] escape_on_approval = true` lets human-approved shell skip Landlock/`no_new_privs` for that invocation (sudo/apt parity). Default remains `false` (always sandboxed). Privilege/package commands require ApprovalHub even under Full when enabled. See [config-reference.md](docs/config-reference.md#securitysandbox).

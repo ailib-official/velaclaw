@@ -16,6 +16,11 @@ updates:
         update-types:
           - minor
           - patch
+    ignore:
+      # VL-NA-000 / VL-MA-006: stay on wasmi 0.31.x (fuel API). Majors need a
+      # dedicated runtime-wasm adapter task, not Dependabot lockfile bumps.
+      - dependency-name: "wasmi"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: "/"

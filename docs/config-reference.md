@@ -234,6 +234,7 @@ Notes:
 - Receipts: `<workspace>/.velaclaw/tool_receipts.jsonl` (truncated command; no secrets). Approved escapes record `sandbox=none(approved-escape)`.
 - Shell `tool_result` errors use classified prefixes on the existing `error` string (GOV-007, no second API): `[policy_deny]`, `[needs_approval]`, `[sandbox_deny]`. Models must not retry equivalent `ls`/`find`/`cat` after `[sandbox_deny]`/`[policy_deny]`.
 - Known credential **basenames** (`github_token_list.txt`, `id_rsa`, `id_ed25519`, …): unset `profile` still hard-denies even when approved. `isolated` asks Once (Always is not persisted for those paths). `local` allows under `allowed_commands` (scrubbed). Substring false positives (`raid_rsa`) are not matched.
+- **Isolated GitHub CLI:** with `env_clear`, put `GH_TOKEN` or `GITHUB_TOKEN` in the daemon `EnvironmentFile` (`daemon.env`, mode `600`). Those names are restored **only** when the first policy segment is `gh` / `gh.exe`. The child also gets `GH_CONFIG_DIR` under the workspace. `profile = local` inherits daemon env and can use real `~/.config/gh` instead. Do not `cat` PAT files.
 
 ```toml
 [security.sandbox]

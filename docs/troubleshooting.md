@@ -376,6 +376,26 @@ Fix:
 4. **Never** persists a denylist in L2.5 until you clear it.
 5. Cron and heartbeat reuse the CLI assemble path but are **not** interactive: elevation is denied (fail closed). Pipe/`systemd` CLI without a TTY also denies instead of hanging.
 
+### `gh` cannot authenticate (PAT / hosts.yml)
+
+Symptoms:
+
+- `gh` asks to authenticate, or cannot read `~/.config/gh/hosts.yml` (`[sandbox_deny]` / permission denied)
+- Agent tries to `cat ~/github_token_list.txt` → `[policy_deny]`
+
+Cause:
+
+- Isolated shells start from `env_clear()`. `PATH`/`HOME`/locale are always restored. `GH_TOKEN` / `GITHUB_TOKEN` are restored **only** when the first allowlist segment is `gh` / `gh.exe`. `~/.config/gh` is not in the Landlock home extras (only `~/.ssh`).
+- `profile = local` inherits the daemon environment (including `GH_TOKEN` if set) and can use the real `~/.config/gh`; do not apply the isolated punch on that path.
+- `echo $GH_TOKEN` / `env` do **not** receive the PAT under isolated. `gh … | jq` and `gh … && echo …` still share one `sh -c` environment (inherent).
+- Landlock cannot read `~/.config/gh`. For `gh` invocations the shell child gets `GH_CONFIG_DIR=<workspace>/.velaclaw/gh-config` so hosts.yml EACCES does not mask a valid `GH_TOKEN`.
+- Credential **files** stay hard-denied even after Approve.
+
+Fix:
+
+1. Add `GH_TOKEN=…` (or `GITHUB_TOKEN`) to the daemon `EnvironmentFile` (mode `600`). Restart the daemon. Ask the agent to run `gh …`, not to print the token.
+2. Do not expand Landlock to all of `$HOME` or `~/.config` as a product default.
+
 ### Session allowlist lost after restart (pre-0.7)
 
 On **0.7.0+**, **Always** decisions persist to `<workspace>/.velaclaw/policy-overrides.yaml`. Verify the file exists and `[security.audit]` / workspace path is correct.

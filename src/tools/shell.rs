@@ -1,8 +1,11 @@
 use super::traits::{Tool, ToolExecutionContext, ToolResult};
 use crate::runtime::RuntimeAdapter;
-use crate::security::{NoopSandbox, PolicyHandle, ReceiptDecision, Sandbox, ToolReceiptLog};
+use crate::security::{
+    NoopSandbox, PolicyHandle, ReceiptDecision, Sandbox, SecurityPolicy, ToolReceiptLog,
+};
 use async_trait::async_trait;
 use serde_json::json;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -15,6 +18,10 @@ const MAX_OUTPUT_BYTES: usize = 1_048_576;
 const SAFE_ENV_VARS: &[&str] = &[
     "PATH", "HOME", "TERM", "LANG", "LC_ALL", "LC_CTYPE", "USER", "SHELL", "TMPDIR",
 ];
+/// Operator-supplied tokens from the daemon process env (e.g. systemd `EnvironmentFile`).
+/// Kept off `SAFE_ENV_VARS` so the secret-name lint stays honest. Values are never logged.
+/// Injected only when the first allowlist segment is `gh` / `gh.exe` (same split as policy).
+const OPERATOR_PASSTHROUGH_ENV_VARS: &[&str] = &["GH_TOKEN", "GITHUB_TOKEN"];
 
 /// Shell command execution tool with sandboxing
 pub struct ShellTool {
@@ -71,7 +78,14 @@ impl ShellTool {
 }
 
 /// Restore env after `env_clear`, or leave daemon env when `inherit_process_env` (GOV-007: one site).
-fn apply_shell_child_env(cmd: &mut tokio::process::Command, inherit_process_env: bool) {
+/// Isolated (`inherit=false`): SAFE_ENV_VARS plus `GH_TOKEN`/`GITHUB_TOKEN` only when the first
+/// policy segment is `gh` (Landlock `GH_CONFIG_DIR` under the workspace). Local inherits all.
+fn apply_shell_child_env(
+    cmd: &mut tokio::process::Command,
+    inherit_process_env: bool,
+    command: &str,
+    workspace: &Path,
+) {
     if inherit_process_env {
         return;
     }
@@ -81,6 +95,33 @@ fn apply_shell_child_env(cmd: &mut tokio::process::Command, inherit_process_env:
             cmd.env(var, val);
         }
     }
+    if !first_executable_is_github_cli(command) {
+        return;
+    }
+    for var in OPERATOR_PASSTHROUGH_ENV_VARS {
+        if let Ok(val) = std::env::var(var) {
+            if !val.is_empty() {
+                cmd.env(var, val);
+            }
+        }
+    }
+    // Landlock does not allow ~/.config/gh; gh still opens hosts.yml and fails with EACCES
+    // even when GH_TOKEN is set. Point config at the workspace (already in the sandbox).
+    let gh_config = workspace.join(".velaclaw").join("gh-config");
+    if let Err(e) = std::fs::create_dir_all(&gh_config) {
+        tracing::warn!("could not create GH_CONFIG_DIR: {e}");
+    }
+    cmd.env("GH_CONFIG_DIR", &gh_config);
+}
+
+/// First executable basename via [`SecurityPolicy::base_executables`] (GOV-007: no second parser).
+fn first_executable_is_github_cli(command: &str) -> bool {
+    matches!(
+        SecurityPolicy::base_executables(command)
+            .first()
+            .map(String::as_str),
+        Some("gh" | "gh.exe")
+    )
 }
 
 #[async_trait]
@@ -158,9 +199,9 @@ impl Tool for ShellTool {
             });
         }
 
-        // Execute with timeout to prevent hanging commands.
-        // Clear the environment to prevent leaking API keys and other secrets
-        // (CWE-200), then re-add only safe, functional variables.
+        // Clear the environment to prevent leaking unrelated secrets (CWE-200),
+        // then restore SAFE_ENV_VARS. GH_TOKEN/GITHUB_TOKEN only when the first
+        // policy segment is `gh` / `gh.exe` (same `base_executables` as allowlist).
         let mut cmd = match self
             .runtime
             .build_shell_command(command, &self.security.workspace_dir())
@@ -174,7 +215,12 @@ impl Tool for ShellTool {
                 });
             }
         };
-        apply_shell_child_env(&mut cmd, self.security.inherit_process_env());
+        apply_shell_child_env(
+            &mut cmd,
+            self.security.inherit_process_env(),
+            command,
+            &self.security.workspace_dir(),
+        );
 
         let skip_sandbox = self.skip_os_sandbox(ctx);
         let sandbox_name = if skip_sandbox {
@@ -702,6 +748,121 @@ mod tests {
         assert!(
             SAFE_ENV_VARS.contains(&"TERM"),
             "TERM must be in safe env vars"
+        );
+    }
+
+    #[test]
+    fn shell_operator_passthrough_is_gh_tokens_only() {
+        assert_eq!(OPERATOR_PASSTHROUGH_ENV_VARS, &["GH_TOKEN", "GITHUB_TOKEN"]);
+        for var in OPERATOR_PASSTHROUGH_ENV_VARS {
+            assert!(
+                !SAFE_ENV_VARS.contains(var),
+                "{var} must stay off SAFE_ENV_VARS"
+            );
+        }
+    }
+
+    #[test]
+    fn gh_passthrough_uses_policy_first_executable() {
+        assert!(first_executable_is_github_cli("gh pr view 1"));
+        assert!(first_executable_is_github_cli("/usr/bin/gh api user"));
+        assert!(first_executable_is_github_cli("FOO=1 gh pr list"));
+        assert!(first_executable_is_github_cli("gh.exe pr view"));
+        assert!(!first_executable_is_github_cli("echo $GH_TOKEN"));
+        assert!(!first_executable_is_github_cli("env"));
+        assert!(!first_executable_is_github_cli(
+            "git status && gh pr create"
+        ));
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn shell_does_not_pass_gh_token_to_non_gh_command() {
+        let prev = std::env::var("GH_TOKEN").ok();
+        std::env::set_var("GH_TOKEN", "test-gh-token-fixture");
+        let security = PolicyHandle::new(SecurityPolicy {
+            autonomy: AutonomyLevel::Full,
+            allowed_commands: vec!["echo".into()],
+            workspace_dir: std::env::temp_dir(),
+            ..SecurityPolicy::default()
+        });
+        let tool = ShellTool::new(security, test_runtime());
+        let result = tool
+            .execute(
+                json!({"command": "echo $GH_TOKEN"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .expect("echo GH_TOKEN");
+        match prev {
+            Some(v) => std::env::set_var("GH_TOKEN", v),
+            None => std::env::remove_var("GH_TOKEN"),
+        }
+        assert!(result.success, "{:?}", result.error);
+        assert!(
+            !result.output.contains("test-gh-token-fixture"),
+            "non-gh child must not inherit GH_TOKEN; got {:?}",
+            result.output
+        );
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn shell_passes_gh_token_when_first_executable_is_gh() {
+        let stub_dir = std::env::temp_dir().join(format!("vl-gh-stub-{}", std::process::id()));
+        std::fs::create_dir_all(&stub_dir).expect("stub dir");
+        let stub = stub_dir.join("gh");
+        std::fs::write(
+            &stub,
+            "#!/bin/sh\nprintf '%s\\n' \"$GH_TOKEN\"\nprintf '%s\\n' \"$GH_CONFIG_DIR\"\n",
+        )
+        .expect("stub gh");
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        }
+        let prev_token = std::env::var("GH_TOKEN").ok();
+        let prev_path = std::env::var("PATH").ok();
+        std::env::set_var("GH_TOKEN", "test-gh-token-fixture");
+        std::env::set_var(
+            "PATH",
+            format!(
+                "{}:{}",
+                stub_dir.display(),
+                prev_path.as_deref().unwrap_or("")
+            ),
+        );
+        let security = PolicyHandle::new(SecurityPolicy {
+            autonomy: AutonomyLevel::Full,
+            allowed_commands: vec!["gh".into()],
+            workspace_dir: std::env::temp_dir(),
+            ..SecurityPolicy::default()
+        });
+        let tool = ShellTool::new(security, test_runtime());
+        let result = tool
+            .execute(json!({"command": "gh"}), &ToolExecutionContext::default())
+            .await
+            .expect("stub gh");
+        match prev_token {
+            Some(v) => std::env::set_var("GH_TOKEN", v),
+            None => std::env::remove_var("GH_TOKEN"),
+        }
+        match prev_path {
+            Some(v) => std::env::set_var("PATH", v),
+            None => std::env::remove_var("PATH"),
+        }
+        let _ = std::fs::remove_file(&stub);
+        let _ = std::fs::remove_dir(&stub_dir);
+        assert!(result.success, "{:?}", result.error);
+        assert!(
+            result.output.contains("test-gh-token-fixture"),
+            "gh child must inherit GH_TOKEN; got {:?}",
+            result.output
+        );
+        assert!(
+            result.output.contains("gh-config"),
+            "gh child must get workspace GH_CONFIG_DIR; got {:?}",
+            result.output
         );
     }
 

@@ -17,6 +17,18 @@ pub enum AutonomyLevel {
     Full,
 }
 
+/// How shell/file commands that name credential basenames are treated (VL-SEC-011).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SecretPathMode {
+    /// Hard `[policy_deny]` even when approved (legacy default when profile is unset).
+    #[default]
+    Deny,
+    /// `[needs_approval]` until Once/Always this invocation; isolated profile.
+    Ask,
+    /// Allow when otherwise policy-ok (local profile). Output still scrubbed.
+    Allow,
+}
+
 /// Risk score for shell command execution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandRiskLevel {
@@ -144,6 +156,12 @@ pub struct SecurityPolicy {
     pub block_high_risk_commands: bool,
     /// When true, human-approved shell skips OS sandbox wrap (see `[security.sandbox]`).
     pub escape_on_approval: bool,
+    /// Inherit daemon env in `apply_shell_child_env` (local profile).
+    pub inherit_process_env: bool,
+    /// Credential-path handling.
+    pub secret_path_mode: SecretPathMode,
+    /// Unfolded `[security.profile]` if set.
+    pub profile: Option<crate::config::SecurityProfile>,
     pub tracker: ActionTracker,
 }
 
@@ -195,6 +213,9 @@ impl Default for SecurityPolicy {
             require_approval_for_medium_risk: true,
             block_high_risk_commands: true,
             escape_on_approval: false,
+            inherit_process_env: false,
+            secret_path_mode: SecretPathMode::Deny,
+            profile: None,
             tracker: ActionTracker::new(),
         }
     }
@@ -534,7 +555,7 @@ pub(crate) fn command_requires_privilege_hint(command: &str) -> bool {
 /// Credential / PAT / key files the agent must never dump into tool results.
 /// Matches path **basenames** (and a few well-known relative paths), not raw substrings
 /// (`raid_rsa` must not trip `id_rsa`).
-fn command_touches_secret_material(command: &str) -> bool {
+pub(crate) fn command_touches_secret_material(command: &str) -> bool {
     for raw in command.split_whitespace() {
         let token = raw.trim_matches(|c| c == '\'' || c == '"' || c == '`');
         if token.is_empty() {
@@ -753,13 +774,26 @@ impl SecurityPolicy {
             ));
         }
 
-        // Secret material: human approval cannot widen this surface (VL-SEC-010 / SEC-009).
+        // Secret material: local Allow; isolated Ask (Once this execute); unset Deny.
         if command_touches_secret_material(command) {
-            return Err(self.format_command_policy_error(
-                "Command blocked: secret or credential path is not readable by the agent.",
-                command,
-                false,
-            ));
+            match self.secret_path_mode {
+                SecretPathMode::Allow => {}
+                SecretPathMode::Ask if approved => {}
+                SecretPathMode::Ask => {
+                    return Err(self.format_command_policy_error(
+                        "Command reads a credential path; approve Once to allow this invocation.",
+                        command,
+                        true,
+                    ));
+                }
+                SecretPathMode::Deny => {
+                    return Err(self.format_command_policy_error(
+                        "Command blocked: secret or credential path is not readable by the agent.",
+                        command,
+                        false,
+                    ));
+                }
+            }
         }
 
         // Hard allowlist: human approval cannot widen allowed_commands (VL-SEC-009 / H).
@@ -925,7 +959,7 @@ impl SecurityPolicy {
         if approval_eligible {
             msg.push_str(
                 "\n\n   Interactive approval: [Y]es = run once, [A]lways = skip risk prompts for this \
-                 executable basename this session, [N]o = deny.",
+                 executable basename this session, [N]o = deny this call, [!] Never = persist deny.",
             );
             use std::fmt::Write as _;
             let _ = write!(
@@ -1232,8 +1266,9 @@ self_adjust, use the `policy_patch` tool; otherwise edit config.toml (no silent 
              - When the user asks you to run a command, read a file, or check connectivity, ALWAYS invoke the matching tool first.\n\
              - NEVER claim a command or path is blocked without a real `<tool_result>` error from an attempted tool call.\n\
              - If a tool fails, quote the exact error to the user in plain language and say what to change in `config.toml` — do not ask the user to edit source code.\n\
-             - If a `<tool_result>` starts with `[sandbox_deny]` or `[policy_deny]`, do **not** retry equivalent `ls`/`find`/`cat` on the same path. Copy into the workspace, or tell the operator which config/approval step is required.\n\
-             - GitHub CLI: invoke `gh` as the **first** executable (allowlisted). Auth is `GH_TOKEN`/`GITHUB_TOKEN` from the daemon environment when set. Do not prefix with `echo`/`env`/`git &&`. Never `cat` PAT/key files (`[policy_deny]`).\n\
+             - If a `<tool_result>` starts with `[sandbox_deny]` or `[needs_approval]`, wait for the human approval modal (Once/Always/No/Never). Do not invent a second tool.\n\
+             - If a `<tool_result>` starts with `[policy_deny]`, do **not** retry equivalent `ls`/`find`/`cat` on the same path unless the operator changed allowlist/config.\n\
+             - Isolated GitHub CLI: invoke `gh` as the **first** executable (allowlisted). Auth is `GH_TOKEN`/`GITHUB_TOKEN` from the daemon environment when set. Do not prefix with `echo`/`env`/`git &&`. Never `cat` PAT/key files (`[policy_deny]`). Local profile inherits daemon env instead.\n\
              - Optional local tool catalog: a workspace `tools/` directory (or symlink) when present.\n\n",
         );
     }
@@ -1257,6 +1292,7 @@ self_adjust, use the `policy_patch` tool; otherwise edit config.toml (no silent 
         #[cfg(not(feature = "ai-protocol"))]
         let mut policy = Self::from_config(&config.autonomy, &config.workspace_dir);
         policy.escape_on_approval = config.security.sandbox.escape_on_approval;
+        apply_security_profile(&mut policy, config);
         Ok(policy)
     }
 
@@ -1272,8 +1308,36 @@ self_adjust, use the `policy_patch` tool; otherwise edit config.toml (no silent 
             require_approval_for_medium_risk: effective.require_approval_for_medium_risk,
             block_high_risk_commands: effective.block_high_risk_commands,
             escape_on_approval: false,
+            inherit_process_env: false,
+            secret_path_mode: SecretPathMode::Deny,
+            profile: None,
             tracker: ActionTracker::new(),
         }
+    }
+}
+
+fn apply_security_profile(policy: &mut SecurityPolicy, config: &crate::config::Config) {
+    use crate::config::SecurityProfile;
+    policy.profile = config.security.profile;
+    policy.inherit_process_env = config.security.inherit_process_env.unwrap_or(false);
+    match config.security.profile {
+        Some(SecurityProfile::Local) => {
+            if config.security.inherit_process_env.is_none() {
+                policy.inherit_process_env = true;
+            }
+            policy.secret_path_mode = SecretPathMode::Allow;
+            policy.workspace_only = false;
+            policy.forbidden_paths.retain(|p| {
+                p.as_str() != "/home" && p.as_str() != "/tmp" && p.as_str() != "~/.config"
+            });
+        }
+        Some(SecurityProfile::Isolated) => {
+            policy.secret_path_mode = SecretPathMode::Ask;
+        }
+        Some(SecurityProfile::Readonly) => {
+            policy.autonomy = AutonomyLevel::ReadOnly;
+        }
+        None => {}
     }
 }
 
@@ -1628,6 +1692,39 @@ mod tests {
             p.validate_command_execution("cat ./raid_rsa", true).is_ok(),
             "id_rsa must not match as a substring of raid_rsa"
         );
+    }
+
+    #[test]
+    fn secret_material_ask_allows_when_approved() {
+        let p = SecurityPolicy {
+            autonomy: AutonomyLevel::Full,
+            allowed_commands: vec!["cat".into()],
+            secret_path_mode: SecretPathMode::Ask,
+            ..SecurityPolicy::default()
+        };
+        let denied = p.validate_command_execution("cat /tmp/github_token_list.txt", false);
+        assert!(denied.unwrap_err().contains("[needs_approval]"));
+        assert!(p
+            .validate_command_execution("cat /tmp/github_token_list.txt", true)
+            .is_ok());
+    }
+
+    #[test]
+    fn local_profile_allows_secret_paths_and_drops_home_forbid() {
+        let mut config = crate::config::Config::default();
+        config.security.profile = Some(crate::config::SecurityProfile::Local);
+        config.autonomy.allowed_commands = vec!["cat".into()];
+        config.autonomy.workspace_only = true;
+        config.autonomy.forbidden_paths = vec!["/home".into(), "/etc".into(), "~/.ssh".into()];
+        let p = SecurityPolicy::from_workspace_config(&config).unwrap();
+        assert!(p.inherit_process_env);
+        assert!(!p.workspace_only);
+        assert!(!p.forbidden_paths.iter().any(|x| x == "/home"));
+        assert!(p.forbidden_paths.iter().any(|x| x == "/etc"));
+        assert_eq!(p.secret_path_mode, SecretPathMode::Allow);
+        assert!(p
+            .validate_command_execution("cat /home/alex/github_token_list.txt", false)
+            .is_ok());
     }
 
     #[test]

@@ -88,6 +88,42 @@ impl PolicyOverridesStore {
         }
         save_policy_overrides(&path, &layer)
     }
+
+    pub fn persist_session_denylist_add(&self, tool_name: &str) -> Result<()> {
+        self.enforcer.validate_session_allowlist_tool(tool_name)?;
+        let path = self.path();
+        let mut layer = load_policy_overrides_from_path(&path)?.unwrap_or_default();
+        layer.version = Some(1);
+        let approval = layer.approval.get_or_insert_with(Default::default);
+        if !approval
+            .session_denylist
+            .iter()
+            .any(|existing| existing == tool_name)
+        {
+            approval.session_denylist.push(tool_name.to_string());
+            approval.session_denylist.sort();
+            approval.session_denylist.dedup();
+        }
+        save_policy_overrides(&path, &layer)
+    }
+
+    pub fn persist_session_shell_denylist_add(&self, binary: &str) -> Result<()> {
+        self.enforcer.validate_session_shell_binary(binary)?;
+        let path = self.path();
+        let mut layer = load_policy_overrides_from_path(&path)?.unwrap_or_default();
+        layer.version = Some(1);
+        let approval = layer.approval.get_or_insert_with(Default::default);
+        if !approval
+            .session_shell_denylist
+            .iter()
+            .any(|existing| existing == binary)
+        {
+            approval.session_shell_denylist.push(binary.to_string());
+            approval.session_shell_denylist.sort();
+            approval.session_shell_denylist.dedup();
+        }
+        save_policy_overrides(&path, &layer)
+    }
 }
 
 pub fn discover_policy_overrides(config: &Config) -> Result<Option<PolicyOverridesLayer>> {

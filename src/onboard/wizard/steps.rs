@@ -528,12 +528,10 @@ pub(crate) fn setup_provider(
         let has_api_key = !api_key.trim().is_empty()
             || ((canonical_provider != "ollama" || ollama_remote)
                 && std::env::var(provider_env_var(provider_name))
-                    .ok()
-                    .is_some_and(|value| !value.trim().is_empty()))
+                    .is_ok_and(|value| !value.trim().is_empty()))
             || (provider_name == "minimax"
                 && std::env::var("MINIMAX_OAUTH_TOKEN")
-                    .ok()
-                    .is_some_and(|value| !value.trim().is_empty()));
+                    .is_ok_and(|value| !value.trim().is_empty()));
 
         if canonical_provider == "ollama" && ollama_remote && !has_api_key {
             print_bullet(&format!(
@@ -833,6 +831,27 @@ pub(crate) fn setup_tool_mode() -> Result<(ComposioConfig, SecretsConfig)> {
     }
 
     Ok((composio_config, secrets_config))
+}
+
+pub(crate) fn setup_security_profile() -> Result<crate::config::SecurityProfile> {
+    println!();
+    print_bullet("Security profile (VL-SEC-011): one preset over sandbox + approval knobs.");
+    print_bullet("isolated = Landlock + scrubbed env (default). local = host like Cursor. readonly = no shell.");
+    let options = vec![
+        "isolated — OS sandbox; home/secrets require Once (recommended)",
+        "local — no OS sandbox; inherit daemon env; home readable (secrets enter the model)",
+        "readonly — observe only, no shell elevation",
+    ];
+    let choice = Select::new()
+        .with_prompt("  Select security profile")
+        .items(&options)
+        .default(0)
+        .interact()?;
+    Ok(match choice {
+        1 => crate::config::SecurityProfile::Local,
+        2 => crate::config::SecurityProfile::Readonly,
+        _ => crate::config::SecurityProfile::Isolated,
+    })
 }
 
 // ── Step 6: Hardware (Physical World) ───────────────────────────

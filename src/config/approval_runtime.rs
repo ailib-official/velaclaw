@@ -34,6 +34,8 @@ impl ApprovalManagerWiring {
         if let Ok(Some(layer)) = self.overrides_store.load() {
             if let Some(approval) = layer.approval {
                 mgr.seed_session_shell_binaries(approval.session_shell_binaries);
+                mgr.seed_session_denylist(approval.session_denylist);
+                mgr.seed_session_shell_denylist(approval.session_shell_denylist);
             }
         }
         mgr

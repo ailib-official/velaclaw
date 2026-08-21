@@ -71,23 +71,25 @@ impl ShellTool {
         }
     }
 
-    /// Skip OS sandbox when policy B is on and this invocation was human-approved.
-    fn skip_os_sandbox(&self, human_approved: bool) -> bool {
-        human_approved && self.security.escape_on_approval()
+    /// Skip OS sandbox for this invocation: Policy B, or Once elevation after sandbox deny.
+    fn skip_os_sandbox(&self, ctx: &ToolExecutionContext) -> bool {
+        ctx.human_shell_approved && (self.security.escape_on_approval() || ctx.sandbox_elevated)
     }
 }
 
-/// First executable basename via [`SecurityPolicy::base_executables`] (GOV-007: no second parser).
-fn first_executable_is_github_cli(command: &str) -> bool {
-    matches!(
-        SecurityPolicy::base_executables(command)
-            .first()
-            .map(String::as_str),
-        Some("gh" | "gh.exe")
-    )
-}
-
-fn apply_shell_child_env(cmd: &mut tokio::process::Command, command: &str, workspace: &Path) {
+/// Restore env after `env_clear`, or leave daemon env when `inherit_process_env` (GOV-007: one site).
+/// Isolated (`inherit=false`): SAFE_ENV_VARS plus `GH_TOKEN`/`GITHUB_TOKEN` only when the first
+/// policy segment is `gh` (Landlock `GH_CONFIG_DIR` under the workspace). Local inherits all.
+fn apply_shell_child_env(
+    cmd: &mut tokio::process::Command,
+    inherit_process_env: bool,
+    command: &str,
+    workspace: &Path,
+) {
+    if inherit_process_env {
+        return;
+    }
+    cmd.env_clear();
     for var in SAFE_ENV_VARS {
         if let Ok(val) = std::env::var(var) {
             cmd.env(var, val);
@@ -110,6 +112,16 @@ fn apply_shell_child_env(cmd: &mut tokio::process::Command, command: &str, works
         tracing::warn!("could not create GH_CONFIG_DIR: {e}");
     }
     cmd.env("GH_CONFIG_DIR", &gh_config);
+}
+
+/// First executable basename via [`SecurityPolicy::base_executables`] (GOV-007: no second parser).
+fn first_executable_is_github_cli(command: &str) -> bool {
+    matches!(
+        SecurityPolicy::base_executables(command)
+            .first()
+            .map(String::as_str),
+        Some("gh" | "gh.exe")
+    )
 }
 
 #[async_trait]
@@ -203,10 +215,14 @@ impl Tool for ShellTool {
                 });
             }
         };
-        cmd.env_clear();
-        apply_shell_child_env(&mut cmd, command, &self.security.workspace_dir());
+        apply_shell_child_env(
+            &mut cmd,
+            self.security.inherit_process_env(),
+            command,
+            &self.security.workspace_dir(),
+        );
 
-        let skip_sandbox = self.skip_os_sandbox(human_approved);
+        let skip_sandbox = self.skip_os_sandbox(ctx);
         let sandbox_name = if skip_sandbox {
             "none(approved-escape)"
         } else {
@@ -437,8 +453,8 @@ fn sandbox_deny_message(detail: &str, sandbox_name: &str) -> String {
          Detail: {detail}\n\n\
          Next steps:\n\
          1. Copy the needed file into the workspace and use `file_read` (or `cat` there).\n\
-         2. Operators who need host sudo/apt: set `[security.sandbox] escape_on_approval = true`, then Approve once.\n\
-         3. Do not retry `ls`/`find`/`cat` on the same path — the sandbox result will not change.\n\
+         2. Approve Once in the same ApprovalHub modal to retry this invocation (may skip Landlock for that call).\n\
+         3. Do not retry `ls`/`find`/`cat` on the same path without approval — the sandbox result will not change.\n\
          Human approval does not enlarge `allowed_commands` (VL-SEC-009)."
     )
 }
@@ -955,6 +971,31 @@ mod tests {
             .execute(
                 json!({"command": "echo hello"}),
                 &ToolExecutionContext::with_shell_human_approved(true),
+            )
+            .await
+            .expect("echo");
+        assert!(result.success, "{:?}", result.error);
+        assert_eq!(recorder.wraps.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn sandbox_elevated_skips_wrap_without_escape_flag() {
+        let recorder = Arc::new(RecordingSandbox {
+            wraps: std::sync::atomic::AtomicU32::new(0),
+        });
+        let security = PolicyHandle::new(SecurityPolicy {
+            autonomy: AutonomyLevel::Full,
+            workspace_dir: std::env::temp_dir(),
+            allowed_commands: vec!["echo".into()],
+            escape_on_approval: false,
+            ..SecurityPolicy::default()
+        });
+        let tool = ShellTool::with_isolation(security, test_runtime(), recorder.clone(), None);
+        let result = tool
+            .execute(
+                json!({"command": "echo hello"}),
+                &ToolExecutionContext::with_shell_human_approved(true).with_sandbox_elevated(true),
             )
             .await
             .expect("echo");

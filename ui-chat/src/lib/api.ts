@@ -222,11 +222,12 @@ export async function respondApproval(
   id: string,
   approved: boolean,
   always = false,
+  never = false,
 ): Promise<void> {
   const res = await fetch(`/api/approvals/${encodeURIComponent(id)}/respond`, {
     method: "POST",
     headers: authHeaders(token),
-    body: JSON.stringify({ approved, always }),
+    body: JSON.stringify({ approved, always, never }),
   });
   if (!res.ok) throw new Error(`approval ${res.status}: ${await res.text()}`);
 }

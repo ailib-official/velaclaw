@@ -81,7 +81,7 @@ Same `[agent]` keys must not silently mean different things on different shells.
 | Channels (Telegram/Discord/…) | No | Use channel `route.model` only (documented; not ORCH parity yet) |
 | Doctor observe | Independent | `--force` bypasses live flags |
 
-**Shared pre-turn (CLI + Web + Channel):** `resolve_turn_model` (CLI/Web), **`context_orch::prepare_turn_history`** (compact + `assemble_layered`; VL-CTX-001 / GOV-007), and L2 `agent-policy.yaml` tool_dispatcher merge. **Shared tool loop (VL-CTX-002):** `run_tool_call_loop` is the single iteration body; Web injects ApprovalHub/HITL via gate extras (adapters, not a second policy). **Shared bootstrap (VL-REVIEW2-A0 / GOV-007):** `agent::assemble::assemble_runtime` is the canonical Config → provider/memory/security/tools/dispatcher entry for CLI, Web, and Channel hosts.
+**Shared pre-turn (CLI + Web + Channel):** `resolve_turn_model` (CLI/Web), **`context_orch::prepare_turn_history`** (compact + `assemble_layered`; VL-CTX-001 / GOV-007), and L2 `agent-policy.yaml` tool_dispatcher merge. **Shared tool loop (VL-CTX-002):** `run_tool_call_loop` is the single iteration body; Web injects ApprovalHub/HITL via gate extras (adapters, not a second policy). CLI stdin uses the same `ApprovalGate`; cron/heartbeat jobs reuse this loop with channel names `cron`/`heartbeat` (no stdin elevation). **Shared bootstrap (VL-REVIEW2-A0 / GOV-007):** `agent::assemble::assemble_runtime` is the canonical Config → provider/memory/security/tools/dispatcher entry for CLI, Web, and Channel hosts.
 
 DAG-related keys below are **library / doctor** surfaces. Enabling them does **not** change live chat behavior (AI-DAG remains frozen off the default turn path).
 
@@ -196,6 +196,23 @@ Notes:
 - In CLI, gateway, and channel tool loops, multiple independent tool calls are executed concurrently by default when the pending calls do not require approval gating; result order remains stable.
 - `parallel_tools` applies to the `Agent::turn()` API surface (Web Local Control). CLI and channel handlers use their own concurrent batching when calls do not require approval gating.
 
+## `[security]`
+
+User-facing **profile** (VL-SEC-011) plus optional env inherit. Profiles **unfold** existing knobs; they do not add a second tool loop (GOV-007). Unset `profile` leaves sandbox/autonomy as written.
+
+| Key | Default | Purpose |
+|---|---|---|
+| `profile` | unset | `isolated` — Landlock/fail-closed, scrubbed shell env, credential paths **Ask** (Once). `local` — Noop sandbox, inherit daemon env, do not treat `/home` as a file ban, credential paths **Allow** (output scrubbed; secrets can enter the model). `readonly` — `autonomy.level = read_only`. |
+| `inherit_process_env` | unset | Override: `true` copies daemon env into every shell child inside `apply_shell_child_env`. Unset + `profile = local` implies true. Isolated keeps `env_clear` + functional allowlist. |
+
+```toml
+[security]
+# profile = "isolated"
+# inherit_process_env = false
+```
+
+`velaclaw doctor` prints `security.profile=` and whether inherit is on.
+
 ## `[security.sandbox]`
 
 OS isolation for production `shell` (wired in `all_tools_with_runtime`). Unit tests that construct `ShellTool::new` keep Noop.
@@ -216,8 +233,8 @@ Notes:
 - Landlock applies in the child (`pre_exec`), not the agent parent.
 - Receipts: `<workspace>/.velaclaw/tool_receipts.jsonl` (truncated command; no secrets). Approved escapes record `sandbox=none(approved-escape)`.
 - Shell `tool_result` errors use classified prefixes on the existing `error` string (GOV-007, no second API): `[policy_deny]`, `[needs_approval]`, `[sandbox_deny]`. Models must not retry equivalent `ls`/`find`/`cat` after `[sandbox_deny]`/`[policy_deny]`.
-- Known credential **basenames** (`github_token_list.txt`, `id_rsa`, `id_ed25519`, …) are hard-denied even when approved (SEC-009). Substring false positives (`raid_rsa`) are not matched. Do not widen Landlock to `$HOME` as a product default.
-- **GitHub CLI:** put `GH_TOKEN` or `GITHUB_TOKEN` in the daemon `EnvironmentFile` (`daemon.env`, mode `600`). Those names are restored after `env_clear` **only** when the first policy segment is `gh` / `gh.exe` (same `base_executables` as the allowlist). The child also gets `GH_CONFIG_DIR` under the workspace so Landlock is not asked to read `~/.config/gh`. Pipelines/`&&` after `gh` still share the `sh -c` env. Do not `cat` PAT files.
+- Known credential **basenames** (`github_token_list.txt`, `id_rsa`, `id_ed25519`, …): unset `profile` still hard-denies even when approved. `isolated` asks Once (Always is not persisted for those paths). `local` allows under `allowed_commands` (scrubbed). Substring false positives (`raid_rsa`) are not matched.
+- **Isolated GitHub CLI:** with `env_clear`, put `GH_TOKEN` or `GITHUB_TOKEN` in the daemon `EnvironmentFile` (`daemon.env`, mode `600`). Those names are restored **only** when the first policy segment is `gh` / `gh.exe`. The child also gets `GH_CONFIG_DIR` under the workspace. `profile = local` inherits daemon env and can use real `~/.config/gh` instead. Do not `cat` PAT files.
 
 ```toml
 [security.sandbox]

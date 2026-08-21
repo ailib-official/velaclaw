@@ -190,6 +190,22 @@ impl<'a> AgentRunOpts<'a> {
     }
 }
 
+/// HITL channel name for `loop_::run`. Cron/heartbeat reuse the CLI assemble path
+/// but must not claim stdin (`interactive_shell_approval`); elevation stays denied
+/// and sandbox wrap is not skipped (VL-SEC-011 / GOV-007).
+fn approval_channel_for_phases(
+    extra_prompt_phases: &[crate::agent::prompt_composer::PromptPhase],
+) -> &'static str {
+    use crate::agent::prompt_composer::PromptPhase;
+    if extra_prompt_phases.contains(&PromptPhase::Cron) {
+        "cron"
+    } else if extra_prompt_phases.contains(&PromptPhase::Heartbeat) {
+        "heartbeat"
+    } else {
+        "cli"
+    }
+}
+
 pub async fn run(
     mut config: Config,
     message: Option<String>,
@@ -202,6 +218,7 @@ pub async fn run(
     opts: AgentRunOpts<'_>,
 ) -> Result<String> {
     let extra_prompt_phases = opts.extra_prompt_phases;
+    let approval_channel = approval_channel_for_phases(extra_prompt_phases);
     let host_phase = opts.host_phase;
     let chat_session_id = opts.chat_session_id;
     let persist_chat_session = opts.persist_chat_session;
@@ -592,7 +609,7 @@ pub async fn run(
             temperature,
             false,
             Some(&approval_manager),
-            "cli",
+            approval_channel,
             &config.multimodal,
             config.agent.max_tool_iterations,
             None,
@@ -878,7 +895,7 @@ pub async fn run(
                 temperature,
                 false,
                 Some(&approval_manager),
-                "cli",
+                approval_channel,
                 &config.multimodal,
                 config.agent.max_tool_iterations,
                 Some(cancel.token()),
@@ -1161,6 +1178,17 @@ mod tests {
     use velaclaw_agent_runtime::loop_parse::{
         tools_to_openai_format, DEFAULT_MAX_HISTORY_MESSAGES,
     };
+
+    #[test]
+    fn approval_channel_for_phases_maps_cron_heartbeat() {
+        use crate::agent::prompt_composer::PromptPhase;
+        assert_eq!(approval_channel_for_phases(&[]), "cli");
+        assert_eq!(approval_channel_for_phases(&[PromptPhase::Cron]), "cron");
+        assert_eq!(
+            approval_channel_for_phases(&[PromptPhase::Heartbeat]),
+            "heartbeat"
+        );
+    }
 
     #[test]
     fn test_scrub_credentials() {
@@ -1565,7 +1593,7 @@ mod tests {
     }
 
     #[test]
-    fn should_execute_tools_in_parallel_returns_true_when_cli_has_no_interactive_approvals() {
+    fn should_execute_tools_in_parallel_returns_false_for_shell_even_under_full() {
         use crate::approval::ApprovalGate;
 
         let calls = vec![
@@ -1585,7 +1613,7 @@ mod tests {
         let approval_mgr = ApprovalManager::from_config(&approval_cfg);
         let gate = ApprovalGate::new(&approval_mgr, "cli", None);
 
-        assert!(tool_batch::should_execute_tools_in_parallel(
+        assert!(!tool_batch::should_execute_tools_in_parallel(
             &calls,
             Some(&gate)
         ));

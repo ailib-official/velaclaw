@@ -19,10 +19,31 @@ pub struct EffectiveSandbox {
 ///
 /// YOLO opt-out: `sandbox.enabled = false` or `backend = none`.
 /// Autonomy Full does not change this selection.
-pub fn create_sandbox(config: &SecurityConfig, workspace_dir: Option<&Path>) -> Arc<dyn Sandbox> {
-    let backend = &config.sandbox.backend;
+/// Unfold `[security.profile] = local` onto sandbox knobs without a second factory.
+pub fn effective_sandbox_config(config: &SecurityConfig) -> crate::config::SandboxConfig {
+    let mut sandbox = config.sandbox.clone();
+    if config.profile == Some(crate::config::SecurityProfile::Local) {
+        let user_forced_on = sandbox.enabled == Some(true);
+        if !user_forced_on
+            && sandbox.enabled != Some(false)
+            && !matches!(sandbox.backend, SandboxBackend::None)
+        {
+            sandbox.enabled = Some(false);
+            sandbox.backend = SandboxBackend::None;
+        }
+    }
+    sandbox
+}
 
-    if matches!(backend, SandboxBackend::None) || config.sandbox.enabled == Some(false) {
+/// Create a sandbox based on config. Linux Auto is Landlock or fail-closed.
+///
+/// YOLO opt-out: `sandbox.enabled = false` or `backend = none`.
+/// Autonomy Full does not change this selection.
+pub fn create_sandbox(config: &SecurityConfig, workspace_dir: Option<&Path>) -> Arc<dyn Sandbox> {
+    let sandbox = effective_sandbox_config(config);
+    let backend = &sandbox.backend;
+
+    if matches!(backend, SandboxBackend::None) || sandbox.enabled == Some(false) {
         return Arc::new(NoopSandbox);
     }
 
@@ -98,22 +119,27 @@ fn detect_best_sandbox(workspace: Option<std::path::PathBuf>) -> Arc<dyn Sandbox
 
 /// Map config to the sandbox that production `ShellTool` wiring will use.
 pub fn describe_effective_sandbox(config: &SecurityConfig) -> EffectiveSandbox {
-    let yolo = matches!(config.sandbox.backend, SandboxBackend::None)
+    let sandbox = effective_sandbox_config(config);
+    let yolo = matches!(sandbox.backend, SandboxBackend::None) || sandbox.enabled == Some(false);
+    let raw_yolo = matches!(config.sandbox.backend, SandboxBackend::None)
         || config.sandbox.enabled == Some(false);
-    let source = if yolo {
-        "explicit_yolo"
-    } else if matches!(config.sandbox.backend, SandboxBackend::Auto) {
-        #[cfg(target_os = "linux")]
-        {
-            "linux_auto"
-        }
-        #[cfg(not(target_os = "linux"))]
-        {
-            "non_linux_auto"
-        }
-    } else {
-        "config_explicit"
-    };
+    let source =
+        if yolo && !raw_yolo && config.profile == Some(crate::config::SecurityProfile::Local) {
+            "profile_local"
+        } else if yolo {
+            "explicit_yolo"
+        } else if matches!(sandbox.backend, SandboxBackend::Auto) {
+            #[cfg(target_os = "linux")]
+            {
+                "linux_auto"
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                "non_linux_auto"
+            }
+        } else {
+            "config_explicit"
+        };
     let sandbox = create_sandbox(config, None);
     let name = sandbox.name().to_string();
     let production_path = matches!(
@@ -204,5 +230,17 @@ mod tests {
             assert_ne!(sandbox.name(), "none");
         }
         let _ = sandbox;
+    }
+
+    #[test]
+    fn local_profile_unfolds_to_noop_sandbox() {
+        let config = SecurityConfig {
+            profile: Some(crate::config::SecurityProfile::Local),
+            ..auto_config()
+        };
+        let sandbox = create_sandbox(&config, None);
+        assert_eq!(sandbox.name(), "none");
+        let report = describe_effective_sandbox(&config);
+        assert_eq!(report.source, "profile_local");
     }
 }

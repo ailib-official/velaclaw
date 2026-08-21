@@ -34,8 +34,25 @@ pub trait HumanApprovalBackend: Send + Sync {
         self.approve_shell_command_sync(command)
     }
 
+    /// Same stdin/hub as shell approval, used after sandbox/policy miss (VL-SEC-011).
+    async fn approve_shell_elevation_async(&self, command: &str) -> bool {
+        self.approve_shell_command_async(command).await
+    }
+
     /// Session-scoped Always for risk prompts covering this command's executable basenames.
     fn shell_session_always_allowed(&self, command: &str) -> bool {
+        let _ = command;
+        false
+    }
+
+    /// Persistent Never for this tool name (no prompt; deny).
+    fn never_tool(&self, tool_name: &str) -> bool {
+        let _ = tool_name;
+        false
+    }
+
+    /// Persistent Never for this shell command's executable basenames.
+    fn shell_session_never(&self, command: &str) -> bool {
         let _ = command;
         false
     }
@@ -88,7 +105,49 @@ impl<'a, B: HumanApprovalBackend + ?Sized> ApprovalGate<'a, B> {
             .await
     }
 
+    /// Same gate, after `[sandbox_deny]` / `[needs_approval]` at execute (VL-SEC-011).
+    /// Always prompts when interactive — including Full autonomy (routine skip does not apply).
+    pub async fn decide_elevation_async(&self, call: &ParsedToolCall) -> GateDecision {
+        if !is_shell_policy_tool(&call.name) {
+            return GateDecision::Denied {
+                message: "Elevation applies only to shell-policy tools.".into(),
+            };
+        }
+        let Some(command) = shell_command_from_args(&call.name, &call.arguments) else {
+            return GateDecision::Denied {
+                message: "Elevation requires a shell command.".into(),
+            };
+        };
+        if self.backend.shell_session_never(command) {
+            return GateDecision::Denied {
+                message: "Denied by policy (Never).".into(),
+            };
+        }
+        if !self.backend.interactive_shell_approval() {
+            return GateDecision::Denied {
+                message: format!(
+                    "Command requires explicit human approval: {command}. \
+                     Interactive approval is not available on this channel."
+                ),
+            };
+        }
+        if self.backend.approve_shell_elevation_async(command).await {
+            GateDecision::Proceed {
+                shell_human_approved: true,
+            }
+        } else {
+            GateDecision::Denied {
+                message: "Denied by user.".into(),
+            }
+        }
+    }
+
     fn tool_level_decision_sync(&self, call: &ParsedToolCall) -> Option<GateDecision> {
+        if self.backend.never_tool(&call.name) {
+            return Some(GateDecision::Denied {
+                message: "Denied by policy (Never).".into(),
+            });
+        }
         if !self.backend.needs_tool_approval(&call.name) {
             return None;
         }
@@ -102,6 +161,11 @@ impl<'a, B: HumanApprovalBackend + ?Sized> ApprovalGate<'a, B> {
     }
 
     async fn tool_level_decision_async(&self, call: &ParsedToolCall) -> Option<GateDecision> {
+        if self.backend.never_tool(&call.name) {
+            return Some(GateDecision::Denied {
+                message: "Denied by policy (Never).".into(),
+            });
+        }
         if !self.backend.needs_tool_approval(&call.name) {
             return None;
         }
@@ -139,6 +203,11 @@ impl<'a, B: HumanApprovalBackend + ?Sized> ApprovalGate<'a, B> {
                 shell_human_approved: false,
             };
         };
+        if self.backend.shell_session_never(command) {
+            return GateDecision::Denied {
+                message: "Denied by policy (Never).".into(),
+            };
+        }
         let pre_approved =
             prior_tool_level_approval || self.backend.shell_session_always_allowed(command);
         if pre_approved && hook.validate_shell_command(tool_name, args, true).is_ok() {
@@ -199,6 +268,11 @@ impl<'a, B: HumanApprovalBackend + ?Sized> ApprovalGate<'a, B> {
                 shell_human_approved: false,
             };
         };
+        if self.backend.shell_session_never(command) {
+            return GateDecision::Denied {
+                message: "Denied by policy (Never).".into(),
+            };
+        }
         let pre_approved =
             prior_tool_level_approval || self.backend.shell_session_always_allowed(command);
         if pre_approved && hook.validate_shell_command(tool_name, args, true).is_ok() {

@@ -229,13 +229,11 @@ pub fn nvidia_implied_wire_model_id(logical_model_id: &str) -> String {
 #[cfg(feature = "ai-protocol")]
 pub fn hybrid_text_tool_result_history(logical_model_id: &str) -> bool {
     let init = nvidia_byok_ai_client_logical_id(logical_model_id);
-    super::init_ai_client_sync(&init)
-        .ok()
-        .is_some_and(|client| {
-            ai_lib_rust::ToolCallingPolicy::from_tool_calling(client.manifest.tool_calling())
-                .native_strategy
-                == ai_lib_rust::NativeStrategy::Hybrid
-        })
+    super::init_ai_client_sync(&init).is_ok_and(|client| {
+        ai_lib_rust::ToolCallingPolicy::from_tool_calling(client.manifest.tool_calling())
+            .native_strategy
+            == ai_lib_rust::NativeStrategy::Hybrid
+    })
 }
 
 #[cfg(not(feature = "ai-protocol"))]

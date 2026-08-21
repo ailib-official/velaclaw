@@ -9,9 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Security profiles + retractable elevation** (VL-SEC-011): `[security.profile]` = `isolated` | `local` | `readonly` unfolds existing sandbox/autonomy knobs (no second tool loop). `[sandbox_deny]` / `[needs_approval]` re-enter the same `ApprovalGate` even under Full; **Once** dies after that `execute`. **Never** persists to L2.5. Local inherits daemon env in `apply_shell_child_env` only. Credential basenames: unset profile still hard-denies; isolated **Ask**; local **Allow** (scrubbed). CLI stdin uses the same gate as Web (`Y`/`A`/`N`/`!`); cron/heartbeat reuse `loop_::run` but are **not** labeled `cli`, so they cannot HITL-elevate or skip wrap. See [config-reference.md](docs/config-reference.md#security).
+
 - **Sandbox escape on approval** (opt-in policy B): `[security.sandbox] escape_on_approval = true` lets human-approved shell skip Landlock/`no_new_privs` for that invocation (sudo/apt parity). Default remains `false` (always sandboxed). Privilege/package commands require ApprovalHub even under Full when enabled. See [config-reference.md](docs/config-reference.md#securitysandbox).
-- **Classified shell failures** (VL-SEC-010): `[policy_deny]` / `[needs_approval]` / `[sandbox_deny]` on the existing `ToolResult.error` string (no second HITL or wrap path). Credential paths are hard-denied even when approved. Prompt tells the model not to retry equivalent `ls`/`find`/`cat`.
-- **GitHub CLI token passthrough:** `GH_TOKEN` / `GITHUB_TOKEN` from the daemon `EnvironmentFile` are injected into shell children **only** when the first policy segment is `gh` / `gh.exe` (same `base_executables` as the allowlist). Those children also get `GH_CONFIG_DIR` under the workspace (Landlock cannot read `~/.config/gh`). Values are not logged. PAT files remain `[policy_deny]`. See [troubleshooting.md](docs/troubleshooting.md).
+- **Classified shell failures** (VL-SEC-010): `[policy_deny]` / `[needs_approval]` / `[sandbox_deny]` on the existing `ToolResult.error` string (no second HITL or wrap path). Unset profile still hard-denies credential basenames even when approved.
+- **Isolated GitHub CLI token passthrough:** when `inherit_process_env` is off, `GH_TOKEN` / `GITHUB_TOKEN` from the daemon `EnvironmentFile` are injected **only** if the first policy segment is `gh` / `gh.exe` (same `base_executables`). Those children also get workspace `GH_CONFIG_DIR` (Landlock cannot read `~/.config/gh`). Local profile inherits the full daemon env instead. Values are not logged. PAT files remain `[policy_deny]`. See [troubleshooting.md](docs/troubleshooting.md).
 
 ## [1.1.0] - 2026-08-19
 

@@ -529,6 +529,42 @@ fn check_config_semantics(config: &Config, items: &mut Vec<DiagItem>) {
                 "inherit_process_env=true (shell children see daemon.env secrets)",
             ));
         }
+
+        let autonomy_level = match config.autonomy.level {
+            crate::security::AutonomyLevel::ReadOnly => "readonly",
+            crate::security::AutonomyLevel::Supervised => "supervised",
+            crate::security::AutonomyLevel::Full => "full",
+        };
+        let autonomy_msg = if config.autonomy.level == crate::security::AutonomyLevel::Full {
+            format!(
+                "autonomy.level={autonomy_level} (does not disable OS sandbox; Full != unsandboxed)"
+            )
+        } else {
+            format!("autonomy.level={autonomy_level}")
+        };
+        items.push(DiagItem::ok("security", autonomy_msg));
+    }
+
+    // VL-NA-000: Contact + envelope honesty (code present ≠ live select on).
+    {
+        items.push(DiagItem::ok(
+            "context",
+            format!(
+                "envelope_assemble={} (ai-lib MessageAssembler; kill-switch when false)",
+                config.agent.envelope_assemble
+            ),
+        ));
+        let contact = format!(
+            "contact host_decide={} intent_capability_route={} \
+             (live select default-off; BYOK default_provider still used; \
+             observe: velaclaw doctor host-decide --force / capability-route --force)",
+            config.agent.host_decide, config.agent.intent_capability_route
+        );
+        if config.agent.host_decide || config.agent.intent_capability_route {
+            items.push(DiagItem::ok("contact", contact));
+        } else {
+            items.push(DiagItem::warn("contact", contact));
+        }
     }
 
     // Runtime kind honesty: native host vs docker wrapper (avoid model/container confusion).
@@ -1246,6 +1282,54 @@ mod tests {
                     || item.message.contains("sandbox=fail-closed")
             );
             assert!(!item.message.contains("sandbox=none"));
+        }
+    }
+
+    #[test]
+    fn doctor_reports_envelope_and_contact_defaults() {
+        let config = Config::default();
+        let mut items = Vec::new();
+        check_config_semantics(&config, &mut items);
+        let envelope = items
+            .iter()
+            .find(|i| i.message.contains("envelope_assemble="))
+            .expect("envelope line");
+        assert!(envelope.message.contains("envelope_assemble=true"));
+        let contact = items
+            .iter()
+            .find(|i| i.message.contains("contact host_decide="))
+            .expect("contact line");
+        assert_eq!(contact.severity, Severity::Warn);
+        assert!(contact.message.contains("host_decide=false"));
+        assert!(contact.message.contains("intent_capability_route=false"));
+        let autonomy = items
+            .iter()
+            .find(|i| i.message.contains("autonomy.level="))
+            .expect("autonomy line");
+        assert!(autonomy.message.contains("autonomy.level=supervised"));
+    }
+
+    #[test]
+    fn doctor_reports_full_autonomy_does_not_drop_sandbox() {
+        let mut config = Config::default();
+        config.autonomy.level = crate::security::AutonomyLevel::Full;
+        let mut items = Vec::new();
+        check_config_semantics(&config, &mut items);
+        let autonomy = items
+            .iter()
+            .find(|i| i.message.contains("autonomy.level=full"))
+            .expect("full autonomy line");
+        assert!(autonomy.message.contains("does not disable OS sandbox"));
+        let sandbox = items
+            .iter()
+            .find(|i| i.message.contains("sandbox="))
+            .expect("sandbox line");
+        #[cfg(target_os = "linux")]
+        {
+            assert!(
+                sandbox.message.contains("sandbox=landlock")
+                    || sandbox.message.contains("sandbox=fail-closed")
+            );
         }
     }
 

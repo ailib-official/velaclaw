@@ -547,18 +547,27 @@ fn execution_environment_json(config: &crate::config::Config) -> serde_json::Val
     let kind = if kind.is_empty() { "native" } else { kind };
     let docker_active = kind.eq_ignore_ascii_case("docker");
     let sandbox = crate::security::describe_effective_sandbox(&config.security);
+    let autonomy = match config.autonomy.level {
+        crate::security::AutonomyLevel::ReadOnly => "readonly",
+        crate::security::AutonomyLevel::Supervised => "supervised",
+        crate::security::AutonomyLevel::Full => "full",
+    };
     serde_json::json!({
         "runtime_kind": kind,
         "docker_active": docker_active,
         "sandbox": sandbox.name,
         "sandbox_source": sandbox.source,
         "escape_on_approval": config.security.sandbox.escape_on_approval,
+        "autonomy_level": autonomy,
+        "envelope_assemble": config.agent.envelope_assemble,
+        "host_decide": config.agent.host_decide,
+        "intent_capability_route": config.agent.intent_capability_route,
         "note": if docker_active {
             "Shell uses [runtime.docker]."
         } else if config.security.sandbox.escape_on_approval {
-            "Shell runs on the host under the OS sandbox by default; human-approved shell may skip Landlock/NNP (escape_on_approval)."
+            "Shell runs on the host under the OS sandbox by default; human-approved shell may skip Landlock/NNP (escape_on_approval). Autonomy full does not disable the sandbox."
         } else {
-            "Shell runs on the host under the OS sandbox; [runtime.docker] is unused."
+            "Shell runs on the host under the OS sandbox; [runtime.docker] is unused. Autonomy full does not disable the sandbox. Contact live-select is off unless host_decide or intent_capability_route is true."
         },
     })
 }
@@ -1286,6 +1295,19 @@ mod tests {
     fn generate_test_secret() -> String {
         let bytes: [u8; 32] = rand::random();
         hex::encode(bytes)
+    }
+
+    #[test]
+    fn execution_environment_reports_contact_and_envelope() {
+        let config = crate::config::Config::default();
+        let v = execution_environment_json(&config);
+        assert_eq!(v["envelope_assemble"], true);
+        assert_eq!(v["host_decide"], false);
+        assert_eq!(v["intent_capability_route"], false);
+        assert_eq!(v["autonomy_level"], "supervised");
+        assert_eq!(v["escape_on_approval"], false);
+        let note = v["note"].as_str().unwrap_or("");
+        assert!(note.contains("Autonomy full does not disable the sandbox"));
     }
 
     #[test]

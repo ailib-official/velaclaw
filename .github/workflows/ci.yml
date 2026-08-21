@@ -69,6 +69,8 @@ jobs:
 
       - name: cargo test (ai-protocol feature)
         run: cargo test --workspace --features ai-protocol --locked
+        # VL-SEC-010 classified denies (`secret_material_denied`, sandbox_deny
+        # labeling) run in this job. Default features include sandbox-landlock.
 
       - name: Checkout ai-protocol (manifest runtime gate)
         uses: actions/checkout@v4

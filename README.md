@@ -14,7 +14,7 @@
 
 ## What is VelaClaw
 
-VelaClaw is an autonomous AI agent runtime for Rust. Providers are defined as [ai-protocol](https://github.com/ailib-official/ai-protocol) YAML manifests — zero hardcoded provider logic.
+VelaClaw is an autonomous AI agent runtime for Rust — the **ai-lib reference application** (capability routing + context envelope + a single tool loop). Providers are defined as [ai-protocol](https://github.com/ailib-official/ai-protocol) YAML manifests — zero hardcoded provider logic. WASM/MCP loaders are **not** the default product path.
 
 **Two execution modes:**
 
@@ -58,6 +58,14 @@ velaclaw onboard
 ```
 
 Walks through workspace initialization, API keys, and default model. Creates `~/.velaclaw/config.toml`.
+
+Then validate (do **not** turn off the OS sandbox to “make it smooth”):
+
+```bash
+velaclaw doctor
+```
+
+Expect `envelope_assemble=true`, `contact host_decide=false` (live select is opt-in), `sandbox=landlock` or `fail-closed` on Linux, and `escape_on_approval=false`. `autonomy.level=full` does **not** disable the sandbox. Shell errors may use `[sandbox_deny]` / `[policy_deny]` — copy files into the workspace instead of retrying or setting `backend = "none"`.
 
 ### 2. Chat
 

@@ -201,7 +201,7 @@ See also [operations-runbook.md](operations-runbook.md) for daemon lifecycle and
 
 ### `doctor`
 
-- `velaclaw doctor` — config, protocol, workspace, daemon, and environment checks; ends with a short `[maintenance]` hint (config vs rebuild)
+- `velaclaw doctor` — config, protocol, workspace, daemon, and environment checks (envelope assemble, Contact live-select flags, sandbox, autonomy Full ≠ no sandbox); ends with a short `[maintenance]` hint (config vs rebuild)
 - `velaclaw doctor maintenance` — full operator guide (layers, hot-reload, preflight, when to rebuild) plus **VL-OPS-001** PATH/install binary hygiene (which `velaclaw` is first on PATH vs this process; warns on multiple known installs — observe-only)
 - `velaclaw doctor l4-shadow-summary --log <path>|'-' [--json]` — **CR-HOST-002** local aggregate of L4 M3c/d/e fields (`m3c_pass` / `m3d_category` / `m3e_fallback`) from tracing or JSONL logs. Observe-only; does **not** enable `[agent].candidate_dag_shadow`; Prometheus/Grafana are **not** an entry gate. Tip: `RUST_LOG=info velaclaw doctor candidate-dag --candidate <path> 2>shadow.log` then summarize that file.
 - `velaclaw doctor models [--provider <ID>] [--use-cache]`

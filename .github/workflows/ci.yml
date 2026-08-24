@@ -15,7 +15,7 @@ jobs:
   public-doc-privacy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install ripgrep
         run: sudo apt-get update && sudo apt-get install -y ripgrep
       - name: Public doc privacy gate (DOC-002 / TEST-002)
@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [public-doc-privacy]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -73,7 +73,7 @@ jobs:
         # labeling) run in this job. Default features include sandbox-landlock.
 
       - name: Checkout ai-protocol (manifest runtime gate)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ailib-official/ai-protocol
           path: ai-protocol

@@ -94,7 +94,7 @@ ENTRYPOINT ["velaclaw"]
 CMD ["gateway"]
 
 # ── Stage 3: Production Runtime (Distroless) ─────────────────
-FROM gcr.io/distroless/cc-debian13:nonroot@sha256:d97bc0a941b8d4be647dc0ee75b264ddbb772f1ac5ba690a4309c00723b23775 AS release
+FROM gcr.io/distroless/cc-debian13:nonroot@sha256:a77defd6fedbb3392b175ba8ea3d1c22be963c1597c248c3ba987ddd80bfb512 AS release
 
 COPY --from=builder /app/velaclaw /usr/local/bin/velaclaw
 COPY --from=builder /velaclaw-data /velaclaw-data

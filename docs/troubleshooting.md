@@ -181,6 +181,26 @@ Prefer a single install location early on `PATH` (common: `$HOME/bin`). Compare
 `this_process` vs `first_on_PATH` in the maintenance guide. Do not `sudo` remove
 binaries unless you understand ownership — reinstall or adjust `PATH` order.
 
+### Bounded DAG live vs Plan (VL-NA-011/012)
+
+Symptoms:
+
+- Chat Plan/Build toggle does not walk `locate` → `patch` → `verify`
+- CLI `--plan` still only blocks mutating tools
+
+Cause:
+
+- `[agent].bounded_dag_live` defaults to **false** (opt-in). Plan without that flag is the older mutating-tool gate, not the DAG planner + preview.
+
+Fix:
+
+1. Set `bounded_dag_live = true` in `[agent]`. Leave `bounded_dag_path` empty to let the planner run; set a JSON path to skip the planner.
+2. CLI: `velaclaw agent --plan -m "…"` for planner + preview; omit `--plan` for Build.
+3. Web: Plan/Build radios send `host_phase` on `/ws` chat (same `Agent::turn` as REST).
+4. `velaclaw doctor` reports `bounded_dag` live/path. Build nodes write `dag_art:<session>:<node>` and print a `contact model=` line. This is **not** L4 `candidate_dag_emit`.
+5. Plan preview shows `code-fix-template` (`locate` → `patch` → `verify`) when the planner JSON fails validation twice. The planner uses a **tool-free** chat turn (not the shell tool loop). Fallback graphs are **not** cached. Plan always replans; Build with a short approval (`ok` / `同意` / `Approve Build`) reuses `dag_plan:<session>`. A new task or correction on Build clears that cache and `dag_art:<session>:*` then replans (generic — not domain-specific).
+6. Work-node Contact follows capability tags (`hint:document` / `hint:reasoning` / `hint:code` / `hint:fast`). The Web session picker is the **planner** default only; it does not flatten every node onto that model. Non-entry nodes receive the previous node's clipped artifact even when the planner omitted `context_requirements`.
+
 ### L4 shadow M3 fields with no Grafana (CR-HOST-002)
 
 Symptoms:

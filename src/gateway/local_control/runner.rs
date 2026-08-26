@@ -93,7 +93,11 @@ pub async fn run_agent_chat(
     progress_tx: Option<Sender<crate::agent::turn_progress::TurnProgress>>,
 ) -> Result<ChatApiResponse> {
     let user_message = extract_last_user_message(&req.messages)?;
-    let explicit_model = explicit_model_from_request(req);
+    let explicit_model = if config.agent.bounded_dag_live {
+        None
+    } else {
+        explicit_model_from_request(req)
+    };
     // Still apply overrides for provider bootstrap when picker is set.
     let effective_config = apply_chat_overrides(config.clone(), req);
 

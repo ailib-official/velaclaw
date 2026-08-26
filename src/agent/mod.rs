@@ -18,6 +18,12 @@
 pub mod agent;
 pub mod assemble;
 #[cfg(feature = "ai-protocol")]
+pub mod bounded_dag;
+#[cfg(feature = "ai-protocol")]
+pub mod bounded_dag_context;
+#[cfg(feature = "ai-protocol")]
+pub mod bounded_dag_live;
+#[cfg(feature = "ai-protocol")]
 pub mod candidate_dag;
 pub mod classifier;
 #[cfg(feature = "ai-protocol")]

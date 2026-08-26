@@ -392,11 +392,20 @@ pub struct AgentConfig {
     #[serde(default)]
     pub envelope_assemble_async: bool,
     /// Reserved / unused live gate for CR-L2 `agent::dag_runner`.
-    /// Default: `false`. The bool is **not read** by CLI, Web, or channel turn paths.
+    /// Default: `false`. **Not wired** into live CLI/Web/channel turn paths.
     /// Doctor `template-dag` observes fixtures without this flag. Prefer doctor over
     /// expecting chat behavior. Requires `--features ai-protocol`. No AI-generated DAGs.
     #[serde(default)]
     pub template_dag: bool,
+    /// VL-NA-011/015: when true, CLI + Web `Agent::turn` run a planner node (session
+    /// default model, same `run_tool_call_loop`) then linear work nodes. Default: `false`.
+    /// Not L4 `candidate_dag_emit`. Empty `bounded_dag_path` enables the planner.
+    #[serde(default)]
+    pub bounded_dag_live: bool,
+    /// Optional filesystem path to L2 DAG JSON. Non-empty skips the planner.
+    /// Empty/none → planner; invalid planner JSON → embedded code-fix template.
+    #[serde(default)]
+    pub bounded_dag_path: Option<String>,
     /// CR-L4-003: library/doctor gate for [`crate::agent::candidate_dag::maybe_run_candidate_shadow`].
     /// Default: `false`. **Not wired** into live CLI/Web/channel chat. Doctor `candidate-dag`
     /// observes without enabling this flag. Does **not** default-on AI-DAG in the live loop.
@@ -460,6 +469,8 @@ impl Default for AgentConfig {
             envelope_assemble: true,
             envelope_assemble_async: false,
             template_dag: false,
+            bounded_dag_live: false,
+            bounded_dag_path: None,
             candidate_dag_shadow: false,
             candidate_dag_stagnation_limit: 0,
             intent_capability_route: false,

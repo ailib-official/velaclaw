@@ -109,6 +109,16 @@ pub fn hint_to_tag(hint: &str) -> Option<&'static str> {
         .map(|(_, tag)| *tag)
 }
 
+/// Hints in `HINT_TO_TAG` that map to this Capability Tag (for node Contact).
+#[must_use]
+pub fn hints_for_tag(tag: &str) -> Vec<&'static str> {
+    HINT_TO_TAG
+        .iter()
+        .filter(|(_, t)| t.eq_ignore_ascii_case(tag))
+        .map(|(h, _)| *h)
+        .collect()
+}
+
 fn tag_relation(tag: &str) -> Option<TagWireRelation> {
     TAG_MAPPING_TABLE
         .iter()

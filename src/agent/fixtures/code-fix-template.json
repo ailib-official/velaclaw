@@ -39,7 +39,7 @@
       "id": "verify",
       "task_type": "code-fix",
       "model_selector": {
-        "capabilities": ["coding", "speed"]
+        "capabilities": ["speed"]
       },
       "context_requirements": {
         "layers": [0, 1, 3],

@@ -599,38 +599,196 @@ pub async fn run(
 
         let progress_obs =
             crate::agent::turn_progress::ProgressObserver::cli(Arc::clone(&observer));
-        let response = run_tool_call_loop(
-            provider.as_ref(),
-            &mut history,
-            &tools_registry,
-            &progress_obs,
-            provider_name,
-            &turn_model,
-            temperature,
-            false,
-            Some(&approval_manager),
-            approval_channel,
-            &config.multimodal,
-            config.agent.max_tool_iterations,
-            None,
-            None,
-            tool_dispatcher_ref,
-            Some(&security),
-            None,
-            text_tool_result_history,
-            render_opts,
-            None,
-            Some(SoftFailLoopCtx {
-                session_key: session_id.as_str(),
-                config: Some(&config),
-                #[cfg(feature = "ai-protocol")]
-                host_decide: None,
-                surface: velaclaw_agent_runtime::SoftFailSurface::Cli,
-                peer_logical_ids: &[],
-            }),
-            Some(&cli_gate_extras),
-        )
-        .await?;
+        let response = {
+            #[cfg(feature = "ai-protocol")]
+            {
+                if config.agent.bounded_dag_live {
+                    let planned = {
+                        let use_cache = crate::agent::bounded_dag_live::should_reuse_cached_dag(
+                            host_phase, &msg,
+                        );
+                        if !use_cache {
+                            crate::agent::bounded_dag_live::clear_session_dag_state(
+                                mem.as_ref(),
+                                session_id.as_str(),
+                            )
+                            .await?;
+                        }
+                        crate::agent::bounded_dag_live::obtain_planned_live_dag_with_provider(
+                            &config.agent,
+                            mem.as_ref(),
+                            session_id.as_str(),
+                            provider.as_ref(),
+                            &model_name,
+                            &enriched,
+                            temperature,
+                            use_cache,
+                        )
+                        .await?
+                    };
+                    if host_phase == crate::agent::host_phase::HostPhase::Plan {
+                        planned.preview_with_contact(&model_name, &available_hints)
+                    } else {
+                        let dag_base_len = history.len();
+                        let dag = &planned.dag;
+                        let order = &planned.order;
+                        let by_id: HashMap<_, _> =
+                            dag.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+                        let mut parts = Vec::new();
+                        let mut prior: Vec<String> = Vec::new();
+                        for id in order {
+                            let node = by_id
+                                .get(id.as_str())
+                                .ok_or_else(|| anyhow::anyhow!("bounded DAG missing node {id}"))?;
+                            let retrieve = crate::agent::bounded_dag_context::node_retrieve_texts(
+                                mem.as_ref(),
+                                &config.workspace_dir,
+                                session_id.as_str(),
+                                node,
+                                &prior,
+                            )
+                            .await;
+                            crate::agent::bounded_dag_context::reset_chat_scope(
+                                &mut history,
+                                dag_base_len,
+                                node,
+                                &retrieve,
+                            );
+                            crate::agent::context_orch::prepare_turn_history(
+                                &mut history,
+                                crate::agent::context_orch::PrepareHistoryOpts {
+                                    layered: config.agent.envelope_assemble,
+                                    compact_context: config.agent.compact_context,
+                                    async_pool: config.agent.envelope_assemble_async,
+                                    max_history: config.agent.max_history_messages,
+                                    extra_chunks: &extra_chunks,
+                                    summarizer: Some(&summarizer),
+                                },
+                            )
+                            .await?;
+                            let contact = crate::agent::bounded_dag_context::contact_for_node(
+                                node,
+                                &model_name,
+                                &available_hints,
+                                None,
+                            );
+                            let node_provider =
+                                crate::protocol_registry::provider_id_from_logical(&contact.model);
+                            let piece = run_tool_call_loop(
+                                provider.as_ref(),
+                                &mut history,
+                                &tools_registry,
+                                &progress_obs,
+                                node_provider,
+                                &contact.model,
+                                temperature,
+                                false,
+                                Some(&approval_manager),
+                                approval_channel,
+                                &config.multimodal,
+                                config.agent.max_tool_iterations,
+                                None,
+                                None,
+                                tool_dispatcher_ref,
+                                Some(&security),
+                                None,
+                                text_tool_result_history,
+                                render_opts,
+                                None,
+                                Some(SoftFailLoopCtx {
+                                    session_key: session_id.as_str(),
+                                    config: Some(&config),
+                                    host_decide: None,
+                                    surface: velaclaw_agent_runtime::SoftFailSurface::Cli,
+                                    peer_logical_ids: &[],
+                                }),
+                                Some(&cli_gate_extras),
+                            )
+                            .await?;
+                            let _ = crate::agent::bounded_dag_context::store_node_artifact(
+                                mem.as_ref(),
+                                session_id.as_str(),
+                                &node.id,
+                                &piece,
+                            )
+                            .await;
+                            parts.push(format!(
+                                "## {}\n{}\n{piece}",
+                                node.id,
+                                contact.observe_line()
+                            ));
+                            prior.push(node.id.clone());
+                        }
+                        parts.join("\n\n")
+                    }
+                } else {
+                    run_tool_call_loop(
+                        provider.as_ref(),
+                        &mut history,
+                        &tools_registry,
+                        &progress_obs,
+                        provider_name,
+                        &turn_model,
+                        temperature,
+                        false,
+                        Some(&approval_manager),
+                        approval_channel,
+                        &config.multimodal,
+                        config.agent.max_tool_iterations,
+                        None,
+                        None,
+                        tool_dispatcher_ref,
+                        Some(&security),
+                        None,
+                        text_tool_result_history,
+                        render_opts,
+                        None,
+                        Some(SoftFailLoopCtx {
+                            session_key: session_id.as_str(),
+                            config: Some(&config),
+                            host_decide: None,
+                            surface: velaclaw_agent_runtime::SoftFailSurface::Cli,
+                            peer_logical_ids: &[],
+                        }),
+                        Some(&cli_gate_extras),
+                    )
+                    .await?
+                }
+            }
+            #[cfg(not(feature = "ai-protocol"))]
+            {
+                run_tool_call_loop(
+                    provider.as_ref(),
+                    &mut history,
+                    &tools_registry,
+                    &progress_obs,
+                    provider_name,
+                    &turn_model,
+                    temperature,
+                    false,
+                    Some(&approval_manager),
+                    approval_channel,
+                    &config.multimodal,
+                    config.agent.max_tool_iterations,
+                    None,
+                    None,
+                    tool_dispatcher_ref,
+                    Some(&security),
+                    None,
+                    text_tool_result_history,
+                    render_opts,
+                    None,
+                    Some(SoftFailLoopCtx {
+                        session_key: session_id.as_str(),
+                        config: Some(&config),
+                        surface: velaclaw_agent_runtime::SoftFailSurface::Cli,
+                        peer_logical_ids: &[],
+                    }),
+                    Some(&cli_gate_extras),
+                )
+                .await?
+            }
+        };
         final_output = response.clone();
         let rendered = render_opts.render(&response);
         println!("{}", prefix_agent_lines(&rendered, render_opts.style));
@@ -885,38 +1043,206 @@ pub async fn run(
                 Arc::clone(&fold_cache),
             );
 
-            let loop_result = run_tool_call_loop(
-                provider.as_ref(),
-                &mut history,
-                &tools_registry,
-                &progress_obs,
-                provider_name,
-                &turn_model,
-                temperature,
-                false,
-                Some(&approval_manager),
-                approval_channel,
-                &config.multimodal,
-                config.agent.max_tool_iterations,
-                Some(cancel.token()),
-                None,
-                tool_dispatcher_ref,
-                Some(&security),
-                None,
-                text_tool_result_history,
-                render_opts,
-                Some(&fold_cache),
-                Some(SoftFailLoopCtx {
-                    session_key: session_id.as_str(),
-                    config: Some(&config),
-                    #[cfg(feature = "ai-protocol")]
-                    host_decide: None,
-                    surface: velaclaw_agent_runtime::SoftFailSurface::Cli,
-                    peer_logical_ids: &[],
-                }),
-                Some(&cli_gate_extras),
-            )
-            .await;
+            let loop_result = {
+                #[cfg(feature = "ai-protocol")]
+                {
+                    async {
+                        if config.agent.bounded_dag_live {
+                            let planned = {
+                                let use_cache =
+                                    crate::agent::bounded_dag_live::should_reuse_cached_dag(
+                                        host_phase,
+                                        &user_input,
+                                    );
+                                if !use_cache {
+                                    crate::agent::bounded_dag_live::clear_session_dag_state(
+                                        mem.as_ref(),
+                                        session_id.as_str(),
+                                    )
+                                    .await?;
+                                }
+                                crate::agent::bounded_dag_live::obtain_planned_live_dag_with_provider(
+                                    &config.agent,
+                                    mem.as_ref(),
+                                    session_id.as_str(),
+                                    provider.as_ref(),
+                                    &session_model,
+                                    &enriched,
+                                    temperature,
+                                    use_cache,
+                                )
+                                .await?
+                            };
+                            if host_phase == crate::agent::host_phase::HostPhase::Plan {
+                                return Ok(planned.preview_with_contact(
+                                    &session_model,
+                                    &available_hints,
+                                ));
+                            }
+                            let dag = &planned.dag;
+                            let order = &planned.order;
+                            let by_id: HashMap<_, _> =
+                                dag.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+                            let mut parts = Vec::new();
+                            let dag_base_len = history.len();
+                            let mut prior: Vec<String> = Vec::new();
+                            for id in order {
+                                let node = by_id.get(id.as_str()).ok_or_else(|| {
+                                    anyhow::anyhow!("bounded DAG missing node {id}")
+                                })?;
+                                let retrieve =
+                                    crate::agent::bounded_dag_context::node_retrieve_texts(
+                                        mem.as_ref(),
+                                        &config.workspace_dir,
+                                        session_id.as_str(),
+                                        node,
+                                        &prior,
+                                    )
+                                    .await;
+                                crate::agent::bounded_dag_context::reset_chat_scope(
+                                    &mut history,
+                                    dag_base_len,
+                                    node,
+                                    &retrieve,
+                                );
+                                crate::agent::context_orch::prepare_turn_history(
+                                    &mut history,
+                                    crate::agent::context_orch::PrepareHistoryOpts {
+                                        layered: config.agent.envelope_assemble,
+                                        compact_context: config.agent.compact_context,
+                                        async_pool: config.agent.envelope_assemble_async,
+                                        max_history: config.agent.max_history_messages,
+                                        extra_chunks: &extra_chunks,
+                                        summarizer: Some(&summarizer),
+                                    },
+                                )
+                                .await?;
+                                let contact = crate::agent::bounded_dag_context::contact_for_node(
+                                    node,
+                                    &session_model,
+                                    &available_hints,
+                                    None,
+                                );
+                                let node_provider =
+                                    crate::protocol_registry::provider_id_from_logical(
+                                        &contact.model,
+                                    );
+                                let piece = run_tool_call_loop(
+                                    provider.as_ref(),
+                                    &mut history,
+                                    &tools_registry,
+                                    &progress_obs,
+                                    node_provider,
+                                    &contact.model,
+                                    temperature,
+                                    false,
+                                    Some(&approval_manager),
+                                    approval_channel,
+                                    &config.multimodal,
+                                    config.agent.max_tool_iterations,
+                                    Some(cancel.token()),
+                                    None,
+                                    tool_dispatcher_ref,
+                                    Some(&security),
+                                    None,
+                                    text_tool_result_history,
+                                    render_opts,
+                                    Some(&fold_cache),
+                                    Some(SoftFailLoopCtx {
+                                        session_key: session_id.as_str(),
+                                        config: Some(&config),
+                                        host_decide: None,
+                                        surface: velaclaw_agent_runtime::SoftFailSurface::Cli,
+                                        peer_logical_ids: &[],
+                                    }),
+                                    Some(&cli_gate_extras),
+                                )
+                                .await?;
+                                let _ = crate::agent::bounded_dag_context::store_node_artifact(
+                                    mem.as_ref(),
+                                    session_id.as_str(),
+                                    &node.id,
+                                    &piece,
+                                )
+                                .await;
+                                parts.push(format!(
+                                    "## {}\n{}\n{piece}",
+                                    node.id,
+                                    contact.observe_line()
+                                ));
+                                prior.push(node.id.clone());
+                            }
+                            Ok(parts.join("\n\n"))
+                        } else {
+                            run_tool_call_loop(
+                                provider.as_ref(),
+                                &mut history,
+                                &tools_registry,
+                                &progress_obs,
+                                provider_name,
+                                &turn_model,
+                                temperature,
+                                false,
+                                Some(&approval_manager),
+                                approval_channel,
+                                &config.multimodal,
+                                config.agent.max_tool_iterations,
+                                Some(cancel.token()),
+                                None,
+                                tool_dispatcher_ref,
+                                Some(&security),
+                                None,
+                                text_tool_result_history,
+                                render_opts,
+                                Some(&fold_cache),
+                                Some(SoftFailLoopCtx {
+                                    session_key: session_id.as_str(),
+                                    config: Some(&config),
+                                    host_decide: None,
+                                    surface: velaclaw_agent_runtime::SoftFailSurface::Cli,
+                                    peer_logical_ids: &[],
+                                }),
+                                Some(&cli_gate_extras),
+                            )
+                            .await
+                        }
+                    }
+                    .await
+                }
+                #[cfg(not(feature = "ai-protocol"))]
+                {
+                    run_tool_call_loop(
+                        provider.as_ref(),
+                        &mut history,
+                        &tools_registry,
+                        &progress_obs,
+                        provider_name,
+                        &turn_model,
+                        temperature,
+                        false,
+                        Some(&approval_manager),
+                        approval_channel,
+                        &config.multimodal,
+                        config.agent.max_tool_iterations,
+                        Some(cancel.token()),
+                        None,
+                        tool_dispatcher_ref,
+                        Some(&security),
+                        None,
+                        text_tool_result_history,
+                        render_opts,
+                        Some(&fold_cache),
+                        Some(SoftFailLoopCtx {
+                            session_key: session_id.as_str(),
+                            config: Some(&config),
+                            surface: velaclaw_agent_runtime::SoftFailSurface::Cli,
+                            peer_logical_ids: &[],
+                        }),
+                        Some(&cli_gate_extras),
+                    )
+                    .await
+                }
+            };
             let response = match cancel.conclude(loop_result).await {
                 crate::agent::turn_cancel::TurnFinish::Completed(resp) => resp,
                 crate::agent::turn_cancel::TurnFinish::Cancelled => {

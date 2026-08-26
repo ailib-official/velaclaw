@@ -10,12 +10,51 @@ use crate::providers::{ChatMessage, ChatRequest, Provider};
 use anyhow::Result;
 
 /// Compact schema constraint for the planner model (not the full JSON Schema document).
-pub const DAG_PLAN_SYSTEM_PROMPT: &str = r#"You are a DAG planner. Reply with ONLY one JSON object (no markdown fences, no prose).
+pub const DAG_PLAN_SYSTEM_PROMPT: &str = r#"You are a DAG planner. Reply with ONLY one JSON object (no markdown fences, no prose, no tool calls).
 The object MUST use schema_version "0.1.0" and include:
-- id (string), entry (string node id), max_steps (number)
-- nodes: array of { id, task_type, model_selector: { capabilities: string[] }, next: string|null }
+- id (string), entry (string node id), max_steps (number, <= 8)
+- nodes: 2 to 6 items of { id, task_type, model_selector: { capabilities: string[] }, next: string|null, context_requirements?: { layers: number[], retrieve?: object[] } }
 capabilities MUST be tags such as coding, tool_calling, high-reasoning, speed, document_understanding.
-Do not include executable scripts. Linear or simple DAGs only."#;
+Use document_understanding for reading/summarizing; coding for patches and shell ops; tool_calling for status/checks; high-reasoning for analysis; speed for short cheap checks.
+Do not name providers or model IDs — only capability tags.
+The graph MUST be a single linear chain: entry walks next until null and covers every node (no branches, no unused nodes).
+Plan for a generic task (ops, documents, planning, review, code, research) — do not assume a single domain.
+Every non-entry node SHOULD set context_requirements.layers including 3 and/or retrieve [{kind:"tool_result"}] so the next step receives the previous node's artifact. The runtime also injects that artifact if omitted.
+Do not include executable scripts.
+
+Example (inspect then summarize — any ops/status task):
+{"schema_version":"0.1.0","id":"inspect-summarize","entry":"inspect","max_steps":8,"nodes":[{"id":"inspect","task_type":"ops-check","model_selector":{"capabilities":["tool_calling","coding"]},"next":"report"},{"id":"report","task_type":"summarize","model_selector":{"capabilities":["document_understanding","speed"]},"context_requirements":{"layers":[3],"retrieve":[{"kind":"tool_result"}]},"next":null}]}
+
+Example (read then write then review — any document/planning task):
+{"schema_version":"0.1.0","id":"read-write-review","entry":"read","max_steps":8,"nodes":[{"id":"read","task_type":"summarize","model_selector":{"capabilities":["document_understanding"]},"next":"write"},{"id":"write","task_type":"write","model_selector":{"capabilities":["high-reasoning"]},"context_requirements":{"layers":[3],"retrieve":[{"kind":"tool_result"}]},"next":"review"},{"id":"review","task_type":"review","model_selector":{"capabilities":["high-reasoning","document_understanding"]},"context_requirements":{"layers":[3],"retrieve":[{"kind":"tool_result"}]},"next":null}]}"#;
+
+/// Tool-free planner turn: one system prompt + user task → raw model text.
+pub async fn planner_chat_text(
+    provider: &dyn Provider,
+    planner_model: &str,
+    user_task: &str,
+    temperature: f64,
+) -> Result<String> {
+    let messages = [
+        ChatMessage::system(DAG_PLAN_SYSTEM_PROMPT),
+        ChatMessage::user(format!(
+            "User task:\n{user_task}\n\nProduce the DAG JSON object now."
+        )),
+    ];
+    let request = ChatRequest {
+        messages: &messages,
+        tools: None,
+    };
+    let response = provider.chat(request, planner_model, temperature).await?;
+    let text = response.text_or_empty();
+    tracing::info!(
+        target: "bounded_dag_planner",
+        model = %planner_model,
+        chars = text.len(),
+        "planner model returned candidate text"
+    );
+    Ok(text.to_string())
+}
 
 /// Extract a JSON object from model text (fenced ```json or raw `{...}`).
 #[must_use]
@@ -90,26 +129,9 @@ pub async fn plan_emit_or_fallback(
         return Ok(None);
     }
 
-    let messages = [
-        ChatMessage::system(DAG_PLAN_SYSTEM_PROMPT),
-        ChatMessage::user(format!(
-            "User task:\n{user_task}\n\nProduce the DAG JSON object now."
-        )),
-    ];
-    let request = ChatRequest {
-        messages: &messages,
-        tools: None,
-    };
-    let response = provider.chat(request, planner_model, temperature).await?;
-    let text = response.text_or_empty();
-    tracing::info!(
-        target: "dag_plan_emit",
-        model = %planner_model,
-        chars = text.len(),
-        "planner model returned candidate text"
-    );
+    let text = planner_chat_text(provider, planner_model, user_task, temperature).await?;
     Ok(Some(emit_or_fallback(
-        text,
+        &text,
         fallback_template_json,
         options,
     )?))

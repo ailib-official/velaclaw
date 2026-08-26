@@ -9,6 +9,7 @@
     lastAssistantHasVelaClawNotice,
     looksLikeVelaClawNotice,
     outboundChatHistory,
+    parseLiveDagPreview,
     streamChat,
     type ChatMessage,
   } from "./lib/chat";
@@ -94,6 +95,16 @@
   let dashboardView = $state<DashboardView | null>(null);
   let dashboardLoading = $state(false);
   let routingDiagnostics = $state<RoutingDiagnosticsView | null>(null);
+  let hostPhase = $state<"plan" | "build">("build");
+  let boundedDagLive = $state(false);
+  let lastDagPreview = $derived.by(() => {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      if (messages[i].role === "assistant") {
+        return parseLiveDagPreview(messages[i].content);
+      }
+    }
+    return null;
+  });
 
   let listEl: HTMLDivElement | undefined;
   let inputEl: HTMLTextAreaElement | undefined;
@@ -411,6 +422,23 @@
     }
   }
 
+  async function loadChatAgentFlags() {
+    if (!token) {
+      boundedDagLive = false;
+      return;
+    }
+    try {
+      const cfg = await fetchConfig(token);
+      const agent = cfg.agent as Record<string, unknown> | undefined;
+      boundedDagLive = agent?.bounded_dag_live === true;
+      if (boundedDagLive) {
+        hostPhase = "plan";
+      }
+    } catch {
+      boundedDagLive = false;
+    }
+  }
+
   async function loadSettings() {
     if (!token) return;
     try {
@@ -457,6 +485,7 @@
     void (async () => {
       await refreshMeta();
       await loadSessions();
+      await loadChatAgentFlags();
       const params = new URLSearchParams(window.location.search);
       const requested = params.get("tab");
       const tabs: Tab[] = ["overview", "chat", "sessions", "memory", "cron", "tools", "settings"];
@@ -485,7 +514,10 @@
     }
     window.history.replaceState({}, "", `${url.pathname}${url.search}`);
     if (next === "overview") loadOverview();
-    if (next === "chat" || next === "sessions") void loadSessions();
+    if (next === "chat" || next === "sessions") {
+      void loadSessions();
+      if (next === "chat") void loadChatAgentFlags();
+    }
     if (next === "memory") loadMemory();
     if (next === "cron") loadCron();
     if (next === "tools") loadTools();
@@ -528,6 +560,7 @@
       sessionId,
       messages: history,
       modelId: selectedModel || undefined,
+      hostPhase,
       onDelta: (chunk) => {
         messages = appendAssistantDelta(messages, chunk);
         scrollToBottom();
@@ -749,13 +782,50 @@
         </div>
 
         <footer>
+          <div class="phase-row">
+            <label>
+              <input type="radio" name="host-phase" value="plan" bind:group={hostPhase} disabled={streaming} />
+              Plan
+            </label>
+            <label>
+              <input type="radio" name="host-phase" value="build" bind:group={hostPhase} disabled={streaming} />
+              Build
+            </label>
+            {#if boundedDagLive}
+              <span class="hint">AI Native: Plan = DeepSeek Flash 规划任务图 · Build = 按节点 Contact（DeepSeek / Groq / NVIDIA NIM）</span>
+            {:else}
+              <span class="hint">Plan blocks mutating tools (same as CLI --plan). Enable [agent].bounded_dag_live for linear DAG steps.</span>
+            {/if}
+          </div>
+          {#if boundedDagLive && lastDagPreview}
+            <div class="dag-rail" aria-label="Task DAG">
+              <div class="dag-rail-head">
+                <strong>{lastDagPreview.dagId}</strong>
+                {#if lastDagPreview.fallback}
+                  <span class="dag-fallback">fallback graph</span>
+                {/if}
+                <span class="hint">switch to Build to run</span>
+              </div>
+              <ol class="dag-nodes">
+                {#each lastDagPreview.nodes as n}
+                  <li>
+                    <span class="dag-id">{n.id}</span>
+                    <span class="dag-caps">{n.caps}</span>
+                  </li>
+                {/each}
+              </ol>
+            </div>
+          {/if}
+          <div class="composer-row">
           <textarea
             bind:this={inputEl}
             class="composer"
             rows="4"
             bind:value={input}
             onkeydown={onKeydown}
-            placeholder="Message… (Enter to send, Shift+Enter for newline)"
+            placeholder={boundedDagLive
+              ? "Describe a general task… Plan first (task graph), then switch to Build."
+              : "Message… (Enter to send, Shift+Enter for newline)"}
             disabled={streaming}
           ></textarea>
           {#if streaming}
@@ -763,6 +833,7 @@
           {:else}
             <button type="button" onclick={send} disabled={!input.trim()}>Send</button>
           {/if}
+          </div>
         </footer>
       </div>
     </div>
@@ -1373,9 +1444,73 @@
   }
   footer {
     display: flex;
+    flex-direction: column;
     gap: 0.5rem;
     align-items: stretch;
     flex-shrink: 0;
+  }
+  .composer-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: stretch;
+  }
+  .phase-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  .phase-row label {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.85rem;
+    color: #cbd5e1;
+  }
+  .dag-rail {
+    width: 100%;
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 0.6rem 0.75rem;
+    margin: 0.35rem 0 0.5rem;
+  }
+  .dag-rail-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.5rem;
+    margin-bottom: 0.4rem;
+  }
+  .dag-fallback {
+    font-size: 0.75rem;
+    color: #fbbf24;
+  }
+  .dag-nodes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .dag-nodes li {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    background: #0f172a;
+    border-radius: 6px;
+    padding: 0.35rem 0.5rem;
+    min-width: 7rem;
+  }
+  .dag-id {
+    font-family: monospace;
+    font-weight: 600;
+    font-size: 0.85rem;
+  }
+  .dag-caps {
+    font-size: 0.7rem;
+    color: #94a3b8;
   }
   textarea {
     flex: 1;

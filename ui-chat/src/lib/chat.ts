@@ -81,6 +81,8 @@ export interface StreamChatOptions {
   sessionId?: string;
   modelId?: string;
   temperature?: number;
+  /** CLI `--plan` equivalent. Default `"build"`. */
+  hostPhase?: "plan" | "build";
   onDelta: (chunk: string) => void;
   onDone: (frame: WsServerFrame) => void;
   onError: (message: string) => void;
@@ -104,19 +106,38 @@ function wsUrl(token: string): string {
   return `${proto}//${host}/ws${q}`;
 }
 
+export function chatClientFrame(opts: {
+  messages: ChatMessage[];
+  sessionId?: string;
+  modelId?: string;
+  temperature?: number;
+  hostPhase?: "plan" | "build";
+}): Record<string, unknown> {
+  return {
+    type: "chat",
+    session_id: opts.sessionId,
+    messages: opts.messages,
+    model_id: opts.modelId,
+    temperature: opts.temperature,
+    host_phase: opts.hostPhase ?? "build",
+  };
+}
+
 export function streamChat(opts: StreamChatOptions): () => void {
   const socket = new WebSocket(wsUrl(opts.token));
   let closed = false;
 
   socket.addEventListener("open", () => {
     socket.send(
-      JSON.stringify({
-        type: "chat",
-        session_id: opts.sessionId,
-        messages: opts.messages,
-        model_id: opts.modelId,
-        temperature: opts.temperature,
-      }),
+      JSON.stringify(
+        chatClientFrame({
+          messages: opts.messages,
+          sessionId: opts.sessionId,
+          modelId: opts.modelId,
+          temperature: opts.temperature,
+          hostPhase: opts.hostPhase,
+        }),
+      ),
     );
   });
 
@@ -243,4 +264,47 @@ export function applyStepFrame(
   }
   out.push(msg);
   return out;
+}
+
+export type LiveDagPreviewNode = {
+  index: number;
+  id: string;
+  taskType: string;
+  caps: string;
+  next: string;
+};
+
+export type LiveDagPreview = {
+  dagId: string;
+  fallback: boolean;
+  nodes: LiveDagPreviewNode[];
+};
+
+/** Parse Plan-phase bounded DAG preview (VL-NA-015/016 product chrome). */
+export function parseLiveDagPreview(text: string): LiveDagPreview | null {
+  const dagId = text.match(/Bounded task DAG `([^`]+)`/)?.[1];
+  if (!dagId) {
+    return null;
+  }
+  const nodes: LiveDagPreviewNode[] = [];
+  const re =
+    /^(\d+)\.\s+(\S+)\s+task_type=(\S+)\s+caps=(\S*)\s+next=(\S+)\s*$/gm;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    nodes.push({
+      index: Number(m[1]),
+      id: m[2],
+      taskType: m[3],
+      caps: m[4],
+      next: m[5],
+    });
+  }
+  if (nodes.length === 0) {
+    return null;
+  }
+  return {
+    dagId,
+    fallback: text.includes("using handwritten fallback"),
+    nodes,
+  };
 }

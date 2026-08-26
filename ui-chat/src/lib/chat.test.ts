@@ -1,14 +1,16 @@
 import { describe, expect, it } from "vitest";
-import {
-  appendAssistantDelta,
-  appendSystemNotice,
-  applyStatusFrame,
-  applyStepFrame,
-  clearStatusMessages,
-  lastAssistantHasVelaClawNotice,
-  looksLikeVelaClawNotice,
-  outboundChatHistory,
-} from "./chat";
+    import {
+    appendAssistantDelta,
+    appendSystemNotice,
+    applyStatusFrame,
+    applyStepFrame,
+    chatClientFrame,
+    clearStatusMessages,
+    lastAssistantHasVelaClawNotice,
+    looksLikeVelaClawNotice,
+    outboundChatHistory,
+    parseLiveDagPreview,
+  } from "./chat";
 
 describe("appendAssistantDelta", () => {
   it("creates assistant message when none exists", () => {
@@ -132,5 +134,50 @@ describe("progress frames", () => {
       { role: "assistant", content: "done" },
     ]);
     expect(hist.map((m) => m.role)).toEqual(["user", "assistant"]);
+  });
+});
+
+describe("chatClientFrame", () => {
+  it("defaults host_phase to build", () => {
+    const frame = chatClientFrame({
+      messages: [{ role: "user", content: "hi" }],
+    });
+    expect(frame.host_phase).toBe("build");
+    expect(frame.type).toBe("chat");
+  });
+
+  it("sends plan when requested", () => {
+    const frame = chatClientFrame({
+      messages: [{ role: "user", content: "hi" }],
+      hostPhase: "plan",
+      sessionId: "s1",
+    });
+    expect(frame.host_phase).toBe("plan");
+  });
+});
+
+describe("parseLiveDagPreview", () => {
+  it("parses numbered linear nodes", () => {
+    const text = `Planner accepted linear DAG \`paper-slides\`.
+
+Bounded task DAG \`paper-slides\` (2 node(s), max_steps=8). Approve Build to run each node through the existing tool loop.
+
+1. read  task_type=summarize  caps=document_understanding  next=slides
+2. slides  task_type=write  caps=speed  next=(end)
+`;
+    const parsed = parseLiveDagPreview(text);
+    expect(parsed?.dagId).toBe("paper-slides");
+    expect(parsed?.fallback).toBe(false);
+    expect(parsed?.nodes.map((n) => n.id)).toEqual(["read", "slides"]);
+  });
+
+  it("marks handwritten fallback", () => {
+    const text = `Planner output was not a valid linear L2 DAG; using handwritten fallback.
+
+Bounded task DAG \`code-fix-template\` (3 node(s), max_steps=8). Approve Build to run each node through the existing tool loop.
+
+1. locate  task_type=code-fix  caps=coding  next=patch
+`;
+    expect(parseLiveDagPreview(text)?.fallback).toBe(true);
   });
 });

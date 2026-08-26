@@ -703,13 +703,135 @@ impl Agent {
             format!("{context}{user_message}")
         };
 
+        #[cfg(feature = "ai-protocol")]
+        let dag_prefix_len = self.history.len();
         self.history
-            .push(ConversationMessage::Chat(ChatMessage::user(enriched)));
+            .push(ConversationMessage::Chat(ChatMessage::user(
+                enriched.clone(),
+            )));
 
         self.prepare_conversation_history().await?;
 
-        let effective_model = self.classify_model_tracked(user_message)?;
+        #[cfg(feature = "ai-protocol")]
+        if self.config.bounded_dag_live {
+            use crate::agent::host_phase::HostPhase;
+            use std::collections::HashMap;
+            let planned = self
+                .resolve_live_dag(dag_prefix_len, &enriched, user_message)
+                .await?;
+            if self.host_phase == HostPhase::Plan {
+                return Ok(planned.preview_with_contact(&self.model_name, &self.available_hints));
+            }
+            let dag_base_len = self.history.len();
+            self.history.truncate(dag_base_len);
+            let by_id: HashMap<&str, _> = planned
+                .dag
+                .nodes
+                .iter()
+                .map(|n| (n.id.as_str(), n))
+                .collect();
+            let mut prior: Vec<String> = Vec::new();
+            let mut parts = Vec::new();
+            parts.push(format!(
+                "planner source={} used_fallback={}",
+                planned.source, planned.used_fallback
+            ));
+            for id in &planned.order {
+                let node = by_id
+                    .get(id.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("bounded DAG missing node {id}"))?;
+                self.history.truncate(dag_base_len);
+                self.history
+                    .push(ConversationMessage::Chat(ChatMessage::system(
+                        crate::agent::bounded_dag::node_system_note(&node.id, &node.task_type),
+                    )));
+                let retrieve = crate::agent::bounded_dag_context::node_retrieve_texts(
+                    self.memory.as_ref(),
+                    &self.workspace_dir,
+                    self.session_id.as_str(),
+                    node,
+                    &prior,
+                )
+                .await;
+                for text in retrieve {
+                    self.history
+                        .push(ConversationMessage::Chat(ChatMessage::user(text)));
+                }
+                self.prepare_conversation_history().await?;
+                let contact = crate::agent::bounded_dag_context::contact_for_node(
+                    node,
+                    &self.model_name,
+                    &self.available_hints,
+                    None,
+                );
+                self.last_turn_model = Some(contact.to_turn_decision());
+                let text = self
+                    .invoke_tool_loop_resolved(contact.model.clone())
+                    .await?;
+                if let Err(err) = crate::agent::bounded_dag_context::store_node_artifact(
+                    self.memory.as_ref(),
+                    self.session_id.as_str(),
+                    &node.id,
+                    &text,
+                )
+                .await
+                {
+                    tracing::debug!(error = %err, node = %node.id, "bounded DAG artifact store skipped");
+                }
+                parts.push(format!(
+                    "## {}\n{}\n{text}",
+                    node.id,
+                    contact.observe_line()
+                ));
+                prior.push(node.id.clone());
+            }
+            return Ok(parts.join("\n\n"));
+        }
 
+        self.invoke_tool_loop_once(user_message).await
+    }
+
+    #[cfg(feature = "ai-protocol")]
+    async fn resolve_live_dag(
+        &mut self,
+        _prefix_len: usize,
+        enriched: &str,
+        user_message: &str,
+    ) -> Result<crate::agent::bounded_dag_live::PlannedLiveDag> {
+        use crate::agent::bounded_dag_live::{
+            clear_session_dag_state, obtain_planned_live_dag_with_provider, should_reuse_cached_dag,
+        };
+
+        let use_cache = should_reuse_cached_dag(self.host_phase, user_message);
+        if !use_cache {
+            clear_session_dag_state(self.memory.as_ref(), self.session_id.as_str()).await?;
+        }
+        let planned = obtain_planned_live_dag_with_provider(
+            &self.config,
+            self.memory.as_ref(),
+            self.session_id.as_str(),
+            self.provider.as_ref(),
+            &self.model_name,
+            enriched,
+            self.temperature,
+            use_cache,
+        )
+        .await?;
+        self.last_turn_model = Some(crate::orchestration::TurnModelDecision {
+            model: self.model_name.clone(),
+            source: crate::orchestration::TurnModelSource::DefaultModel,
+            reason: "bounded_dag_planner_session_default".into(),
+        });
+        Ok(planned)
+    }
+
+    /// One `run_tool_call_loop` over current history (GOV-007 canonical body).
+    async fn invoke_tool_loop_once(&mut self, user_message: &str) -> Result<String> {
+        let effective_model = self.classify_model_tracked(user_message)?;
+        self.invoke_tool_loop_resolved(effective_model).await
+    }
+
+    async fn invoke_tool_loop_resolved(&mut self, effective_model: String) -> Result<String> {
         // VL-CTX-002 / GOV-007: single tool-iteration body (`run_tool_call_loop`).
         // ApprovalHub / HumanInputHub stay as backend adapters via gate_extras.
         let mut loop_history = self.tool_dispatcher.to_provider_messages(&self.history);

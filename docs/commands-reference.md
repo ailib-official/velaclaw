@@ -54,7 +54,7 @@ Last verified: **July 30, 2026**.
 - `velaclaw agent --peripheral <board:path>`
 - `velaclaw agent --no-color`
 - `velaclaw agent --no-fold`
-- `velaclaw agent --plan -m "Propose a change"` — Plan phase: mutating tools are blocked (default is Build)
+- `velaclaw agent --plan -m "Propose a change"` — Plan phase: mutating tools are blocked (default is Build). With `[agent].bounded_dag_live = true` and empty `bounded_dag_path`, Plan runs a tool-free planner (session default) then prints the linear DAG; omit `--plan` (Build) to run each work node through the existing tool loop. Short Build approvals reuse the session DAG; other Build text replans. Same `host_phase` contract as Web chat.
 - `velaclaw agent --session-id <id> -m "Continue"` — load/save `workspace/.velaclaw/chat_sessions`
 - `velaclaw undo` — restore tracked files to HEAD if workspace already has `.git`
 
@@ -78,6 +78,8 @@ CR-L3-003 async schedule façade (opt-in, default off): set `[agent].envelope_as
 Turn model selection (CLI + Web) shares `orchestration::resolve_turn_model`: explicit user pick → `host_decide` → `intent_capability_route` → `query_classification` / `default_model`. Channels still use `route.model` only. See the wiring matrix in [config-reference.md](config-reference.md#agent).
 
 DAG flags (`template_dag`, `candidate_dag_shadow`, `candidate_dag_emit`) are **library/doctor** gates — they do **not** change live chat. Observe with doctor commands below.
+
+`[agent].bounded_dag_live` is a **separate** opt-in (default `false`): CLI + Web only. Empty path = planner node (session default model) then linear work nodes; not L4 `candidate_dag_emit`. See [config-reference.md](config-reference.md#agent).
 
 Opt-in template DAG shell (CR-L2 library): `agent::dag_runner` walks handwritten DAGs. The `[agent].template_dag` bool is reserved/unused on live turns. Observe with `velaclaw doctor template-dag --fixture <path>`.
 

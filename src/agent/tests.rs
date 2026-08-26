@@ -39,6 +39,7 @@ use crate::security::PolicyHandle;
 use crate::tools::{Tool, ToolExecutionContext, ToolResult};
 use anyhow::Result;
 use async_trait::async_trait;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -50,19 +51,35 @@ use std::sync::{Arc, Mutex};
 struct ScriptedProvider {
     responses: Mutex<Vec<ChatResponse>>,
     /// Records every request for assertion.
-    requests: Mutex<Vec<Vec<ChatMessage>>>,
+    requests: Arc<Mutex<Vec<Vec<ChatMessage>>>>,
+    models: Arc<Mutex<Vec<String>>>,
+    call_count: Arc<AtomicUsize>,
 }
 
 impl ScriptedProvider {
     fn new(responses: Vec<ChatResponse>) -> Self {
         Self {
             responses: Mutex::new(responses),
-            requests: Mutex::new(Vec::new()),
+            requests: Arc::new(Mutex::new(Vec::new())),
+            models: Arc::new(Mutex::new(Vec::new())),
+            call_count: Arc::new(AtomicUsize::new(0)),
         }
     }
 
     fn request_count(&self) -> usize {
         self.requests.lock().unwrap().len()
+    }
+
+    fn call_counter(&self) -> Arc<AtomicUsize> {
+        Arc::clone(&self.call_count)
+    }
+
+    fn recorded_requests(&self) -> Arc<Mutex<Vec<Vec<ChatMessage>>>> {
+        Arc::clone(&self.requests)
+    }
+
+    fn recorded_models(&self) -> Arc<Mutex<Vec<String>>> {
+        Arc::clone(&self.models)
     }
 }
 
@@ -81,9 +98,11 @@ impl Provider for ScriptedProvider {
     async fn chat(
         &self,
         request: ChatRequest<'_>,
-        _model: &str,
+        model: &str,
         _temperature: f64,
     ) -> Result<ChatResponse> {
+        self.call_count.fetch_add(1, Ordering::SeqCst);
+        self.models.lock().unwrap().push(model.to_string());
         self.requests
             .lock()
             .unwrap()
@@ -1337,5 +1356,231 @@ async fn run_single_delegates_to_turn() {
     assert!(
         !response.is_empty(),
         "Expected non-empty response from run_single"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// VL-NA-011: bounded linear DAG live (opt-in)
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[cfg(feature = "ai-protocol")]
+#[tokio::test]
+async fn bounded_dag_plan_runs_planner_then_preview() {
+    let provider = Box::new(ScriptedProvider::new(vec![text_response("not a dag")]));
+    let mut agent = build_agent_with_config(
+        provider,
+        vec![],
+        AgentConfig {
+            bounded_dag_live: true,
+            envelope_assemble: false,
+            ..AgentConfig::default()
+        },
+    );
+    agent.set_host_phase(crate::agent::host_phase::HostPhase::Plan);
+    let out = agent.turn("fix the compiler error").await.unwrap();
+    assert!(out.contains("Planner output was not a valid"), "{out}");
+    assert!(out.contains("locate"), "{out}");
+    assert!(out.contains("patch"), "{out}");
+    assert!(out.contains("verify"), "{out}");
+    assert!(out.contains("Approve Build"), "{out}");
+}
+
+#[cfg(feature = "ai-protocol")]
+#[tokio::test]
+async fn bounded_dag_plan_accepts_planner_json() {
+    let json = r#"{"schema_version":"0.1.0","id":"paper-slides","entry":"read","max_steps":8,"nodes":[{"id":"read","task_type":"summarize","model_selector":{"capabilities":["document_understanding"]},"next":"slides"},{"id":"slides","task_type":"write","model_selector":{"capabilities":["speed"]},"next":null}]}"#;
+    let mut agent = build_agent_with_config(
+        Box::new(ScriptedProvider::new(vec![text_response(json)])),
+        vec![],
+        AgentConfig {
+            bounded_dag_live: true,
+            envelope_assemble: false,
+            ..AgentConfig::default()
+        },
+    );
+    agent.set_host_phase(crate::agent::host_phase::HostPhase::Plan);
+    let out = agent
+        .turn("read this paper, write intro slides")
+        .await
+        .unwrap();
+    assert!(out.contains("paper-slides"), "{out}");
+    assert!(out.contains("read"), "{out}");
+    assert!(out.contains("slides"), "{out}");
+    assert!(!out.contains("locate"), "{out}");
+}
+
+#[cfg(feature = "ai-protocol")]
+#[tokio::test]
+async fn bounded_dag_plan_path_skips_planner() {
+    let tmp = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(tmp.path(), crate::agent::dag_runner::CODE_FIX_TEMPLATE_JSON).unwrap();
+    let mut agent = build_agent_with_config(
+        Box::new(FailingProvider),
+        vec![],
+        AgentConfig {
+            bounded_dag_live: true,
+            bounded_dag_path: Some(tmp.path().to_string_lossy().into_owned()),
+            envelope_assemble: false,
+            ..AgentConfig::default()
+        },
+    );
+    agent.set_host_phase(crate::agent::host_phase::HostPhase::Plan);
+    let out = agent.turn("fix the compiler error").await.unwrap();
+    assert!(out.contains("locate"), "{out}");
+    assert!(out.contains("Approve Build"), "{out}");
+}
+
+#[cfg(feature = "ai-protocol")]
+#[tokio::test]
+async fn bounded_dag_build_one_loop_per_node() {
+    let provider = ScriptedProvider::new(vec![
+        text_response("not a dag"),
+        text_response("not a dag"),
+        text_response("located"),
+        text_response("patched"),
+        text_response("verified"),
+    ]);
+    let calls = provider.call_counter();
+    let mut agent = build_agent_with_config(
+        Box::new(provider),
+        vec![],
+        AgentConfig {
+            bounded_dag_live: true,
+            envelope_assemble: false,
+            ..AgentConfig::default()
+        },
+    );
+    agent.set_host_phase(crate::agent::host_phase::HostPhase::Build);
+    let out = agent.turn("fix the compiler error").await.unwrap();
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        5,
+        "planner retry plus one provider chat per linear node"
+    );
+    assert!(out.contains("## locate"), "{out}");
+    assert!(out.contains("## patch"), "{out}");
+    assert!(out.contains("## verify"), "{out}");
+}
+
+#[cfg(feature = "ai-protocol")]
+#[tokio::test]
+async fn bounded_dag_writeback_and_node_contact() {
+    let (mem, _tmp) = make_sqlite_memory();
+    let provider = ScriptedProvider::new(vec![
+        text_response("not a dag"),
+        text_response("not a dag"),
+        text_response("LOCATE_UNIQUE_BODY"),
+        text_response("PATCH_UNIQUE_BODY"),
+        text_response("VERIFY_OK"),
+    ]);
+    let reqs = provider.recorded_requests();
+    let models = provider.recorded_models();
+    let mut agent = Agent::builder()
+        .provider(Box::new(provider))
+        .tools(Vec::<Box<dyn Tool>>::new())
+        .memory(mem.clone())
+        .observer(make_observer())
+        .tool_dispatcher(Box::new(NativeToolDispatcher::default()))
+        .workspace_dir(std::env::temp_dir())
+        .security(test_security())
+        .config(AgentConfig {
+            bounded_dag_live: true,
+            envelope_assemble: false,
+            ..AgentConfig::default()
+        })
+        .available_hints(vec!["fast".into(), "code".into()])
+        .build()
+        .unwrap();
+    agent.set_session_id("sess-dag");
+    agent.set_host_phase(crate::agent::host_phase::HostPhase::Build);
+    let out = agent.turn("fix the compiler error").await.unwrap();
+    assert!(out.contains("contact model=hint:code"), "{out}");
+    assert!(out.contains("contact model=hint:fast"), "{out}");
+    assert!(out.contains("reason=node_capability:speed"), "{out}");
+
+    let locate = mem
+        .get(&crate::agent::bounded_dag_context::artifact_memory_key(
+            "sess-dag", "locate",
+        ))
+        .await
+        .unwrap()
+        .expect("locate artifact");
+    assert!(
+        locate.content.contains("LOCATE_UNIQUE_BODY"),
+        "{}",
+        locate.content
+    );
+
+    let captured = reqs.lock().unwrap();
+    assert_eq!(captured.len(), 5);
+    let patch_msgs = &captured[3];
+    assert!(
+        !patch_msgs
+            .iter()
+            .any(|m| m.role == "assistant" && m.content.contains("LOCATE_UNIQUE_BODY")),
+        "patch node must not carry prior assistant dump: {patch_msgs:?}"
+    );
+    assert!(
+        patch_msgs
+            .iter()
+            .any(|m| m.content.contains("dag_artifact") && m.content.contains("LOCATE_UNIQUE_BODY")),
+        "patch node should retrieve clipped locate artifact: {patch_msgs:?}"
+    );
+
+    let used = models.lock().unwrap().clone();
+    assert_eq!(used.len(), 5, "planner retry + 3 work nodes; got {used:?}");
+    assert_eq!(
+        &used[2..],
+        [
+            "hint:code".to_string(),
+            "hint:code".to_string(),
+            "hint:fast".to_string()
+        ],
+        "locate/patch coding hint, verify speed hint; got {used:?}"
+    );
+}
+
+#[cfg(feature = "ai-protocol")]
+#[tokio::test]
+async fn bounded_dag_session_picker_does_not_override_contact() {
+    let provider = ScriptedProvider::new(vec![
+        text_response("not a dag"),
+        text_response("not a dag"),
+        text_response("located"),
+        text_response("patched"),
+        text_response("verified"),
+    ]);
+    let models = provider.recorded_models();
+    let mut agent = Agent::builder()
+        .provider(Box::new(provider))
+        .tools(Vec::<Box<dyn Tool>>::new())
+        .memory(make_memory())
+        .observer(make_observer())
+        .tool_dispatcher(Box::new(NativeToolDispatcher::default()))
+        .workspace_dir(std::env::temp_dir())
+        .security(test_security())
+        .config(AgentConfig {
+            bounded_dag_live: true,
+            envelope_assemble: false,
+            ..AgentConfig::default()
+        })
+        .available_hints(vec!["fast".into(), "code".into()])
+        .build()
+        .unwrap();
+    agent.set_explicit_model(Some("deepseek/deepseek-v4-flash".into()));
+    agent.set_host_phase(crate::agent::host_phase::HostPhase::Build);
+    let out = agent.turn("fix the compiler error").await.unwrap();
+    assert!(out.contains("contact model=hint:code"), "{out}");
+    assert!(out.contains("contact model=hint:fast"), "{out}");
+    assert!(!out.contains("reason=explicit_user_pick"), "{out}");
+    let used = models.lock().unwrap().clone();
+    assert_eq!(
+        &used[2..],
+        [
+            "hint:code".to_string(),
+            "hint:code".to_string(),
+            "hint:fast".to_string()
+        ],
+        "work nodes must follow Contact, not the session picker; got {used:?}"
     );
 }

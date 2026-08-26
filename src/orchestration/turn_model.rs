@@ -24,6 +24,8 @@ pub enum TurnModelSource {
     IntentCapabilityRoute,
     QueryClassification,
     DefaultModel,
+    /// Linear L2 DAG node `model_selector.capabilities` (VL-NA-014). Opt-in live only.
+    NodeCapability,
 }
 
 /// Inputs for one turn's model resolution.

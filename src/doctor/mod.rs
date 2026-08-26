@@ -565,6 +565,19 @@ fn check_config_semantics(config: &Config, items: &mut Vec<DiagItem>) {
         } else {
             items.push(DiagItem::warn("contact", contact));
         }
+        let dag_path = config
+            .agent
+            .bounded_dag_path
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or("(empty: live planner; fallback code-fix-template)");
+        items.push(DiagItem::ok(
+            "bounded_dag",
+            format!(
+                "bounded_dag_live={} path={} (opt-in; empty path = planner node then linear work; not L4 emit)",
+                config.agent.bounded_dag_live, dag_path
+            ),
+        ));
     }
 
     // Runtime kind honesty: native host vs docker wrapper (avoid model/container confusion).

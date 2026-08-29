@@ -307,6 +307,33 @@ pub fn provider_id_from_logical(raw: &str) -> &str {
     raw.split_once('/').map(|(p, _)| p).unwrap_or(raw)
 }
 
+/// Map `hint:<name>` to the `[[model_routes]]` logical model; otherwise return `model_or_hint`.
+#[must_use]
+pub fn resolve_route_logical_model(
+    model_or_hint: &str,
+    routes: &[crate::config::ModelRouteConfig],
+) -> String {
+    let raw = model_or_hint.trim();
+    if let Some(hint) = raw.strip_prefix("hint:") {
+        if let Some(route) = routes
+            .iter()
+            .find(|r| r.hint.eq_ignore_ascii_case(hint.trim()))
+        {
+            return route.model.clone();
+        }
+    }
+    raw.to_string()
+}
+
+/// Protocol `context_window` for this hop (`hint:` resolved via `[[model_routes]]`).
+#[must_use]
+pub fn lookup_hop_context_window(
+    model_or_hint: &str,
+    routes: &[crate::config::ModelRouteConfig],
+) -> Option<u32> {
+    lookup_context_window(&resolve_route_logical_model(model_or_hint, routes))
+}
+
 /// Lookup `context_window` for a model from the local ai-protocol registry cache.
 #[must_use]
 pub fn lookup_context_window(model_id: &str) -> Option<u32> {
@@ -767,6 +794,28 @@ endpoint:
             .expect("provider");
         assert_eq!(provider.required_envs, vec!["VELACLAW_PT074_MISSING_TOKEN"]);
         assert!(provider.available);
+    }
+
+    #[test]
+    fn resolve_route_logical_model_maps_hint() {
+        let routes = [crate::config::ModelRouteConfig {
+            hint: "code".into(),
+            provider: "deepseek".into(),
+            model: "deepseek/deepseek-v4-flash".into(),
+            api_key: None,
+        }];
+        assert_eq!(
+            resolve_route_logical_model("hint:code", &routes),
+            "deepseek/deepseek-v4-flash"
+        );
+        assert_eq!(
+            resolve_route_logical_model("deepseek/deepseek-v4-flash", &routes),
+            "deepseek/deepseek-v4-flash"
+        );
+        assert_eq!(
+            resolve_route_logical_model("hint:unknown", &routes),
+            "hint:unknown"
+        );
     }
 
     #[test]

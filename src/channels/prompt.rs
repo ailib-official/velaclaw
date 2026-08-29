@@ -102,6 +102,30 @@ pub fn build_system_prompt_pyramid(
     )
 }
 
+/// Work-node product system: P0+P1 only, compact skills, no bootstrap file bodies.
+#[must_use]
+pub fn build_work_node_system_prompt(
+    workspace_dir: &Path,
+    model_name: &str,
+    tools: &[(&str, &str)],
+    skills: &[crate::skills::Skill],
+    identity_config: Option<&crate::config::IdentityConfig>,
+    native_tools: bool,
+) -> String {
+    build_system_prompt_pyramid(
+        workspace_dir,
+        model_name,
+        tools,
+        skills,
+        identity_config,
+        None,
+        native_tools,
+        crate::config::SkillsPromptInjectionMode::Compact,
+        PromptMode::Minimal,
+        None,
+    )
+}
+
 fn build_system_prompt_with_mode_inner(
     workspace_dir: &Path,
     model_name: &str,

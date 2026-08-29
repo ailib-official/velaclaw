@@ -128,13 +128,30 @@ fn layered_options(compact_context: bool, context_window: Option<u32>) -> Layere
     }
 }
 
+/// Operator-visible hop identity on an existing envelope error (fail-closed; no strip).
+#[must_use]
+pub fn annotate_hop_budget_error(
+    err: anyhow::Error,
+    hop_model: &str,
+    context_window: Option<u32>,
+) -> anyhow::Error {
+    let msg = err.to_string();
+    if msg.contains("HardBudgetViolation") {
+        anyhow::anyhow!(
+            "{msg}; hop_model={hop_model} context_window={context_window:?} (System+Active unstrippable)"
+        )
+    } else {
+        err
+    }
+}
+
 fn map_assemble_error(err: AssembleError) -> anyhow::Error {
     match err {
         AssembleError::HardBudgetViolation {
             critical_tokens,
             budget,
         } => anyhow::anyhow!(
-            "envelope HardBudgetViolation: critical layers need {critical_tokens} tokens but budget is {budget} (refusing to strip System/Active)"
+            "envelope HardBudgetViolation: critical layers (System+Active) need {critical_tokens} tokens but budget is {budget} (refusing to strip System/Active)"
         ),
         AssembleError::EmptyInput => anyhow::anyhow!("envelope assemble: empty input"),
         AssembleError::QueueFull { max_in_flight } => anyhow::anyhow!(
@@ -409,5 +426,15 @@ mod tests {
             .unwrap();
         assert!(kept.iter().any(|m| m.role == "system"));
         assert!(kept.iter().any(|m| m.role == "user" && m.content == "ask"));
+    }
+
+    #[test]
+    fn annotate_hop_budget_appends_model_and_window() {
+        let err = anyhow::anyhow!(
+            "envelope HardBudgetViolation: critical layers (System+Active) need 10 tokens but budget is 1 (refusing to strip System/Active)"
+        );
+        let out = annotate_hop_budget_error(err, "hint:code", Some(128_000)).to_string();
+        assert!(out.contains("hop_model=hint:code"));
+        assert!(out.contains("128000"));
     }
 }

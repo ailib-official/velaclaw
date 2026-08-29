@@ -209,8 +209,22 @@ fn keep_leading_product_system(history: &mut Vec<ChatMessage>) {
 }
 
 /// Rebuild work-node chat: product system + task card + USER TASK + retrieve (no Plan chrome).
-pub fn reset_chat_scope(history: &mut Vec<ChatMessage>, packet: &NodeWorkPacket<'_>) {
-    keep_leading_product_system(history);
+///
+/// `product_system`: when set, replace the leading product system (work-node P0+P1 pack).
+/// When `None`, keep the first non-NODE-TASK system already in `history`.
+pub fn reset_chat_scope(
+    history: &mut Vec<ChatMessage>,
+    packet: &NodeWorkPacket<'_>,
+    product_system: Option<&str>,
+) {
+    if let Some(system) = product_system {
+        history.clear();
+        if !system.trim().is_empty() {
+            history.push(ChatMessage::system(system));
+        }
+    } else {
+        keep_leading_product_system(history);
+    }
     history.push(ChatMessage::system(node_task_card(
         packet.dag_id,
         packet.node,
@@ -410,6 +424,7 @@ mod tests {
                 user_task: "fix the flaky test",
                 retrieve_texts: &[],
             },
+            None,
         );
         let joined: String = history.iter().map(|m| m.content.as_str()).collect();
         assert!(joined.contains("product system"));
@@ -418,6 +433,27 @@ mod tests {
         assert!(joined.contains("next_node_id: patch"));
         assert!(!joined.contains("Approve Build"));
         assert!(!joined.contains("同意"));
+    }
+
+    #[test]
+    fn reset_chat_scope_can_replace_product_system() {
+        let dag = parse_dag_json(CODE_FIX_TEMPLATE_JSON).unwrap();
+        let locate = dag.nodes.iter().find(|n| n.id == "locate").unwrap();
+        let mut history = vec![ChatMessage::system("FAT SYSTEM WITH TOOL JSON")];
+        reset_chat_scope(
+            &mut history,
+            &NodeWorkPacket {
+                dag_id: "code-fix-template",
+                node: locate,
+                index: 1,
+                node_count: 3,
+                user_task: "generic task",
+                retrieve_texts: &[],
+            },
+            Some("slim P0+P1"),
+        );
+        assert_eq!(history[0].content, "slim P0+P1");
+        assert!(!history.iter().any(|m| m.content.contains("FAT SYSTEM")));
     }
 
     #[tokio::test]

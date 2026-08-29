@@ -249,6 +249,7 @@ pub(crate) async fn process_channel_message(
             async_pool: ctx.envelope_pilot.use_async_pool,
             max_history: super::runtime::MAX_CHANNEL_HISTORY,
             extra_chunks: &[],
+            context_window: None,
             summarizer: Some(&summarizer),
         },
     )

@@ -41,12 +41,22 @@ pub fn assemble_history_layered_with_extra(
     extra: &[MessageChunk],
     compact_context: bool,
 ) -> Result<Vec<ChatMessage>> {
+    assemble_history_layered_with_extra_window(history, extra, compact_context, None)
+}
+
+/// Same as [`assemble_history_layered_with_extra`] with protocol `context_window`.
+pub fn assemble_history_layered_with_extra_window(
+    history: &[ChatMessage],
+    extra: &[MessageChunk],
+    compact_context: bool,
+    context_window: Option<u32>,
+) -> Result<Vec<ChatMessage>> {
     let chunks = merge_history_and_extra(history, extra);
     if chunks.is_empty() {
         return Ok(Vec::new());
     }
 
-    let options = layered_options(compact_context);
+    let options = layered_options(compact_context, context_window);
     let report =
         MessageAssembler::assemble_layered(&chunks, &options).map_err(map_assemble_error)?;
 
@@ -74,12 +84,21 @@ pub async fn assemble_history_layered_async_with_extra(
     extra: &[MessageChunk],
     compact_context: bool,
 ) -> Result<Vec<ChatMessage>> {
+    assemble_history_layered_async_with_extra_window(history, extra, compact_context, None).await
+}
+
+pub async fn assemble_history_layered_async_with_extra_window(
+    history: &[ChatMessage],
+    extra: &[MessageChunk],
+    compact_context: bool,
+    context_window: Option<u32>,
+) -> Result<Vec<ChatMessage>> {
     let chunks = merge_history_and_extra(history, extra);
     if chunks.is_empty() {
         return Ok(Vec::new());
     }
 
-    let options = layered_options(compact_context);
+    let options = layered_options(compact_context, context_window);
     let report = MessageAssembler::assemble_layered_async(chunks, options, assemble_pool())
         .await
         .map_err(map_assemble_error)?;
@@ -94,9 +113,11 @@ pub async fn assemble_history_layered_async_with_extra(
     Ok(report.messages.into_iter().map(message_to_chat).collect())
 }
 
-fn layered_options(compact_context: bool) -> LayeredAssembleOptions {
+fn layered_options(compact_context: bool, context_window: Option<u32>) -> LayeredAssembleOptions {
     let budget = if compact_context {
         ContextBudget::new(8_192, 0, 1)
+    } else if let Some(window) = context_window.filter(|w| *w > 0) {
+        ContextBudget::from_capacity(ModelCapacity::new(window, 0), 2)
     } else {
         ContextBudget::from_capacity(ModelCapacity::UNKNOWN, 2)
     };
@@ -239,8 +260,15 @@ pub async fn apply_envelope_pilot_async(
     compact_context: bool,
     use_async_pool: bool,
 ) -> Result<()> {
-    apply_envelope_pilot_async_with_extra(history, &[], enabled, compact_context, use_async_pool)
-        .await
+    apply_envelope_pilot_async_with_extra(
+        history,
+        &[],
+        enabled,
+        compact_context,
+        use_async_pool,
+        None,
+    )
+    .await
 }
 
 pub async fn apply_envelope_pilot_async_with_extra(
@@ -249,16 +277,22 @@ pub async fn apply_envelope_pilot_async_with_extra(
     enabled: bool,
     compact_context: bool,
     use_async_pool: bool,
+    context_window: Option<u32>,
 ) -> Result<()> {
     if !enabled || (history.is_empty() && extra.is_empty()) {
         return Ok(());
     }
     let assembled = if use_async_pool {
-        assemble_history_layered_async_with_extra(history, extra, compact_context)
-            .await
-            .with_context(|| "CR-L3-003 envelope pilot assemble_layered_async")?
+        assemble_history_layered_async_with_extra_window(
+            history,
+            extra,
+            compact_context,
+            context_window,
+        )
+        .await
+        .with_context(|| "CR-L3-003 envelope pilot assemble_layered_async")?
     } else {
-        assemble_history_layered_with_extra(history, extra, compact_context)
+        assemble_history_layered_with_extra_window(history, extra, compact_context, context_window)
             .with_context(|| "CR-L1 envelope pilot assemble_layered")?
     };
     if assembled.is_empty() {
@@ -359,5 +393,21 @@ mod tests {
             .unwrap();
         assert_eq!(hist.len(), before.len());
         assert_eq!(hist[0].content, before[0].content);
+    }
+
+    #[test]
+    fn protocol_context_window_allows_large_system() {
+        let history = vec![
+            ChatMessage::system("S".repeat(100_000)),
+            ChatMessage::user("ask"),
+        ];
+        let err = assemble_history_layered_with_extra_window(&history, &[], false, None)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("HardBudgetViolation"), "{err}");
+        let kept = assemble_history_layered_with_extra_window(&history, &[], false, Some(128_000))
+            .unwrap();
+        assert!(kept.iter().any(|m| m.role == "system"));
+        assert!(kept.iter().any(|m| m.role == "user" && m.content == "ask"));
     }
 }

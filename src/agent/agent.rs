@@ -584,6 +584,7 @@ impl Agent {
                 async_pool: self.config.envelope_assemble_async,
                 max_history: self.config.max_history_messages,
                 extra_chunks: &extra_chunks,
+                context_window: crate::protocol_registry::lookup_context_window(&self.model_name),
                 summarizer: Some(&summarizer),
             },
         )
@@ -721,7 +722,13 @@ impl Agent {
                 enriched.clone(),
             )));
 
-        self.prepare_conversation_history().await?;
+        #[cfg(feature = "ai-protocol")]
+        let skip_pre_envelope = self.config.bounded_dag_live;
+        #[cfg(not(feature = "ai-protocol"))]
+        let skip_pre_envelope = false;
+        if !skip_pre_envelope {
+            self.prepare_conversation_history().await?;
+        }
 
         #[cfg(feature = "ai-protocol")]
         if self.config.bounded_dag_live {

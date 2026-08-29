@@ -564,25 +564,28 @@ pub async fn run(
             provider: provider.as_ref(),
             model: &model_name,
         };
-        let extra_chunks = crate::agent::context_contract::retrieve_turn_extra_chunks(
-            &config.workspace_dir,
-            mem.as_ref(),
-            &msg,
-            Some(session_id.as_str()),
-        )
-        .await;
-        crate::agent::context_orch::prepare_turn_history(
-            &mut history,
-            crate::agent::context_orch::PrepareHistoryOpts {
-                layered: config.agent.envelope_assemble,
-                compact_context: config.agent.compact_context,
-                async_pool: config.agent.envelope_assemble_async,
-                max_history: config.agent.max_history_messages,
-                extra_chunks: &extra_chunks,
-                summarizer: Some(&summarizer),
-            },
-        )
-        .await?;
+        if !config.agent.bounded_dag_live {
+            let extra_chunks = crate::agent::context_contract::retrieve_turn_extra_chunks(
+                &config.workspace_dir,
+                mem.as_ref(),
+                &msg,
+                Some(session_id.as_str()),
+            )
+            .await;
+            crate::agent::context_orch::prepare_turn_history(
+                &mut history,
+                crate::agent::context_orch::PrepareHistoryOpts {
+                    layered: config.agent.envelope_assemble,
+                    compact_context: config.agent.compact_context,
+                    async_pool: config.agent.envelope_assemble_async,
+                    max_history: config.agent.max_history_messages,
+                    extra_chunks: &extra_chunks,
+                    context_window: crate::protocol_registry::lookup_context_window(&model_name),
+                    summarizer: Some(&summarizer),
+                },
+            )
+            .await?;
+        }
 
         let turn_model = resolve_cli_turn_model(
             &config,
@@ -675,6 +678,9 @@ pub async fn run(
                                     async_pool: config.agent.envelope_assemble_async,
                                     max_history: config.agent.max_history_messages,
                                     extra_chunks: no_extra,
+                                    context_window: crate::protocol_registry::lookup_context_window(
+                                        &model_name,
+                                    ),
                                     summarizer: Some(&summarizer),
                                 },
                             )
@@ -1014,25 +1020,32 @@ pub async fn run(
                 provider: provider.as_ref(),
                 model: &session_model,
             };
-            let extra_chunks = crate::agent::context_contract::retrieve_turn_extra_chunks(
-                &config.workspace_dir,
-                mem.as_ref(),
-                &user_input,
-                Some(session_id.as_str()),
-            )
-            .await;
-            let prepare_report = crate::agent::context_orch::prepare_turn_history(
-                &mut history,
-                crate::agent::context_orch::PrepareHistoryOpts {
-                    layered: config.agent.envelope_assemble,
-                    compact_context: config.agent.compact_context,
-                    async_pool: config.agent.envelope_assemble_async,
-                    max_history: config.agent.max_history_messages,
-                    extra_chunks: &extra_chunks,
-                    summarizer: Some(&summarizer),
-                },
-            )
-            .await?;
+            let prepare_report = if config.agent.bounded_dag_live {
+                crate::agent::context_orch::PrepareHistoryReport::default()
+            } else {
+                let extra_chunks = crate::agent::context_contract::retrieve_turn_extra_chunks(
+                    &config.workspace_dir,
+                    mem.as_ref(),
+                    &user_input,
+                    Some(session_id.as_str()),
+                )
+                .await;
+                crate::agent::context_orch::prepare_turn_history(
+                    &mut history,
+                    crate::agent::context_orch::PrepareHistoryOpts {
+                        layered: config.agent.envelope_assemble,
+                        compact_context: config.agent.compact_context,
+                        async_pool: config.agent.envelope_assemble_async,
+                        max_history: config.agent.max_history_messages,
+                        extra_chunks: &extra_chunks,
+                        context_window: crate::protocol_registry::lookup_context_window(
+                            &session_model,
+                        ),
+                        summarizer: Some(&summarizer),
+                    },
+                )
+                .await?
+            };
             if prepare_report.compacted {
                 println!("🧹 Auto-compaction complete");
             }
@@ -1139,6 +1152,9 @@ pub async fn run(
                                         async_pool: config.agent.envelope_assemble_async,
                                         max_history: config.agent.max_history_messages,
                                         extra_chunks: no_extra,
+                                        context_window: crate::protocol_registry::lookup_context_window(
+                                            &session_model,
+                                        ),
                                         summarizer: Some(&summarizer),
                                     },
                                 )
@@ -1306,32 +1322,37 @@ pub async fn run(
             }
 
             // Post-turn prepare: compact overflow + layered (or trim kill-switch).
-            let summarizer = crate::agent::context_orch::HistorySummarizer {
-                provider: provider.as_ref(),
-                model: &session_model,
-            };
-            let extra_chunks = crate::agent::context_contract::retrieve_turn_extra_chunks(
-                &config.workspace_dir,
-                mem.as_ref(),
-                &user_input,
-                Some(session_id.as_str()),
-            )
-            .await;
-            if let Ok(report) = crate::agent::context_orch::prepare_turn_history(
-                &mut history,
-                crate::agent::context_orch::PrepareHistoryOpts {
-                    layered: config.agent.envelope_assemble,
-                    compact_context: config.agent.compact_context,
-                    async_pool: config.agent.envelope_assemble_async,
-                    max_history: config.agent.max_history_messages,
-                    extra_chunks: &extra_chunks,
-                    summarizer: Some(&summarizer),
-                },
-            )
-            .await
-            {
-                if report.compacted {
-                    println!("🧹 Auto-compaction complete");
+            if !config.agent.bounded_dag_live {
+                let summarizer = crate::agent::context_orch::HistorySummarizer {
+                    provider: provider.as_ref(),
+                    model: &session_model,
+                };
+                let extra_chunks = crate::agent::context_contract::retrieve_turn_extra_chunks(
+                    &config.workspace_dir,
+                    mem.as_ref(),
+                    &user_input,
+                    Some(session_id.as_str()),
+                )
+                .await;
+                if let Ok(report) = crate::agent::context_orch::prepare_turn_history(
+                    &mut history,
+                    crate::agent::context_orch::PrepareHistoryOpts {
+                        layered: config.agent.envelope_assemble,
+                        compact_context: config.agent.compact_context,
+                        async_pool: config.agent.envelope_assemble_async,
+                        max_history: config.agent.max_history_messages,
+                        extra_chunks: &extra_chunks,
+                        context_window: crate::protocol_registry::lookup_context_window(
+                            &session_model,
+                        ),
+                        summarizer: Some(&summarizer),
+                    },
+                )
+                .await
+                {
+                    if report.compacted {
+                        println!("🧹 Auto-compaction complete");
+                    }
                 }
             }
         }

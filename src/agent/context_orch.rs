@@ -31,6 +31,9 @@ pub struct PrepareHistoryOpts<'a> {
     /// Host-retrieved Layer chunks (workspace / memory-shaped). Empty = history only.
     #[cfg(feature = "ai-protocol")]
     pub extra_chunks: &'a [ai_lib_rust::context::MessageChunk],
+    /// Protocol `context_window` for envelope budget. `None` = UNKNOWN 24k fallback.
+    #[cfg(feature = "ai-protocol")]
+    pub context_window: Option<u32>,
 }
 
 /// Outcome of [`prepare_turn_history`] for observability / CLI notices.
@@ -73,6 +76,7 @@ pub async fn prepare_turn_history(
                 true,
                 opts.compact_context,
                 opts.async_pool,
+                opts.context_window,
             )
             .await?;
             report.layered_applied = true;
@@ -198,6 +202,7 @@ mod tests {
                 async_pool: false,
                 max_history: 4,
                 extra_chunks: &[],
+                context_window: None,
                 summarizer: None,
             },
         )
@@ -232,6 +237,7 @@ mod tests {
                 async_pool: false,
                 max_history: 10,
                 extra_chunks: &[],
+                context_window: None,
                 summarizer: Some(&summarizer),
             },
         )
@@ -269,6 +275,7 @@ mod tests {
                 async_pool: false,
                 max_history: 8,
                 extra_chunks: &[],
+                context_window: None,
                 summarizer: Some(&summarizer),
             },
         )
@@ -295,6 +302,7 @@ mod tests {
                 async_pool: false,
                 max_history: 32,
                 extra_chunks: &extra,
+                context_window: None,
                 summarizer: None,
             },
         )

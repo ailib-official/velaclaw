@@ -21,6 +21,10 @@ pub struct PromptContext<'a> {
     pub skills_prompt_mode: crate::config::SkillsPromptInjectionMode,
     pub identity_config: Option<&'a IdentityConfig>,
     pub dispatcher_instructions: &'a str,
+    /// Pyramid cutoff (work nodes use [`PromptMode::Minimal`]: P0+P1, no bootstrap bodies).
+    pub prompt_mode: PromptMode,
+    /// When true, tool names/descriptions only; JSON schemas stay on the tools array (native).
+    pub compact_tool_catalog: bool,
 }
 
 pub trait PromptSection: Send + Sync {
@@ -63,7 +67,7 @@ impl SystemPromptBuilder {
             }
             tiered.push(TieredSection::new(section_tier(section.name()), part));
         }
-        Ok(compose(tiered, PromptMode::Full, None))
+        Ok(compose(tiered, ctx.prompt_mode, None))
     }
 }
 
@@ -154,15 +158,21 @@ impl PromptSection for ToolsSection {
     fn build(&self, ctx: &PromptContext<'_>) -> Result<String> {
         let mut out = String::from("## Tools\n\n");
         for tool in ctx.tools {
-            let _ = writeln!(
-                out,
-                "- **{}**: {}\n  Parameters: `{}`",
-                tool.name(),
-                tool.description(),
-                tool.parameters_schema()
-            );
+            if ctx.compact_tool_catalog {
+                let _ = writeln!(out, "- **{}**: {}", tool.name(), tool.description());
+            } else {
+                let _ = writeln!(
+                    out,
+                    "- **{}**: {}\n  Parameters: `{}`",
+                    tool.name(),
+                    tool.description(),
+                    tool.parameters_schema()
+                );
+            }
         }
-        if !ctx.dispatcher_instructions.is_empty() {
+        let keep_dispatcher = !ctx.dispatcher_instructions.is_empty()
+            && (!ctx.compact_tool_catalog || ctx.dispatcher_instructions.contains("<tool_call>"));
+        if keep_dispatcher {
             out.push('\n');
             out.push_str(ctx.dispatcher_instructions);
         }
@@ -295,6 +305,8 @@ mod tests {
             skills_prompt_mode: crate::config::SkillsPromptInjectionMode::Full,
             identity_config: Some(&identity_config),
             dispatcher_instructions: "",
+            prompt_mode: PromptMode::Full,
+            compact_tool_catalog: false,
         };
 
         let section = IdentitySection;
@@ -323,6 +335,8 @@ mod tests {
             skills_prompt_mode: crate::config::SkillsPromptInjectionMode::Full,
             identity_config: None,
             dispatcher_instructions: "instr",
+            prompt_mode: PromptMode::Full,
+            compact_tool_catalog: false,
         };
         let prompt = SystemPromptBuilder::with_defaults().build(&ctx).unwrap();
         assert!(prompt.contains("## Tools"));
@@ -358,6 +372,8 @@ mod tests {
             skills_prompt_mode: crate::config::SkillsPromptInjectionMode::Full,
             identity_config: None,
             dispatcher_instructions: "",
+            prompt_mode: PromptMode::Full,
+            compact_tool_catalog: false,
         };
 
         let output = SkillsSection.build(&ctx).unwrap();
@@ -396,6 +412,8 @@ mod tests {
             skills_prompt_mode: crate::config::SkillsPromptInjectionMode::Compact,
             identity_config: None,
             dispatcher_instructions: "",
+            prompt_mode: PromptMode::Full,
+            compact_tool_catalog: false,
         };
 
         let output = SkillsSection.build(&ctx).unwrap();
@@ -417,6 +435,8 @@ mod tests {
             skills_prompt_mode: crate::config::SkillsPromptInjectionMode::Full,
             identity_config: None,
             dispatcher_instructions: "instr",
+            prompt_mode: PromptMode::Full,
+            compact_tool_catalog: false,
         };
 
         let rendered = DateTimeSection.build(&ctx).unwrap();
@@ -451,6 +471,8 @@ mod tests {
             skills_prompt_mode: crate::config::SkillsPromptInjectionMode::Full,
             identity_config: None,
             dispatcher_instructions: "",
+            prompt_mode: PromptMode::Full,
+            compact_tool_catalog: false,
         };
 
         let prompt = SystemPromptBuilder::with_defaults().build(&ctx).unwrap();
@@ -466,5 +488,26 @@ mod tests {
         assert!(prompt.contains(
             "<instruction>Use &lt;tool_call&gt; and &amp; keep output &quot;safe&quot;</instruction>"
         ));
+    }
+
+    #[test]
+    fn compact_tool_catalog_omits_json_schema() {
+        let tools: Vec<Box<dyn Tool>> = vec![Box::new(TestTool)];
+        let ctx = PromptContext {
+            workspace_dir: Path::new("/tmp/workspace"),
+            model_name: "test-model",
+            tools: &tools,
+            skills: &[],
+            skills_prompt_mode: crate::config::SkillsPromptInjectionMode::Compact,
+            identity_config: None,
+            dispatcher_instructions: "native catalog",
+            prompt_mode: PromptMode::Minimal,
+            compact_tool_catalog: true,
+        };
+        let body = ToolsSection.build(&ctx).unwrap();
+        assert!(body.contains("test_tool"));
+        assert!(body.contains("tool desc"));
+        assert!(!body.contains("Parameters:"));
+        assert!(!body.contains("native catalog"));
     }
 }

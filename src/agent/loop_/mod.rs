@@ -647,6 +647,30 @@ pub async fn run(
                             dag.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
                         let mut parts = Vec::new();
                         let mut prior: Vec<String> = Vec::new();
+                        let mut work_sys = crate::channels::build_work_node_system_prompt(
+                            &config.workspace_dir,
+                            &model_name,
+                            &tool_descs,
+                            &skills,
+                            Some(&config.identity),
+                            native_tools,
+                        );
+                        #[cfg(feature = "ai-protocol")]
+                        if let Some(ref dispatcher) = tool_dispatcher {
+                            let strategy = if text_tool_result_history {
+                                ai_lib_rust::NativeStrategy::Hybrid
+                            } else if dispatcher.should_send_tool_specs() {
+                                ai_lib_rust::NativeStrategy::Full
+                            } else {
+                                ai_lib_rust::NativeStrategy::TextOnly
+                            };
+                            append_text_tool_prompt(
+                                &mut work_sys,
+                                dispatcher.as_ref(),
+                                &tools_registry,
+                                strategy,
+                            );
+                        }
                         for (index, id) in order.iter().enumerate() {
                             let node = by_id
                                 .get(id.as_str())
@@ -659,6 +683,12 @@ pub async fn run(
                                 &prior,
                             )
                             .await;
+                            let contact = crate::agent::bounded_dag_context::contact_for_node(
+                                node,
+                                &model_name,
+                                &available_hints,
+                                None,
+                            );
                             crate::agent::bounded_dag_context::reset_chat_scope(
                                 &mut history,
                                 &crate::agent::bounded_dag_context::NodeWorkPacket {
@@ -669,6 +699,11 @@ pub async fn run(
                                     user_task: &graph_task,
                                     retrieve_texts: &retrieve,
                                 },
+                                Some(work_sys.as_str()),
+                            );
+                            let hop_window = crate::protocol_registry::lookup_hop_context_window(
+                                &contact.model,
+                                &config.model_routes,
                             );
                             crate::agent::context_orch::prepare_turn_history(
                                 &mut history,
@@ -678,19 +713,18 @@ pub async fn run(
                                     async_pool: config.agent.envelope_assemble_async,
                                     max_history: config.agent.max_history_messages,
                                     extra_chunks: no_extra,
-                                    context_window: crate::protocol_registry::lookup_context_window(
-                                        &model_name,
-                                    ),
+                                    context_window: hop_window,
                                     summarizer: Some(&summarizer),
                                 },
                             )
-                            .await?;
-                            let contact = crate::agent::bounded_dag_context::contact_for_node(
-                                node,
-                                &model_name,
-                                &available_hints,
-                                None,
-                            );
+                            .await
+                            .map_err(|err| {
+                                crate::agent::envelope_pilot::annotate_hop_budget_error(
+                                    err,
+                                    &contact.model,
+                                    hop_window,
+                                )
+                            })?;
                             let node_provider =
                                 crate::protocol_registry::provider_id_from_logical(&contact.model);
                             let piece = run_tool_call_loop(
@@ -1120,6 +1154,30 @@ pub async fn run(
                                 dag.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
                             let mut parts = Vec::new();
                             let mut prior: Vec<String> = Vec::new();
+                            let mut work_sys = crate::channels::build_work_node_system_prompt(
+                                &config.workspace_dir,
+                                &session_model,
+                                &tool_descs,
+                                &skills,
+                                Some(&config.identity),
+                                native_tools,
+                            );
+                            #[cfg(feature = "ai-protocol")]
+                            if let Some(ref dispatcher) = tool_dispatcher {
+                                let strategy = if text_tool_result_history {
+                                    ai_lib_rust::NativeStrategy::Hybrid
+                                } else if dispatcher.should_send_tool_specs() {
+                                    ai_lib_rust::NativeStrategy::Full
+                                } else {
+                                    ai_lib_rust::NativeStrategy::TextOnly
+                                };
+                                append_text_tool_prompt(
+                                    &mut work_sys,
+                                    dispatcher.as_ref(),
+                                    &tools_registry,
+                                    strategy,
+                                );
+                            }
                             for (index, id) in order.iter().enumerate() {
                                 let node = by_id.get(id.as_str()).ok_or_else(|| {
                                     anyhow::anyhow!("bounded DAG missing node {id}")
@@ -1133,6 +1191,12 @@ pub async fn run(
                                         &prior,
                                     )
                                     .await;
+                                let contact = crate::agent::bounded_dag_context::contact_for_node(
+                                    node,
+                                    &session_model,
+                                    &available_hints,
+                                    None,
+                                );
                                 crate::agent::bounded_dag_context::reset_chat_scope(
                                     &mut history,
                                     &crate::agent::bounded_dag_context::NodeWorkPacket {
@@ -1143,7 +1207,13 @@ pub async fn run(
                                         user_task: &graph_task,
                                         retrieve_texts: &retrieve,
                                     },
+                                    Some(work_sys.as_str()),
                                 );
+                                let hop_window =
+                                    crate::protocol_registry::lookup_hop_context_window(
+                                        &contact.model,
+                                        &config.model_routes,
+                                    );
                                 crate::agent::context_orch::prepare_turn_history(
                                     &mut history,
                                     crate::agent::context_orch::PrepareHistoryOpts {
@@ -1152,19 +1222,18 @@ pub async fn run(
                                         async_pool: config.agent.envelope_assemble_async,
                                         max_history: config.agent.max_history_messages,
                                         extra_chunks: no_extra,
-                                        context_window: crate::protocol_registry::lookup_context_window(
-                                            &session_model,
-                                        ),
+                                        context_window: hop_window,
                                         summarizer: Some(&summarizer),
                                     },
                                 )
-                                .await?;
-                                let contact = crate::agent::bounded_dag_context::contact_for_node(
-                                    node,
-                                    &session_model,
-                                    &available_hints,
-                                    None,
-                                );
+                                .await
+                                .map_err(|err| {
+                                    crate::agent::envelope_pilot::annotate_hop_budget_error(
+                                        err,
+                                        &contact.model,
+                                        hop_window,
+                                    )
+                                })?;
                                 let node_provider =
                                     crate::protocol_registry::provider_id_from_logical(
                                         &contact.model,

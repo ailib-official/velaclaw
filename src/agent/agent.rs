@@ -532,12 +532,13 @@ impl Agent {
     /// Run [`prepare_turn_history`] on Chat frames and reintegrate without
     /// reordering native `AssistantToolCalls` / `ToolResults` frames.
     async fn prepare_conversation_history(&mut self) -> Result<()> {
-        self.prepare_conversation_history_inner(true).await
+        self.prepare_conversation_history_inner(true, None).await
     }
 
     async fn prepare_conversation_history_inner(
         &mut self,
         include_turn_retrieve: bool,
+        hop_model: Option<&str>,
     ) -> Result<()> {
         let original_chat_count = self
             .history
@@ -576,6 +577,7 @@ impl Agent {
         } else {
             Vec::new()
         };
+        let context_window = self.hop_envelope_window(hop_model);
         crate::agent::context_orch::prepare_turn_history(
             &mut chat_hist,
             crate::agent::context_orch::PrepareHistoryOpts {
@@ -584,14 +586,42 @@ impl Agent {
                 async_pool: self.config.envelope_assemble_async,
                 max_history: self.config.max_history_messages,
                 extra_chunks: &extra_chunks,
-                context_window: crate::protocol_registry::lookup_context_window(&self.model_name),
+                context_window,
                 summarizer: Some(&summarizer),
             },
         )
-        .await?;
+        .await
+        .map_err(|err| {
+            crate::agent::envelope_pilot::annotate_hop_budget_error(
+                err,
+                hop_model.unwrap_or(&self.model_name),
+                context_window,
+            )
+        })?;
         self.history = reintegrate_prepared_chat(&self.history, chat_hist, original_chat_count);
         self.trim_conversation_cap();
         Ok(())
+    }
+
+    fn hop_envelope_window(&self, hop_model: Option<&str>) -> Option<u32> {
+        #[cfg(feature = "ai-protocol")]
+        {
+            let routes = self
+                .intent_route_host
+                .as_ref()
+                .map(|h| h.model_routes.as_slice())
+                .unwrap_or(&[]);
+            if let Some(hop) = hop_model {
+                crate::protocol_registry::lookup_hop_context_window(hop, routes)
+            } else {
+                crate::protocol_registry::lookup_context_window(&self.model_name)
+            }
+        }
+        #[cfg(not(feature = "ai-protocol"))]
+        {
+            let _ = hop_model;
+            None
+        }
     }
 
     fn build_system_prompt(&self) -> Result<String> {
@@ -604,6 +634,29 @@ impl Agent {
             skills_prompt_mode: self.skills_prompt_mode,
             identity_config: Some(&self.identity_config),
             dispatcher_instructions: &instructions,
+            prompt_mode: crate::agent::prompt_composer::PromptMode::Full,
+            compact_tool_catalog: false,
+        };
+        let mut prompt = self.prompt_builder.build(&ctx)?;
+        if let Some(note) = self.host_phase.system_note() {
+            prompt.push_str("\n\n");
+            prompt.push_str(note);
+        }
+        Ok(prompt)
+    }
+
+    fn build_work_node_system_prompt(&self) -> Result<String> {
+        let instructions = self.tool_dispatcher.prompt_instructions(&self.tools);
+        let ctx = PromptContext {
+            workspace_dir: &self.workspace_dir,
+            model_name: &self.model_name,
+            tools: &self.tools,
+            skills: &self.skills,
+            skills_prompt_mode: crate::config::SkillsPromptInjectionMode::Compact,
+            identity_config: Some(&self.identity_config),
+            dispatcher_instructions: &instructions,
+            prompt_mode: crate::agent::prompt_composer::PromptMode::Minimal,
+            compact_tool_catalog: true,
         };
         let mut prompt = self.prompt_builder.build(&ctx)?;
         if let Some(note) = self.host_phase.system_note() {
@@ -769,6 +822,7 @@ impl Agent {
                 "planner source={} used_fallback={}",
                 planned.source, planned.used_fallback
             ));
+            let work_sys = self.build_work_node_system_prompt()?;
             for (index, id) in planned.order.iter().enumerate() {
                 let node = by_id
                     .get(id.as_str())
@@ -781,6 +835,12 @@ impl Agent {
                     &prior,
                 )
                 .await;
+                let contact = crate::agent::bounded_dag_context::contact_for_node(
+                    node,
+                    &self.model_name,
+                    &self.available_hints,
+                    None,
+                );
                 crate::agent::bounded_dag_context::reset_chat_scope(
                     &mut chat_hist,
                     &crate::agent::bounded_dag_context::NodeWorkPacket {
@@ -791,19 +851,15 @@ impl Agent {
                         user_task: &graph_task,
                         retrieve_texts: &retrieve,
                     },
+                    Some(work_sys.as_str()),
                 );
                 self.history = chat_hist
                     .iter()
                     .cloned()
                     .map(ConversationMessage::Chat)
                     .collect();
-                self.prepare_conversation_history_inner(false).await?;
-                let contact = crate::agent::bounded_dag_context::contact_for_node(
-                    node,
-                    &self.model_name,
-                    &self.available_hints,
-                    None,
-                );
+                self.prepare_conversation_history_inner(false, Some(contact.model.as_str()))
+                    .await?;
                 self.last_turn_model = Some(contact.to_turn_decision());
                 let text = self
                     .invoke_tool_loop_resolved(contact.model.clone())

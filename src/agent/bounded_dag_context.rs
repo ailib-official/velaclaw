@@ -5,7 +5,7 @@
 //!
 //! 节点产物写入既有 Memory；下一步只注入合同允许的块。Contact 按节点 capabilities 选 hint。
 
-use super::bounded_dag::node_system_note;
+use super::bounded_dag::{is_aggregate_task_type, node_task_card};
 use super::context_contract::{retrieve_memory_chunks, retrieve_workspace_files};
 use super::dag_runner::DagNode;
 use super::intent_route::{hint_to_tag, hints_for_tag};
@@ -13,6 +13,7 @@ use crate::memory::{Memory, MemoryCategory};
 use crate::orchestration::{TurnModelDecision, TurnModelSource};
 use crate::providers::ChatMessage;
 use anyhow::Result;
+use std::collections::HashSet;
 use std::path::Path;
 
 /// Clip node output stored as a Daily memory row (layer-3 / tool_result retrieve).
@@ -102,6 +103,16 @@ fn chunk_plain_text(chunk: &ai_lib_rust::context::MessageChunk) -> String {
     }
 }
 
+/// Slots for one work-node packet (host-filled; GOV-007 still uses prepare_turn_history).
+pub struct NodeWorkPacket<'a> {
+    pub dag_id: &'a str,
+    pub node: &'a DagNode,
+    pub index: usize,
+    pub node_count: usize,
+    pub user_task: &'a str,
+    pub retrieve_texts: &'a [String],
+}
+
 /// User-role retrieve blobs for this node (workspace / memory / prior artifacts).
 pub async fn node_retrieve_texts(
     mem: &dyn Memory,
@@ -111,7 +122,7 @@ pub async fn node_retrieve_texts(
     prior_ids: &[String],
 ) -> Vec<String> {
     let mut out = Vec::new();
-    let mut injected_prior = false;
+    let mut injected: HashSet<String> = HashSet::new();
 
     for retrieve in &node.context_requirements.retrieve {
         match retrieve.kind.as_str() {
@@ -131,13 +142,16 @@ pub async fn node_retrieve_texts(
                 }
             }
             "tool_result" => {
-                if let Some(prev) = prior_ids.last() {
+                for prev in prior_ids_for_node(node, prior_ids) {
+                    if injected.contains(prev) {
+                        continue;
+                    }
                     if let Ok(Some(body)) = load_node_artifact(mem, session_id, prev).await {
                         out.push(format!(
                             "[dag_artifact node={prev} alias={}]\n{body}",
                             retrieve.alias.as_deref().unwrap_or("tool_result")
                         ));
-                        injected_prior = true;
+                        injected.insert(prev.clone());
                     }
                 }
             }
@@ -152,34 +166,62 @@ pub async fn node_retrieve_texts(
         .layers
         .iter()
         .any(|&layer| layer >= 3);
-    // Live graphs often omit context_requirements. Always pass the previous
-    // node's clipped artifact into the next node so generic tasks (ops, docs,
-    // planning, review) keep a contract handoff without a second tool loop.
-    if !injected_prior {
-        if let Some(prev) = prior_ids.last() {
-            if let Ok(Some(body)) = load_node_artifact(mem, session_id, prev).await {
-                let tag = if wants_summary { "layer=3" } else { "prior" };
-                out.push(format!("[dag_artifact node={prev} {tag}]\n{body}"));
-            }
+    for prev in prior_ids_for_node(node, prior_ids) {
+        if injected.contains(prev) {
+            continue;
+        }
+        if let Ok(Some(body)) = load_node_artifact(mem, session_id, prev).await {
+            let tag = if wants_summary { "layer=3" } else { "prior" };
+            out.push(format!("[dag_artifact node={prev} {tag}]\n{body}"));
+            injected.insert(prev.clone());
         }
     }
 
     out
 }
 
-/// Truncate chat history to the pre-node base, then add node note + retrieve texts.
-pub fn reset_chat_scope(
-    history: &mut Vec<ChatMessage>,
-    base_len: usize,
-    node: &DagNode,
-    retrieve_texts: &[String],
-) {
-    history.truncate(base_len);
-    history.push(ChatMessage::system(node_system_note(
-        &node.id,
-        &node.task_type,
+fn prior_ids_for_node<'a>(node: &DagNode, prior_ids: &'a [String]) -> &'a [String] {
+    if prior_ids.is_empty() {
+        return prior_ids;
+    }
+    if is_aggregate_task_type(&node.task_type) {
+        return prior_ids;
+    }
+    let start = prior_ids.len() - 1;
+    &prior_ids[start..]
+}
+
+fn keep_leading_product_system(history: &mut Vec<ChatMessage>) {
+    let first = history
+        .iter()
+        .find(|message| message.role == "system" && !message.content.starts_with("NODE TASK"))
+        .cloned()
+        .or_else(|| {
+            history
+                .iter()
+                .find(|message| message.role == "system")
+                .cloned()
+        });
+    history.clear();
+    if let Some(system) = first {
+        history.push(system);
+    }
+}
+
+/// Rebuild work-node chat: product system + task card + USER TASK + retrieve (no Plan chrome).
+pub fn reset_chat_scope(history: &mut Vec<ChatMessage>, packet: &NodeWorkPacket<'_>) {
+    keep_leading_product_system(history);
+    history.push(ChatMessage::system(node_task_card(
+        packet.dag_id,
+        packet.node,
+        packet.index,
+        packet.node_count,
     )));
-    for text in retrieve_texts {
+    let task = packet.user_task.trim();
+    if !task.is_empty() {
+        history.push(ChatMessage::user(format!("USER TASK\n{task}")));
+    }
+    for text in packet.retrieve_texts {
         history.push(ChatMessage::user(text.clone()));
     }
 }
@@ -346,5 +388,78 @@ mod tests {
             texts.iter().any(|t| t.contains("dag_artifact")),
             "{texts:?}"
         );
+    }
+
+    #[test]
+    fn reset_chat_scope_drops_plan_preview() {
+        let dag = parse_dag_json(CODE_FIX_TEMPLATE_JSON).unwrap();
+        let locate = dag.nodes.iter().find(|n| n.id == "locate").unwrap();
+        let mut history = vec![
+            ChatMessage::system("product system"),
+            ChatMessage::user("fix the flaky test"),
+            ChatMessage::assistant("Bounded task DAG `code-fix-template`. Approve Build to run."),
+            ChatMessage::user("同意"),
+        ];
+        reset_chat_scope(
+            &mut history,
+            &NodeWorkPacket {
+                dag_id: "code-fix-template",
+                node: locate,
+                index: 1,
+                node_count: 3,
+                user_task: "fix the flaky test",
+                retrieve_texts: &[],
+            },
+        );
+        let joined: String = history.iter().map(|m| m.content.as_str()).collect();
+        assert!(joined.contains("product system"));
+        assert!(joined.contains("USER TASK"));
+        assert!(joined.contains("fix the flaky test"));
+        assert!(joined.contains("next_node_id: patch"));
+        assert!(!joined.contains("Approve Build"));
+        assert!(!joined.contains("同意"));
+    }
+
+    #[tokio::test]
+    async fn summarize_injects_all_prior_artifacts() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = crate::config::MemoryConfig {
+            backend: "sqlite".into(),
+            ..crate::config::MemoryConfig::default()
+        };
+        let mem = crate::memory::create_memory(&cfg, tmp.path(), None).unwrap();
+        let json = r#"{
+          "schema_version": "0.1.0",
+          "id": "generic",
+          "entry": "a",
+          "max_steps": 8,
+          "nodes": [
+            {"id":"a","task_type":"ops-check","model_selector":{"capabilities":["coding"]},"next":"b"},
+            {"id":"b","task_type":"analyze","model_selector":{"capabilities":["document_understanding"]},"next":"c"},
+            {"id":"c","task_type":"summarize","model_selector":{"capabilities":["document_understanding"]},"next":null}
+          ]
+        }"#;
+        let dag = parse_dag_json(json).unwrap();
+        let c = dag.nodes.iter().find(|n| n.id == "c").unwrap();
+        store_node_artifact(mem.as_ref(), "sess", "a", "ALPHA_ONLY")
+            .await
+            .unwrap();
+        store_node_artifact(mem.as_ref(), "sess", "b", "BETA_ONLY")
+            .await
+            .unwrap();
+        let texts = node_retrieve_texts(
+            mem.as_ref(),
+            tmp.path(),
+            "sess",
+            c,
+            &["a".into(), "b".into()],
+        )
+        .await;
+        assert!(texts.iter().any(|t| t.contains("ALPHA_ONLY")), "{texts:?}");
+        assert!(texts.iter().any(|t| t.contains("BETA_ONLY")), "{texts:?}");
+        let b = dag.nodes.iter().find(|n| n.id == "b").unwrap();
+        let mid = node_retrieve_texts(mem.as_ref(), tmp.path(), "sess", b, &["a".into()]).await;
+        assert!(mid.iter().any(|t| t.contains("ALPHA_ONLY")));
+        assert!(!mid.iter().any(|t| t.contains("BETA_ONLY")));
     }
 }

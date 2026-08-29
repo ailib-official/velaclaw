@@ -103,7 +103,42 @@ pub fn format_preview(dag: &DagManifest, order: &[String]) -> String {
     out
 }
 
-/// System note prepended before a node's `run_tool_call_loop` (VL-NA-011).
+/// Host-filled work-node card (VL-NA-018). Fixed slots; not a domain prompt.
+pub fn node_task_card(dag_id: &str, node: &DagNode, index: usize, node_count: usize) -> String {
+    let next = node.next.as_deref().unwrap_or("END");
+    format!(
+        "NODE TASK (host-filled slots; do not rewrite this card)\n\
+         - dag_id: {dag_id}\n\
+         - node_id: {id}\n\
+         - index: {index} of {node_count}\n\
+         - task_type: {task_type}\n\
+         - next_node_id: {next}\n\
+         \n\
+         OBJECTIVE\n\
+         Do only this node's job (task_type) for USER TASK. Do not start {next}. \
+         Do not redo a prior node unless INPUTS lack pointers you need.\n\
+         \n\
+         SUCCESS\n\
+         Stop with a HANDOFF as the last assistant message:\n\
+         - verdict: ok | partial | failed\n\
+         - findings: facts this node established\n\
+         - pointers: identifiers the next node needs (not source dumps)\n\
+         - gaps: unknowns",
+        id = node.id,
+        task_type = node.task_type,
+    )
+}
+
+/// True when this node should receive every prior clip, not only the last.
+#[must_use]
+pub fn is_aggregate_task_type(task_type: &str) -> bool {
+    matches!(
+        task_type.trim().to_ascii_lowercase().as_str(),
+        "summarize" | "report"
+    )
+}
+
+/// Short note kept for tests / older call sites (same job as the card id line).
 pub fn node_system_note(node_id: &str, task_type: &str) -> String {
     format!(
         "You are executing bounded DAG node '{node_id}' (task_type={task_type}). Stay on this node's job; do not skip ahead."
@@ -165,6 +200,27 @@ mod tests {
         let note = node_system_note("locate", "code-fix");
         assert!(note.contains("locate"));
         assert!(note.contains("code-fix"));
+    }
+
+    #[test]
+    fn node_task_card_includes_next_and_handoff() {
+        let dag = parse_dag_json(CODE_FIX_TEMPLATE_JSON).unwrap();
+        let locate = dag.nodes.iter().find(|n| n.id == "locate").unwrap();
+        let card = node_task_card("code-fix-template", locate, 1, 3);
+        assert!(card.contains("next_node_id: patch"));
+        assert!(card.contains("HANDOFF"));
+        assert!(card.contains("pointers:"));
+        assert!(!card.contains("Approve Build"));
+        let verify = dag.nodes.iter().find(|n| n.id == "verify").unwrap();
+        let end = node_task_card("code-fix-template", verify, 3, 3);
+        assert!(end.contains("next_node_id: END"));
+    }
+
+    #[test]
+    fn summarize_is_aggregate_task_type() {
+        assert!(is_aggregate_task_type("summarize"));
+        assert!(is_aggregate_task_type("Report"));
+        assert!(!is_aggregate_task_type("ops-check"));
     }
 
     #[test]

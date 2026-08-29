@@ -36,6 +36,38 @@ pub fn planned_dag_key(session_id: &str) -> String {
     format!("{PLANNED_DAG_KEY_PREFIX}{session_id}")
 }
 
+pub const GRAPH_USER_KEY_PREFIX: &str = "dag_user:";
+
+pub fn graph_user_key(session_id: &str) -> String {
+    format!("{GRAPH_USER_KEY_PREFIX}{session_id}")
+}
+
+/// Persist the Plan-time user task for work-node USER TASK slots.
+pub async fn store_graph_user_task(
+    mem: &dyn Memory,
+    session_id: &str,
+    user_task: &str,
+) -> Result<()> {
+    let trimmed = user_task.trim();
+    if trimmed.is_empty() || is_build_approval(trimmed) {
+        return Ok(());
+    }
+    mem.store(
+        &graph_user_key(session_id),
+        trimmed,
+        crate::memory::MemoryCategory::Daily,
+        Some(session_id),
+    )
+    .await
+}
+
+pub async fn load_graph_user_task(mem: &dyn Memory, session_id: &str) -> Result<Option<String>> {
+    Ok(mem
+        .get(&graph_user_key(session_id))
+        .await?
+        .map(|e| e.content))
+}
+
 /// True when the user is confirming a previewed DAG rather than changing the task.
 #[must_use]
 pub fn is_build_approval(raw: &str) -> bool {
@@ -58,6 +90,45 @@ pub fn is_build_approval(raw: &str) -> bool {
     tokens.iter().all(|t| APPROVAL_TOKENS.contains(&t.as_str()))
 }
 
+/// Prefer Plan-time user text; skip approval tokens and retrieve blobs.
+pub fn user_task_from_history(history: &[ChatMessage], current: &str) -> String {
+    let current = current.trim();
+    if !current.is_empty() && !is_build_approval(current) {
+        return current.to_string();
+    }
+    for message in history.iter().rev() {
+        if message.role != "user" {
+            continue;
+        }
+        let body = message.content.trim();
+        if body.is_empty()
+            || body.starts_with("[dag_artifact")
+            || body.starts_with("USER TASK")
+            || is_build_approval(body)
+        {
+            continue;
+        }
+        return body.to_string();
+    }
+    current.to_string()
+}
+
+/// Stored Plan-time task, else last non-approval user in history.
+pub async fn work_node_user_task(
+    mem: &dyn Memory,
+    session_id: &str,
+    history: &[ChatMessage],
+    current: &str,
+) -> String {
+    if let Ok(Some(stored)) = load_graph_user_task(mem, session_id).await {
+        let trimmed = stored.trim();
+        if !trimmed.is_empty() && !is_build_approval(trimmed) {
+            return trimmed.to_string();
+        }
+    }
+    user_task_from_history(history, current)
+}
+
 /// Build + short approval reuses `dag_plan:<session>`. Plan or a new task invalidates.
 #[must_use]
 pub fn should_reuse_cached_dag(host_phase: HostPhase, user_message: &str) -> bool {
@@ -67,7 +138,9 @@ pub fn should_reuse_cached_dag(host_phase: HostPhase, user_message: &str) -> boo
 /// Drop cached plan + node artifacts for this session (bounded forget count).
 pub async fn clear_session_dag_state(mem: &dyn Memory, session_id: &str) -> Result<()> {
     let plan_key = planned_dag_key(session_id);
+    let user_key = graph_user_key(session_id);
     let _ = mem.forget(&plan_key).await;
+    let _ = mem.forget(&user_key).await;
     let prefix = format!("dag_art:{session_id}:");
     let listed = mem
         .list(Some(&MemoryCategory::Daily), Some(session_id))
@@ -77,7 +150,7 @@ pub async fn clear_session_dag_state(mem: &dyn Memory, session_id: &str) -> Resu
         if i >= MAX_SESSION_DAG_FORGET {
             break;
         }
-        if entry.key == plan_key || entry.key.starts_with(&prefix) {
+        if entry.key == plan_key || entry.key == user_key || entry.key.starts_with(&prefix) {
             let _ = mem.forget(&entry.key).await;
         }
     }
@@ -186,6 +259,7 @@ pub async fn obtain_planned_live_dag_with_provider(
             return Ok(planned);
         }
     } else if let Some((dag, order)) = operator_fixed_live_graph(agent)? {
+        let _ = store_graph_user_task(mem, session_id, user_task).await;
         return Ok(PlannedLiveDag {
             dag,
             order,
@@ -208,6 +282,7 @@ pub async fn obtain_planned_live_dag_with_provider(
             tracing::debug!(error = %err, "bounded DAG plan store skipped");
         }
     }
+    let _ = store_graph_user_task(mem, session_id, user_task).await;
     Ok(planned)
 }
 

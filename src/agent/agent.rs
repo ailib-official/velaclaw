@@ -532,6 +532,13 @@ impl Agent {
     /// Run [`prepare_turn_history`] on Chat frames and reintegrate without
     /// reordering native `AssistantToolCalls` / `ToolResults` frames.
     async fn prepare_conversation_history(&mut self) -> Result<()> {
+        self.prepare_conversation_history_inner(true).await
+    }
+
+    async fn prepare_conversation_history_inner(
+        &mut self,
+        include_turn_retrieve: bool,
+    ) -> Result<()> {
         let original_chat_count = self
             .history
             .iter()
@@ -553,18 +560,22 @@ impl Agent {
             provider: self.provider.as_ref(),
             model: &self.model_name,
         };
-        let extra_chunks = crate::agent::context_contract::retrieve_turn_extra_chunks(
-            &self.workspace_dir,
-            self.memory.as_ref(),
-            chat_hist
-                .iter()
-                .rev()
-                .find(|m| m.role == "user")
-                .map(|m| m.content.as_str())
-                .unwrap_or(""),
-            Some(self.session_id.as_str()),
-        )
-        .await;
+        let extra_chunks = if include_turn_retrieve {
+            crate::agent::context_contract::retrieve_turn_extra_chunks(
+                &self.workspace_dir,
+                self.memory.as_ref(),
+                chat_hist
+                    .iter()
+                    .rev()
+                    .find(|m| m.role == "user")
+                    .map(|m| m.content.as_str())
+                    .unwrap_or(""),
+                Some(self.session_id.as_str()),
+            )
+            .await
+        } else {
+            Vec::new()
+        };
         crate::agent::context_orch::prepare_turn_history(
             &mut chat_hist,
             crate::agent::context_orch::PrepareHistoryOpts {
@@ -722,8 +733,23 @@ impl Agent {
             if self.host_phase == HostPhase::Plan {
                 return Ok(planned.preview_with_contact(&self.model_name, &self.available_hints));
             }
-            let dag_base_len = self.history.len();
-            self.history.truncate(dag_base_len);
+            let dag_id = planned.dag.id.clone();
+            let node_count = planned.order.len();
+            let mut chat_hist: Vec<ChatMessage> = self
+                .history
+                .iter()
+                .filter_map(|m| match m {
+                    ConversationMessage::Chat(c) => Some(c.clone()),
+                    _ => None,
+                })
+                .collect();
+            let graph_task = crate::agent::bounded_dag_live::work_node_user_task(
+                self.memory.as_ref(),
+                self.session_id.as_str(),
+                &chat_hist,
+                user_message,
+            )
+            .await;
             let by_id: HashMap<&str, _> = planned
                 .dag
                 .nodes
@@ -736,15 +762,10 @@ impl Agent {
                 "planner source={} used_fallback={}",
                 planned.source, planned.used_fallback
             ));
-            for id in &planned.order {
+            for (index, id) in planned.order.iter().enumerate() {
                 let node = by_id
                     .get(id.as_str())
                     .ok_or_else(|| anyhow::anyhow!("bounded DAG missing node {id}"))?;
-                self.history.truncate(dag_base_len);
-                self.history
-                    .push(ConversationMessage::Chat(ChatMessage::system(
-                        crate::agent::bounded_dag::node_system_note(&node.id, &node.task_type),
-                    )));
                 let retrieve = crate::agent::bounded_dag_context::node_retrieve_texts(
                     self.memory.as_ref(),
                     &self.workspace_dir,
@@ -753,11 +774,23 @@ impl Agent {
                     &prior,
                 )
                 .await;
-                for text in retrieve {
-                    self.history
-                        .push(ConversationMessage::Chat(ChatMessage::user(text)));
-                }
-                self.prepare_conversation_history().await?;
+                crate::agent::bounded_dag_context::reset_chat_scope(
+                    &mut chat_hist,
+                    &crate::agent::bounded_dag_context::NodeWorkPacket {
+                        dag_id: dag_id.as_str(),
+                        node,
+                        index: index + 1,
+                        node_count,
+                        user_task: &graph_task,
+                        retrieve_texts: &retrieve,
+                    },
+                );
+                self.history = chat_hist
+                    .iter()
+                    .cloned()
+                    .map(ConversationMessage::Chat)
+                    .collect();
+                self.prepare_conversation_history_inner(false).await?;
                 let contact = crate::agent::bounded_dag_context::contact_for_node(
                     node,
                     &self.model_name,
@@ -784,6 +817,14 @@ impl Agent {
                     contact.observe_line()
                 ));
                 prior.push(node.id.clone());
+                chat_hist = self
+                    .history
+                    .iter()
+                    .filter_map(|m| match m {
+                        ConversationMessage::Chat(c) => Some(c.clone()),
+                        _ => None,
+                    })
+                    .collect();
             }
             return Ok(parts.join("\n\n"));
         }
@@ -795,7 +836,7 @@ impl Agent {
     async fn resolve_live_dag(
         &mut self,
         _prefix_len: usize,
-        enriched: &str,
+        _enriched: &str,
         user_message: &str,
     ) -> Result<crate::agent::bounded_dag_live::PlannedLiveDag> {
         use crate::agent::bounded_dag_live::{
@@ -812,7 +853,7 @@ impl Agent {
             self.session_id.as_str(),
             self.provider.as_ref(),
             &self.model_name,
-            enriched,
+            user_message,
             self.temperature,
             use_cache,
         )

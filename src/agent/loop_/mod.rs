@@ -620,7 +620,7 @@ pub async fn run(
                             session_id.as_str(),
                             provider.as_ref(),
                             &model_name,
-                            &enriched,
+                            &msg,
                             temperature,
                             use_cache,
                         )
@@ -629,14 +629,22 @@ pub async fn run(
                     if host_phase == crate::agent::host_phase::HostPhase::Plan {
                         planned.preview_with_contact(&model_name, &available_hints)
                     } else {
-                        let dag_base_len = history.len();
                         let dag = &planned.dag;
                         let order = &planned.order;
+                        let node_count = order.len();
+                        let graph_task = crate::agent::bounded_dag_live::work_node_user_task(
+                            mem.as_ref(),
+                            session_id.as_str(),
+                            &history,
+                            &msg,
+                        )
+                        .await;
+                        let no_extra: &[ai_lib_rust::context::MessageChunk] = &[];
                         let by_id: HashMap<_, _> =
                             dag.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
                         let mut parts = Vec::new();
                         let mut prior: Vec<String> = Vec::new();
-                        for id in order {
+                        for (index, id) in order.iter().enumerate() {
                             let node = by_id
                                 .get(id.as_str())
                                 .ok_or_else(|| anyhow::anyhow!("bounded DAG missing node {id}"))?;
@@ -650,9 +658,14 @@ pub async fn run(
                             .await;
                             crate::agent::bounded_dag_context::reset_chat_scope(
                                 &mut history,
-                                dag_base_len,
-                                node,
-                                &retrieve,
+                                &crate::agent::bounded_dag_context::NodeWorkPacket {
+                                    dag_id: dag.id.as_str(),
+                                    node,
+                                    index: index + 1,
+                                    node_count,
+                                    user_task: &graph_task,
+                                    retrieve_texts: &retrieve,
+                                },
                             );
                             crate::agent::context_orch::prepare_turn_history(
                                 &mut history,
@@ -661,7 +674,7 @@ pub async fn run(
                                     compact_context: config.agent.compact_context,
                                     async_pool: config.agent.envelope_assemble_async,
                                     max_history: config.agent.max_history_messages,
-                                    extra_chunks: &extra_chunks,
+                                    extra_chunks: no_extra,
                                     summarizer: Some(&summarizer),
                                 },
                             )
@@ -1067,7 +1080,7 @@ pub async fn run(
                                     session_id.as_str(),
                                     provider.as_ref(),
                                     &session_model,
-                                    &enriched,
+                                    &user_input,
                                     temperature,
                                     use_cache,
                                 )
@@ -1081,12 +1094,20 @@ pub async fn run(
                             }
                             let dag = &planned.dag;
                             let order = &planned.order;
+                            let node_count = order.len();
+                            let graph_task = crate::agent::bounded_dag_live::work_node_user_task(
+                                mem.as_ref(),
+                                session_id.as_str(),
+                                &history,
+                                &user_input,
+                            )
+                            .await;
+                            let no_extra: &[ai_lib_rust::context::MessageChunk] = &[];
                             let by_id: HashMap<_, _> =
                                 dag.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
                             let mut parts = Vec::new();
-                            let dag_base_len = history.len();
                             let mut prior: Vec<String> = Vec::new();
-                            for id in order {
+                            for (index, id) in order.iter().enumerate() {
                                 let node = by_id.get(id.as_str()).ok_or_else(|| {
                                     anyhow::anyhow!("bounded DAG missing node {id}")
                                 })?;
@@ -1101,9 +1122,14 @@ pub async fn run(
                                     .await;
                                 crate::agent::bounded_dag_context::reset_chat_scope(
                                     &mut history,
-                                    dag_base_len,
-                                    node,
-                                    &retrieve,
+                                    &crate::agent::bounded_dag_context::NodeWorkPacket {
+                                        dag_id: dag.id.as_str(),
+                                        node,
+                                        index: index + 1,
+                                        node_count,
+                                        user_task: &graph_task,
+                                        retrieve_texts: &retrieve,
+                                    },
                                 );
                                 crate::agent::context_orch::prepare_turn_history(
                                     &mut history,
@@ -1112,7 +1138,7 @@ pub async fn run(
                                         compact_context: config.agent.compact_context,
                                         async_pool: config.agent.envelope_assemble_async,
                                         max_history: config.agent.max_history_messages,
-                                        extra_chunks: &extra_chunks,
+                                        extra_chunks: no_extra,
                                         summarizer: Some(&summarizer),
                                     },
                                 )

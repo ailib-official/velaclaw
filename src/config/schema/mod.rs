@@ -2287,7 +2287,7 @@ pub struct TelemetryConfig {
 /// ```
 ///
 /// Usage: pass `hint:reasoning` as the model parameter to route the request.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 pub struct ModelRouteConfig {
     /// Task hint name (e.g. "reasoning", "fast", "code", "summarize")
     pub hint: String,
@@ -2301,18 +2301,6 @@ pub struct ModelRouteConfig {
     /// Same-hint peers after micro-retry (VL-NA-021). Empty = no peer list.
     #[serde(default)]
     pub fallbacks: Vec<ModelRoutePeerConfig>,
-}
-
-impl Default for ModelRouteConfig {
-    fn default() -> Self {
-        Self {
-            hint: String::new(),
-            provider: String::new(),
-            model: String::new(),
-            api_key: None,
-            fallbacks: Vec::new(),
-        }
-    }
 }
 
 /// One peer in `[[model_routes]].fallbacks`.

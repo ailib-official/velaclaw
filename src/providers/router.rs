@@ -231,7 +231,7 @@ impl Provider for RouterProvider {
                 cross,
             ) {
                 Admit::Stop => break,
-                Admit::Skip => continue,
+                Admit::Skip => {}
                 Admit::Take { cross_delta } => {
                     attempts += 1;
                     cross += cross_delta;
@@ -295,7 +295,7 @@ impl Provider for RouterProvider {
                 cross,
             ) {
                 Admit::Stop => break,
-                Admit::Skip => continue,
+                Admit::Skip => {}
                 Admit::Take { cross_delta } => {
                     attempts += 1;
                     cross += cross_delta;
@@ -341,7 +341,7 @@ impl Provider for RouterProvider {
                 cross,
             ) {
                 Admit::Stop => break,
-                Admit::Skip => continue,
+                Admit::Skip => {}
                 Admit::Take { cross_delta } => {
                     attempts += 1;
                     cross += cross_delta;
@@ -388,7 +388,7 @@ impl Provider for RouterProvider {
                 cross,
             ) {
                 Admit::Stop => break,
-                Admit::Skip => continue,
+                Admit::Skip => {}
                 Admit::Take { cross_delta } => {
                     attempts += 1;
                     cross += cross_delta;

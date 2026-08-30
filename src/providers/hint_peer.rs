@@ -29,7 +29,6 @@ pub fn is_peer_switchable(err: &str) -> bool {
     looks_like_model_retired(&lower)
         || looks_like_rate_or_quota(&lower)
         || lower.contains("model_not_found")
-        || lower.contains("not_found")
 }
 
 /// HTTP 410 / vendor EOL — not billing.
@@ -169,6 +168,8 @@ mod tests {
             "HTTP 410 (http_error): Gone end of life"
         ));
         assert!(is_peer_switchable("HTTP 429 rate limit"));
+        assert!(is_peer_switchable("error: model_not_found"));
+        assert!(!is_peer_switchable("tool failed: file not found"));
     }
 
     #[test]

@@ -20,7 +20,9 @@ use crate::orchestration::dag_emit::{
 };
 use crate::providers::{ChatMessage, ChatRequest, Provider};
 use anyhow::Result;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
+use std::hash::BuildHasher;
 use std::path::Path;
 
 pub const PLANNED_DAG_KEY_PREFIX: &str = "dag_plan:";
@@ -290,11 +292,11 @@ pub fn format_work_node_stop(
 
 /// Rail snapshot: one row per graph order, with pending/running/ok/error.
 #[must_use]
-pub fn live_dag_node_rows(
+pub fn live_dag_node_rows<S: BuildHasher>(
     dag: &crate::agent::dag_runner::DagManifest,
     order: &[String],
     running: Option<&str>,
-    completed: &std::collections::HashSet<String>,
+    completed: &HashSet<String, S>,
     failed: Option<&str>,
 ) -> Vec<LiveDagNodeRow> {
     let by_id: std::collections::HashMap<&str, _> =
@@ -347,9 +349,8 @@ pub fn dag_contact_labels(
     session_model: &str,
     hints: &[String],
 ) -> std::collections::HashMap<String, String> {
-    let mut out = std::collections::HashMap::new();
-    let by_id: std::collections::HashMap<&str, _> =
-        dag.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+    let mut out = HashMap::new();
+    let by_id: HashMap<&str, _> = dag.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
     for id in order {
         let Some(node) = by_id.get(id.as_str()) else {
             continue;
@@ -362,17 +363,21 @@ pub fn dag_contact_labels(
 
 /// Structured WS/CLI progress for the live rail.
 #[must_use]
-pub fn live_dag_progress(
+pub fn live_dag_progress<S, C>(
     dag_id: &str,
     fallback: bool,
     outline: &str,
     dag: &crate::agent::dag_runner::DagManifest,
     order: &[String],
     running: Option<&str>,
-    completed: &std::collections::HashSet<String>,
+    completed: &HashSet<String, S>,
     failed: Option<&str>,
-    contacts: Option<&std::collections::HashMap<String, String>>,
-) -> crate::agent::turn_progress::TurnProgress {
+    contacts: Option<&HashMap<String, String, C>>,
+) -> crate::agent::turn_progress::TurnProgress
+where
+    S: BuildHasher,
+    C: BuildHasher,
+{
     use crate::agent::turn_progress::{DagNodeProgress, TurnProgress};
     TurnProgress::Dag {
         dag_id: dag_id.to_string(),

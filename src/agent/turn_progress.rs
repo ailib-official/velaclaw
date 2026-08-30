@@ -30,6 +30,19 @@ pub fn get_fold_payload(cache: &FoldCache, id: u64) -> Option<String> {
     guard.get(&id).cloned()
 }
 
+/// One node in a live bounded DAG (Web rail + CLI observe).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DagNodeProgress {
+    pub id: String,
+    pub label: String,
+    pub task_type: String,
+    pub caps: String,
+    /// Resolved provider/model for this hop (`hint:` already mapped).
+    pub contact: String,
+    /// `pending` | `running` | `ok` | `error`
+    pub status: String,
+}
+
 /// User-facing progress during a tool-loop turn (not the final assistant reply).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TurnProgress {
@@ -44,6 +57,13 @@ pub enum TurnProgress {
         summary: String,
         /// Scrubbed output for on-demand expand; omitted when empty.
         expand: Option<String>,
+    },
+    /// Structured DAG + node state (not dumped as chat Markdown).
+    Dag {
+        dag_id: String,
+        fallback: bool,
+        outline: String,
+        nodes: Vec<DagNodeProgress>,
     },
 }
 
@@ -186,11 +206,33 @@ fn verb_arg(verb: &str, args: &Value, keys: &[&str]) -> String {
     }
 }
 
+fn first_substantive_shell_segment(cmd: &str) -> &str {
+    for part in cmd.split("&&") {
+        for seg in part.split(';') {
+            let t = seg.trim();
+            if t.is_empty() {
+                continue;
+            }
+            let bin = t
+                .split_whitespace()
+                .next()
+                .map(basename_or_path)
+                .unwrap_or("");
+            if matches!(bin, "cd" | "export" | "true" | ":" | "shift") {
+                continue;
+            }
+            return t;
+        }
+    }
+    cmd.trim()
+}
+
 fn shell_caption(args: &Value) -> String {
     let Some(cmd) = first_str(args, &["command"]) else {
         return "shell".into();
     };
-    let head = cmd.split('|').next().unwrap_or(cmd).trim();
+    let head = first_substantive_shell_segment(cmd);
+    let head = head.split('|').next().unwrap_or(head).trim();
     let mut tokens = head.split_whitespace().filter(|t| !t.contains('='));
     let Some(bin_raw) = tokens.next() else {
         return "shell".into();
@@ -361,6 +403,17 @@ pub fn print_cli_progress(progress: &TurnProgress, fold_cache: Option<&FoldCache
             };
             eprintln!("{}", console::style(line).cyan());
         }
+        TurnProgress::Dag { dag_id, nodes, .. } => {
+            let running = nodes
+                .iter()
+                .find(|n| n.status == "running")
+                .map(|n| n.id.as_str())
+                .unwrap_or("-");
+            eprintln!(
+                "{}",
+                console::style(format!("· dag `{dag_id}` running={running}")).dim()
+            );
+        }
     }
 }
 
@@ -422,6 +475,8 @@ mod tests {
         assert_eq!(pipe, "cat Cargo.toml");
         let cargo = progress_caption("shell", &json!({"command": "cargo test --lib repairs"}));
         assert_eq!(cargo, "cargo test");
+        let cd = progress_caption("shell", &json!({"command": "cd /tmp && git status -sb"}));
+        assert_eq!(cd, "git status");
     }
 
     #[test]
@@ -481,7 +536,7 @@ mod tests {
                 assert!(ok);
                 assert_eq!(expand.as_deref(), Some("On branch main"));
             }
-            TurnProgress::Status { .. } => panic!("expected step"),
+            TurnProgress::Status { .. } | TurnProgress::Dag { .. } => panic!("expected step"),
         }
     }
 

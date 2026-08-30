@@ -9,9 +9,9 @@
     lastAssistantHasVelaClawNotice,
     looksLikeVelaClawNotice,
     outboundChatHistory,
-    parseLiveDagPreview,
     streamChat,
     type ChatMessage,
+    type DagFrame,
   } from "./lib/chat";
   import {
     createCronJob,
@@ -97,14 +97,8 @@
   let routingDiagnostics = $state<RoutingDiagnosticsView | null>(null);
   let hostPhase = $state<"plan" | "build">("build");
   let boundedDagLive = $state(false);
-  let lastDagPreview = $derived.by(() => {
-    for (let i = messages.length - 1; i >= 0; i -= 1) {
-      if (messages[i].role === "assistant") {
-        return parseLiveDagPreview(messages[i].content);
-      }
-    }
-    return null;
-  });
+  let liveDag = $state<DagFrame | null>(null);
+  let liveDagOutlinePosted = $state(false);
 
   let listEl: HTMLDivElement | undefined;
   let inputEl: HTMLTextAreaElement | undefined;
@@ -432,7 +426,7 @@
       const agent = cfg.agent as Record<string, unknown> | undefined;
       boundedDagLive = agent?.bounded_dag_live === true;
       if (boundedDagLive) {
-        hostPhase = "plan";
+        hostPhase = "build";
       }
     } catch {
       boundedDagLive = false;
@@ -542,6 +536,8 @@
     humanInputText = "";
     humanInputSecret = "";
     streaming = true;
+    liveDag = null;
+    liveDagOutlinePosted = false;
     scrollToBottom();
 
     let sessionId: string | undefined;
@@ -560,7 +556,7 @@
       sessionId,
       messages: history,
       modelId: selectedModel || undefined,
-      hostPhase,
+      hostPhase: boundedDagLive ? "build" : hostPhase,
       onDelta: (chunk) => {
         messages = appendAssistantDelta(messages, chunk);
         scrollToBottom();
@@ -571,6 +567,14 @@
       },
       onStep: (payload) => {
         messages = applyStepFrame(messages, payload);
+        scrollToBottom();
+      },
+      onDag: (payload) => {
+        liveDag = payload;
+        if (payload.outline && !liveDagOutlinePosted) {
+          liveDagOutlinePosted = true;
+          messages = appendAssistantDelta(messages, payload.outline);
+        }
         scrollToBottom();
       },
       onCancelled: (msg) => {
@@ -782,6 +786,7 @@
         </div>
 
         <footer>
+          {#if !boundedDagLive}
           <div class="phase-row">
             <label>
               <input type="radio" name="host-phase" value="plan" bind:group={hostPhase} disabled={streaming} />
@@ -791,26 +796,22 @@
               <input type="radio" name="host-phase" value="build" bind:group={hostPhase} disabled={streaming} />
               Build
             </label>
-            {#if boundedDagLive}
-              <span class="hint">AI Native: Plan = DeepSeek Flash 规划任务图 · Build = 按节点 Contact（DeepSeek / Groq / NVIDIA NIM）</span>
-            {:else}
-              <span class="hint">Plan blocks mutating tools (same as CLI --plan). Enable [agent].bounded_dag_live for linear DAG steps.</span>
-            {/if}
+            <span class="hint">Plan blocks mutating tools (same as CLI --plan).</span>
           </div>
-          {#if boundedDagLive && lastDagPreview}
+          {/if}
+          {#if boundedDagLive && liveDag}
             <div class="dag-rail" aria-label="Task DAG">
               <div class="dag-rail-head">
-                <strong>{lastDagPreview.dagId}</strong>
-                {#if lastDagPreview.fallback}
+                <strong>{liveDag.dag_id}</strong>
+                {#if liveDag.fallback}
                   <span class="dag-fallback">fallback graph</span>
                 {/if}
-                <span class="hint">switch to Build to run</span>
               </div>
               <ol class="dag-nodes">
-                {#each lastDagPreview.nodes as n}
-                  <li>
-                    <span class="dag-id">{n.id}</span>
-                    <span class="dag-caps">{n.caps}</span>
+                {#each liveDag.nodes as n}
+                  <li class={`dag-node dag-${n.status}`} title={`${n.label} (${n.task_type}${n.contact ? ` · ${n.contact}` : ""})`}>
+                    <span class="dag-id">{n.label}</span>
+                    <span class="dag-caps">{n.contact ? n.contact : n.task_type}{n.caps ? ` · ${n.caps}` : ""}</span>
                   </li>
                 {/each}
               </ol>
@@ -824,7 +825,7 @@
             bind:value={input}
             onkeydown={onKeydown}
             placeholder={boundedDagLive
-              ? "Describe a general task… Plan first (task graph), then switch to Build."
+              ? "Describe a task… Send plans the steps and runs them immediately."
               : "Message… (Enter to send, Shift+Enter for newline)"}
             disabled={streaming}
           ></textarea>
@@ -1498,10 +1499,60 @@
     display: flex;
     flex-direction: column;
     gap: 0.1rem;
+    position: relative;
+    overflow: hidden;
     background: #0f172a;
+    border: 1px solid #334155;
     border-radius: 6px;
     padding: 0.35rem 0.5rem;
     min-width: 7rem;
+  }
+  .dag-nodes li > * {
+    position: relative;
+    z-index: 1;
+  }
+  .dag-nodes li::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    width: 0;
+    background: rgba(59, 130, 246, 0.28);
+    transition: width 0.35s ease;
+  }
+  .dag-nodes li.dag-pending {
+    opacity: 0.72;
+  }
+  .dag-nodes li.dag-running {
+    border-color: #3b82f6;
+  }
+  .dag-nodes li.dag-running::before {
+    width: 70%;
+    animation: dag-node-pulse 1.1s ease-in-out infinite;
+  }
+  .dag-nodes li.dag-ok {
+    border-color: #22c55e;
+  }
+  .dag-nodes li.dag-ok::before {
+    width: 100%;
+    background: rgba(34, 197, 94, 0.28);
+  }
+  .dag-nodes li.dag-error {
+    border-color: #ef4444;
+  }
+  .dag-nodes li.dag-error::before {
+    width: 100%;
+    background: rgba(239, 68, 68, 0.32);
+  }
+  @keyframes dag-node-pulse {
+    0%,
+    100% {
+      width: 35%;
+      opacity: 0.55;
+    }
+    50% {
+      width: 85%;
+      opacity: 1;
+    }
   }
   .dag-id {
     font-family: monospace;

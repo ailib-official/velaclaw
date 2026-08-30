@@ -41,6 +41,7 @@ pub fn bootstrap_routed_provider(
         &logical_model,
         options,
         primary_override,
+        config.agent.hint_peer_fallback,
     )?;
     Ok((execution, provider))
 }

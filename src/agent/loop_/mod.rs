@@ -10,7 +10,7 @@ use crate::providers::{ChatMessage, ChatRequest, Provider, ProviderCapabilityErr
 use crate::security::PolicyHandle;
 use crate::tools::Tool;
 use anyhow::Result;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 use std::io::Write as _;
 use std::sync::{Arc, Mutex};
@@ -606,47 +606,44 @@ pub async fn run(
             #[cfg(feature = "ai-protocol")]
             {
                 if config.agent.bounded_dag_live {
-                    let planned = {
-                        let use_cache = crate::agent::bounded_dag_live::should_reuse_cached_dag(
-                            host_phase, &msg,
-                        );
-                        if !use_cache {
-                            crate::agent::bounded_dag_live::clear_session_dag_state(
-                                mem.as_ref(),
-                                session_id.as_str(),
-                            )
-                            .await?;
-                        }
-                        crate::agent::bounded_dag_live::obtain_planned_live_dag_with_provider(
-                            &config.agent,
-                            mem.as_ref(),
-                            session_id.as_str(),
-                            provider.as_ref(),
-                            &model_name,
-                            &msg,
-                            temperature,
-                            use_cache,
-                        )
-                        .await?
-                    };
+                    let planned = crate::agent::bounded_dag_live::prepare_session_live_dag(
+                        &config.agent,
+                        mem.as_ref(),
+                        session_id.as_str(),
+                        provider.as_ref(),
+                        &model_name,
+                        &msg,
+                        temperature,
+                        host_phase,
+                    )
+                    .await?;
                     if host_phase == crate::agent::host_phase::HostPhase::Plan {
                         planned.preview_with_contact(&model_name, &available_hints)
                     } else {
                         let dag = &planned.dag;
                         let order = &planned.order;
                         let node_count = order.len();
-                        let graph_task = crate::agent::bounded_dag_live::work_node_user_task(
-                            mem.as_ref(),
-                            session_id.as_str(),
-                            &history,
-                            &msg,
-                        )
-                        .await;
+                        let outline = planned.brief_outline(&msg);
+                        let graph_task = match &planned.graph_task_override {
+                            Some(task) => task.clone(),
+                            None => {
+                                crate::agent::bounded_dag_live::work_node_user_task(
+                                    mem.as_ref(),
+                                    session_id.as_str(),
+                                    &history,
+                                    &msg,
+                                )
+                                .await
+                            }
+                        };
                         let no_extra: &[ai_lib_rust::context::MessageChunk] = &[];
                         let by_id: HashMap<_, _> =
                             dag.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
-                        let mut parts = Vec::new();
+                        let mut last_body = String::new();
                         let mut prior: Vec<String> = Vec::new();
+                        for id in order.iter().take(planned.resume_from) {
+                            prior.push(id.clone());
+                        }
                         let mut work_sys = crate::channels::build_work_node_system_prompt(
                             &config.workspace_dir,
                             &model_name,
@@ -672,6 +669,9 @@ pub async fn run(
                             );
                         }
                         for (index, id) in order.iter().enumerate() {
+                            if index < planned.resume_from {
+                                continue;
+                            }
                             let node = by_id
                                 .get(id.as_str())
                                 .ok_or_else(|| anyhow::anyhow!("bounded DAG missing node {id}"))?;
@@ -727,7 +727,7 @@ pub async fn run(
                             })?;
                             let node_provider =
                                 crate::protocol_registry::provider_id_from_logical(&contact.model);
-                            let piece = run_tool_call_loop(
+                            let piece = match run_tool_call_loop(
                                 provider.as_ref(),
                                 &mut history,
                                 &tools_registry,
@@ -757,7 +757,33 @@ pub async fn run(
                                 }),
                                 Some(&cli_gate_extras),
                             )
-                            .await?;
+                            .await
+                            {
+                                Ok(piece) => piece,
+                                Err(err) if is_tool_loop_cancelled(&err) => return Err(err),
+                                Err(err) => {
+                                    let _ = crate::agent::bounded_dag_live::store_dag_fail(
+                                        mem.as_ref(),
+                                        session_id.as_str(),
+                                        &crate::agent::bounded_dag_live::DagFailCursor {
+                                            node_id: node.id.clone(),
+                                            index,
+                                            err: format!("{err:#}"),
+                                            dag_id: dag.id.clone(),
+                                        },
+                                    )
+                                    .await;
+                                    return Ok(
+                                        crate::agent::bounded_dag_live::format_work_node_stop(
+                                            &msg,
+                                            &node.id,
+                                            &format!("{err:#}"),
+                                            index + 1,
+                                            node_count,
+                                        ),
+                                    );
+                                }
+                            };
                             let _ = crate::agent::bounded_dag_context::store_node_artifact(
                                 mem.as_ref(),
                                 session_id.as_str(),
@@ -765,14 +791,19 @@ pub async fn run(
                                 &piece,
                             )
                             .await;
-                            parts.push(format!(
-                                "## {}\n{}\n{piece}",
-                                node.id,
-                                contact.observe_line()
-                            ));
+                            last_body = piece;
                             prior.push(node.id.clone());
                         }
-                        parts.join("\n\n")
+                        let _ = crate::agent::bounded_dag_live::clear_dag_fail(
+                            mem.as_ref(),
+                            session_id.as_str(),
+                        )
+                        .await;
+                        if last_body.is_empty() {
+                            outline
+                        } else {
+                            last_body
+                        }
                     }
                 } else {
                     run_tool_call_loop(
@@ -1108,52 +1139,48 @@ pub async fn run(
                 {
                     async {
                         if config.agent.bounded_dag_live {
-                            let planned = {
-                                let use_cache =
-                                    crate::agent::bounded_dag_live::should_reuse_cached_dag(
-                                        host_phase,
-                                        &user_input,
-                                    );
-                                if !use_cache {
-                                    crate::agent::bounded_dag_live::clear_session_dag_state(
-                                        mem.as_ref(),
-                                        session_id.as_str(),
-                                    )
-                                    .await?;
-                                }
-                                crate::agent::bounded_dag_live::obtain_planned_live_dag_with_provider(
-                                    &config.agent,
-                                    mem.as_ref(),
-                                    session_id.as_str(),
-                                    provider.as_ref(),
-                                    &session_model,
-                                    &user_input,
-                                    temperature,
-                                    use_cache,
-                                )
-                                .await?
-                            };
+                            let planned = crate::agent::bounded_dag_live::prepare_session_live_dag(
+                                &config.agent,
+                                mem.as_ref(),
+                                session_id.as_str(),
+                                provider.as_ref(),
+                                &session_model,
+                                &user_input,
+                                temperature,
+                                host_phase,
+                            )
+                            .await?;
                             if host_phase == crate::agent::host_phase::HostPhase::Plan {
-                                return Ok(planned.preview_with_contact(
-                                    &session_model,
-                                    &available_hints,
-                                ));
+                                return Ok(
+                                    planned.preview_with_contact(&session_model, &available_hints)
+                                );
                             }
                             let dag = &planned.dag;
                             let order = &planned.order;
                             let node_count = order.len();
-                            let graph_task = crate::agent::bounded_dag_live::work_node_user_task(
-                                mem.as_ref(),
-                                session_id.as_str(),
-                                &history,
-                                &user_input,
-                            )
-                            .await;
+                            let outline = planned.brief_outline(&user_input);
+                            let graph_task = match &planned.graph_task_override {
+                                Some(task) => task.clone(),
+                                None => {
+                                    crate::agent::bounded_dag_live::work_node_user_task(
+                                        mem.as_ref(),
+                                        session_id.as_str(),
+                                        &history,
+                                        &user_input,
+                                    )
+                                    .await
+                                }
+                            };
                             let no_extra: &[ai_lib_rust::context::MessageChunk] = &[];
                             let by_id: HashMap<_, _> =
                                 dag.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
-                            let mut parts = Vec::new();
+                            let mut last_body = String::new();
                             let mut prior: Vec<String> = Vec::new();
+                            let mut completed: HashSet<String> = HashSet::new();
+                            for id in order.iter().take(planned.resume_from) {
+                                prior.push(id.clone());
+                                completed.insert(id.clone());
+                            }
                             let mut work_sys = crate::channels::build_work_node_system_prompt(
                                 &config.workspace_dir,
                                 &session_model,
@@ -1178,7 +1205,32 @@ pub async fn run(
                                     strategy,
                                 );
                             }
+                            eprintln!("{outline}");
+                            let contacts = crate::agent::bounded_dag_live::dag_contact_labels(
+                                provider.as_ref(),
+                                dag,
+                                order,
+                                &session_model,
+                                &available_hints,
+                            );
+                            crate::agent::turn_progress::print_cli_progress(
+                                &crate::agent::bounded_dag_live::live_dag_progress(
+                                    dag.id.as_str(),
+                                    planned.used_fallback,
+                                    &outline,
+                                    dag,
+                                    order,
+                                    None,
+                                    &completed,
+                                    None,
+                                    Some(&contacts),
+                                ),
+                                Some(&fold_cache),
+                            );
                             for (index, id) in order.iter().enumerate() {
+                                if index < planned.resume_from {
+                                    continue;
+                                }
                                 let node = by_id.get(id.as_str()).ok_or_else(|| {
                                     anyhow::anyhow!("bounded DAG missing node {id}")
                                 })?;
@@ -1238,7 +1290,28 @@ pub async fn run(
                                     crate::protocol_registry::provider_id_from_logical(
                                         &contact.model,
                                     );
-                                let piece = run_tool_call_loop(
+                                let contacts = crate::agent::bounded_dag_live::dag_contact_labels(
+                                    provider.as_ref(),
+                                    dag,
+                                    order,
+                                    &session_model,
+                                    &available_hints,
+                                );
+                                crate::agent::turn_progress::print_cli_progress(
+                                    &crate::agent::bounded_dag_live::live_dag_progress(
+                                        dag.id.as_str(),
+                                        planned.used_fallback,
+                                        &outline,
+                                        dag,
+                                        order,
+                                        Some(id.as_str()),
+                                        &completed,
+                                        None,
+                                        Some(&contacts),
+                                    ),
+                                    Some(&fold_cache),
+                                );
+                                let piece = match run_tool_call_loop(
                                     provider.as_ref(),
                                     &mut history,
                                     &tools_registry,
@@ -1268,7 +1341,55 @@ pub async fn run(
                                     }),
                                     Some(&cli_gate_extras),
                                 )
-                                .await?;
+                                .await
+                                {
+                                    Ok(piece) => piece,
+                                    Err(err) if is_tool_loop_cancelled(&err) => return Err(err),
+                                    Err(err) => {
+                                        let contacts =
+                                            crate::agent::bounded_dag_live::dag_contact_labels(
+                                                provider.as_ref(),
+                                                dag,
+                                                order,
+                                                &session_model,
+                                                &available_hints,
+                                            );
+                                        crate::agent::turn_progress::print_cli_progress(
+                                            &crate::agent::bounded_dag_live::live_dag_progress(
+                                                dag.id.as_str(),
+                                                planned.used_fallback,
+                                                &outline,
+                                                dag,
+                                                order,
+                                                None,
+                                                &completed,
+                                                Some(id.as_str()),
+                                                Some(&contacts),
+                                            ),
+                                            Some(&fold_cache),
+                                        );
+                                        let _ = crate::agent::bounded_dag_live::store_dag_fail(
+                                            mem.as_ref(),
+                                            session_id.as_str(),
+                                            &crate::agent::bounded_dag_live::DagFailCursor {
+                                                node_id: node.id.clone(),
+                                                index,
+                                                err: format!("{err:#}"),
+                                                dag_id: dag.id.clone(),
+                                            },
+                                        )
+                                        .await;
+                                        return Ok(
+                                            crate::agent::bounded_dag_live::format_work_node_stop(
+                                                &user_input,
+                                                &node.id,
+                                                &format!("{err:#}"),
+                                                index + 1,
+                                                node_count,
+                                            ),
+                                        );
+                                    }
+                                };
                                 let _ = crate::agent::bounded_dag_context::store_node_artifact(
                                     mem.as_ref(),
                                     session_id.as_str(),
@@ -1276,14 +1397,41 @@ pub async fn run(
                                     &piece,
                                 )
                                 .await;
-                                parts.push(format!(
-                                    "## {}\n{}\n{piece}",
-                                    node.id,
-                                    contact.observe_line()
-                                ));
+                                completed.insert(node.id.clone());
+                                last_body = piece;
                                 prior.push(node.id.clone());
+                                let contacts = crate::agent::bounded_dag_live::dag_contact_labels(
+                                    provider.as_ref(),
+                                    dag,
+                                    order,
+                                    &session_model,
+                                    &available_hints,
+                                );
+                                crate::agent::turn_progress::print_cli_progress(
+                                    &crate::agent::bounded_dag_live::live_dag_progress(
+                                        dag.id.as_str(),
+                                        planned.used_fallback,
+                                        &outline,
+                                        dag,
+                                        order,
+                                        None,
+                                        &completed,
+                                        None,
+                                        Some(&contacts),
+                                    ),
+                                    Some(&fold_cache),
+                                );
                             }
-                            Ok(parts.join("\n\n"))
+                            let _ = crate::agent::bounded_dag_live::clear_dag_fail(
+                                mem.as_ref(),
+                                session_id.as_str(),
+                            )
+                            .await;
+                            Ok(if last_body.is_empty() {
+                                outline
+                            } else {
+                                last_body
+                            })
                         } else {
                             run_tool_call_loop(
                                 provider.as_ref(),

@@ -435,6 +435,10 @@ pub struct AgentConfig {
     /// Default: `false`.
     #[serde(default)]
     pub host_decide_failover: bool,
+    /// VL-NA-021: after ReliableProvider micro-retry, try `[[model_routes]].fallbacks`
+    /// for the same hint (max 5 attempts / 3 cross-provider). Dist default `false`.
+    #[serde(default)]
+    pub hint_peer_fallback: bool,
     /// ORCH-DAG-EMIT-001/002: library/doctor gate for schema-strict / LLM plan emit.
     /// Default: `false`. **Not wired** into live chat. Observe: `doctor dag-emit` /
     /// `doctor dag-plan`. Does **not** default-on AI-DAG in the live chat loop.
@@ -477,6 +481,7 @@ impl Default for AgentConfig {
             host_decide: false,
             host_decide_optimize: default_host_decide_optimize(),
             host_decide_failover: false,
+            hint_peer_fallback: false,
             candidate_dag_emit: false,
         }
     }
@@ -2293,6 +2298,28 @@ pub struct ModelRouteConfig {
     /// Optional API key override for this route's provider
     #[serde(default)]
     pub api_key: Option<String>,
+    /// Same-hint peers after micro-retry (VL-NA-021). Empty = no peer list.
+    #[serde(default)]
+    pub fallbacks: Vec<ModelRoutePeerConfig>,
+}
+
+impl Default for ModelRouteConfig {
+    fn default() -> Self {
+        Self {
+            hint: String::new(),
+            provider: String::new(),
+            model: String::new(),
+            api_key: None,
+            fallbacks: Vec::new(),
+        }
+    }
+}
+
+/// One peer in `[[model_routes]].fallbacks`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+pub struct ModelRoutePeerConfig {
+    pub provider: String,
+    pub model: String,
 }
 
 // ── Embedding routing ───────────────────────────────────────────

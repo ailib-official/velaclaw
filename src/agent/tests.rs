@@ -1457,9 +1457,9 @@ async fn bounded_dag_build_one_loop_per_node() {
         5,
         "planner retry plus one provider chat per linear node"
     );
-    assert!(out.contains("## locate"), "{out}");
-    assert!(out.contains("## patch"), "{out}");
-    assert!(out.contains("## verify"), "{out}");
+    assert!(out.contains("verified"), "{out}");
+    assert!(!out.contains("## locate"), "{out}");
+    assert!(!out.contains("Bounded task DAG"), "{out}");
 }
 
 #[cfg(feature = "ai-protocol")]
@@ -1494,9 +1494,8 @@ async fn bounded_dag_writeback_and_node_contact() {
     agent.set_session_id("sess-dag");
     agent.set_host_phase(crate::agent::host_phase::HostPhase::Build);
     let out = agent.turn("fix the compiler error").await.unwrap();
-    assert!(out.contains("contact model=hint:code"), "{out}");
-    assert!(out.contains("contact model=hint:fast"), "{out}");
-    assert!(out.contains("reason=node_capability:speed"), "{out}");
+    assert!(out.contains("VERIFY_OK"), "{out}");
+    assert!(!out.contains("contact model="), "{out}");
 
     let locate = mem
         .get(&crate::agent::bounded_dag_context::artifact_memory_key(
@@ -1570,8 +1569,8 @@ async fn bounded_dag_session_picker_does_not_override_contact() {
     agent.set_explicit_model(Some("deepseek/deepseek-v4-flash".into()));
     agent.set_host_phase(crate::agent::host_phase::HostPhase::Build);
     let out = agent.turn("fix the compiler error").await.unwrap();
-    assert!(out.contains("contact model=hint:code"), "{out}");
-    assert!(out.contains("contact model=hint:fast"), "{out}");
+    assert!(out.contains("verified"), "{out}");
+    assert!(!out.contains("contact model="), "{out}");
     assert!(!out.contains("reason=explicit_user_pick"), "{out}");
     let used = models.lock().unwrap().clone();
     assert_eq!(

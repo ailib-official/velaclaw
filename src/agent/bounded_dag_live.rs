@@ -24,16 +24,15 @@ use std::fmt::Write;
 use std::path::Path;
 
 pub const PLANNED_DAG_KEY_PREFIX: &str = "dag_plan:";
+pub const DAG_FAIL_KEY_PREFIX: &str = "dag_fail:";
 const MAX_SESSION_DAG_FORGET: usize = 32;
-
-/// Short confirmations that mean "run the already previewed graph" (any domain).
-const APPROVAL_TOKENS: &[&str] = &[
-    "ok", "okay", "yes", "y", "go", "build", "approve", "approved", "proceed", "lgtm", "run",
-    "start", "sure", "agree", "同意", "做吧", "执行", "开始", "可以", "好的", "确认", "行",
-];
 
 pub fn planned_dag_key(session_id: &str) -> String {
     format!("{PLANNED_DAG_KEY_PREFIX}{session_id}")
+}
+
+pub fn dag_fail_key(session_id: &str) -> String {
+    format!("{DAG_FAIL_KEY_PREFIX}{session_id}")
 }
 
 pub const GRAPH_USER_KEY_PREFIX: &str = "dag_user:";
@@ -42,14 +41,23 @@ pub fn graph_user_key(session_id: &str) -> String {
     format!("{GRAPH_USER_KEY_PREFIX}{session_id}")
 }
 
-/// Persist the Plan-time user task for work-node USER TASK slots.
+/// Cursor so the next user message can replan the failed node (not a Build approval).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct DagFailCursor {
+    pub node_id: String,
+    pub index: usize,
+    pub err: String,
+    pub dag_id: String,
+}
+
+/// Persist the original user task for work-node USER TASK slots.
 pub async fn store_graph_user_task(
     mem: &dyn Memory,
     session_id: &str,
     user_task: &str,
 ) -> Result<()> {
     let trimmed = user_task.trim();
-    if trimmed.is_empty() || is_build_approval(trimmed) {
+    if trimmed.is_empty() {
         return Ok(());
     }
     mem.store(
@@ -68,32 +76,10 @@ pub async fn load_graph_user_task(mem: &dyn Memory, session_id: &str) -> Result<
         .map(|e| e.content))
 }
 
-/// True when the user is confirming a previewed DAG rather than changing the task.
-#[must_use]
-pub fn is_build_approval(raw: &str) -> bool {
-    let tokens: Vec<String> = raw
-        .split(|c: char| !(c.is_alphanumeric() || ('\u{4e00}'..='\u{9fff}').contains(&c)))
-        .map(|s| s.trim().to_lowercase())
-        .filter(|s| !s.is_empty())
-        .collect();
-    if tokens.is_empty() {
-        return true;
-    }
-    let chars: usize = tokens.iter().map(|t| t.chars().count()).sum();
-    if chars > 32 {
-        return false;
-    }
-    let joined = tokens.join("");
-    if joined == "doit" || joined == "goahead" || joined == "approvebuild" {
-        return true;
-    }
-    tokens.iter().all(|t| APPROVAL_TOKENS.contains(&t.as_str()))
-}
-
-/// Prefer Plan-time user text; skip approval tokens and retrieve blobs.
+/// Prefer stored original task, else last user in history.
 pub fn user_task_from_history(history: &[ChatMessage], current: &str) -> String {
     let current = current.trim();
-    if !current.is_empty() && !is_build_approval(current) {
+    if !current.is_empty() {
         return current.to_string();
     }
     for message in history.iter().rev() {
@@ -101,11 +87,7 @@ pub fn user_task_from_history(history: &[ChatMessage], current: &str) -> String 
             continue;
         }
         let body = message.content.trim();
-        if body.is_empty()
-            || body.starts_with("[dag_artifact")
-            || body.starts_with("USER TASK")
-            || is_build_approval(body)
-        {
+        if body.is_empty() || body.starts_with("[dag_artifact") || body.starts_with("USER TASK") {
             continue;
         }
         return body.to_string();
@@ -113,7 +95,7 @@ pub fn user_task_from_history(history: &[ChatMessage], current: &str) -> String 
     current.to_string()
 }
 
-/// Stored Plan-time task, else last non-approval user in history.
+/// Stored original task, else last user in history.
 pub async fn work_node_user_task(
     mem: &dyn Memory,
     session_id: &str,
@@ -122,25 +104,48 @@ pub async fn work_node_user_task(
 ) -> String {
     if let Ok(Some(stored)) = load_graph_user_task(mem, session_id).await {
         let trimmed = stored.trim();
-        if !trimmed.is_empty() && !is_build_approval(trimmed) {
+        if !trimmed.is_empty() {
             return trimmed.to_string();
         }
     }
     user_task_from_history(history, current)
 }
 
-/// Build + short approval reuses `dag_plan:<session>`. Plan or a new task invalidates.
-#[must_use]
-pub fn should_reuse_cached_dag(host_phase: HostPhase, user_message: &str) -> bool {
-    host_phase == HostPhase::Build && is_build_approval(user_message)
+pub async fn store_dag_fail(
+    mem: &dyn Memory,
+    session_id: &str,
+    cursor: &DagFailCursor,
+) -> Result<()> {
+    let json = serde_json::to_string(cursor)?;
+    mem.store(
+        &dag_fail_key(session_id),
+        &json,
+        crate::memory::MemoryCategory::Daily,
+        Some(session_id),
+    )
+    .await
 }
 
-/// Drop cached plan + node artifacts for this session (bounded forget count).
+pub async fn load_dag_fail(mem: &dyn Memory, session_id: &str) -> Result<Option<DagFailCursor>> {
+    let Some(entry) = mem.get(&dag_fail_key(session_id)).await? else {
+        return Ok(None);
+    };
+    Ok(serde_json::from_str(&entry.content).ok())
+}
+
+pub async fn clear_dag_fail(mem: &dyn Memory, session_id: &str) -> Result<()> {
+    let _ = mem.forget(&dag_fail_key(session_id)).await;
+    Ok(())
+}
+
+/// Drop cached plan, fail cursor, and node artifacts for this session.
 pub async fn clear_session_dag_state(mem: &dyn Memory, session_id: &str) -> Result<()> {
     let plan_key = planned_dag_key(session_id);
     let user_key = graph_user_key(session_id);
+    let fail_key = dag_fail_key(session_id);
     let _ = mem.forget(&plan_key).await;
     let _ = mem.forget(&user_key).await;
+    let _ = mem.forget(&fail_key).await;
     let prefix = format!("dag_art:{session_id}:");
     let listed = mem
         .list(Some(&MemoryCategory::Daily), Some(session_id))
@@ -150,7 +155,11 @@ pub async fn clear_session_dag_state(mem: &dyn Memory, session_id: &str) -> Resu
         if i >= MAX_SESSION_DAG_FORGET {
             break;
         }
-        if entry.key == plan_key || entry.key == user_key || entry.key.starts_with(&prefix) {
+        if entry.key == plan_key
+            || entry.key == user_key
+            || entry.key == fail_key
+            || entry.key.starts_with(&prefix)
+        {
             let _ = mem.forget(&entry.key).await;
         }
     }
@@ -163,6 +172,10 @@ pub struct PlannedLiveDag {
     pub order: Vec<String>,
     pub used_fallback: bool,
     pub source: &'static str,
+    /// Skip already-finished nodes when retrying after a fail cursor.
+    pub resume_from: usize,
+    /// Original task plus user guidance for the failed node.
+    pub graph_task_override: Option<String>,
 }
 
 impl PlannedLiveDag {
@@ -170,6 +183,221 @@ impl PlannedLiveDag {
         self.preview_with_contact("", &[])
     }
 
+    /// Short operator-facing step list (chat), not the debug Plan chrome dump.
+    pub fn brief_outline(&self, user_message: &str) -> String {
+        brief_dag_outline(
+            user_message,
+            &self.dag,
+            &self.order,
+            self.used_fallback,
+            self.resume_from,
+        )
+    }
+}
+
+/// Prefer CJK copy when the user prompt contains Han characters.
+#[must_use]
+pub fn user_prefers_cjk(text: &str) -> bool {
+    text.chars().any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c))
+}
+
+#[must_use]
+pub fn prettify_node_id(id: &str) -> String {
+    id.replace(['_', '-'], " ")
+}
+
+/// Chat-facing outline: numbered steps in the user's script, no Contact dump.
+#[must_use]
+pub fn brief_dag_outline(
+    user_message: &str,
+    dag: &crate::agent::dag_runner::DagManifest,
+    order: &[String],
+    used_fallback: bool,
+    resume_from: usize,
+) -> String {
+    let cjk = user_prefers_cjk(user_message);
+    let by_id: std::collections::HashMap<&str, _> =
+        dag.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+    let mut lines = Vec::new();
+    if cjk {
+        if used_fallback {
+            lines.push("规划未能得到有效步骤，改用手写回退图。".to_string());
+        }
+        if resume_from > 0 {
+            lines.push(format!(
+                "按你的新说明，从第 {} 步起重新规划并继续（共 {} 步）：",
+                resume_from + 1,
+                order.len()
+            ));
+        } else {
+            lines.push(format!("将分 {} 步处理：", order.len()));
+        }
+    } else {
+        if used_fallback {
+            lines.push("Planner did not produce a valid step list; using a fallback graph.".into());
+        }
+        if resume_from > 0 {
+            lines.push(format!(
+                "Replanning from step {} of {} with your new guidance:",
+                resume_from + 1,
+                order.len()
+            ));
+        } else {
+            lines.push(format!("Working in {} step(s):", order.len()));
+        }
+    }
+    for (i, id) in order.iter().enumerate() {
+        let label = prettify_node_id(id);
+        let task = by_id
+            .get(id.as_str())
+            .map(|n| n.task_type.as_str())
+            .unwrap_or("-");
+        if cjk {
+            lines.push(format!("{}. {}（{}）", i + 1, label, task));
+        } else {
+            lines.push(format!("{}. {label} ({task})", i + 1));
+        }
+    }
+    if cjk {
+        lines.push("开始执行。".into());
+    } else {
+        lines.push("Starting now.".into());
+    }
+    lines.join("\n")
+}
+
+/// Persistable stop line when a work node fails (does not dump the graph).
+#[must_use]
+pub fn format_work_node_stop(
+    user_message: &str,
+    node_id: &str,
+    err: &str,
+    completed: usize,
+    total: usize,
+) -> String {
+    let pretty = prettify_node_id(node_id);
+    let err = err.trim();
+    if user_prefers_cjk(user_message) {
+        format!(
+            "已在第 {completed}/{total} 步停住（`{pretty}`）。\n{err}\n针对这一步发送新说明，即可重新规划该步并继续。"
+        )
+    } else {
+        format!(
+            "Stopped at step {completed}/{total} (`{pretty}`).\n{err}\nSend guidance for this step to replan it and continue."
+        )
+    }
+}
+
+/// Rail snapshot: one row per graph order, with pending/running/ok/error.
+#[must_use]
+pub fn live_dag_node_rows(
+    dag: &crate::agent::dag_runner::DagManifest,
+    order: &[String],
+    running: Option<&str>,
+    completed: &std::collections::HashSet<String>,
+    failed: Option<&str>,
+) -> Vec<LiveDagNodeRow> {
+    let by_id: std::collections::HashMap<&str, _> =
+        dag.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+    order
+        .iter()
+        .map(|id| {
+            let node = by_id.get(id.as_str());
+            let status = if failed == Some(id.as_str()) {
+                "error"
+            } else if completed.contains(id) {
+                "ok"
+            } else if running == Some(id.as_str()) {
+                "running"
+            } else {
+                "pending"
+            };
+            LiveDagNodeRow {
+                id: id.clone(),
+                label: prettify_node_id(id),
+                task_type: node
+                    .map(|n| n.task_type.clone())
+                    .unwrap_or_else(|| "-".into()),
+                caps: node
+                    .map(|n| n.model_selector.capabilities.join(","))
+                    .unwrap_or_default(),
+                contact: String::new(),
+                status,
+            }
+        })
+        .collect()
+}
+
+#[derive(Debug, Clone)]
+pub struct LiveDagNodeRow {
+    pub id: String,
+    pub label: String,
+    pub task_type: String,
+    pub caps: String,
+    pub contact: String,
+    pub status: &'static str,
+}
+
+/// Resolved hop labels for the live rail (`RouterProvider` pin after peer fallback).
+#[must_use]
+pub fn dag_contact_labels(
+    provider: &dyn Provider,
+    dag: &DagManifest,
+    order: &[String],
+    session_model: &str,
+    hints: &[String],
+) -> std::collections::HashMap<String, String> {
+    let mut out = std::collections::HashMap::new();
+    let by_id: std::collections::HashMap<&str, _> =
+        dag.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+    for id in order {
+        let Some(node) = by_id.get(id.as_str()) else {
+            continue;
+        };
+        let contact = contact_for_node(node, session_model, hints, None);
+        out.insert(id.clone(), provider.routed_model_label(&contact.model));
+    }
+    out
+}
+
+/// Structured WS/CLI progress for the live rail.
+#[must_use]
+pub fn live_dag_progress(
+    dag_id: &str,
+    fallback: bool,
+    outline: &str,
+    dag: &crate::agent::dag_runner::DagManifest,
+    order: &[String],
+    running: Option<&str>,
+    completed: &std::collections::HashSet<String>,
+    failed: Option<&str>,
+    contacts: Option<&std::collections::HashMap<String, String>>,
+) -> crate::agent::turn_progress::TurnProgress {
+    use crate::agent::turn_progress::{DagNodeProgress, TurnProgress};
+    TurnProgress::Dag {
+        dag_id: dag_id.to_string(),
+        fallback,
+        outline: outline.to_string(),
+        nodes: live_dag_node_rows(dag, order, running, completed, failed)
+            .into_iter()
+            .map(|r| {
+                let contact = contacts
+                    .and_then(|m| m.get(&r.id).cloned())
+                    .unwrap_or_default();
+                DagNodeProgress {
+                    id: r.id,
+                    label: r.label,
+                    task_type: r.task_type,
+                    caps: r.caps,
+                    contact,
+                    status: r.status.to_string(),
+                }
+            })
+            .collect(),
+    }
+}
+
+impl PlannedLiveDag {
     /// Plan chrome: graph plus per-node Contact (hint → provider family).
     pub fn preview_with_contact(&self, default_model: &str, available_hints: &[String]) -> String {
         let mut out = String::new();
@@ -213,6 +441,8 @@ pub async fn try_cached_or_fixed_live_dag(
             order,
             used_fallback: false,
             source: "operator_path",
+            resume_from: 0,
+            graph_task_override: None,
         }));
     }
     let fallback = fallback_template_json(agent)?;
@@ -242,8 +472,8 @@ pub fn restore_chat_history_after_planner(
 
 /// Cached/operator graph, or run the tool-free planner and persist successful plans only.
 ///
-/// `use_cache`: Build approval reuses `dag_plan:<session>`. Plan and task
-/// corrections pass false (caller should have cleared session DAG state).
+/// `use_cache`: reuse `dag_plan:<session>` when already loaded for a repair.
+/// New tasks pass false after `clear_session_dag_state`.
 pub async fn obtain_planned_live_dag_with_provider(
     agent: &crate::config::AgentConfig,
     mem: &dyn Memory,
@@ -265,6 +495,8 @@ pub async fn obtain_planned_live_dag_with_provider(
             order,
             used_fallback: false,
             source: "operator_path",
+            resume_from: 0,
+            graph_task_override: None,
         });
     }
     let fallback = fallback_template_json(agent)?;
@@ -284,6 +516,192 @@ pub async fn obtain_planned_live_dag_with_provider(
     }
     let _ = store_graph_user_task(mem, session_id, user_task).await;
     Ok(planned)
+}
+
+/// Combine original graph task with the user's failed-node guidance.
+#[must_use]
+pub fn repair_graph_task(original: &str, node_id: &str, guidance: &str) -> String {
+    let original = original.trim();
+    let guidance = guidance.trim();
+    format!("{original}\n\nFailed node `{node_id}` — user guidance for this step:\n{guidance}")
+}
+
+#[must_use]
+pub fn repair_planner_user_prompt(
+    original: &str,
+    fail: &DagFailCursor,
+    completed: &[String],
+    guidance: &str,
+) -> String {
+    let completed = if completed.is_empty() {
+        "(none)".to_string()
+    } else {
+        completed.join(", ")
+    };
+    format!(
+        "Replan remaining work after a failed node. Reply with ONLY one linear DAG JSON object \
+(schema_version 0.1.0). Include 1 to 6 remaining nodes. Do not redo completed nodes.\n\n\
+Original user task:\n{original}\n\n\
+Graph id: {}\nCompleted node ids: {completed}\n\
+Failed node: {} (0-based index {})\nFailure:\n{}\n\n\
+User guidance for this node (and remaining if needed):\n{guidance}",
+        fail.dag_id,
+        fail.node_id,
+        fail.index,
+        fail.err.trim()
+    )
+}
+
+/// Prefix completed nodes from `stored`, append remaining from `repair`.
+#[must_use]
+pub fn splice_remaining_plan(
+    stored: &PlannedLiveDag,
+    fail: &DagFailCursor,
+    remaining: PlannedLiveDag,
+) -> PlannedLiveDag {
+    let resume_from = fail.index.min(stored.order.len());
+    let prefix: Vec<String> = stored.order.iter().take(resume_from).cloned().collect();
+    let prefix_set: std::collections::HashSet<&str> = prefix.iter().map(String::as_str).collect();
+    let mut nodes: Vec<_> = stored
+        .dag
+        .nodes
+        .iter()
+        .filter(|n| prefix_set.contains(n.id.as_str()))
+        .cloned()
+        .collect();
+    let mut rest_order: Vec<String> = Vec::new();
+    for id in &remaining.order {
+        if prefix_set.contains(id.as_str()) {
+            continue;
+        }
+        let Some(node) = remaining.dag.nodes.iter().find(|n| n.id == *id) else {
+            continue;
+        };
+        rest_order.push(id.clone());
+        nodes.push(node.clone());
+    }
+    if rest_order.is_empty() {
+        rest_order = stored.order.iter().skip(resume_from).cloned().collect();
+        for id in &rest_order {
+            if nodes.iter().any(|n| n.id == *id) {
+                continue;
+            }
+            if let Some(node) = stored.dag.nodes.iter().find(|n| n.id == *id) {
+                nodes.push(node.clone());
+            }
+        }
+    }
+    if let (Some(last_prefix), Some(first_rest)) = (prefix.last(), rest_order.first()) {
+        for node in &mut nodes {
+            if node.id == *last_prefix {
+                node.next = Some(first_rest.clone());
+            }
+        }
+    }
+    for i in 0..rest_order.len() {
+        let nxt = rest_order.get(i + 1).cloned();
+        if let Some(n) = nodes.iter_mut().find(|n| n.id == rest_order[i]) {
+            n.next = nxt;
+        }
+    }
+    let order: Vec<String> = prefix
+        .iter()
+        .cloned()
+        .chain(rest_order.iter().cloned())
+        .collect();
+    let mut dag = stored.dag.clone();
+    dag.nodes = nodes;
+    if !prefix.is_empty() {
+        dag.entry = stored.dag.entry.clone();
+    } else if let Some(first) = order.first() {
+        dag.entry = first.clone();
+    }
+    PlannedLiveDag {
+        dag,
+        order,
+        used_fallback: remaining.used_fallback,
+        source: "repair",
+        resume_from,
+        graph_task_override: remaining.graph_task_override,
+    }
+}
+
+/// New task → full plan. Failed node + new prompt → replan remaining from that node.
+pub async fn prepare_session_live_dag(
+    agent: &crate::config::AgentConfig,
+    mem: &dyn Memory,
+    session_id: &str,
+    provider: &dyn Provider,
+    planner_model: &str,
+    user_task: &str,
+    temperature: f64,
+    host_phase: HostPhase,
+) -> Result<PlannedLiveDag> {
+    if host_phase == HostPhase::Plan {
+        clear_session_dag_state(mem, session_id).await?;
+        return obtain_planned_live_dag_with_provider(
+            agent,
+            mem,
+            session_id,
+            provider,
+            planner_model,
+            user_task,
+            temperature,
+            false,
+        )
+        .await;
+    }
+
+    if let Some(fail) = load_dag_fail(mem, session_id).await? {
+        if let Some(mut stored) = try_cached_or_fixed_live_dag(agent, mem, session_id).await? {
+            let original = load_graph_user_task(mem, session_id)
+                .await?
+                .unwrap_or_else(|| user_task.to_string());
+            let completed: Vec<String> = stored.order.iter().take(fail.index).cloned().collect();
+            let repair_user = repair_planner_user_prompt(&original, &fail, &completed, user_task);
+            let fallback = fallback_template_json(agent)?;
+            let remaining = run_live_planner_chat(
+                provider,
+                planner_model,
+                &repair_user,
+                temperature,
+                &fallback,
+            )
+            .await?;
+            let override_task = repair_graph_task(&original, &fail.node_id, user_task);
+            if remaining.used_fallback {
+                stored.resume_from = fail.index.min(stored.order.len());
+                stored.graph_task_override = Some(override_task);
+                stored.source = "repair_keep";
+                return Ok(stored);
+            }
+            let mut spliced = splice_remaining_plan(&stored, &fail, remaining);
+            if linear_node_ids(&spliced.dag).is_err() {
+                stored.resume_from = fail.index.min(stored.order.len());
+                stored.graph_task_override = Some(override_task);
+                stored.source = "repair_keep";
+                return Ok(stored);
+            }
+            spliced.graph_task_override = Some(override_task);
+            let json = planned_store_json(&spliced, &fallback);
+            let _ = store_planned_json(mem, session_id, &json).await;
+            return Ok(spliced);
+        }
+        let _ = clear_dag_fail(mem, session_id).await;
+    }
+
+    clear_session_dag_state(mem, session_id).await?;
+    obtain_planned_live_dag_with_provider(
+        agent,
+        mem,
+        session_id,
+        provider,
+        planner_model,
+        user_task,
+        temperature,
+        false,
+    )
+    .await
 }
 
 /// Tool-free planner chat with one validation retry before L2 fallback.
@@ -370,6 +788,8 @@ pub fn resolve_planned_manifest(planner_text: &str, fallback_json: &str) -> Resu
                     order,
                     used_fallback: false,
                     source: "planner",
+                    resume_from: 0,
+                    graph_task_override: None,
                 });
             }
         }
@@ -381,6 +801,8 @@ pub fn resolve_planned_manifest(planner_text: &str, fallback_json: &str) -> Resu
         order,
         used_fallback: true,
         source: "fallback_template",
+        resume_from: 0,
+        graph_task_override: None,
     })
 }
 
@@ -562,14 +984,100 @@ mod tests {
     }
 
     #[test]
-    fn short_confirmations_reuse_cached_dag() {
-        assert!(is_build_approval("同意，做吧"));
-        assert!(is_build_approval("ok"));
-        assert!(is_build_approval("Approve Build"));
-        assert!(should_reuse_cached_dag(HostPhase::Build, "yes"));
-        assert!(!should_reuse_cached_dag(HostPhase::Plan, "yes"));
-        assert!(!is_build_approval(
-            "this is not velaclaw; put the plan in the home directory"
-        ));
+    fn splice_keeps_prefix_and_resumes_at_failed_node() {
+        let stored = resolve_planned_manifest(
+            r#"{
+              "schema_version":"0.1.0","id":"ops","entry":"a","max_steps":8,
+              "nodes":[
+                {"id":"a","task_type":"ops-check","model_selector":{"capabilities":["coding"]},"next":"b"},
+                {"id":"b","task_type":"ops-check","model_selector":{"capabilities":["coding"]},"next":"c"},
+                {"id":"c","task_type":"summarize","model_selector":{"capabilities":["speed"]},"next":null}
+              ]
+            }"#,
+            CODE_FIX_TEMPLATE_JSON,
+        )
+        .unwrap();
+        let remaining = resolve_planned_manifest(
+            r#"{
+              "schema_version":"0.1.0","id":"ops-repair","entry":"b","max_steps":8,
+              "nodes":[
+                {"id":"b","task_type":"ops-check","model_selector":{"capabilities":["coding"]},"next":"c"},
+                {"id":"c","task_type":"summarize","model_selector":{"capabilities":["document_understanding"]},"next":null}
+              ]
+            }"#,
+            CODE_FIX_TEMPLATE_JSON,
+        )
+        .unwrap();
+        let fail = DagFailCursor {
+            node_id: "b".into(),
+            index: 1,
+            err: "timeout".into(),
+            dag_id: "ops".into(),
+        };
+        let spliced = splice_remaining_plan(&stored, &fail, remaining);
+        assert_eq!(spliced.resume_from, 1);
+        assert_eq!(spliced.order, vec!["a", "b", "c"]);
+        assert_eq!(spliced.source, "repair");
+        let b = spliced.dag.nodes.iter().find(|n| n.id == "b").unwrap();
+        assert_eq!(b.task_type, "ops-check");
+        assert_eq!(b.next.as_deref(), Some("c"));
+        let c = spliced.dag.nodes.iter().find(|n| n.id == "c").unwrap();
+        assert!(c.next.is_none());
+        assert!(linear_node_ids(&spliced.dag).is_ok());
+    }
+
+    #[test]
+    fn repair_prompt_asks_for_remaining_not_approval() {
+        let fail = DagFailCursor {
+            node_id: "check_install".into(),
+            index: 0,
+            err: "timeout".into(),
+            dag_id: "opcencode-check-upgrade".into(),
+        };
+        let prompt = repair_planner_user_prompt(
+            "请检查 opcencode",
+            &fail,
+            &[],
+            "不要用 find /，改查 which 和版本号",
+        );
+        assert!(prompt.contains("Failed node: check_install"));
+        assert!(prompt.contains("不要用 find /"));
+        assert!(!prompt.contains("Approve Build"));
+        assert!(!prompt.contains("继续"));
+    }
+
+    #[test]
+    fn work_node_stop_invites_step_guidance() {
+        let zh = format_work_node_stop("请检查", "check_install", "timeout", 1, 3);
+        assert!(zh.contains("已在第 1/3 步停住"));
+        assert!(zh.contains("针对这一步发送新说明"));
+        let en = format_work_node_stop("please check", "check_install", "timeout", 1, 3);
+        assert!(en.contains("guidance for this step"));
+    }
+
+    #[test]
+    fn brief_outline_uses_cjk_when_prompt_has_han() {
+        let plan = PlannedLiveDag {
+            dag: crate::agent::dag_runner::parse_dag_json(
+                r#"{
+                  "schema_version":"0.1.0","id":"opcencode-check-upgrade","entry":"check_install",
+                  "max_steps":6,"nodes":[
+                    {"id":"check_install","task_type":"ops-check","model_selector":{"capabilities":["coding"]},"next":"upgrade"},
+                    {"id":"upgrade","task_type":"upgrade","model_selector":{"capabilities":["coding"]},"next":null}
+                  ]
+                }"#,
+            )
+            .unwrap(),
+            order: vec!["check_install".into(), "upgrade".into()],
+            used_fallback: false,
+            source: "test",
+            resume_from: 0,
+            graph_task_override: None,
+        };
+        let out = plan.brief_outline("请检查 opcencode 是否要升级");
+        assert!(out.contains("将分 2 步处理"));
+        assert!(out.contains("check install"));
+        assert!(!out.contains("Bounded task DAG"));
+        assert!(!out.contains("contact model="));
     }
 }

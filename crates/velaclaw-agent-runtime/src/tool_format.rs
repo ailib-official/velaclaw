@@ -305,9 +305,33 @@ pub fn looks_like_provider_limit(err_msg: &str) -> bool {
         "insufficient_quota",
         "insufficient balance",
         "out of credits",
-        "all providers/models failed",
     ];
     HINTS.iter().any(|h| lower.contains(h))
+}
+
+/// True when an error string is a retired / gone model (HTTP 410), not billing.
+#[must_use]
+pub fn looks_like_model_retired(err_msg: &str) -> bool {
+    let lower = err_msg.to_lowercase();
+    lower.contains("end of life")
+        || lower.contains("http 410")
+        || lower.contains("status\":410")
+        || (lower.contains("410") && (lower.contains("gone") || lower.contains("http_error")))
+}
+
+/// User-facing notice for a retired / gone model (not quota).
+#[must_use]
+pub fn provider_retired_user_message(
+    sanitized_error: &str,
+    model: &str,
+    surface: SoftFailSurface,
+) -> String {
+    format!(
+        "VelaClaw notice: model `{model}` is retired or gone (not a billing error).\n\
+         Detail: {sanitized_error}\n\
+         {}",
+        surface.switch_hint()
+    )
 }
 
 /// Build an actionable user-facing message for provider limit / quota hard-fail.
@@ -420,8 +444,11 @@ mod tests {
             "429 Too Many Requests rate limit"
         ));
         assert!(looks_like_provider_limit("insufficient_quota"));
-        assert!(looks_like_provider_limit(
-            "All providers/models failed. Attempts:"
+        assert!(!looks_like_provider_limit(
+            "All providers/models failed. Attempts: dns error"
+        ));
+        assert!(looks_like_model_retired(
+            "HTTP 410 (http_error): Gone end of life"
         ));
         assert!(!looks_like_provider_limit("connection reset"));
         let msg = provider_limit_user_message(

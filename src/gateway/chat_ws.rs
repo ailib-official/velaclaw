@@ -5,7 +5,7 @@ use super::local_control::auth::{check_pairing_auth, unauthorized_response};
 use super::local_control::runner::{
     chunk_text_for_stream, persist_chat_turn, run_agent_chat, user_facing_turn_error,
 };
-use super::local_control::types::{ChatApiRequest, WsClientMessage, WsServerMessage};
+use super::local_control::types::{ChatApiRequest, WsClientMessage, WsDagNode, WsServerMessage};
 use super::AppState;
 use crate::agent::turn_cancel::{classify_turn_result, ws_inbound_cancels_turn, TurnFinish};
 use crate::agent::turn_progress::TurnProgress;
@@ -57,6 +57,27 @@ fn progress_frame(progress: TurnProgress) -> WsServerMessage {
             ok,
             summary,
             expand,
+        },
+        TurnProgress::Dag {
+            dag_id,
+            fallback,
+            outline,
+            nodes,
+        } => WsServerMessage::Dag {
+            dag_id,
+            fallback,
+            outline,
+            nodes: nodes
+                .into_iter()
+                .map(|n| WsDagNode {
+                    id: n.id,
+                    label: n.label,
+                    task_type: n.task_type,
+                    caps: n.caps,
+                    contact: n.contact,
+                    status: n.status,
+                })
+                .collect(),
         },
     }
 }
@@ -191,7 +212,7 @@ async fn handle_ws_socket(socket: WebSocket, state: AppState) {
         });
 
         let cancel = CancellationToken::new();
-        let (progress_tx, mut progress_rx) = tokio::sync::mpsc::channel(64);
+        let (progress_tx, mut progress_rx) = tokio::sync::mpsc::channel(128);
         let mut chat_fut = std::pin::pin!(run_agent_chat(
             &config,
             &req,

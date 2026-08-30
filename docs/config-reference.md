@@ -101,7 +101,9 @@ DAG-related keys below: **`template_dag` / candidate emit / shadow** stay librar
 | `candidate_dag_stagnation_limit` | `0` | **CR-L4-003:** optional consecutive assemble-output hash limit for shadow library runs (`0` = off). |
 | `intent_capability_route` | `false` | **CR-CAP-005 (opt-in; CAP-003 wire):** live on CLI + Web via `resolve_turn_model` (after explicit pick / `host_decide`). Tag/Hint → host capability index → **reachable (local keys)** ∩ `[[model_routes]]`. Serde alias: `capability_index_route`. Empty reachable sets **fail closed**. Channels remain route-table only. Observe: `doctor capabilities` → `doctor capability-route --tag <Tag> --force`. Requires `--features ai-protocol`. |
 | `host_decide` | `false` | **ORCH-HOST-001/002/003 (opt-in):** live on CLI + Web via `resolve_turn_model`. CAP reachable ∩ host Decide (embedded pricing; stub if unavailable). Preserves full multi-segment logical ids via `compose_logical_model_id` (e.g. `nvidia/deepseek-ai/...`). CAP index load failure **soft-skips** Decide (ladder continues). **Explicit user picks beat Decide.** Optimize via `host_decide_optimize`. Observe: `velaclaw doctor host-decide --force` (prints `used_cost_router`). Requires `--features ai-protocol`. |
-| `host_decide_optimize` | `cost` | Optimize goal when `host_decide` is enabled: `cost` \| `latency` \| `balanced` (Decide contract; keep all three for Eos/prism-core parity). **Host honesty:** only `cost` may set `used_cost_router=true` and reason `lowest_cost` when priced. `latency` / `balanced` stay accepted config values but emit stub reasons (`host_reachable_latency_stub` / `host_reachable_balanced_stub`) until live latency health exists — never claim Eos-style `lowest_latency` / `balanced_score` on the host embed. Prefer `cost` until host latency signals exist (Eos/prism-core CostRouter can use `ProviderHealth` when available). || `host_decide_failover` | `false` | **ORCH-HOST-004 (opt-in):** when `host_decide` is true, tool-format recovery exhaustion or provider limit/quota hard-fail may set a process-local session override to the next Decide fallback logical id for the **next** turn, and append a user-visible notice. Always-on notices (switch hint) apply even when this is false. Requires `--features ai-protocol`. |
+| `host_decide_optimize` | `cost` | Optimize goal when `host_decide` is enabled: `cost` \| `latency` \| `balanced` (Decide contract; keep all three for Eos/prism-core parity). **Host honesty:** only `cost` may set `used_cost_router=true` and reason `lowest_cost` when priced. `latency` / `balanced` stay accepted config values but emit stub reasons (`host_reachable_latency_stub` / `host_reachable_balanced_stub`) until live latency health exists — never claim Eos-style `lowest_latency` / `balanced_score` on the host embed. Prefer `cost` until host latency signals exist (Eos/prism-core CostRouter can use `ProviderHealth` when available). |
+| `host_decide_failover` | `false` | **ORCH-HOST-004 (opt-in):** when `host_decide` is true, tool-format recovery exhaustion or provider limit/quota hard-fail may set a process-local session override to the next Decide fallback logical id for the **next** turn, and append a user-visible notice. Always-on notices (switch hint) apply even when this is false. Requires `--features ai-protocol`. |
+| `hint_peer_fallback` | `false` | **VL-NA-021 (opt-in).** After ReliableProvider micro-retry, try `[[model_routes]].fallbacks` for the same hint (max 5 attempts, 3 cross-provider). Success pins the hint for the rest of the session and blacklists the failed model id. Dist default off. HTTP 410 / EOL is **not** billed as quota. |
 | `candidate_dag_emit` | `false` | **Library/doctor gate (ORCH-DAG-EMIT-001/002).** Schema-strict / LLM plan→emit helpers. **Not wired** into live chat. Observe: `velaclaw doctor dag-emit` / `velaclaw doctor dag-plan --force`. Requires `--features ai-protocol`. |
 
 **See the linear DAG without changing the shipped default:** keep `bounded_dag_live = false` in dist. For a **local vision proof** (trial), set `bounded_dag_live = true`, empty `bounded_dag_path`, and `[[model_routes]]` for the three families you have keys for:
@@ -112,6 +114,8 @@ DAG-related keys below: **`template_dag` / candidate emit / shadow** stay librar
 | `document` / `code` / `tools` | document_understanding, coding, tool_calling | DeepSeek | `deepseek/deepseek-v4-flash` |
 | `fast` | speed | Groq | `groq/openai/gpt-oss-20b` |
 | `reasoning` | high-reasoning | NVIDIA NIM | `nvidia/nvidia/llama-3.3-nemotron-super-49b-v1.5` |
+
+PT-NIM-002: that 49b-v1.5 id is **EOL** (NIM HTTP 410). Dist still ships `hint_peer_fallback = false`. Trial may keep the id as the route primary and list `fallbacks` (70b, then DeepSeek). After a successful hop the session pins the live peer.
 
 Planner stays on session `default_model` (not `host_decide`). Invalid planner JSON still falls back to `locate` → `patch` → `verify`. Web Plan/Build send `host_phase`. This is not L4 emit.
 
@@ -512,10 +516,11 @@ Use route hints so integrations can keep stable names while model IDs evolve.
 
 | Key | Default | Purpose |
 |---|---|---|
-| `hint` | _required_ | Task hint name (e.g. `"reasoning"`, `"fast"`, `"code"`, `"summarize"`) |
+| `hint` | _required_ | Task name (e.g. `"reasoning"`, `"fast"`, `"code"`, `"summarize"`) |
 | `provider` | _required_ | Provider to route to (must match a known provider name) |
 | `model` | _required_ | Model to use with that provider |
 | `api_key` | unset | Optional API key override for this route's provider |
+| `fallbacks` | `[]` | **VL-NA-021.** Same-hint peers `{ provider, model }` after micro-retry. Used only when `hint_peer_fallback` is on. |
 
 ### `[[embedding_routes]]`
 
@@ -535,6 +540,10 @@ embedding_model = "hint:semantic"
 hint = "reasoning"
 provider = "openrouter"
 model = "provider/model-id"
+# Used only when [agent].hint_peer_fallback = true (dist default off)
+fallbacks = [
+  { provider = "openrouter", model = "provider/peer-model" },
+]
 
 [[embedding_routes]]
 hint = "semantic"

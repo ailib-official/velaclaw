@@ -566,6 +566,7 @@ mod tests {
             provider: "beta".into(),
             model: "beta/x".into(),
             api_key: None,
+            fallbacks: Vec::new(),
         }];
         let decision = resolve(
             &index,
@@ -595,6 +596,7 @@ mod tests {
             provider: "groq".into(),
             model: "llama-fast".into(),
             api_key: None,
+            fallbacks: Vec::new(),
         }];
         let decision = resolve(
             &index,

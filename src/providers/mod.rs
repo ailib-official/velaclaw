@@ -18,6 +18,7 @@
 //! To add a new provider, add or update an ai-protocol manifest instead of
 //! wiring vendor-specific HTTP code in VelaClaw.
 
+pub mod hint_peer;
 pub mod openai_codex;
 pub mod reliable;
 pub mod router;
@@ -467,6 +468,7 @@ pub fn create_routed_provider(
         default_model,
         &ProviderRuntimeOptions::default(),
         None,
+        false,
     )
 }
 
@@ -480,6 +482,7 @@ pub fn create_routed_provider_with_options(
     default_model: &str,
     options: &ProviderRuntimeOptions,
     primary_override: Option<Box<dyn Provider>>,
+    hint_peer_fallback: bool,
 ) -> anyhow::Result<Box<dyn Provider>> {
     if model_routes.is_empty() {
         return create_resilient_provider_with_options(
@@ -496,6 +499,11 @@ pub fn create_routed_provider_with_options(
     for route in model_routes {
         if !needed.iter().any(|name| name == &route.provider) {
             needed.push(route.provider.clone());
+        }
+        for peer in &route.fallbacks {
+            if !needed.iter().any(|name| name == &peer.provider) {
+                needed.push(peer.provider.clone());
+            }
         }
     }
 
@@ -548,16 +556,20 @@ pub fn create_routed_provider_with_options(
                 router::Route {
                     provider_name: route.provider.clone(),
                     model: route.model.clone(),
+                    fallbacks: route
+                        .fallbacks
+                        .iter()
+                        .map(|p| (p.provider.clone(), p.model.clone()))
+                        .collect(),
                 },
             )
         })
         .collect();
 
-    Ok(Box::new(router::RouterProvider::new(
-        providers,
-        routes,
-        default_model.to_string(),
-    )))
+    Ok(Box::new(
+        router::RouterProvider::new(providers, routes, default_model.to_string())
+            .with_hint_peer_fallback(hint_peer_fallback),
+    ))
 }
 
 /// Information about a supported provider display row.

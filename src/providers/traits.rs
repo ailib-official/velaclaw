@@ -231,6 +231,11 @@ pub trait Provider: Send + Sync {
         ProviderCapabilities::default()
     }
 
+    /// Logical model the router will actually call for `requested` (`hint:` resolved / pinned).
+    fn routed_model_label(&self, requested: &str) -> String {
+        requested.to_string()
+    }
+
     /// Convert tool specifications to provider-native format.
     ///
     /// Default implementation returns `PromptGuided` payload, which injects

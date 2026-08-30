@@ -39,6 +39,7 @@ export interface WsServerFrame {
     | "input_required"
     | "status"
     | "step"
+    | "dag"
     | "cancelled";
   content?: string;
   message?: string;
@@ -58,6 +59,26 @@ export interface WsServerFrame {
   ok?: boolean;
   summary?: string;
   expand?: string;
+  dag_id?: string;
+  fallback?: boolean;
+  outline?: string;
+  nodes?: DagNodeFrame[];
+}
+
+export interface DagNodeFrame {
+  id: string;
+  label: string;
+  task_type: string;
+  caps: string;
+  contact?: string;
+  status: string;
+}
+
+export interface DagFrame {
+  dag_id: string;
+  fallback: boolean;
+  outline: string;
+  nodes: DagNodeFrame[];
 }
 
 export interface ApprovalRequiredPayload {
@@ -96,6 +117,7 @@ export interface StreamChatOptions {
     summary: string;
     expand?: string;
   }) => void;
+  onDag?: (payload: DagFrame) => void;
   onCancelled?: (message?: string) => void;
 }
 
@@ -161,6 +183,13 @@ export function streamChat(opts: StreamChatOptions): () => void {
         ok: frame.ok !== false,
         summary: frame.summary ?? "",
         expand: frame.expand,
+      });
+    } else if (frame.type === "dag" && frame.dag_id && Array.isArray(frame.nodes)) {
+      opts.onDag?.({
+        dag_id: frame.dag_id,
+        fallback: frame.fallback === true,
+        outline: frame.outline ?? "",
+        nodes: frame.nodes,
       });
     } else if (frame.type === "cancelled") {
       opts.onCancelled?.(frame.message);

@@ -27,13 +27,13 @@ pub use schema::{
     DeploymentTargetConfig, DiscordConfig, DockerRuntimeConfig, EmbeddingRouteConfig,
     ExecutionRoutingConfig, GatewayConfig, HardwareConfig, HardwareTransport, HeartbeatConfig,
     HttpRequestConfig, IMessageConfig, IdentityConfig, LarkConfig, MatrixConfig, MemoryConfig,
-    ModelRouteConfig, MultimodalConfig, NextcloudTalkConfig, ObservabilityConfig,
-    PeripheralBoardConfig, PeripheralsConfig, ProviderRoutingMode, ProxyConfig, ProxyScope,
-    QueryClassificationConfig, ReliabilityConfig, ResourceLimitsConfig, RuntimeConfig,
-    SandboxBackend, SandboxConfig, SchedulerConfig, SecretsConfig, SecurityConfig, SecurityProfile,
-    SkillsConfig, SkillsPromptInjectionMode, SlackConfig, StorageConfig, StorageProviderConfig,
-    StorageProviderSection, StreamMode, TelegramConfig, TunnelConfig, WasmRuntimeConfig,
-    WebSearchConfig, WebhookConfig,
+    ModelRouteConfig, ModelRoutePeerConfig, MultimodalConfig, NextcloudTalkConfig,
+    ObservabilityConfig, PeripheralBoardConfig, PeripheralsConfig, ProviderRoutingMode,
+    ProxyConfig, ProxyScope, QueryClassificationConfig, ReliabilityConfig, ResourceLimitsConfig,
+    RuntimeConfig, SandboxBackend, SandboxConfig, SchedulerConfig, SecretsConfig, SecurityConfig,
+    SecurityProfile, SkillsConfig, SkillsPromptInjectionMode, SlackConfig, StorageConfig,
+    StorageProviderConfig, StorageProviderSection, StreamMode, TelegramConfig, TunnelConfig,
+    WasmRuntimeConfig, WebSearchConfig, WebhookConfig,
 };
 
 #[cfg(feature = "ai-protocol")]

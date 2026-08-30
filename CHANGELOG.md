@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Hint peer fallback (VL-NA-021):** `[agent].hint_peer_fallback` (dist default **off**) retries `[[model_routes]].fallbacks` after micro-retry on retired/429/402 hops (not DNS). Max 5 attempts / 3 cross-provider; success pins the hint and blacklists the failed id. HTTP 410 is reported as retired, not quota.
+- **Step captions (VL-UX-STEP-003):** skip `cd`/`export` setup in shell captions; DAG node labels show the resolved provider/model.
+
 - **Native-app honesty (VL-NA-000):** `velaclaw doctor` reports `envelope_assemble`, Contact live-select flags (`host_decide` / `intent_capability_route`, default off), and `autonomy.level=full` does not mean unsandboxed. `/health` `execution` and Web Overview show the same fields. Default binary still does **not** compile `runtime-wasm`.
 
 - **Security profiles + retractable elevation** (VL-SEC-011): `[security.profile]` = `isolated` | `local` | `readonly` unfolds existing sandbox/autonomy knobs (no second tool loop). `[sandbox_deny]` / `[needs_approval]` re-enter the same `ApprovalGate` even under Full; **Once** dies after that `execute`. **Never** persists to L2.5. Local inherits daemon env in `apply_shell_child_env` only. Credential basenames: unset profile still hard-denies; isolated **Ask**; local **Allow** (scrubbed). CLI stdin uses the same gate as Web (`Y`/`A`/`N`/`!`); cron/heartbeat reuse `loop_::run` but are **not** labeled `cli`, so they cannot HITL-elevate or skip wrap. See [config-reference.md](docs/config-reference.md#security).

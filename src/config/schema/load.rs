@@ -563,6 +563,14 @@ impl Config {
             if route.model.trim().is_empty() {
                 anyhow::bail!("model_routes[{i}].model must not be empty");
             }
+            for (j, peer) in route.fallbacks.iter().enumerate() {
+                if peer.provider.trim().is_empty() {
+                    anyhow::bail!("model_routes[{i}].fallbacks[{j}].provider must not be empty");
+                }
+                if peer.model.trim().is_empty() {
+                    anyhow::bail!("model_routes[{i}].fallbacks[{j}].model must not be empty");
+                }
+            }
         }
 
         // Embedding routes

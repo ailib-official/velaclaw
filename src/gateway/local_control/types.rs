@@ -136,11 +136,29 @@ pub enum WsServerMessage {
         #[serde(skip_serializing_if = "Option::is_none")]
         expand: Option<String>,
     },
+    /// Live bounded DAG rail (node progress; outline is also in `outline`).
+    Dag {
+        dag_id: String,
+        fallback: bool,
+        outline: String,
+        nodes: Vec<WsDagNode>,
+    },
     /// User cancelled the in-flight turn.
     Cancelled {
         #[serde(skip_serializing_if = "Option::is_none")]
         message: Option<String>,
     },
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct WsDagNode {
+    pub id: String,
+    pub label: String,
+    pub task_type: String,
+    pub caps: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub contact: String,
+    pub status: String,
 }
 
 #[cfg(test)]
@@ -202,6 +220,26 @@ mod tests {
         assert!(json.contains(r#""type":"step""#));
         assert!(json.contains(r#""tool":"shell""#));
         assert!(json.contains(r#""expand":"On branch main""#));
+    }
+
+    #[test]
+    fn ws_server_dag_serializes() {
+        let msg = WsServerMessage::Dag {
+            dag_id: "opcencode-check-upgrade".into(),
+            fallback: false,
+            outline: "Working in 1 step(s):".into(),
+            nodes: vec![WsDagNode {
+                id: "check_install".into(),
+                label: "check install".into(),
+                task_type: "ops-check".into(),
+                caps: "coding".into(),
+                contact: "hint:code".into(),
+                status: "running".into(),
+            }],
+        };
+        let json = serde_json::to_string(&msg).expect("serialize");
+        assert!(json.contains(r#""type":"dag""#));
+        assert!(json.contains(r#""status":"running""#));
     }
 
     #[test]

@@ -82,6 +82,7 @@ pub fn assemble_runtime(config: &Config, options: BootstrapOptions) -> Result<As
             &model_name,
             &provider_runtime_options,
             None,
+            config.agent.hint_peer_fallback,
         )?;
         let workspace_policy =
             crate::config::discover_and_load(config).context("load workspace agent-policy.yaml")?;

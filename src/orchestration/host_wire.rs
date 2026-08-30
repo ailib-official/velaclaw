@@ -166,6 +166,12 @@ pub fn map_provider_limit_error(
     session_key: &str,
 ) -> anyhow::Error {
     let raw = err.to_string();
+    let sanitized = crate::providers::sanitize_api_error(&raw);
+    if velaclaw_agent_runtime::looks_like_model_retired(&raw) {
+        return anyhow::anyhow!(velaclaw_agent_runtime::provider_retired_user_message(
+            &sanitized, model, surface,
+        ));
+    }
     if !velaclaw_agent_runtime::looks_like_provider_limit(&raw) {
         return err;
     }

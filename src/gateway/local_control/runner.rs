@@ -393,6 +393,17 @@ pub fn user_facing_turn_error(err: &anyhow::Error, model: Option<&str>) -> Strin
     }
     let full = format!("{err:#}");
     let sanitized = crate::providers::sanitize_api_error(&full);
+    if velaclaw_agent_runtime::looks_like_model_retired(&full) {
+        let model = model
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("the selected model");
+        return velaclaw_agent_runtime::provider_retired_user_message(
+            &sanitized,
+            model,
+            velaclaw_agent_runtime::SoftFailSurface::Web,
+        );
+    }
     if velaclaw_agent_runtime::looks_like_provider_limit(&full) {
         let model = model
             .map(str::trim)

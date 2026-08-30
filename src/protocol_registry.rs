@@ -803,6 +803,7 @@ endpoint:
             provider: "deepseek".into(),
             model: "deepseek/deepseek-v4-flash".into(),
             api_key: None,
+            fallbacks: Vec::new(),
         }];
         assert_eq!(
             resolve_route_logical_model("hint:code", &routes),

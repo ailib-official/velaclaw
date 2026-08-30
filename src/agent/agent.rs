@@ -402,6 +402,29 @@ impl Agent {
         self.progress_tx = tx;
     }
 
+    fn emit_turn_progress(&self, progress: crate::agent::turn_progress::TurnProgress) {
+        if self.cli_render.is_some() {
+            crate::agent::turn_progress::print_cli_progress(&progress, None);
+        }
+        if let Some(tx) = &self.progress_tx {
+            let _ = tx.try_send(progress);
+        }
+    }
+
+    fn dag_contact_labels(
+        &self,
+        dag: &crate::agent::dag_runner::DagManifest,
+        order: &[String],
+    ) -> std::collections::HashMap<String, String> {
+        crate::agent::bounded_dag_live::dag_contact_labels(
+            self.provider.as_ref(),
+            dag,
+            order,
+            &self.model_name,
+            &self.available_hints,
+        )
+    }
+
     pub fn set_host_phase(&mut self, phase: crate::agent::host_phase::HostPhase) {
         self.host_phase = phase;
     }
@@ -785,8 +808,12 @@ impl Agent {
 
         #[cfg(feature = "ai-protocol")]
         if self.config.bounded_dag_live {
+            use crate::agent::bounded_dag_live::{
+                format_work_node_stop, live_dag_progress, work_node_user_task,
+            };
             use crate::agent::host_phase::HostPhase;
-            use std::collections::HashMap;
+            use crate::agent::loop_::is_tool_loop_cancelled;
+            use std::collections::{HashMap, HashSet};
             let planned = self
                 .resolve_live_dag(dag_prefix_len, &enriched, user_message)
                 .await?;
@@ -795,6 +822,7 @@ impl Agent {
             }
             let dag_id = planned.dag.id.clone();
             let node_count = planned.order.len();
+            let outline = planned.brief_outline(user_message);
             let mut chat_hist: Vec<ChatMessage> = self
                 .history
                 .iter()
@@ -803,13 +831,18 @@ impl Agent {
                     _ => None,
                 })
                 .collect();
-            let graph_task = crate::agent::bounded_dag_live::work_node_user_task(
-                self.memory.as_ref(),
-                self.session_id.as_str(),
-                &chat_hist,
-                user_message,
-            )
-            .await;
+            let graph_task = match &planned.graph_task_override {
+                Some(task) => task.clone(),
+                None => {
+                    work_node_user_task(
+                        self.memory.as_ref(),
+                        self.session_id.as_str(),
+                        &chat_hist,
+                        user_message,
+                    )
+                    .await
+                }
+            };
             let by_id: HashMap<&str, _> = planned
                 .dag
                 .nodes
@@ -817,13 +850,29 @@ impl Agent {
                 .map(|n| (n.id.as_str(), n))
                 .collect();
             let mut prior: Vec<String> = Vec::new();
-            let mut parts = Vec::new();
-            parts.push(format!(
-                "planner source={} used_fallback={}",
-                planned.source, planned.used_fallback
+            let mut completed: HashSet<String> = HashSet::new();
+            for id in planned.order.iter().take(planned.resume_from) {
+                prior.push(id.clone());
+                completed.insert(id.clone());
+            }
+            let mut last_body = String::new();
+            let contacts = self.dag_contact_labels(&planned.dag, &planned.order);
+            self.emit_turn_progress(live_dag_progress(
+                &dag_id,
+                planned.used_fallback,
+                &outline,
+                &planned.dag,
+                &planned.order,
+                None,
+                &completed,
+                None,
+                Some(&contacts),
             ));
             let work_sys = self.build_work_node_system_prompt()?;
             for (index, id) in planned.order.iter().enumerate() {
+                if index < planned.resume_from {
+                    continue;
+                }
                 let node = by_id
                     .get(id.as_str())
                     .ok_or_else(|| anyhow::anyhow!("bounded DAG missing node {id}"))?;
@@ -861,9 +910,55 @@ impl Agent {
                 self.prepare_conversation_history_inner(false, Some(contact.model.as_str()))
                     .await?;
                 self.last_turn_model = Some(contact.to_turn_decision());
-                let text = self
-                    .invoke_tool_loop_resolved(contact.model.clone())
-                    .await?;
+                let contacts = self.dag_contact_labels(&planned.dag, &planned.order);
+                self.emit_turn_progress(live_dag_progress(
+                    &dag_id,
+                    planned.used_fallback,
+                    &outline,
+                    &planned.dag,
+                    &planned.order,
+                    Some(id.as_str()),
+                    &completed,
+                    None,
+                    Some(&contacts),
+                ));
+                let text = match self.invoke_tool_loop_resolved(contact.model.clone()).await {
+                    Ok(text) => text,
+                    Err(err) if is_tool_loop_cancelled(&err) => return Err(err),
+                    Err(err) => {
+                        let contacts = self.dag_contact_labels(&planned.dag, &planned.order);
+                        self.emit_turn_progress(live_dag_progress(
+                            &dag_id,
+                            planned.used_fallback,
+                            &outline,
+                            &planned.dag,
+                            &planned.order,
+                            None,
+                            &completed,
+                            Some(id.as_str()),
+                            Some(&contacts),
+                        ));
+                        let stop = format_work_node_stop(
+                            user_message,
+                            &node.id,
+                            &format!("{err:#}"),
+                            index + 1,
+                            node_count,
+                        );
+                        let _ = crate::agent::bounded_dag_live::store_dag_fail(
+                            self.memory.as_ref(),
+                            self.session_id.as_str(),
+                            &crate::agent::bounded_dag_live::DagFailCursor {
+                                node_id: node.id.clone(),
+                                index,
+                                err: format!("{err:#}"),
+                                dag_id: dag_id.clone(),
+                            },
+                        )
+                        .await;
+                        return Ok(stop);
+                    }
+                };
                 if let Err(err) = crate::agent::bounded_dag_context::store_node_artifact(
                     self.memory.as_ref(),
                     self.session_id.as_str(),
@@ -874,11 +969,8 @@ impl Agent {
                 {
                     tracing::debug!(error = %err, node = %node.id, "bounded DAG artifact store skipped");
                 }
-                parts.push(format!(
-                    "## {}\n{}\n{text}",
-                    node.id,
-                    contact.observe_line()
-                ));
+                completed.insert(node.id.clone());
+                last_body = text;
                 prior.push(node.id.clone());
                 chat_hist = self
                     .history
@@ -888,8 +980,29 @@ impl Agent {
                         _ => None,
                     })
                     .collect();
+                let contacts = self.dag_contact_labels(&planned.dag, &planned.order);
+                self.emit_turn_progress(live_dag_progress(
+                    &dag_id,
+                    planned.used_fallback,
+                    &outline,
+                    &planned.dag,
+                    &planned.order,
+                    None,
+                    &completed,
+                    None,
+                    Some(&contacts),
+                ));
             }
-            return Ok(parts.join("\n\n"));
+            let _ = crate::agent::bounded_dag_live::clear_dag_fail(
+                self.memory.as_ref(),
+                self.session_id.as_str(),
+            )
+            .await;
+            return Ok(if last_body.is_empty() {
+                outline
+            } else {
+                last_body
+            });
         }
 
         self.invoke_tool_loop_once(user_message).await
@@ -902,15 +1015,9 @@ impl Agent {
         _enriched: &str,
         user_message: &str,
     ) -> Result<crate::agent::bounded_dag_live::PlannedLiveDag> {
-        use crate::agent::bounded_dag_live::{
-            clear_session_dag_state, obtain_planned_live_dag_with_provider, should_reuse_cached_dag,
-        };
+        use crate::agent::bounded_dag_live::prepare_session_live_dag;
 
-        let use_cache = should_reuse_cached_dag(self.host_phase, user_message);
-        if !use_cache {
-            clear_session_dag_state(self.memory.as_ref(), self.session_id.as_str()).await?;
-        }
-        let planned = obtain_planned_live_dag_with_provider(
+        let planned = prepare_session_live_dag(
             &self.config,
             self.memory.as_ref(),
             self.session_id.as_str(),
@@ -918,7 +1025,7 @@ impl Agent {
             &self.model_name,
             user_message,
             self.temperature,
-            use_cache,
+            self.host_phase,
         )
         .await?;
         self.last_turn_model = Some(crate::orchestration::TurnModelDecision {

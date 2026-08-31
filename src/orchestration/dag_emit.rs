@@ -13,20 +13,18 @@ use anyhow::Result;
 pub const DAG_PLAN_SYSTEM_PROMPT: &str = r#"You are a DAG planner. Reply with ONLY one JSON object (no markdown fences, no prose, no tool calls).
 The object MUST use schema_version "0.1.0" and include:
 - id (string), entry (string node id), max_steps (number, <= 8)
-- nodes: 2 to 6 items of { id, task_type, model_selector: { capabilities: string[] }, next: string|null, context_requirements?: { layers: number[], retrieve?: object[] } }
-capabilities MUST be tags such as coding, tool_calling, high-reasoning, speed, document_understanding.
-Use document_understanding for reading/summarizing; coding for patches and shell ops; tool_calling for status/checks; high-reasoning for analysis; speed for short cheap checks.
-Do not name providers or model IDs — only capability tags.
+- nodes: 1 to 8 items of { id, task_type, model_selector: { capabilities: string[] }, next: string|null, context_requirements?: { layers: number[], retrieve?: object[] } }
+Choose the node count from THIS task: one node if a single capability can finish it; more only when later steps need a different capability or a real checkpoint (e.g. user asked for a review). Do not invent inspect/diagnose/report splits, empty "gather context" nodes, or ceremony.
+Each node lists ONE primary capability first (optional extras after). Tags: coding (patches/shell), tool_calling (status/checks), high-reasoning (analysis that needs a reasoning family), speed (cheap/short), document_understanding (read/summarize). Different work → different first tags so Contact can route to different [[model_routes]] families. Do not name providers or model IDs.
+Do not pad every node with coding+tool_calling. Runtime already injects workspace retrieve and the previous node's artifact.
 The graph MUST be a single linear chain: entry walks next until null and covers every node (no branches, no unused nodes).
-Plan for a generic task (ops, documents, planning, review, code, research) — do not assume a single domain.
-Every non-entry node SHOULD set context_requirements.layers including 3 and/or retrieve [{kind:"tool_result"}] so the next step receives the previous node's artifact. The runtime also injects that artifact if omitted.
-Do not include executable scripts.
+Work nodes should batch related shell into one command (`&&` / pipes). Do not include executable scripts.
 
-Example (inspect then summarize — any ops/status task):
-{"schema_version":"0.1.0","id":"inspect-summarize","entry":"inspect","max_steps":8,"nodes":[{"id":"inspect","task_type":"ops-check","model_selector":{"capabilities":["tool_calling","coding"]},"next":"report"},{"id":"report","task_type":"summarize","model_selector":{"capabilities":["document_understanding","speed"]},"context_requirements":{"layers":[3],"retrieve":[{"kind":"tool_result"}]},"next":null}]}
+Example (one hop — a single ops check):
+{"schema_version":"0.1.0","id":"ops-one","entry":"check","max_steps":8,"nodes":[{"id":"check","task_type":"ops-check","model_selector":{"capabilities":["tool_calling"]},"next":null}]}
 
-Example (read then write then review — any document/planning task):
-{"schema_version":"0.1.0","id":"read-write-review","entry":"read","max_steps":8,"nodes":[{"id":"read","task_type":"summarize","model_selector":{"capabilities":["document_understanding"]},"next":"write"},{"id":"write","task_type":"write","model_selector":{"capabilities":["high-reasoning"]},"context_requirements":{"layers":[3],"retrieve":[{"kind":"tool_result"}]},"next":"review"},{"id":"review","task_type":"review","model_selector":{"capabilities":["high-reasoning","document_understanding"]},"context_requirements":{"layers":[3],"retrieve":[{"kind":"tool_result"}]},"next":null}]}"#;
+Example (two hops — code then a cheap verify):
+{"schema_version":"0.1.0","id":"patch-verify","entry":"patch","max_steps":8,"nodes":[{"id":"patch","task_type":"write","model_selector":{"capabilities":["coding"]},"next":"verify"},{"id":"verify","task_type":"ops-check","model_selector":{"capabilities":["speed"]},"context_requirements":{"layers":[3],"retrieve":[{"kind":"tool_result"}]},"next":null}]}"#;
 
 /// Tool-free planner turn: one system prompt + user task → raw model text.
 pub async fn planner_chat_text(

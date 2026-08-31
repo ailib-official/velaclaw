@@ -19,7 +19,8 @@ use std::path::Path;
 /// Clip node output stored as a Daily memory row (layer-3 / tool_result retrieve).
 pub const ARTIFACT_MAX_CHARS: usize = 4_096;
 
-/// Prefer long-context / reasoning before cheap speed so mixed tags stay on the right family.
+/// Prefer the planner's first listed tag so mixed caps do not collapse to coding.
+/// Preference order is only a fallback when listed tags have no configured hint.
 const CONTACT_TAG_PREFERENCE: &[&str] = &[
     "document_understanding",
     "high-reasoning",
@@ -27,6 +28,32 @@ const CONTACT_TAG_PREFERENCE: &[&str] = &[
     "tool_calling",
     "speed",
 ];
+
+fn hint_contact_for_tag(
+    tag: &str,
+    available_hints: &[String],
+    capabilities: Vec<String>,
+) -> Option<NodeContact> {
+    let mut candidates = hints_for_tag(tag);
+    if !candidates.iter().any(|h| h.eq_ignore_ascii_case(tag)) {
+        candidates.push(tag);
+    }
+    for hint in candidates {
+        if available_hints.iter().any(|h| h.eq_ignore_ascii_case(hint)) {
+            let canon = available_hints
+                .iter()
+                .find(|h| h.eq_ignore_ascii_case(hint))
+                .cloned()
+                .unwrap_or_else(|| hint.to_string());
+            return Some(NodeContact {
+                model: format!("hint:{canon}"),
+                reason: format!("node_capability:{tag}:hint:{canon}"),
+                capabilities,
+            });
+        }
+    }
+    None
+}
 
 /// Observable Contact choice for one DAG node (not a second router).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -261,6 +288,13 @@ pub fn contact_for_node(
         };
     }
 
+    for cap in &capabilities {
+        let tag = hint_to_tag(cap).unwrap_or(cap.as_str());
+        if let Some(c) = hint_contact_for_tag(tag, available_hints, capabilities.clone()) {
+            return c;
+        }
+    }
+
     for tag in CONTACT_TAG_PREFERENCE {
         if !capabilities
             .iter()
@@ -268,23 +302,8 @@ pub fn contact_for_node(
         {
             continue;
         }
-        let mut candidates = hints_for_tag(tag);
-        if !candidates.iter().any(|h| h.eq_ignore_ascii_case(tag)) {
-            candidates.push(tag);
-        }
-        for hint in candidates {
-            if available_hints.iter().any(|h| h.eq_ignore_ascii_case(hint)) {
-                let canon = available_hints
-                    .iter()
-                    .find(|h| h.eq_ignore_ascii_case(hint))
-                    .cloned()
-                    .unwrap_or_else(|| hint.to_string());
-                return NodeContact {
-                    model: format!("hint:{canon}"),
-                    reason: format!("node_capability:{tag}:hint:{canon}"),
-                    capabilities,
-                };
-            }
+        if let Some(c) = hint_contact_for_tag(tag, available_hints, capabilities.clone()) {
+            return c;
         }
     }
 
@@ -293,6 +312,23 @@ pub fn contact_for_node(
         reason: "node_capability:unmapped_default".into(),
         capabilities,
     }
+}
+
+/// After hop fail strategy: stay on session default instead of the failed hint.
+pub fn contact_for_live_node(
+    node: &DagNode,
+    default_model: &str,
+    available_hints: &[String],
+    force_default: bool,
+) -> NodeContact {
+    if force_default {
+        return NodeContact {
+            model: default_model.to_string(),
+            reason: "fail_strategy:default_model".into(),
+            capabilities: node.model_selector.capabilities.clone(),
+        };
+    }
+    contact_for_node(node, default_model, available_hints, None)
 }
 
 #[cfg(test)]
@@ -363,6 +399,27 @@ mod tests {
         );
         assert_eq!(c.model, "hint:document");
         assert!(c.reason.contains("document_understanding"), "{}", c.reason);
+    }
+
+    #[test]
+    fn first_listed_capability_wins_over_preference() {
+        let json = r#"{
+          "schema_version": "0.1.0",
+          "id": "mix",
+          "entry": "n",
+          "max_steps": 8,
+          "nodes": [
+            {"id":"n","task_type":"ops-check","model_selector":{"capabilities":["speed","coding"]},"next":null}
+          ]
+        }"#;
+        let dag = parse_dag_json(json).unwrap();
+        let c = contact_for_node(
+            &dag.nodes[0],
+            "deepseek/deepseek-v4-flash",
+            &["fast".into(), "code".into()],
+            None,
+        );
+        assert_eq!(c.model, "hint:fast", "{}", c.reason);
     }
 
     #[test]

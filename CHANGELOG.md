@@ -9,7 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Hint peer fallback (VL-NA-021):** `[agent].hint_peer_fallback` (dist default **off**) retries `[[model_routes]].fallbacks` after micro-retry on retired/429/402 hops (not DNS). Max 5 attempts / 3 cross-provider; success pins the hint and blacklists the failed id. HTTP 410 is reported as retired, not quota.
+- **Hint peer fallback (VL-NA-021 / VL-NA-022):** `[agent].hint_peer_fallback` (dist default **off**) retries `[[model_routes]].fallbacks` after micro-retry. Switchable error **classes**: unavailable (410/EOL, `model_not_found`, vendor HTTP 404 Function Not Found) and quota (429/402). DNS/transport and workspace file-not-found do not switch. Max 5 attempts / 3 cross-provider; success pins the hint and blacklists the failed id.
+- **DAG fail auto-replan (VL-NA-024):** `[agent].dag_fail_auto_replan` (dist default **off**) retries a failed live work node once (default model after unavailable/quota).
+- **Scratch temps (VL-SEC-012):** file tools rewrite `/tmp` and `/var/tmp` to workspace `.velaclaw/tmp`; shell children get `TMPDIR` there. Host temp writes are not a silent policy deny.
+- **Planner (VL-NA-023):** node count follows the task (1–8); each node’s **first** capability tag is Contact. Trial `code`/`tools`/`document` may still share one physical model — that is route-table, not a Contact bug.
 - **Step captions (VL-UX-STEP-003):** skip `cd`/`export` setup in shell captions; DAG node labels show the resolved provider/model.
 
 - **Native-app honesty (VL-NA-000):** `velaclaw doctor` reports `envelope_assemble`, Contact live-select flags (`host_decide` / `intent_capability_route`, default off), and `autonomy.level=full` does not mean unsandboxed. `/health` `execution` and Web Overview show the same fields. Default binary still does **not** compile `runtime-wasm`.

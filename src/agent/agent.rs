@@ -869,10 +869,11 @@ impl Agent {
                 Some(&contacts),
             ));
             let work_sys = self.build_work_node_system_prompt()?;
-            for (index, id) in planned.order.iter().enumerate() {
-                if index < planned.resume_from {
-                    continue;
-                }
+            let mut force_default = false;
+            let mut auto_used = false;
+            let mut index = planned.resume_from;
+            while index < planned.order.len() {
+                let id = &planned.order[index];
                 let node = by_id
                     .get(id.as_str())
                     .ok_or_else(|| anyhow::anyhow!("bounded DAG missing node {id}"))?;
@@ -884,11 +885,11 @@ impl Agent {
                     &prior,
                 )
                 .await;
-                let contact = crate::agent::bounded_dag_context::contact_for_node(
+                let contact = crate::agent::bounded_dag_context::contact_for_live_node(
                     node,
                     &self.model_name,
                     &self.available_hints,
-                    None,
+                    force_default,
                 );
                 crate::agent::bounded_dag_context::reset_chat_scope(
                     &mut chat_hist,
@@ -926,37 +927,75 @@ impl Agent {
                     Ok(text) => text,
                     Err(err) if is_tool_loop_cancelled(&err) => return Err(err),
                     Err(err) => {
-                        let contacts = self.dag_contact_labels(&planned.dag, &planned.order);
-                        self.emit_turn_progress(live_dag_progress(
-                            &dag_id,
-                            planned.used_fallback,
-                            &outline,
-                            &planned.dag,
-                            &planned.order,
-                            None,
-                            &completed,
-                            Some(id.as_str()),
-                            Some(&contacts),
-                        ));
-                        let stop = format_work_node_stop(
-                            user_message,
-                            &node.id,
-                            &format!("{err:#}"),
-                            index + 1,
-                            node_count,
-                        );
-                        let _ = crate::agent::bounded_dag_live::store_dag_fail(
-                            self.memory.as_ref(),
-                            self.session_id.as_str(),
-                            &crate::agent::bounded_dag_live::DagFailCursor {
-                                node_id: node.id.clone(),
-                                index,
-                                err: format!("{err:#}"),
-                                dag_id: dag_id.clone(),
-                            },
-                        )
-                        .await;
-                        return Ok(stop);
+                        let err_s = format!("{err:#}");
+                        let class = crate::providers::hint_peer::classify_hop_error(&err_s);
+                        match crate::agent::bounded_dag_live::decide_work_node_fail(
+                            self.config.dag_fail_auto_replan,
+                            auto_used,
+                            &err_s,
+                        ) {
+                            crate::agent::bounded_dag_live::WorkNodeFailDecision::RetrySame {
+                                force_default: fd,
+                            } => {
+                                tracing::warn!(
+                                    node = %node.id,
+                                    class = class.as_str(),
+                                    "dag_fail_auto_replan: retrying node"
+                                );
+                                auto_used = true;
+                                force_default = force_default || fd;
+                                let _ = crate::agent::bounded_dag_live::store_dag_fail(
+                                    self.memory.as_ref(),
+                                    self.session_id.as_str(),
+                                    &crate::agent::bounded_dag_live::DagFailCursor {
+                                        node_id: node.id.clone(),
+                                        index,
+                                        err: err_s,
+                                        dag_id: dag_id.clone(),
+                                        auto_replan_count: 1,
+                                        fail_class: class.as_str().into(),
+                                    },
+                                )
+                                .await;
+                                continue;
+                            }
+                            crate::agent::bounded_dag_live::WorkNodeFailDecision::Stop => {
+                                let contacts =
+                                    self.dag_contact_labels(&planned.dag, &planned.order);
+                                self.emit_turn_progress(live_dag_progress(
+                                    &dag_id,
+                                    planned.used_fallback,
+                                    &outline,
+                                    &planned.dag,
+                                    &planned.order,
+                                    None,
+                                    &completed,
+                                    Some(id.as_str()),
+                                    Some(&contacts),
+                                ));
+                                let stop = format_work_node_stop(
+                                    user_message,
+                                    &node.id,
+                                    &err_s,
+                                    index + 1,
+                                    node_count,
+                                );
+                                let _ = crate::agent::bounded_dag_live::store_dag_fail(
+                                    self.memory.as_ref(),
+                                    self.session_id.as_str(),
+                                    &crate::agent::bounded_dag_live::DagFailCursor {
+                                        node_id: node.id.clone(),
+                                        index,
+                                        err: err_s,
+                                        dag_id: dag_id.clone(),
+                                        auto_replan_count: u32::from(auto_used),
+                                        fail_class: class.as_str().into(),
+                                    },
+                                )
+                                .await;
+                                return Ok(stop);
+                            }
+                        }
                     }
                 };
                 if let Err(err) = crate::agent::bounded_dag_context::store_node_artifact(
@@ -992,6 +1031,7 @@ impl Agent {
                     None,
                     Some(&contacts),
                 ));
+                index += 1;
             }
             let _ = crate::agent::bounded_dag_live::clear_dag_fail(
                 self.memory.as_ref(),

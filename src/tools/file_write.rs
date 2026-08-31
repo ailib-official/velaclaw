@@ -81,7 +81,7 @@ impl Tool for FileWriteTool {
             });
         }
 
-        let full_path = self.security.workspace_dir().join(path);
+        let full_path = self.security.tool_fs_path(path);
 
         let Some(parent) = full_path.parent() else {
             return Ok(ToolResult {

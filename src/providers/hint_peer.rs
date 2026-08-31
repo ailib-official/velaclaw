@@ -19,16 +19,59 @@ pub fn provider_family(provider: &str) -> &str {
         .unwrap_or(provider)
 }
 
+/// Why this hop failed — used for peer switch and DAG fail strategy (VL-NA-022).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HopFailClass {
+    /// Vendor model missing / EOL / account has no such function.
+    Unavailable,
+    /// 429 / 402-style quota.
+    Quota,
+    /// DNS / connect — switching providers will not help.
+    Transport,
+    /// Sandbox / path / approval — not a model problem.
+    Policy,
+    Other,
+}
+
+impl HopFailClass {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Unavailable => "unavailable",
+            Self::Quota => "quota",
+            Self::Transport => "transport",
+            Self::Policy => "policy",
+            Self::Other => "other",
+        }
+    }
+}
+
+/// Classify a provider/tool error for hop fallback (not one HTTP code at a time).
+#[must_use]
+pub fn classify_hop_error(err: &str) -> HopFailClass {
+    let lower = err.to_lowercase();
+    if looks_like_transport(&lower) {
+        return HopFailClass::Transport;
+    }
+    if looks_like_policy(&lower) {
+        return HopFailClass::Policy;
+    }
+    if looks_like_rate_or_quota(&lower) {
+        return HopFailClass::Quota;
+    }
+    if looks_like_model_retired(&lower) || looks_like_model_unavailable(&lower) {
+        return HopFailClass::Unavailable;
+    }
+    HopFailClass::Other
+}
+
 /// True when the hop should try the next hint peer (not DNS/transport).
 #[must_use]
 pub fn is_peer_switchable(err: &str) -> bool {
-    let lower = err.to_lowercase();
-    if looks_like_transport(&lower) {
-        return false;
-    }
-    looks_like_model_retired(&lower)
-        || looks_like_rate_or_quota(&lower)
-        || lower.contains("model_not_found")
+    matches!(
+        classify_hop_error(err),
+        HopFailClass::Unavailable | HopFailClass::Quota
+    )
 }
 
 /// HTTP 410 / vendor EOL — not billing.
@@ -46,6 +89,36 @@ fn looks_like_transport(lower: &str) -> bool {
         || lower.contains("failed to lookup address")
         || lower.contains("error trying to connect")
         || lower.contains("network transport")
+}
+
+fn looks_like_policy(lower: &str) -> bool {
+    lower.contains("[policy_deny]")
+        || lower.contains("[sandbox_deny]")
+        || lower.contains("[needs_approval]")
+        || lower.contains("path not allowed by security policy")
+        || lower.contains("not in allowed_commands")
+}
+
+/// Account/catalog miss: HTTP 404 Function Not Found, model_not_found.
+/// Does **not** match workspace "file not found".
+fn looks_like_model_unavailable(lower: &str) -> bool {
+    if lower.contains("file not found") || lower.contains("no such file") {
+        return false;
+    }
+    if lower.contains("model_not_found") {
+        return true;
+    }
+    let http_404 = lower.contains("http 404")
+        || lower.contains("status\":404")
+        || lower.contains("status 404");
+    if !http_404 {
+        return false;
+    }
+    lower.contains("not_found")
+        || lower.contains("function")
+        || lower.contains("does not exist")
+        || lower.contains("model")
+        || lower.contains("not found")
 }
 
 fn looks_like_rate_or_quota(lower: &str) -> bool {
@@ -170,6 +243,21 @@ mod tests {
         assert!(is_peer_switchable("HTTP 429 rate limit"));
         assert!(is_peer_switchable("error: model_not_found"));
         assert!(!is_peer_switchable("tool failed: file not found"));
+        assert!(is_peer_switchable(
+            "HTTP 404 (not_found): Function xyz does not exist on this NGC account"
+        ));
+        assert_eq!(
+            classify_hop_error("HTTP 404 (not_found): Function missing"),
+            HopFailClass::Unavailable
+        );
+        assert_eq!(
+            classify_hop_error("Path not allowed by security policy: /tmp/x"),
+            HopFailClass::Policy
+        );
+        assert_eq!(
+            classify_hop_error("Network transport error: dns error"),
+            HopFailClass::Transport
+        );
     }
 
     #[test]

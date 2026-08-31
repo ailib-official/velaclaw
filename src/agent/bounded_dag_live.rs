@@ -44,12 +44,45 @@ pub fn graph_user_key(session_id: &str) -> String {
 }
 
 /// Cursor so the next user message can replan the failed node (not a Build approval).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct DagFailCursor {
     pub node_id: String,
     pub index: usize,
     pub err: String,
     pub dag_id: String,
+    #[serde(default)]
+    pub auto_replan_count: u32,
+    #[serde(default)]
+    pub fail_class: String,
+}
+
+/// Same-turn retry vs stop (VL-NA-024). Dist default off via config.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkNodeFailDecision {
+    RetrySame { force_default: bool },
+    Stop,
+}
+
+#[must_use]
+pub fn decide_work_node_fail(
+    auto_enabled: bool,
+    auto_used: bool,
+    err: &str,
+) -> WorkNodeFailDecision {
+    if !auto_enabled || auto_used {
+        return WorkNodeFailDecision::Stop;
+    }
+    match crate::providers::hint_peer::classify_hop_error(err) {
+        crate::providers::hint_peer::HopFailClass::Unavailable
+        | crate::providers::hint_peer::HopFailClass::Quota => WorkNodeFailDecision::RetrySame {
+            force_default: true,
+        },
+        crate::providers::hint_peer::HopFailClass::Policy
+        | crate::providers::hint_peer::HopFailClass::Other => WorkNodeFailDecision::RetrySame {
+            force_default: false,
+        },
+        crate::providers::hint_peer::HopFailClass::Transport => WorkNodeFailDecision::Stop,
+    }
 }
 
 /// Persist the original user task for work-node USER TASK slots.
@@ -548,11 +581,16 @@ pub fn repair_planner_user_prompt(
 (schema_version 0.1.0). Include 1 to 6 remaining nodes. Do not redo completed nodes.\n\n\
 Original user task:\n{original}\n\n\
 Graph id: {}\nCompleted node ids: {completed}\n\
-Failed node: {} (0-based index {})\nFailure:\n{}\n\n\
+Failed node: {} (0-based index {})\nFail class: {}\nFailure:\n{}\n\n\
 User guidance for this node (and remaining if needed):\n{guidance}",
         fail.dag_id,
         fail.node_id,
         fail.index,
+        if fail.fail_class.is_empty() {
+            "unspecified"
+        } else {
+            fail.fail_class.as_str()
+        },
         fail.err.trim()
     )
 }
@@ -1018,6 +1056,7 @@ mod tests {
             index: 1,
             err: "timeout".into(),
             dag_id: "ops".into(),
+            ..Default::default()
         };
         let spliced = splice_remaining_plan(&stored, &fail, remaining);
         assert_eq!(spliced.resume_from, 1);
@@ -1038,6 +1077,7 @@ mod tests {
             index: 0,
             err: "timeout".into(),
             dag_id: "opcencode-check-upgrade".into(),
+            ..Default::default()
         };
         let prompt = repair_planner_user_prompt(
             "请检查 opcencode",
@@ -1084,5 +1124,27 @@ mod tests {
         assert!(out.contains("check install"));
         assert!(!out.contains("Bounded task DAG"));
         assert!(!out.contains("contact model="));
+    }
+
+    #[test]
+    fn auto_replan_retries_unavailable_not_dns() {
+        assert_eq!(
+            decide_work_node_fail(true, false, "HTTP 404 (not_found): Function missing"),
+            WorkNodeFailDecision::RetrySame {
+                force_default: true
+            }
+        );
+        assert_eq!(
+            decide_work_node_fail(true, false, "Network transport error: dns error"),
+            WorkNodeFailDecision::Stop
+        );
+        assert_eq!(
+            decide_work_node_fail(false, false, "HTTP 410 Gone"),
+            WorkNodeFailDecision::Stop
+        );
+        assert_eq!(
+            decide_work_node_fail(true, true, "HTTP 410 Gone"),
+            WorkNodeFailDecision::Stop
+        );
     }
 }

@@ -221,6 +221,30 @@ impl Default for SecurityPolicy {
     }
 }
 
+/// Workspace-relative scratch for host temp roots (`/tmp`, `/var/tmp`).
+pub const SCRATCH_REL: &str = ".velaclaw/tmp";
+
+/// Map `/tmp/foo` → `.velaclaw/tmp/foo` so file tools stay workspace-only.
+#[must_use]
+pub fn rewrite_temp_tool_path(path: &str) -> String {
+    let trimmed = path.trim();
+    for prefix in ["/var/tmp/", "/tmp/", "/var/tmp", "/tmp"] {
+        if trimmed == prefix.trim_end_matches('/') {
+            return format!("{SCRATCH_REL}/scratch");
+        }
+        if let Some(rest) = trimmed.strip_prefix(prefix) {
+            if prefix.ends_with('/') || rest.starts_with('/') {
+                let name = rest.trim_start_matches('/');
+                if name.is_empty() {
+                    return format!("{SCRATCH_REL}/scratch");
+                }
+                return format!("{SCRATCH_REL}/{name}");
+            }
+        }
+    }
+    trimmed.to_string()
+}
+
 // ── Shell Command Parsing Utilities ───────────────────────────────────────
 // These helpers implement a minimal quote-aware shell lexer. They exist
 // because security validation must reason about the *structure* of a
@@ -1042,6 +1066,9 @@ self_adjust, use the `policy_patch` tool; otherwise edit config.toml (no silent 
             return false;
         }
 
+        // VL-SEC-012: host temp roots rewrite into workspace scratch (relative).
+        let path = rewrite_temp_tool_path(path);
+
         // Expand tilde for comparison
         let expanded = if let Some(stripped) = path.strip_prefix("~/") {
             if let Some(home) = std::env::var("HOME").ok().map(PathBuf::from) {
@@ -1077,6 +1104,24 @@ self_adjust, use the `policy_patch` tool; otherwise edit config.toml (no silent 
         }
 
         true
+    }
+
+    /// Map `/tmp` / `/var/tmp` onto workspace `.velaclaw/tmp` (VL-SEC-012).
+    #[must_use]
+    pub fn rewrite_temp_tool_path(&self, path: &str) -> String {
+        rewrite_temp_tool_path(path)
+    }
+
+    /// Workspace join after temp rewrite (file tools must not `join("/tmp/...")`).
+    #[must_use]
+    pub fn tool_fs_path(&self, path: &str) -> PathBuf {
+        let rewritten = rewrite_temp_tool_path(path);
+        let p = Path::new(&rewritten);
+        if p.is_absolute() {
+            PathBuf::from(rewritten)
+        } else {
+            self.workspace_dir.join(rewritten)
+        }
     }
 
     /// Validate that a resolved path is still inside the workspace.
@@ -1808,7 +1853,22 @@ mod tests {
         let p = default_policy();
         assert!(!p.is_path_allowed("/etc/passwd"));
         assert!(!p.is_path_allowed("/root/.ssh/id_rsa"));
-        assert!(!p.is_path_allowed("/tmp/file.txt"));
+        assert!(
+            p.is_path_allowed("/tmp/file.txt"),
+            "host /tmp rewrites to workspace scratch"
+        );
+    }
+
+    #[test]
+    fn tmp_rewrites_to_scratch_under_workspace_only() {
+        let p = default_policy();
+        assert_eq!(
+            p.rewrite_temp_tool_path("/tmp/notes.txt"),
+            ".velaclaw/tmp/notes.txt"
+        );
+        assert!(p
+            .tool_fs_path("/tmp/notes.txt")
+            .starts_with(&p.workspace_dir));
     }
 
     #[test]
@@ -2296,7 +2356,7 @@ mod tests {
         };
         for dir in [
             "/etc", "/root", "/home", "/usr", "/bin", "/sbin", "/lib", "/opt", "/boot", "/dev",
-            "/proc", "/sys", "/var", "/tmp",
+            "/proc", "/sys", "/var",
         ] {
             assert!(
                 !p.is_path_allowed(dir),
@@ -2307,6 +2367,10 @@ mod tests {
                 "Subpath of system dir should be blocked: {dir}/subpath"
             );
         }
+        assert!(
+            p.is_path_allowed("/tmp/scratch.txt"),
+            "/tmp is scratch, not a forbidden system dir"
+        );
     }
 
     #[test]

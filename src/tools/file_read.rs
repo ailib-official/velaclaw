@@ -85,7 +85,7 @@ impl Tool for FileReadTool {
             });
         }
 
-        let full_path = self.security.workspace_dir().join(path);
+        let full_path = self.security.tool_fs_path(path);
 
         // Resolve path before reading to block symlink escapes.
         let resolved_path = match tokio::fs::canonicalize(&full_path).await {

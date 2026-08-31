@@ -3,7 +3,6 @@ use crate::security::PolicyHandle;
 use async_trait::async_trait;
 use serde_json::json;
 use std::fmt::Write;
-use std::path::Path;
 
 /// Maximum file size we will read and base64-encode (5 MB).
 const MAX_IMAGE_BYTES: u64 = 5_242_880;
@@ -159,7 +158,7 @@ impl Tool for ImageInfoTool {
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(false);
 
-        let path = Path::new(path_str);
+        let path = self.security.tool_fs_path(path_str);
 
         // Restrict reads to workspace directory to prevent arbitrary file exfiltration
         if !self.security.is_path_allowed(path_str) {
@@ -180,7 +179,7 @@ impl Tool for ImageInfoTool {
             });
         }
 
-        let metadata = tokio::fs::metadata(path)
+        let metadata = tokio::fs::metadata(&path)
             .await
             .map_err(|e| anyhow::anyhow!("Failed to read file metadata: {e}"))?;
 
@@ -196,7 +195,7 @@ impl Tool for ImageInfoTool {
             });
         }
 
-        let bytes = tokio::fs::read(path)
+        let bytes = tokio::fs::read(&path)
             .await
             .map_err(|e| anyhow::anyhow!("Failed to read image file: {e}"))?;
 
@@ -435,9 +434,9 @@ mod tests {
     #[tokio::test]
     async fn execute_real_file() {
         // Create a minimal valid PNG
-        let dir = std::env::temp_dir().join("velaclaw_image_info_test");
-        let _ = tokio::fs::create_dir_all(&dir).await;
-        let png_path = dir.join("test.png");
+        let rel = "velaclaw_image_info_test/test.png";
+        let png_path = std::env::temp_dir().join(rel);
+        let _ = tokio::fs::create_dir_all(png_path.parent().unwrap()).await;
 
         // Minimal 1x1 red PNG (67 bytes)
         let png_bytes: Vec<u8> = vec![
@@ -460,26 +459,23 @@ mod tests {
 
         let tool = ImageInfoTool::new(test_security());
         let result = tool
-            .execute(
-                json!({"path": png_path.to_string_lossy()}),
-                &ToolExecutionContext::default(),
-            )
+            .execute(json!({"path": rel}), &ToolExecutionContext::default())
             .await
             .unwrap();
-        assert!(result.success);
+        assert!(result.success, "{}", result.error.unwrap_or_default());
         assert!(result.output.contains("Format: png"));
         assert!(result.output.contains("Dimensions: 1x1"));
         assert!(!result.output.contains("data:"));
 
         // Clean up
-        let _ = tokio::fs::remove_dir_all(&dir).await;
+        let _ = tokio::fs::remove_file(&png_path).await;
     }
 
     #[tokio::test]
     async fn execute_with_base64() {
-        let dir = std::env::temp_dir().join("velaclaw_image_info_b64");
-        let _ = tokio::fs::create_dir_all(&dir).await;
-        let png_path = dir.join("test_b64.png");
+        let rel = "velaclaw_image_info_b64/test_b64.png";
+        let png_path = std::env::temp_dir().join(rel);
+        let _ = tokio::fs::create_dir_all(png_path.parent().unwrap()).await;
 
         // Minimal 1x1 PNG
         let png_bytes: Vec<u8> = vec![
@@ -494,14 +490,14 @@ mod tests {
         let tool = ImageInfoTool::new(test_security());
         let result = tool
             .execute(
-                json!({"path": png_path.to_string_lossy(), "include_base64": true}),
+                json!({"path": rel, "include_base64": true}),
                 &ToolExecutionContext::default(),
             )
             .await
             .unwrap();
-        assert!(result.success);
+        assert!(result.success, "{}", result.error.unwrap_or_default());
         assert!(result.output.contains("data:image/png;base64,"));
 
-        let _ = tokio::fs::remove_dir_all(&dir).await;
+        let _ = tokio::fs::remove_file(&png_path).await;
     }
 }

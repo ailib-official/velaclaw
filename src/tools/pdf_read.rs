@@ -103,7 +103,7 @@ impl Tool for PdfReadTool {
             });
         }
 
-        let full_path = self.security.workspace_dir().join(path);
+        let full_path = self.security.tool_fs_path(path);
 
         let resolved_path = match tokio::fs::canonicalize(&full_path).await {
             Ok(p) => p,

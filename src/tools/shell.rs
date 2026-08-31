@@ -86,7 +86,12 @@ fn apply_shell_child_env(
     command: &str,
     workspace: &Path,
 ) {
+    let scratch = workspace.join(".velaclaw").join("tmp");
+    if let Err(e) = std::fs::create_dir_all(&scratch) {
+        tracing::warn!("could not create TMPDIR scratch: {e}");
+    }
     if inherit_process_env {
+        cmd.env("TMPDIR", &scratch);
         return;
     }
     cmd.env_clear();
@@ -95,6 +100,7 @@ fn apply_shell_child_env(
             cmd.env(var, val);
         }
     }
+    cmd.env("TMPDIR", &scratch);
     if !first_executable_is_github_cli(command) {
         return;
     }

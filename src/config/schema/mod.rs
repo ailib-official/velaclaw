@@ -439,6 +439,10 @@ pub struct AgentConfig {
     /// for the same hint (max 5 attempts / 3 cross-provider). Dist default `false`.
     #[serde(default)]
     pub hint_peer_fallback: bool,
+    /// VL-NA-024: on a live DAG work-node fail, retry the node once (default model
+    /// after unavailable/quota). Dist default `false`.
+    #[serde(default)]
+    pub dag_fail_auto_replan: bool,
     /// ORCH-DAG-EMIT-001/002: library/doctor gate for schema-strict / LLM plan emit.
     /// Default: `false`. **Not wired** into live chat. Observe: `doctor dag-emit` /
     /// `doctor dag-plan`. Does **not** default-on AI-DAG in the live chat loop.
@@ -482,6 +486,7 @@ impl Default for AgentConfig {
             host_decide_optimize: default_host_decide_optimize(),
             host_decide_failover: false,
             hint_peer_fallback: false,
+            dag_fail_auto_replan: false,
             candidate_dag_emit: false,
         }
     }

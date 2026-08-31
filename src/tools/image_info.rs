@@ -434,9 +434,9 @@ mod tests {
     #[tokio::test]
     async fn execute_real_file() {
         // Create a minimal valid PNG
-        let dir = std::env::temp_dir().join("velaclaw_image_info_test");
-        let _ = tokio::fs::create_dir_all(&dir).await;
-        let png_path = dir.join("test.png");
+        let rel = "velaclaw_image_info_test/test.png";
+        let png_path = std::env::temp_dir().join(rel);
+        let _ = tokio::fs::create_dir_all(png_path.parent().unwrap()).await;
 
         // Minimal 1x1 red PNG (67 bytes)
         let png_bytes: Vec<u8> = vec![
@@ -460,25 +460,25 @@ mod tests {
         let tool = ImageInfoTool::new(test_security());
         let result = tool
             .execute(
-                json!({"path": png_path.to_string_lossy()}),
+                json!({"path": rel}),
                 &ToolExecutionContext::default(),
             )
             .await
             .unwrap();
-        assert!(result.success);
+        assert!(result.success, "{}", result.error.unwrap_or_default());
         assert!(result.output.contains("Format: png"));
         assert!(result.output.contains("Dimensions: 1x1"));
         assert!(!result.output.contains("data:"));
 
         // Clean up
-        let _ = tokio::fs::remove_dir_all(&dir).await;
+        let _ = tokio::fs::remove_file(&png_path).await;
     }
 
     #[tokio::test]
     async fn execute_with_base64() {
-        let dir = std::env::temp_dir().join("velaclaw_image_info_b64");
-        let _ = tokio::fs::create_dir_all(&dir).await;
-        let png_path = dir.join("test_b64.png");
+        let rel = "velaclaw_image_info_b64/test_b64.png";
+        let png_path = std::env::temp_dir().join(rel);
+        let _ = tokio::fs::create_dir_all(png_path.parent().unwrap()).await;
 
         // Minimal 1x1 PNG
         let png_bytes: Vec<u8> = vec![
@@ -493,14 +493,14 @@ mod tests {
         let tool = ImageInfoTool::new(test_security());
         let result = tool
             .execute(
-                json!({"path": png_path.to_string_lossy(), "include_base64": true}),
+                json!({"path": rel, "include_base64": true}),
                 &ToolExecutionContext::default(),
             )
             .await
             .unwrap();
-        assert!(result.success);
+        assert!(result.success, "{}", result.error.unwrap_or_default());
         assert!(result.output.contains("data:image/png;base64,"));
 
-        let _ = tokio::fs::remove_dir_all(&dir).await;
+        let _ = tokio::fs::remove_file(&png_path).await;
     }
 }

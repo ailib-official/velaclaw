@@ -459,10 +459,7 @@ mod tests {
 
         let tool = ImageInfoTool::new(test_security());
         let result = tool
-            .execute(
-                json!({"path": rel}),
-                &ToolExecutionContext::default(),
-            )
+            .execute(json!({"path": rel}), &ToolExecutionContext::default())
             .await
             .unwrap();
         assert!(result.success, "{}", result.error.unwrap_or_default());

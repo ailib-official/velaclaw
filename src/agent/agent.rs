@@ -799,20 +799,31 @@ impl Agent {
             )));
 
         #[cfg(feature = "ai-protocol")]
-        let use_live_dag = crate::agent::bounded_dag_live::should_run_live_dag(
-            &self.config,
-            self.memory.as_ref(),
-            self.session_id.as_str(),
-            user_message,
-            self.host_phase,
-        )
-        .await;
+        let live_mode = if self.config.bounded_dag_live {
+            crate::agent::bounded_dag_live::resolve_live_turn_mode(
+                &self.config,
+                self.memory.as_ref(),
+                self.session_id.as_str(),
+                self.provider.as_ref(),
+                &self.model_name,
+                user_message,
+                self.temperature,
+                self.host_phase,
+            )
+            .await?
+        } else {
+            crate::agent::bounded_dag_live::TurnMode::SingleWork
+        };
+        #[cfg(feature = "ai-protocol")]
+        let mut use_live_dag = live_mode == crate::agent::bounded_dag_live::TurnMode::PlanDag;
         #[cfg(not(feature = "ai-protocol"))]
         let use_live_dag = false;
+        #[cfg(feature = "ai-protocol")]
         if self.config.bounded_dag_live && !use_live_dag {
             tracing::info!(
                 target: "bounded_dag_live",
-                "direct reply; skip planner/DAG"
+                mode = ?live_mode,
+                "skip planner; chat_only or single_work"
             );
         }
 
@@ -825,22 +836,58 @@ impl Agent {
         }
 
         #[cfg(feature = "ai-protocol")]
+        if self.config.bounded_dag_live && !use_live_dag {
+            use crate::agent::bounded_dag_live::{observe_turn_outcome, ObserveVerdict, TurnMode};
+            self.last_turn_model = Some(crate::orchestration::TurnModelDecision {
+                model: self.model_name.clone(),
+                source: crate::orchestration::TurnModelSource::DefaultModel,
+                reason: match live_mode {
+                    TurnMode::ChatOnly => "live_chat_only".into(),
+                    _ => "live_single_work".into(),
+                },
+            });
+            let allow_tools = live_mode != TurnMode::ChatOnly;
+            let text = self
+                .invoke_tool_loop_resolved_with(self.model_name.clone(), allow_tools)
+                .await?;
+            let verdict = observe_turn_outcome(
+                self.provider.as_ref(),
+                &self.model_name,
+                self.temperature,
+                user_message,
+                &text,
+                None,
+                ObserveVerdict::Continue,
+            )
+            .await?;
+            if verdict == ObserveVerdict::ReplanRemaining {
+                tracing::info!(
+                    target: "bounded_dag_live",
+                    "observe upgraded turn to plan_dag"
+                );
+                use_live_dag = true;
+            } else {
+                return Ok(text);
+            }
+        }
+
+        #[cfg(feature = "ai-protocol")]
         if use_live_dag {
             use crate::agent::bounded_dag_live::{
                 format_work_node_stop, live_dag_progress, work_node_user_task,
             };
             use crate::agent::host_phase::HostPhase;
             use crate::agent::loop_::is_tool_loop_cancelled;
-            use std::collections::{HashMap, HashSet};
-            let planned = self
+            use std::collections::HashSet;
+            let mut planned = self
                 .resolve_live_dag(dag_prefix_len, &enriched, user_message)
                 .await?;
             if self.host_phase == HostPhase::Plan {
                 return Ok(planned.preview_with_contact(&self.model_name, &self.available_hints));
             }
             let dag_id = planned.dag.id.clone();
-            let node_count = planned.order.len();
-            let outline = planned.brief_outline(user_message);
+            let mut node_count = planned.order.len();
+            let mut outline = planned.brief_outline(user_message);
             let mut chat_hist: Vec<ChatMessage> = self
                 .history
                 .iter()
@@ -849,7 +896,7 @@ impl Agent {
                     _ => None,
                 })
                 .collect();
-            let graph_task = match &planned.graph_task_override {
+            let mut graph_task = match &planned.graph_task_override {
                 Some(task) => task.clone(),
                 None => {
                     work_node_user_task(
@@ -861,12 +908,6 @@ impl Agent {
                     .await
                 }
             };
-            let by_id: HashMap<&str, _> = planned
-                .dag
-                .nodes
-                .iter()
-                .map(|n| (n.id.as_str(), n))
-                .collect();
             let mut prior: Vec<String> = Vec::new();
             let mut completed: HashSet<String> = HashSet::new();
             for id in planned.order.iter().take(planned.resume_from) {
@@ -891,20 +932,24 @@ impl Agent {
             let mut auto_used = false;
             let mut index = planned.resume_from;
             while index < planned.order.len() {
-                let id = &planned.order[index];
-                let node = by_id
-                    .get(id.as_str())
+                let id = planned.order[index].clone();
+                let node = planned
+                    .dag
+                    .nodes
+                    .iter()
+                    .find(|n| n.id == id)
+                    .cloned()
                     .ok_or_else(|| anyhow::anyhow!("bounded DAG missing node {id}"))?;
                 let retrieve = crate::agent::bounded_dag_context::node_retrieve_texts(
                     self.memory.as_ref(),
                     &self.workspace_dir,
                     self.session_id.as_str(),
-                    node,
+                    &node,
                     &prior,
                 )
                 .await;
                 let contact = crate::agent::bounded_dag_context::contact_for_live_node(
-                    node,
+                    &node,
                     &self.model_name,
                     &self.available_hints,
                     force_default,
@@ -913,7 +958,7 @@ impl Agent {
                     &mut chat_hist,
                     &crate::agent::bounded_dag_context::NodeWorkPacket {
                         dag_id: dag_id.as_str(),
-                        node,
+                        node: &node,
                         index: index + 1,
                         node_count,
                         user_task: &graph_task,
@@ -1049,7 +1094,60 @@ impl Agent {
                     None,
                     Some(&contacts),
                 ));
-                index += 1;
+                let verdict = crate::agent::bounded_dag_live::observe_turn_outcome(
+                    self.provider.as_ref(),
+                    &self.model_name,
+                    self.temperature,
+                    user_message,
+                    &last_body,
+                    Some(id.as_str()),
+                    crate::agent::bounded_dag_live::ObserveVerdict::Continue,
+                )
+                .await?;
+                match verdict {
+                    crate::agent::bounded_dag_live::ObserveVerdict::Stop => {
+                        let _ = crate::agent::bounded_dag_live::clear_dag_fail(
+                            self.memory.as_ref(),
+                            self.session_id.as_str(),
+                        )
+                        .await;
+                        return Ok(last_body);
+                    }
+                    crate::agent::bounded_dag_live::ObserveVerdict::ReplanRemaining
+                        if !auto_used =>
+                    {
+                        auto_used = true;
+                        if let Some(spliced) =
+                            crate::agent::bounded_dag_live::replan_remaining_after_observe(
+                                &self.config,
+                                self.memory.as_ref(),
+                                self.session_id.as_str(),
+                                self.provider.as_ref(),
+                                &self.model_name,
+                                self.temperature,
+                                &planned,
+                                &id,
+                                index,
+                                user_message,
+                                "observe_off_goal",
+                            )
+                            .await?
+                        {
+                            planned = spliced;
+                            node_count = planned.order.len();
+                            outline = planned.brief_outline(user_message);
+                            if let Some(task) = &planned.graph_task_override {
+                                graph_task = task.clone();
+                            }
+                            index = planned.resume_from;
+                            continue;
+                        }
+                        index += 1;
+                    }
+                    _ => {
+                        index += 1;
+                    }
+                }
             }
             let _ = crate::agent::bounded_dag_live::clear_dag_fail(
                 self.memory.as_ref(),
@@ -1097,10 +1195,20 @@ impl Agent {
     /// One `run_tool_call_loop` over current history (GOV-007 canonical body).
     async fn invoke_tool_loop_once(&mut self, user_message: &str) -> Result<String> {
         let effective_model = self.classify_model_tracked(user_message)?;
-        self.invoke_tool_loop_resolved(effective_model).await
+        self.invoke_tool_loop_resolved_with(effective_model, true)
+            .await
     }
 
     async fn invoke_tool_loop_resolved(&mut self, effective_model: String) -> Result<String> {
+        self.invoke_tool_loop_resolved_with(effective_model, true)
+            .await
+    }
+
+    async fn invoke_tool_loop_resolved_with(
+        &mut self,
+        effective_model: String,
+        allow_tools: bool,
+    ) -> Result<String> {
         // VL-CTX-002 / GOV-007: single tool-iteration body (`run_tool_call_loop`).
         // ApprovalHub / HumanInputHub stay as backend adapters via gate_extras.
         let mut loop_history = self.tool_dispatcher.to_provider_messages(&self.history);
@@ -1155,10 +1263,16 @@ impl Agent {
             Arc::clone(&self.observer)
         };
 
+        let empty_tools: Vec<Box<dyn crate::tools::Tool>> = Vec::new();
+        let tools = if allow_tools {
+            self.tools.as_slice()
+        } else {
+            empty_tools.as_slice()
+        };
         let response = crate::agent::loop_::run_tool_call_loop(
             self.provider.as_ref(),
             &mut loop_history,
-            &self.tools,
+            tools,
             observer.as_ref(),
             provider_name,
             &effective_model,

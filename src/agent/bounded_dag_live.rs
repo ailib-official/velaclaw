@@ -1,13 +1,13 @@
-//! Live bounded DAG: planner node (tool-free chat) → validate → work nodes.
+//! Live bounded DAG: mode judge → planner (tool-free chat) → work nodes → observe.
 //!
-//! When `[agent].bounded_dag_live` is on and `bounded_dag_path` is empty, the
-//! session-default model emits a linear L2 JSON via a single `Provider::chat`
-//! (no tools). Invalid / non-linear output retries once, then falls back to
-//! the handwritten code-fix template. Successful plans are cached per session;
-//! fallback graphs are not cached. A non-empty `bounded_dag_path` skips the
-//! planner (operator-fixed graph).
+//! When `[agent].bounded_dag_live` is on and `bounded_dag_path` is empty, a
+//! cheap JSON judge picks `chat_only` / `single_work` / `plan_dag`. The
+//! planner emits linear L2 JSON via `Provider::chat` (no tools). Invalid /
+//! non-linear output retries once, then falls back to the handwritten code-fix
+//! template. Successful plans are cached per session; fallback graphs are not
+//! cached. A non-empty `bounded_dag_path` skips the planner (operator-fixed graph).
 //!
-//! 有界 DAG live：Planner 是无工具单次 chat；校验失败重试一次再回退手写夹具。
+//! 有界 DAG live：LLM 判定回合模式；Planner 无工具单次 chat；节点后 observe 纠偏。
 
 use super::bounded_dag::{format_preview, linear_node_ids, load_bounded_dag};
 use super::bounded_dag_context::contact_for_node;
@@ -43,32 +43,162 @@ pub fn graph_user_key(session_id: &str) -> String {
     format!("{GRAPH_USER_KEY_PREFIX}{session_id}")
 }
 
-/// True when this user text should run the live planner + work DAG.
-///
-/// Greetings and single-shot Q&A stay on the session default model (existing
-/// tool loop, no planner). Resume / fail-cursor / env targets still use the DAG.
-#[must_use]
-pub fn turn_needs_dag(user_task: &str) -> bool {
-    let t = normalize_turn(user_task);
-    if t.is_empty() {
-        return false;
-    }
-    if is_resume_turn(&t) {
-        return true;
-    }
-    has_execution_intent(&t)
+/// How this user turn should run when `[agent].bounded_dag_live` is on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TurnMode {
+    /// Greeting / thanks / general knowledge. Empty tools slice (not max_iter=0).
+    ChatOnly,
+    /// One deliverable; existing tool loop on the session default model.
+    SingleWork,
+    /// Planner then linear work nodes.
+    PlanDag,
 }
 
-/// Live DAG this turn? Fail cursor always yes; otherwise [`turn_needs_dag`].
-pub async fn should_run_live_dag(
+/// Observe whether the last assistant output advanced the user task.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObserveVerdict {
+    Continue,
+    ReplanRemaining,
+    Stop,
+}
+
+pub const TURN_MODE_SYSTEM_PROMPT: &str = "\
+You classify the user's latest message for VelaClaw. Reply with ONLY one JSON object, no markdown.\n\
+{\"mode\":\"chat_only\"} — greeting, thanks, or a question answerable from general knowledge without reading files, running commands, or inspecting this workspace, repo, or a named host.\n\
+{\"mode\":\"single_work\"} — one deliverable that may need tools but does not need a multi-node plan.\n\
+{\"mode\":\"plan_dag\"} — multiple distinct deliverables, a sequence of independent checks, or a task that should be split before acting.\n\
+If the user asks to compare, research, inspect, or analyze a local codebase, workspace, or named host, do not use chat_only.\n";
+
+pub const TURN_OBSERVE_SYSTEM_PROMPT: &str = "\
+You judge whether the last assistant work advanced the USER TASK. Reply with ONLY one JSON object.\n\
+{\"verdict\":\"continue\"} — on track; remaining DAG nodes may run.\n\
+{\"verdict\":\"replan_remaining\"} — last output lacked required evidence (no tools when the task needs the repo, a host, or files) or went off-goal. Remaining work should be replanned.\n\
+{\"verdict\":\"stop\"} — the user task is done; do not run more DAG nodes.\n\
+If the user task requires local/repo/host evidence and the assistant reply has no tool or observation evidence, you MUST choose replan_remaining.\n";
+
+const OBSERVE_REPLY_CHARS: usize = 4000;
+
+/// Parse judge JSON. Invalid or missing mode → [`TurnMode::SingleWork`] (never chat_only).
+#[must_use]
+pub fn parse_turn_mode_json(text: &str) -> TurnMode {
+    let Some(obj) = extract_json_object(text) else {
+        return TurnMode::SingleWork;
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&obj) else {
+        return TurnMode::SingleWork;
+    };
+    match v.get("mode").and_then(|m| m.as_str()) {
+        Some("chat_only") => TurnMode::ChatOnly,
+        Some("plan_dag") => TurnMode::PlanDag,
+        _ => TurnMode::SingleWork,
+    }
+}
+
+/// Parse observe JSON. Invalid → `fail_closed`.
+#[must_use]
+pub fn parse_observe_verdict(text: &str, fail_closed: ObserveVerdict) -> ObserveVerdict {
+    let Some(obj) = extract_json_object(text) else {
+        return fail_closed;
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&obj) else {
+        return fail_closed;
+    };
+    match v.get("verdict").and_then(|m| m.as_str()) {
+        Some("continue") => ObserveVerdict::Continue,
+        Some("replan_remaining") => ObserveVerdict::ReplanRemaining,
+        Some("stop") => ObserveVerdict::Stop,
+        _ => fail_closed,
+    }
+}
+
+async fn structured_json_chat(
+    provider: &dyn Provider,
+    model: &str,
+    temperature: f64,
+    system: &str,
+    user: &str,
+) -> Result<String> {
+    let messages = [ChatMessage::system(system), ChatMessage::user(user)];
+    let request = ChatRequest {
+        messages: &messages,
+        tools: None,
+    };
+    let response = provider.chat(request, model, temperature).await?;
+    Ok(response.text_or_empty().to_string())
+}
+
+pub async fn judge_turn_mode(
+    provider: &dyn Provider,
+    planner_model: &str,
+    user_task: &str,
+    temperature: f64,
+) -> Result<TurnMode> {
+    let text = structured_json_chat(
+        provider,
+        planner_model,
+        temperature,
+        TURN_MODE_SYSTEM_PROMPT,
+        user_task,
+    )
+    .await?;
+    let mode = parse_turn_mode_json(&text);
+    tracing::info!(
+        target: "bounded_dag_live",
+        mode = ?mode,
+        "turn mode judge"
+    );
+    Ok(mode)
+}
+
+pub async fn observe_turn_outcome(
+    provider: &dyn Provider,
+    planner_model: &str,
+    temperature: f64,
+    user_task: &str,
+    last_reply: &str,
+    node_id: Option<&str>,
+    fail_closed: ObserveVerdict,
+) -> Result<ObserveVerdict> {
+    let reply = if last_reply.chars().count() > OBSERVE_REPLY_CHARS {
+        let clipped: String = last_reply.chars().take(OBSERVE_REPLY_CHARS).collect();
+        format!("{clipped}\n…[truncated]")
+    } else {
+        last_reply.to_string()
+    };
+    let node = node_id.unwrap_or("(none)");
+    let user =
+        format!("USER TASK:\n{user_task}\n\nLast node id: {node}\n\nAssistant reply:\n{reply}");
+    let text = structured_json_chat(
+        provider,
+        planner_model,
+        temperature,
+        TURN_OBSERVE_SYSTEM_PROMPT,
+        &user,
+    )
+    .await?;
+    let verdict = parse_observe_verdict(&text, fail_closed);
+    tracing::info!(
+        target: "bounded_dag_live",
+        node_id = node,
+        verdict = ?verdict,
+        "turn observe"
+    );
+    Ok(verdict)
+}
+
+/// Fail cursor / Plan / operator path skip the judge. Else tool-free JSON judge.
+pub async fn resolve_live_turn_mode(
     agent: &crate::config::AgentConfig,
     mem: &dyn Memory,
     session_id: &str,
+    provider: &dyn Provider,
+    planner_model: &str,
     user_task: &str,
-    _host_phase: HostPhase,
-) -> bool {
+    temperature: f64,
+    host_phase: HostPhase,
+) -> Result<TurnMode> {
     if !agent.bounded_dag_live {
-        return false;
+        return Ok(TurnMode::SingleWork);
     }
     if load_dag_fail(mem, session_id)
         .await
@@ -76,96 +206,73 @@ pub async fn should_run_live_dag(
         .flatten()
         .is_some()
     {
-        return true;
+        return Ok(TurnMode::PlanDag);
     }
-    turn_needs_dag(user_task)
-}
-
-fn normalize_turn(user_task: &str) -> String {
-    user_task
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .to_lowercase()
-}
-
-fn is_resume_turn(t: &str) -> bool {
-    matches!(
-        t,
-        "继续"
-            | "接着"
-            | "接着干"
-            | "重试"
-            | "再试"
-            | "continue"
-            | "retry"
-            | "resume"
-            | "proceed"
-            | "keep going"
-    ) || t.starts_with("继续")
-        || t.starts_with("continue ")
-        || t.starts_with("retry ")
-}
-
-fn has_execution_intent(t: &str) -> bool {
-    const MARKERS: &[&str] = &[
-        "check",
-        "inspect",
-        "debug",
-        "diagnos",
-        "fix ",
-        "fix the",
-        "deploy",
-        "compile",
-        "install",
-        "restart",
-        "health",
-        "status",
-        " ssh",
-        "ssh ",
-        "grep",
-        "cargo ",
-        "git ",
-        "curl ",
-        "probe",
-        "implement",
-        "a patch",
-        "the patch",
-        "look at",
-        "look into",
-        "list files",
-        "read this",
-        "write ",
-        "检查",
-        "查看",
-        "排查",
-        "诊断",
-        "修复",
-        "部署",
-        "对齐",
-        "同步",
-        "编译",
-        "安装",
-        "重启",
-        "健康",
-        "状态",
-        "查一下",
-        "查下",
-        "跑一下",
-        "读一下",
-        "改一下",
-        "piubt",
-        "localhost",
-        "192.168",
-        "/home/",
-        "/usr/",
-        "/etc/",
-    ];
-    if MARKERS.iter().any(|m| t.contains(m)) {
-        return true;
+    if host_phase == HostPhase::Plan {
+        return Ok(TurnMode::PlanDag);
     }
-    // Bare "fix foo" without trailing space after fix.
-    t.starts_with("fix ") || t.contains("/tmp") || t.contains(".rs") || t.contains(".toml")
+    if operator_fixed_live_graph(agent)?.is_some() {
+        return Ok(TurnMode::PlanDag);
+    }
+    judge_turn_mode(provider, planner_model, user_task, temperature).await
+}
+
+/// Replan remaining nodes after observe (prefix includes the completed node).
+#[allow(clippy::too_many_arguments)]
+pub async fn replan_remaining_after_observe(
+    agent: &crate::config::AgentConfig,
+    mem: &dyn Memory,
+    session_id: &str,
+    provider: &dyn Provider,
+    planner_model: &str,
+    temperature: f64,
+    stored: &PlannedLiveDag,
+    completed_node_id: &str,
+    completed_index: usize,
+    user_task: &str,
+    observe_note: &str,
+) -> Result<Option<PlannedLiveDag>> {
+    let original = load_graph_user_task(mem, session_id)
+        .await?
+        .unwrap_or_else(|| user_task.to_string());
+    let fail = DagFailCursor {
+        node_id: completed_node_id.to_string(),
+        index: completed_index.saturating_add(1),
+        err: observe_note.to_string(),
+        dag_id: stored.dag.id.clone(),
+        auto_replan_count: 1,
+        fail_class: "observe_off_goal".into(),
+    };
+    let completed: Vec<String> = stored.order.iter().take(fail.index).cloned().collect();
+    let repair_user = repair_planner_user_prompt(&original, &fail, &completed, observe_note);
+    let fallback = fallback_template_json(agent)?;
+    let remaining = run_live_planner_chat(
+        provider,
+        planner_model,
+        &repair_user,
+        temperature,
+        &fallback,
+    )
+    .await?;
+    if remaining.used_fallback {
+        tracing::info!(
+            target: "bounded_dag_live",
+            "observe replan used fallback; keeping remaining nodes"
+        );
+        return Ok(None);
+    }
+    let mut spliced = splice_remaining_plan(stored, &fail, remaining);
+    if linear_node_ids(&spliced.dag).is_err() {
+        return Ok(None);
+    }
+    spliced.graph_task_override = Some(repair_graph_task(
+        &original,
+        completed_node_id,
+        observe_note,
+    ));
+    let json = planned_store_json(&spliced, &fallback);
+    let _ = store_planned_json(mem, session_id, &json).await;
+    Ok(Some(spliced))
 }
 
 /// Cursor so the next user message can replan the failed node (not a Build approval).
@@ -1070,25 +1177,41 @@ mod tests {
     }
 
     #[test]
-    fn turn_needs_dag_skips_greetings() {
-        assert!(!turn_needs_dag("hello"));
-        assert!(!turn_needs_dag("Hello!"));
-        assert!(!turn_needs_dag("你好"));
-        assert!(!turn_needs_dag("谢谢"));
-        assert!(!turn_needs_dag("what is a dag"));
-        assert!(!turn_needs_dag("please dispatch the email"));
-        assert!(!turn_needs_dag("what is a workspace"));
+    fn parse_turn_mode_invalid_is_single_work() {
+        assert_eq!(parse_turn_mode_json(""), TurnMode::SingleWork);
+        assert_eq!(parse_turn_mode_json("not json"), TurnMode::SingleWork);
+        assert_eq!(parse_turn_mode_json("{}"), TurnMode::SingleWork);
+        assert_eq!(
+            parse_turn_mode_json(r#"{"mode":"chat_only"}"#),
+            TurnMode::ChatOnly
+        );
+        assert_eq!(
+            parse_turn_mode_json(r#"{"mode":"plan_dag"}"#),
+            TurnMode::PlanDag
+        );
+        assert_eq!(
+            parse_turn_mode_json("Sure.\n```json\n{\"mode\":\"single_work\"}\n```\n"),
+            TurnMode::SingleWork
+        );
     }
 
     #[test]
-    fn turn_needs_dag_ops_and_resume() {
-        assert!(turn_needs_dag("fix the compiler error"));
-        assert!(turn_needs_dag(
-            "你检查piubt上xray代理服务的状态，然后检查各代理节点的健康状态"
-        ));
-        assert!(turn_needs_dag("继续"));
-        assert!(turn_needs_dag("read this paper, write intro slides"));
-        assert!(turn_needs_dag("apply a patch to the file"));
+    fn parse_observe_fail_closed() {
+        assert_eq!(
+            parse_observe_verdict("nope", ObserveVerdict::Continue),
+            ObserveVerdict::Continue
+        );
+        assert_eq!(
+            parse_observe_verdict(
+                r#"{"verdict":"replan_remaining"}"#,
+                ObserveVerdict::Continue
+            ),
+            ObserveVerdict::ReplanRemaining
+        );
+        assert_eq!(
+            parse_observe_verdict(r#"{"verdict":"stop"}"#, ObserveVerdict::Continue),
+            ObserveVerdict::Stop
+        );
     }
 
     #[test]

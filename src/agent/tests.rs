@@ -1363,6 +1363,11 @@ async fn run_single_delegates_to_turn() {
 // VL-NA-011: bounded linear DAG live (opt-in)
 // ═══════════════════════════════════════════════════════════════════════════
 
+const LIVE_MODE_CHAT: &str = r#"{"mode":"chat_only"}"#;
+const LIVE_MODE_PLAN: &str = r#"{"mode":"plan_dag"}"#;
+const LIVE_OBS_CONTINUE: &str = r#"{"verdict":"continue"}"#;
+const LIVE_OBS_REPLAN: &str = r#"{"verdict":"replan_remaining"}"#;
+
 #[cfg(feature = "ai-protocol")]
 #[tokio::test]
 async fn bounded_dag_plan_runs_planner_then_preview() {
@@ -1434,11 +1439,15 @@ async fn bounded_dag_plan_path_skips_planner() {
 #[tokio::test]
 async fn bounded_dag_build_one_loop_per_node() {
     let provider = ScriptedProvider::new(vec![
+        text_response(LIVE_MODE_PLAN),
         text_response("not a dag"),
         text_response("not a dag"),
         text_response("located"),
+        text_response(LIVE_OBS_CONTINUE),
         text_response("patched"),
+        text_response(LIVE_OBS_CONTINUE),
         text_response("verified"),
+        text_response(LIVE_OBS_CONTINUE),
     ]);
     let calls = provider.call_counter();
     let mut agent = build_agent_with_config(
@@ -1454,8 +1463,8 @@ async fn bounded_dag_build_one_loop_per_node() {
     let out = agent.turn("fix the compiler error").await.unwrap();
     assert_eq!(
         calls.load(Ordering::SeqCst),
-        5,
-        "planner retry plus one provider chat per linear node"
+        9,
+        "judge + planner retry plus work+observe per linear node"
     );
     assert!(out.contains("verified"), "{out}");
     assert!(!out.contains("## locate"), "{out}");
@@ -1465,7 +1474,11 @@ async fn bounded_dag_build_one_loop_per_node() {
 #[cfg(feature = "ai-protocol")]
 #[tokio::test]
 async fn bounded_dag_hello_skips_planner() {
-    let provider = ScriptedProvider::new(vec![text_response("Hi — ready.")]);
+    let provider = ScriptedProvider::new(vec![
+        text_response(LIVE_MODE_CHAT),
+        text_response("Hi — ready."),
+        text_response(LIVE_OBS_CONTINUE),
+    ]);
     let calls = provider.call_counter();
     let mut agent = build_agent_with_config(
         Box::new(provider),
@@ -1480,10 +1493,49 @@ async fn bounded_dag_hello_skips_planner() {
     let out = agent.turn("hello").await.unwrap();
     assert_eq!(
         calls.load(Ordering::SeqCst),
-        1,
-        "greeting must not run planner or work nodes"
+        3,
+        "greeting: judge + reply + observe; no planner"
     );
     assert!(out.contains("Hi"), "{out}");
+}
+
+#[cfg(feature = "ai-protocol")]
+#[tokio::test]
+async fn bounded_dag_chat_only_observe_upgrades_to_plan() {
+    let provider = ScriptedProvider::new(vec![
+        text_response(LIVE_MODE_CHAT),
+        text_response("I compared agent runtimes from memory."),
+        text_response(LIVE_OBS_REPLAN),
+        text_response("not a dag"),
+        text_response("not a dag"),
+        text_response("located"),
+        text_response(LIVE_OBS_CONTINUE),
+        text_response("patched"),
+        text_response(LIVE_OBS_CONTINUE),
+        text_response("verified"),
+        text_response(LIVE_OBS_CONTINUE),
+    ]);
+    let calls = provider.call_counter();
+    let mut agent = build_agent_with_config(
+        Box::new(provider),
+        vec![],
+        AgentConfig {
+            bounded_dag_live: true,
+            envelope_assemble: false,
+            ..AgentConfig::default()
+        },
+    );
+    agent.set_host_phase(crate::agent::host_phase::HostPhase::Build);
+    let out = agent
+        .turn("调研主流 agent 编排并对照本机 velaclaw 仓库")
+        .await
+        .unwrap();
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        11,
+        "judge chat_only + empty-tool reply + observe replan + planner retry + 3 work+observe"
+    );
+    assert!(out.contains("verified"), "{out}");
 }
 
 #[cfg(feature = "ai-protocol")]
@@ -1491,11 +1543,15 @@ async fn bounded_dag_hello_skips_planner() {
 async fn bounded_dag_writeback_and_node_contact() {
     let (mem, _tmp) = make_sqlite_memory();
     let provider = ScriptedProvider::new(vec![
+        text_response(LIVE_MODE_PLAN),
         text_response("not a dag"),
         text_response("not a dag"),
         text_response("LOCATE_UNIQUE_BODY"),
+        text_response(LIVE_OBS_CONTINUE),
         text_response("PATCH_UNIQUE_BODY"),
+        text_response(LIVE_OBS_CONTINUE),
         text_response("VERIFY_OK"),
+        text_response(LIVE_OBS_CONTINUE),
     ]);
     let reqs = provider.recorded_requests();
     let models = provider.recorded_models();
@@ -1535,8 +1591,8 @@ async fn bounded_dag_writeback_and_node_contact() {
     );
 
     let captured = reqs.lock().unwrap();
-    assert_eq!(captured.len(), 5);
-    let patch_msgs = &captured[3];
+    assert_eq!(captured.len(), 9);
+    let patch_msgs = &captured[5];
     assert!(
         !patch_msgs
             .iter()
@@ -1551,15 +1607,25 @@ async fn bounded_dag_writeback_and_node_contact() {
     );
 
     let used = models.lock().unwrap().clone();
-    assert_eq!(used.len(), 5, "planner retry + 3 work nodes; got {used:?}");
     assert_eq!(
-        &used[2..],
-        [
-            "hint:code".to_string(),
-            "hint:code".to_string(),
-            "hint:fast".to_string()
-        ],
-        "locate/patch coding hint, verify speed hint; got {used:?}"
+        used.len(),
+        9,
+        "judge + planner retry + 3 work + 3 observe; got {used:?}"
+    );
+    assert_eq!(
+        used[3],
+        "hint:code".to_string(),
+        "locate follows Contact; got {used:?}"
+    );
+    assert_eq!(
+        used[5],
+        "hint:code".to_string(),
+        "patch follows Contact; got {used:?}"
+    );
+    assert_eq!(
+        used[7],
+        "hint:fast".to_string(),
+        "verify follows Contact; got {used:?}"
     );
 }
 
@@ -1567,11 +1633,15 @@ async fn bounded_dag_writeback_and_node_contact() {
 #[tokio::test]
 async fn bounded_dag_session_picker_does_not_override_contact() {
     let provider = ScriptedProvider::new(vec![
+        text_response(LIVE_MODE_PLAN),
         text_response("not a dag"),
         text_response("not a dag"),
         text_response("located"),
+        text_response(LIVE_OBS_CONTINUE),
         text_response("patched"),
+        text_response(LIVE_OBS_CONTINUE),
         text_response("verified"),
+        text_response(LIVE_OBS_CONTINUE),
     ]);
     let models = provider.recorded_models();
     let mut agent = Agent::builder()
@@ -1598,12 +1668,10 @@ async fn bounded_dag_session_picker_does_not_override_contact() {
     assert!(!out.contains("reason=explicit_user_pick"), "{out}");
     let used = models.lock().unwrap().clone();
     assert_eq!(
-        &used[2..],
-        [
-            "hint:code".to_string(),
-            "hint:code".to_string(),
-            "hint:fast".to_string()
-        ],
-        "work nodes must follow Contact, not the session picker; got {used:?}"
+        used[3],
+        "hint:code".to_string(),
+        "work hops must follow Contact, not the session picker; got {used:?}"
     );
+    assert_eq!(used[5], "hint:code".to_string(), "got {used:?}");
+    assert_eq!(used[7], "hint:fast".to_string(), "got {used:?}");
 }

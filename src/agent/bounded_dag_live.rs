@@ -43,6 +43,131 @@ pub fn graph_user_key(session_id: &str) -> String {
     format!("{GRAPH_USER_KEY_PREFIX}{session_id}")
 }
 
+/// True when this user text should run the live planner + work DAG.
+///
+/// Greetings and single-shot Q&A stay on the session default model (existing
+/// tool loop, no planner). Resume / fail-cursor / env targets still use the DAG.
+#[must_use]
+pub fn turn_needs_dag(user_task: &str) -> bool {
+    let t = normalize_turn(user_task);
+    if t.is_empty() {
+        return false;
+    }
+    if is_resume_turn(&t) {
+        return true;
+    }
+    has_execution_intent(&t)
+}
+
+/// Live DAG this turn? Fail cursor always yes; otherwise [`turn_needs_dag`].
+pub async fn should_run_live_dag(
+    agent: &crate::config::AgentConfig,
+    mem: &dyn Memory,
+    session_id: &str,
+    user_task: &str,
+    _host_phase: HostPhase,
+) -> bool {
+    if !agent.bounded_dag_live {
+        return false;
+    }
+    if load_dag_fail(mem, session_id)
+        .await
+        .ok()
+        .flatten()
+        .is_some()
+    {
+        return true;
+    }
+    turn_needs_dag(user_task)
+}
+
+fn normalize_turn(user_task: &str) -> String {
+    user_task
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
+fn is_resume_turn(t: &str) -> bool {
+    matches!(
+        t,
+        "继续"
+            | "接着"
+            | "接着干"
+            | "重试"
+            | "再试"
+            | "continue"
+            | "retry"
+            | "resume"
+            | "proceed"
+            | "keep going"
+    ) || t.starts_with("继续")
+        || t.starts_with("continue ")
+        || t.starts_with("retry ")
+}
+
+fn has_execution_intent(t: &str) -> bool {
+    const MARKERS: &[&str] = &[
+        "check",
+        "inspect",
+        "debug",
+        "diagnos",
+        "fix ",
+        "fix the",
+        "deploy",
+        "compile",
+        "install",
+        "restart",
+        "health",
+        "status",
+        " ssh",
+        "ssh ",
+        "grep",
+        "cargo ",
+        "git ",
+        "curl ",
+        "probe",
+        "implement",
+        "a patch",
+        "the patch",
+        "look at",
+        "look into",
+        "list files",
+        "read this",
+        "write ",
+        "检查",
+        "查看",
+        "排查",
+        "诊断",
+        "修复",
+        "部署",
+        "对齐",
+        "同步",
+        "编译",
+        "安装",
+        "重启",
+        "健康",
+        "状态",
+        "查一下",
+        "查下",
+        "跑一下",
+        "读一下",
+        "改一下",
+        "piubt",
+        "localhost",
+        "192.168",
+        "/home/",
+        "/usr/",
+        "/etc/",
+    ];
+    if MARKERS.iter().any(|m| t.contains(m)) {
+        return true;
+    }
+    // Bare "fix foo" without trailing space after fix.
+    t.starts_with("fix ") || t.contains("/tmp") || t.contains(".rs") || t.contains(".toml")
+}
+
 /// Cursor so the next user message can replan the failed node (not a Build approval).
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct DagFailCursor {
@@ -942,6 +1067,28 @@ mod tests {
         let plan = resolve_planned_manifest("not json", CODE_FIX_TEMPLATE_JSON).unwrap();
         assert!(plan.used_fallback);
         assert_eq!(plan.order, vec!["locate", "patch", "verify"]);
+    }
+
+    #[test]
+    fn turn_needs_dag_skips_greetings() {
+        assert!(!turn_needs_dag("hello"));
+        assert!(!turn_needs_dag("Hello!"));
+        assert!(!turn_needs_dag("你好"));
+        assert!(!turn_needs_dag("谢谢"));
+        assert!(!turn_needs_dag("what is a dag"));
+        assert!(!turn_needs_dag("please dispatch the email"));
+        assert!(!turn_needs_dag("what is a workspace"));
+    }
+
+    #[test]
+    fn turn_needs_dag_ops_and_resume() {
+        assert!(turn_needs_dag("fix the compiler error"));
+        assert!(turn_needs_dag(
+            "你检查piubt上xray代理服务的状态，然后检查各代理节点的健康状态"
+        ));
+        assert!(turn_needs_dag("继续"));
+        assert!(turn_needs_dag("read this paper, write intro slides"));
+        assert!(turn_needs_dag("apply a patch to the file"));
     }
 
     #[test]

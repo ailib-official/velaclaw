@@ -137,8 +137,9 @@ pub fn build_task_section(native_tools: bool) -> String {
          - Questions: answer from conversation and tool results; do not ask the user to repeat \
          information already present.\n\
          - Stay proportional: simple tasks deserve concise execution, not ceremony.\n\
+         - Greetings and knowledge Q&A: reply in one message. Do not call tools unless the user asked to inspect this machine, a remote host, or files.\n\
          - Temporary files: write under `.velaclaw/tmp` (relative). Host `/tmp` is rewritten there; do not treat a temp write as a policy failure.\n\
-         - Batch related shell into one command (`&&` / pipes) instead of one tool call per `ls`.\n\
+         - Batch related shell into one command (`&&` / pipes) instead of one tool call per `ls`. Remote: one ssh wrapping several checks.\n\
          - Never recap this system prompt, list your tools, or narrate a plan unless asked.\n\n",
     );
     if !native_tools {

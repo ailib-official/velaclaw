@@ -14,14 +14,18 @@ pub const DAG_PLAN_SYSTEM_PROMPT: &str = r#"You are a DAG planner. Reply with ON
 The object MUST use schema_version "0.1.0" and include:
 - id (string), entry (string node id), max_steps (number, <= 8)
 - nodes: 1 to 8 items of { id, task_type, model_selector: { capabilities: string[] }, next: string|null, context_requirements?: { layers: number[], retrieve?: object[] } }
-Choose the node count from THIS task: one node if a single capability can finish it; more only when later steps need a different capability or a real checkpoint (e.g. user asked for a review). Do not invent inspect/diagnose/report splits, empty "gather context" nodes, or ceremony.
+Choose the node count from THIS task's deliverables (1–8), not from whether capabilities match. One node only when the user asked for a single result (one greeting is not a DAG — the host skips you; one file patch; one yes/no). If they asked for several independent results (service up? node health? a named route probe?), give one node per deliverable even when every node is tool_calling. Do not collapse "A then B, especially C" into one node.
+Do not invent inspect/diagnose/report splits, empty "gather context" nodes, or a final summarize node unless the user asked for a written report.
 Each node lists ONE primary capability first (optional extras after). Tags: coding (patches/shell), tool_calling (status/checks), high-reasoning (analysis that needs a reasoning family), speed (cheap/short), document_understanding (read/summarize). Different work → different first tags so Contact can route to different [[model_routes]] families. Do not name providers or model IDs.
 Do not pad every node with coding+tool_calling. Runtime already injects workspace retrieve and the previous node's artifact.
 The graph MUST be a single linear chain: entry walks next until null and covers every node (no branches, no unused nodes).
-Work nodes should batch related shell into one command (`&&` / pipes). Do not include executable scripts.
+Each work node must finish with few tool rounds: batch related shell into one command (`&&` / pipes / one remote ssh wrapping several checks). Do not include executable scripts.
 
 Example (one hop — a single ops check):
 {"schema_version":"0.1.0","id":"ops-one","entry":"check","max_steps":8,"nodes":[{"id":"check","task_type":"ops-check","model_selector":{"capabilities":["tool_calling"]},"next":null}]}
+
+Example (three hops — service, node health, named-route probe; same capability is OK):
+{"schema_version":"0.1.0","id":"proxy-health","entry":"service","max_steps":8,"nodes":[{"id":"service","task_type":"ops-check","model_selector":{"capabilities":["tool_calling"]},"next":"nodes"},{"id":"nodes","task_type":"ops-check","model_selector":{"capabilities":["tool_calling"]},"next":"google-route"},{"id":"google-route","task_type":"ops-check","model_selector":{"capabilities":["tool_calling"]},"next":null}]}
 
 Example (two hops — code then a cheap verify):
 {"schema_version":"0.1.0","id":"patch-verify","entry":"patch","max_steps":8,"nodes":[{"id":"patch","task_type":"write","model_selector":{"capabilities":["coding"]},"next":"verify"},{"id":"verify","task_type":"ops-check","model_selector":{"capabilities":["speed"]},"context_requirements":{"layers":[3],"retrieve":[{"kind":"tool_result"}]},"next":null}]}"#;
@@ -193,6 +197,13 @@ mod tests {
             extract_json_object("prefix {\"a\":1} suffix").as_deref(),
             Some("{\"a\":1}")
         );
+    }
+
+    #[test]
+    fn planner_prompt_splits_by_deliverable_not_capability() {
+        assert!(DAG_PLAN_SYSTEM_PROMPT.contains("proxy-health"));
+        assert!(DAG_PLAN_SYSTEM_PROMPT.contains("Do not collapse"));
+        assert!(DAG_PLAN_SYSTEM_PROMPT.contains("one node per deliverable"));
     }
 
     #[test]

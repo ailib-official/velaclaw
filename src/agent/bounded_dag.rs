@@ -118,6 +118,13 @@ pub fn node_task_card(dag_id: &str, node: &DagNode, index: usize, node_count: us
          Do only this node's job (task_type) for USER TASK. Do not start {next}. \
          Do not redo a prior node unless INPUTS lack pointers you need.\n\
          \n\
+         TOOLS\n\
+         Prefer one compound shell (`&&` / pipes) over many tool rounds. \
+         Independent remote checks: one ssh, several commands inside. \
+         If USER TASK names a remote host, do not first run the same service check on this machine. \
+         Do not `find /` or open-ended local scans. Aim for at most four shell rounds; then HANDOFF.\n\
+         You may emit multiple tool calls in one assistant message when they are independent.\n\
+         \n\
          SUCCESS\n\
          Stop with a HANDOFF as the last assistant message:\n\
          - verdict: ok | partial | failed\n\
@@ -209,6 +216,7 @@ mod tests {
         let card = node_task_card("code-fix-template", locate, 1, 3);
         assert!(card.contains("next_node_id: patch"));
         assert!(card.contains("HANDOFF"));
+        assert!(card.contains("compound shell"));
         assert!(card.contains("pointers:"));
         assert!(!card.contains("Approve Build"));
         let verify = dag.nodes.iter().find(|n| n.id == "verify").unwrap();

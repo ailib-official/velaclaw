@@ -799,7 +799,25 @@ impl Agent {
             )));
 
         #[cfg(feature = "ai-protocol")]
-        let skip_pre_envelope = self.config.bounded_dag_live;
+        let use_live_dag = crate::agent::bounded_dag_live::should_run_live_dag(
+            &self.config,
+            self.memory.as_ref(),
+            self.session_id.as_str(),
+            user_message,
+            self.host_phase,
+        )
+        .await;
+        #[cfg(not(feature = "ai-protocol"))]
+        let use_live_dag = false;
+        if self.config.bounded_dag_live && !use_live_dag {
+            tracing::info!(
+                target: "bounded_dag_live",
+                "direct reply; skip planner/DAG"
+            );
+        }
+
+        #[cfg(feature = "ai-protocol")]
+        let skip_pre_envelope = use_live_dag;
         #[cfg(not(feature = "ai-protocol"))]
         let skip_pre_envelope = false;
         if !skip_pre_envelope {
@@ -807,7 +825,7 @@ impl Agent {
         }
 
         #[cfg(feature = "ai-protocol")]
-        if self.config.bounded_dag_live {
+        if use_live_dag {
             use crate::agent::bounded_dag_live::{
                 format_work_node_stop, live_dag_progress, work_node_user_task,
             };

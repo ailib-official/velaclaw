@@ -519,6 +519,18 @@ pub async fn run(
             memory::new_session_id()
         };
 
+        #[cfg(feature = "ai-protocol")]
+        let use_live_dag = crate::agent::bounded_dag_live::should_run_live_dag(
+            &config.agent,
+            mem.as_ref(),
+            session_id.as_str(),
+            &msg,
+            host_phase,
+        )
+        .await;
+        #[cfg(not(feature = "ai-protocol"))]
+        let use_live_dag = false;
+
         // Auto-save user message to memory (skip short/trivial messages)
         if config.memory.auto_save && msg.chars().count() >= AUTOSAVE_MIN_MESSAGE_CHARS {
             let user_key = autosave_memory_key("user_msg");
@@ -564,7 +576,7 @@ pub async fn run(
             provider: provider.as_ref(),
             model: &model_name,
         };
-        if !config.agent.bounded_dag_live {
+        if !use_live_dag {
             let extra_chunks = crate::agent::context_contract::retrieve_turn_extra_chunks(
                 &config.workspace_dir,
                 mem.as_ref(),
@@ -605,7 +617,7 @@ pub async fn run(
         let response = {
             #[cfg(feature = "ai-protocol")]
             {
-                if config.agent.bounded_dag_live {
+                if use_live_dag {
                     let planned = crate::agent::bounded_dag_live::prepare_session_live_dag(
                         &config.agent,
                         mem.as_ref(),
@@ -1116,11 +1128,23 @@ pub async fn run(
 
             history.push(ChatMessage::user(&enriched));
 
+            #[cfg(feature = "ai-protocol")]
+            let use_live_dag = crate::agent::bounded_dag_live::should_run_live_dag(
+                &config.agent,
+                mem.as_ref(),
+                session_id.as_str(),
+                &user_input,
+                host_phase,
+            )
+            .await;
+            #[cfg(not(feature = "ai-protocol"))]
+            let use_live_dag = false;
+
             let summarizer = crate::agent::context_orch::HistorySummarizer {
                 provider: provider.as_ref(),
                 model: &session_model,
             };
-            let prepare_report = if config.agent.bounded_dag_live {
+            let prepare_report = if use_live_dag {
                 crate::agent::context_orch::PrepareHistoryReport::default()
             } else {
                 let extra_chunks = crate::agent::context_contract::retrieve_turn_extra_chunks(
@@ -1173,7 +1197,7 @@ pub async fn run(
                 #[cfg(feature = "ai-protocol")]
                 {
                     async {
-                        if config.agent.bounded_dag_live {
+                        if use_live_dag {
                             let planned = crate::agent::bounded_dag_live::prepare_session_live_dag(
                                 &config.agent,
                                 mem.as_ref(),
@@ -1609,7 +1633,7 @@ pub async fn run(
             }
 
             // Post-turn prepare: compact overflow + layered (or trim kill-switch).
-            if !config.agent.bounded_dag_live {
+            if !use_live_dag {
                 let summarizer = crate::agent::context_orch::HistorySummarizer {
                     provider: provider.as_ref(),
                     model: &session_model,

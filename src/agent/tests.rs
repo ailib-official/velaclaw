@@ -1464,6 +1464,30 @@ async fn bounded_dag_build_one_loop_per_node() {
 
 #[cfg(feature = "ai-protocol")]
 #[tokio::test]
+async fn bounded_dag_hello_skips_planner() {
+    let provider = ScriptedProvider::new(vec![text_response("Hi — ready.")]);
+    let calls = provider.call_counter();
+    let mut agent = build_agent_with_config(
+        Box::new(provider),
+        vec![],
+        AgentConfig {
+            bounded_dag_live: true,
+            envelope_assemble: false,
+            ..AgentConfig::default()
+        },
+    );
+    agent.set_host_phase(crate::agent::host_phase::HostPhase::Build);
+    let out = agent.turn("hello").await.unwrap();
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "greeting must not run planner or work nodes"
+    );
+    assert!(out.contains("Hi"), "{out}");
+}
+
+#[cfg(feature = "ai-protocol")]
+#[tokio::test]
 async fn bounded_dag_writeback_and_node_contact() {
     let (mem, _tmp) = make_sqlite_memory();
     let provider = ScriptedProvider::new(vec![

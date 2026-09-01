@@ -520,14 +520,23 @@ pub async fn run(
         };
 
         #[cfg(feature = "ai-protocol")]
-        let use_live_dag = crate::agent::bounded_dag_live::should_run_live_dag(
-            &config.agent,
-            mem.as_ref(),
-            session_id.as_str(),
-            &msg,
-            host_phase,
-        )
-        .await;
+        let live_mode = if config.agent.bounded_dag_live {
+            crate::agent::bounded_dag_live::resolve_live_turn_mode(
+                &config.agent,
+                mem.as_ref(),
+                session_id.as_str(),
+                provider.as_ref(),
+                &model_name,
+                &msg,
+                temperature,
+                host_phase,
+            )
+            .await?
+        } else {
+            crate::agent::bounded_dag_live::TurnMode::SingleWork
+        };
+        #[cfg(feature = "ai-protocol")]
+        let use_live_dag = live_mode == crate::agent::bounded_dag_live::TurnMode::PlanDag;
         #[cfg(not(feature = "ai-protocol"))]
         let use_live_dag = false;
 
@@ -853,13 +862,34 @@ pub async fn run(
                         }
                     }
                 } else {
+                    #[cfg(feature = "ai-protocol")]
+                    let empty_tools: Vec<Box<dyn crate::tools::Tool>> = Vec::new();
+                    #[cfg(feature = "ai-protocol")]
+                    let tools_for_turn: &[Box<dyn crate::tools::Tool>] =
+                        if config.agent.bounded_dag_live
+                            && live_mode == crate::agent::bounded_dag_live::TurnMode::ChatOnly
+                        {
+                            empty_tools.as_slice()
+                        } else {
+                            tools_registry.as_slice()
+                        };
+                    #[cfg(not(feature = "ai-protocol"))]
+                    let tools_for_turn = tools_registry.as_slice();
+                    #[cfg(feature = "ai-protocol")]
+                    let hop_model = if config.agent.bounded_dag_live {
+                        model_name.as_str()
+                    } else {
+                        turn_model.as_str()
+                    };
+                    #[cfg(not(feature = "ai-protocol"))]
+                    let hop_model = turn_model.as_str();
                     run_tool_call_loop(
                         provider.as_ref(),
                         &mut history,
-                        &tools_registry,
+                        tools_for_turn,
                         &progress_obs,
                         provider_name,
-                        &turn_model,
+                        hop_model,
                         temperature,
                         false,
                         Some(&approval_manager),
@@ -1129,14 +1159,23 @@ pub async fn run(
             history.push(ChatMessage::user(&enriched));
 
             #[cfg(feature = "ai-protocol")]
-            let use_live_dag = crate::agent::bounded_dag_live::should_run_live_dag(
-                &config.agent,
-                mem.as_ref(),
-                session_id.as_str(),
-                &user_input,
-                host_phase,
-            )
-            .await;
+            let live_mode = if config.agent.bounded_dag_live {
+                crate::agent::bounded_dag_live::resolve_live_turn_mode(
+                    &config.agent,
+                    mem.as_ref(),
+                    session_id.as_str(),
+                    provider.as_ref(),
+                    &session_model,
+                    &user_input,
+                    temperature,
+                    host_phase,
+                )
+                .await?
+            } else {
+                crate::agent::bounded_dag_live::TurnMode::SingleWork
+            };
+            #[cfg(feature = "ai-protocol")]
+            let use_live_dag = live_mode == crate::agent::bounded_dag_live::TurnMode::PlanDag;
             #[cfg(not(feature = "ai-protocol"))]
             let use_live_dag = false;
 
@@ -1527,13 +1566,36 @@ pub async fn run(
                                 last_body
                             })
                         } else {
+                            #[cfg(feature = "ai-protocol")]
+                            let empty_tools: Vec<Box<dyn crate::tools::Tool>> = Vec::new();
+                            #[cfg(feature = "ai-protocol")]
+                            let tools_for_turn: &[Box<dyn crate::tools::Tool>] = if config
+                                .agent
+                                .bounded_dag_live
+                                && live_mode
+                                    == crate::agent::bounded_dag_live::TurnMode::ChatOnly
+                            {
+                                empty_tools.as_slice()
+                            } else {
+                                tools_registry.as_slice()
+                            };
+                            #[cfg(not(feature = "ai-protocol"))]
+                            let tools_for_turn = tools_registry.as_slice();
+                            #[cfg(feature = "ai-protocol")]
+                            let hop_model = if config.agent.bounded_dag_live {
+                                session_model.as_str()
+                            } else {
+                                turn_model.as_str()
+                            };
+                            #[cfg(not(feature = "ai-protocol"))]
+                            let hop_model = turn_model.as_str();
                             run_tool_call_loop(
                                 provider.as_ref(),
                                 &mut history,
-                                &tools_registry,
+                                tools_for_turn,
                                 &progress_obs,
                                 provider_name,
-                                &turn_model,
+                                hop_model,
                                 temperature,
                                 false,
                                 Some(&approval_manager),

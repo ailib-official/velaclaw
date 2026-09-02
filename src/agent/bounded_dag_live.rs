@@ -72,6 +72,7 @@ node_count is the live graph size (0 if this turn is chat_only). If node_count i
 If the user task requires local/repo/host evidence and the assistant reply has no tool or observation evidence, you MUST choose replan_remaining.\n";
 
 const OBSERVE_REPLY_CHARS: usize = 4000;
+const OBSERVE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// First live hop: the JSON already contains the greeting or the DAG.
 #[derive(Debug)]
@@ -305,6 +306,84 @@ pub async fn live_first_hop(
 
 #[allow(clippy::too_many_arguments)]
 pub async fn observe_turn_outcome(
+    provider: &dyn Provider,
+    planner_model: &str,
+    temperature: f64,
+    user_task: &str,
+    last_reply: &str,
+    node_id: Option<&str>,
+    remaining_nodes: usize,
+    node_count: usize,
+    fail_closed: ObserveVerdict,
+) -> Result<ObserveVerdict> {
+    observe_turn_outcome_timed(
+        provider,
+        planner_model,
+        temperature,
+        user_task,
+        last_reply,
+        node_id,
+        remaining_nodes,
+        node_count,
+        fail_closed,
+        OBSERVE_TIMEOUT,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn observe_turn_outcome_timed(
+    provider: &dyn Provider,
+    planner_model: &str,
+    temperature: f64,
+    user_task: &str,
+    last_reply: &str,
+    node_id: Option<&str>,
+    remaining_nodes: usize,
+    node_count: usize,
+    fail_closed: ObserveVerdict,
+    timeout: std::time::Duration,
+) -> Result<ObserveVerdict> {
+    let node = node_id.unwrap_or("(none)");
+    tracing::info!(
+        target: "bounded_dag_live",
+        node_id = node,
+        remaining_nodes,
+        node_count,
+        "turn observe start"
+    );
+    match tokio::time::timeout(
+        timeout,
+        observe_turn_outcome_inner(
+            provider,
+            planner_model,
+            temperature,
+            user_task,
+            last_reply,
+            node_id,
+            remaining_nodes,
+            node_count,
+            fail_closed,
+        ),
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(_) => {
+            tracing::warn!(
+                target: "bounded_dag_live",
+                node_id = node,
+                remaining_nodes,
+                node_count,
+                "observe timed out; fail-open"
+            );
+            Ok(fail_closed)
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn observe_turn_outcome_inner(
     provider: &dyn Provider,
     planner_model: &str,
     temperature: f64,
@@ -1556,6 +1635,49 @@ mod tests {
         .unwrap();
         assert!(matches!(hop, LiveFirstHop::ChatOnly { .. }));
         assert_eq!(provider.responses.lock().unwrap().len(), 1);
+    }
+
+    struct HangPlanner;
+
+    #[async_trait::async_trait]
+    impl Provider for HangPlanner {
+        async fn chat_with_system(
+            &self,
+            _system_prompt: Option<&str>,
+            _message: &str,
+            _model: &str,
+            _temperature: f64,
+        ) -> anyhow::Result<String> {
+            std::future::pending().await
+        }
+
+        async fn chat(
+            &self,
+            _request: ChatRequest<'_>,
+            _model: &str,
+            _temperature: f64,
+        ) -> anyhow::Result<crate::providers::ChatResponse> {
+            std::future::pending().await
+        }
+    }
+
+    #[tokio::test]
+    async fn observe_timeout_fail_opens() {
+        let verdict = observe_turn_outcome_timed(
+            &HangPlanner,
+            "m",
+            0.0,
+            "hello",
+            "Hi",
+            None,
+            0,
+            0,
+            ObserveVerdict::Continue,
+            std::time::Duration::from_millis(20),
+        )
+        .await
+        .unwrap();
+        assert_eq!(verdict, ObserveVerdict::Continue);
     }
 
     #[tokio::test]

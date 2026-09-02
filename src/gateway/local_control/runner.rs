@@ -15,6 +15,16 @@ use tokio::sync::mpsc::Sender;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+/// Config for one Web/API turn. Live bounded DAG keeps session `default_model`
+/// (UI picker must not send first-hop/observe to a hung aggregator id).
+pub fn effective_chat_config(config: &Config, req: &ChatApiRequest) -> Config {
+    if config.agent.bounded_dag_live {
+        config.clone()
+    } else {
+        apply_chat_overrides(config.clone(), req)
+    }
+}
+
 /// Apply per-request model/temperature overrides onto a config clone.
 pub fn apply_chat_overrides(mut config: Config, req: &ChatApiRequest) -> Config {
     if let Some(model_id) = &req.model_id {
@@ -98,8 +108,7 @@ pub async fn run_agent_chat(
     } else {
         explicit_model_from_request(req)
     };
-    // Still apply overrides for provider bootstrap when picker is set.
-    let effective_config = apply_chat_overrides(config.clone(), req);
+    let effective_config = effective_chat_config(config, req);
 
     let mut agent = Agent::from_config(&effective_config).context("failed to build agent")?;
     if let Some(sid) = req
@@ -126,8 +135,7 @@ pub async fn run_agent_chat(
     seed_prior_messages(&mut agent, &req.messages)?;
     agent.set_cancellation_token(cancellation);
     agent.set_progress_tx(progress_tx);
-    let content = agent
-        .turn(&user_message)
+    let content = Box::pin(agent.turn(&user_message))
         .await
         .context("agent turn failed")?;
 
@@ -522,6 +530,28 @@ mod tests {
         );
         assert_eq!(updated.default_provider.as_deref(), Some("deepseek"));
         assert!((updated.default_temperature - 0.2).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn live_effective_chat_config_keeps_session_default() {
+        let mut base = Config::default();
+        base.default_model = Some("deepseek/deepseek-v4-flash".into());
+        base.default_provider = Some("deepseek".into());
+        base.agent.bounded_dag_live = true;
+        let req = ChatApiRequest {
+            messages: vec![],
+            session_id: None,
+            model_id: Some("nvidia/nemotron-3-ultra-550b-a55b".into()),
+            temperature: Some(0.2),
+            max_tokens: None,
+            host_phase: None,
+        };
+        let updated = effective_chat_config(&base, &req);
+        assert_eq!(
+            updated.default_model.as_deref(),
+            Some("deepseek/deepseek-v4-flash")
+        );
+        assert_eq!(updated.default_provider.as_deref(), Some("deepseek"));
     }
 
     #[test]

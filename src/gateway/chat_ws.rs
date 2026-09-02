@@ -213,7 +213,7 @@ async fn handle_ws_socket(socket: WebSocket, state: AppState) {
 
         let cancel = CancellationToken::new();
         let (progress_tx, mut progress_rx) = tokio::sync::mpsc::channel(128);
-        let mut chat_fut = std::pin::pin!(run_agent_chat(
+        let mut chat_fut = Box::pin(run_agent_chat(
             &config,
             &req,
             Some(&hub),

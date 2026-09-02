@@ -850,6 +850,7 @@ impl Agent {
                 &text,
                 None,
                 0,
+                0,
                 ObserveVerdict::Continue,
             )
             .await?;
@@ -1099,6 +1100,7 @@ impl Agent {
                     &last_body,
                     Some(id.as_str()),
                     remaining,
+                    node_count,
                     crate::agent::bounded_dag_live::ObserveVerdict::Continue,
                 )
                 .await?;

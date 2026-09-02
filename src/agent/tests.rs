@@ -1499,6 +1499,41 @@ async fn bounded_dag_hello_skips_planner() {
 
 #[cfg(feature = "ai-protocol")]
 #[tokio::test]
+async fn bounded_dag_single_work_refines_then_runs_nodes() {
+    let json = r#"{"schema_version":"0.1.0","id":"paper-slides","entry":"read","max_steps":8,"nodes":[{"id":"read","task_type":"summarize","model_selector":{"capabilities":["document_understanding"]},"next":"slides"},{"id":"slides","task_type":"write","model_selector":{"capabilities":["speed"]},"next":null}]}"#;
+    let provider = ScriptedProvider::new(vec![
+        text_response(r#"{"path":"single_work"}"#),
+        text_response(json),
+        text_response("checked"),
+        text_response(LIVE_OBS_CONTINUE),
+        text_response("synced"),
+        text_response(LIVE_OBS_CONTINUE),
+    ]);
+    let calls = provider.call_counter();
+    let mut agent = build_agent_with_config(
+        Box::new(provider),
+        vec![],
+        AgentConfig {
+            bounded_dag_live: true,
+            envelope_assemble: false,
+            ..AgentConfig::default()
+        },
+    );
+    agent.set_host_phase(crate::agent::host_phase::HostPhase::Build);
+    let out = agent
+        .turn("check piubt git then sync velaclaw")
+        .await
+        .unwrap();
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        6,
+        "single_work + split refine + 2 work+observe"
+    );
+    assert!(out.contains("synced"), "{out}");
+}
+
+#[cfg(feature = "ai-protocol")]
+#[tokio::test]
 async fn bounded_dag_chat_only_observe_upgrades_to_plan() {
     let provider = ScriptedProvider::new(vec![
         text_response(LIVE_MODE_CHAT_EMPTY),

@@ -43,17 +43,6 @@ pub fn graph_user_key(session_id: &str) -> String {
     format!("{GRAPH_USER_KEY_PREFIX}{session_id}")
 }
 
-/// How this user turn should run when `[agent].bounded_dag_live` is on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TurnMode {
-    /// Greeting / thanks / general knowledge. Empty tools slice (not max_iter=0).
-    ChatOnly,
-    /// One deliverable; existing tool loop on the session default model.
-    SingleWork,
-    /// Planner then linear work nodes.
-    PlanDag,
-}
-
 /// Observe whether the last assistant output advanced the user task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ObserveVerdict {
@@ -86,6 +75,13 @@ pub enum LiveFirstHop {
     Plan(PlannedLiveDag),
 }
 
+impl LiveFirstHop {
+    #[must_use]
+    pub fn is_plan(&self) -> bool {
+        matches!(self, Self::Plan(_))
+    }
+}
+
 /// Parse first-hop JSON. Invalid / empty chat_only reply → [`LiveFirstHop::SingleWork`].
 #[must_use]
 pub fn parse_live_first_hop(text: &str, fallback_json: &str) -> LiveFirstHop {
@@ -115,22 +111,6 @@ pub fn parse_live_first_hop(text: &str, fallback_json: &str) -> LiveFirstHop {
             Ok(plan) if !plan.used_fallback => LiveFirstHop::Plan(plan),
             _ => LiveFirstHop::SingleWork,
         },
-    }
-}
-
-/// Parse judge JSON. Invalid or missing mode → [`TurnMode::SingleWork`] (never chat_only).
-#[must_use]
-pub fn parse_turn_mode_json(text: &str) -> TurnMode {
-    let Some(obj) = extract_json_object(text) else {
-        return TurnMode::SingleWork;
-    };
-    let Ok(v) = serde_json::from_str::<serde_json::Value>(&obj) else {
-        return TurnMode::SingleWork;
-    };
-    match v.get("mode").and_then(|m| m.as_str()) {
-        Some("chat_only") => TurnMode::ChatOnly,
-        Some("plan_dag") => TurnMode::PlanDag,
-        _ => TurnMode::SingleWork,
     }
 }
 
@@ -216,21 +196,15 @@ pub async fn live_first_hop(
         let _ = store_planned_json(mem, session_id, &json).await;
         let _ = store_graph_user_task(mem, session_id, user_task).await;
     }
-    match &hop {
-        LiveFirstHop::ChatOnly { .. } => tracing::info!(
-            target: "bounded_dag_live",
-            "first hop chat_only (reply in-band)"
-        ),
-        LiveFirstHop::SingleWork => tracing::info!(
-            target: "bounded_dag_live",
-            "first hop single_work"
-        ),
-        LiveFirstHop::Plan(plan) => tracing::info!(
-            target: "bounded_dag_live",
-            nodes = plan.order.len(),
-            "first hop plan_dag"
-        ),
-    }
+    tracing::info!(
+        target: "bounded_dag_live",
+        plan = hop.is_plan(),
+        nodes = match &hop {
+            LiveFirstHop::Plan(plan) => plan.order.len(),
+            _ => 0,
+        },
+        "first hop"
+    );
     Ok(hop)
 }
 
@@ -276,8 +250,7 @@ pub async fn observe_turn_outcome(
 }
 
 /// Stop is only valid when no DAG nodes remain. Mid-graph Stop is Continue.
-#[must_use]
-pub fn coerce_observe_remaining(verdict: ObserveVerdict, remaining_nodes: usize) -> ObserveVerdict {
+fn coerce_observe_remaining(verdict: ObserveVerdict, remaining_nodes: usize) -> ObserveVerdict {
     if remaining_nodes > 0 && verdict == ObserveVerdict::Stop {
         tracing::info!(
             target: "bounded_dag_live",
@@ -288,37 +261,6 @@ pub fn coerce_observe_remaining(verdict: ObserveVerdict, remaining_nodes: usize)
     } else {
         verdict
     }
-}
-
-/// Fail cursor / Plan / operator skip the in-band first hop (go through [`live_first_hop`]).
-pub async fn resolve_live_turn_mode(
-    agent: &crate::config::AgentConfig,
-    mem: &dyn Memory,
-    session_id: &str,
-    provider: &dyn Provider,
-    planner_model: &str,
-    user_task: &str,
-    temperature: f64,
-    host_phase: HostPhase,
-) -> Result<TurnMode> {
-    Ok(
-        match live_first_hop(
-            agent,
-            mem,
-            session_id,
-            provider,
-            planner_model,
-            user_task,
-            temperature,
-            host_phase,
-        )
-        .await?
-        {
-            LiveFirstHop::ChatOnly { .. } => TurnMode::ChatOnly,
-            LiveFirstHop::SingleWork => TurnMode::SingleWork,
-            LiveFirstHop::Plan(_) => TurnMode::PlanDag,
-        },
-    )
 }
 
 /// Replan remaining nodes after observe (prefix includes the completed node).
@@ -1281,25 +1223,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_turn_mode_invalid_is_single_work() {
-        assert_eq!(parse_turn_mode_json(""), TurnMode::SingleWork);
-        assert_eq!(parse_turn_mode_json("not json"), TurnMode::SingleWork);
-        assert_eq!(parse_turn_mode_json("{}"), TurnMode::SingleWork);
-        assert_eq!(
-            parse_turn_mode_json(r#"{"mode":"chat_only"}"#),
-            TurnMode::ChatOnly
-        );
-        assert_eq!(
-            parse_turn_mode_json(r#"{"mode":"plan_dag"}"#),
-            TurnMode::PlanDag
-        );
-        assert_eq!(
-            parse_turn_mode_json("Sure.\n```json\n{\"mode\":\"single_work\"}\n```\n"),
-            TurnMode::SingleWork
-        );
-    }
-
-    #[test]
     fn parse_live_first_hop_in_band_or_single_work() {
         match parse_live_first_hop(
             r#"{"path":"chat_only","reply":"Hi — ready."}"#,
@@ -1324,6 +1247,17 @@ mod tests {
             parse_live_first_hop(r#"{"mode":"plan_dag"}"#, CODE_FIX_TEMPLATE_JSON),
             LiveFirstHop::SingleWork
         ));
+        assert!(matches!(
+            parse_live_first_hop("", CODE_FIX_TEMPLATE_JSON),
+            LiveFirstHop::SingleWork
+        ));
+        match parse_live_first_hop(
+            r#"{"mode":"chat_only","reply":"Hi — ready."}"#,
+            CODE_FIX_TEMPLATE_JSON,
+        ) {
+            LiveFirstHop::ChatOnly { reply } => assert!(reply.contains("Hi")),
+            other => panic!("mode alias should still carry in-band reply, got {other:?}"),
+        }
     }
 
     #[test]

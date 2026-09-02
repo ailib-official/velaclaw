@@ -196,19 +196,14 @@ pub fn rewrite_tombstoned_route(provider: &str, model: &str) -> (String, String)
     };
     let old_tail = model.rsplit('/').next().unwrap_or(model);
     let new_tail = succ.rsplit('/').next().unwrap_or(succ.as_str());
-    let new_model = if model.contains('/') && succ.contains('/') {
+    let new_model = if succ.contains('/') {
         succ.clone()
-    } else if model.contains('/') {
-        let prefix = model.rsplit_once('/').map(|(p, _)| p).unwrap_or(model);
-        format!("{prefix}/{new_tail}")
+    } else if let Some((prefix, _)) = model.rsplit_once('/') {
+        format!("{prefix}/{succ}")
     } else {
         succ.clone()
     };
-    let new_provider = if provider.contains(old_tail) {
-        provider.replace(old_tail, new_tail)
-    } else {
-        provider.to_string()
-    };
+    let new_provider = provider.replace(old_tail, new_tail);
     tracing::info!(
         target: "protocol_registry",
         from_model = model,

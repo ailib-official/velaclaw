@@ -758,10 +758,6 @@ impl Agent {
     }
 
     pub async fn turn(&mut self, user_message: &str) -> Result<String> {
-        Box::pin(self.turn_inner(user_message)).await
-    }
-
-    async fn turn_inner(&mut self, user_message: &str) -> Result<String> {
         self.ensure_system_prompt()?;
 
         if self.auto_save {
@@ -795,8 +791,6 @@ impl Agent {
             format!("{context}{user_message}")
         };
 
-        #[cfg(feature = "ai-protocol")]
-        let dag_prefix_len = self.history.len();
         self.history
             .push(ConversationMessage::Chat(ChatMessage::user(
                 enriched.clone(),
@@ -804,29 +798,27 @@ impl Agent {
 
         #[cfg(feature = "ai-protocol")]
         let hop = if self.config.bounded_dag_live {
-            Some(
-                crate::agent::bounded_dag_live::live_first_hop(
-                    &self.config,
-                    self.memory.as_ref(),
-                    self.session_id.as_str(),
-                    self.provider.as_ref(),
-                    &self.model_name,
-                    user_message,
-                    self.temperature,
-                    self.host_phase,
-                )
-                .await?,
+            crate::agent::bounded_dag_live::live_first_hop(
+                &self.config,
+                self.memory.as_ref(),
+                self.session_id.as_str(),
+                self.provider.as_ref(),
+                &self.model_name,
+                user_message,
+                self.temperature,
+                self.host_phase,
             )
+            .await?
         } else {
-            None
+            crate::agent::bounded_dag_live::LiveFirstHop::SingleWork
         };
         #[cfg(feature = "ai-protocol")]
         let (mut use_live_dag, planned_from_first, chat_only_reply) = {
             use crate::agent::bounded_dag_live::LiveFirstHop;
             match hop {
-                Some(LiveFirstHop::Plan(plan)) => (true, Some(plan), None),
-                Some(LiveFirstHop::ChatOnly { reply }) => (false, None, Some(reply)),
-                Some(LiveFirstHop::SingleWork) | None => (false, None, None),
+                LiveFirstHop::Plan(plan) => (true, Some(plan), None),
+                LiveFirstHop::ChatOnly { reply } => (false, None, Some(reply)),
+                LiveFirstHop::SingleWork => (false, None, None),
             }
         };
         #[cfg(not(feature = "ai-protocol"))]
@@ -843,11 +835,7 @@ impl Agent {
         #[cfg(feature = "ai-protocol")]
         if self.config.bounded_dag_live && !use_live_dag {
             use crate::agent::bounded_dag_live::{observe_turn_outcome, ObserveVerdict};
-            self.last_turn_model = Some(crate::orchestration::TurnModelDecision {
-                model: self.model_name.clone(),
-                source: crate::orchestration::TurnModelSource::DefaultModel,
-                reason: "live_first_hop".into(),
-            });
+            self.note_session_default("live_first_hop");
             let text = if let Some(reply) = chat_only_reply {
                 reply
             } else {
@@ -885,15 +873,10 @@ impl Agent {
             use crate::agent::loop_::is_tool_loop_cancelled;
             use std::collections::HashSet;
             let mut planned = if let Some(plan) = planned_from_first {
-                self.last_turn_model = Some(crate::orchestration::TurnModelDecision {
-                    model: self.model_name.clone(),
-                    source: crate::orchestration::TurnModelSource::DefaultModel,
-                    reason: "live_first_hop_plan".into(),
-                });
+                self.note_session_default("live_first_hop_plan");
                 plan
             } else {
-                self.resolve_live_dag(dag_prefix_len, &enriched, user_message)
-                    .await?
+                self.resolve_live_dag(user_message).await?
             };
             if self.host_phase == HostPhase::Plan {
                 return Ok(planned.preview_with_contact(&self.model_name, &self.available_hints));
@@ -1180,10 +1163,17 @@ impl Agent {
     }
 
     #[cfg(feature = "ai-protocol")]
+    fn note_session_default(&mut self, reason: &str) {
+        self.last_turn_model = Some(crate::orchestration::TurnModelDecision {
+            model: self.model_name.clone(),
+            source: crate::orchestration::TurnModelSource::DefaultModel,
+            reason: reason.into(),
+        });
+    }
+
+    #[cfg(feature = "ai-protocol")]
     async fn resolve_live_dag(
         &mut self,
-        _prefix_len: usize,
-        _enriched: &str,
         user_message: &str,
     ) -> Result<crate::agent::bounded_dag_live::PlannedLiveDag> {
         use crate::agent::bounded_dag_live::prepare_session_live_dag;
@@ -1199,11 +1189,7 @@ impl Agent {
             self.host_phase,
         )
         .await?;
-        self.last_turn_model = Some(crate::orchestration::TurnModelDecision {
-            model: self.model_name.clone(),
-            source: crate::orchestration::TurnModelSource::DefaultModel,
-            reason: "bounded_dag_planner_session_default".into(),
-        });
+        self.note_session_default("bounded_dag_planner_session_default");
         Ok(planned)
     }
 

@@ -519,27 +519,6 @@ pub async fn run(
             memory::new_session_id()
         };
 
-        #[cfg(feature = "ai-protocol")]
-        let hop = if config.agent.bounded_dag_live {
-            crate::agent::bounded_dag_live::live_first_hop(
-                &config.agent,
-                mem.as_ref(),
-                session_id.as_str(),
-                provider.as_ref(),
-                &model_name,
-                &msg,
-                temperature,
-                host_phase,
-            )
-            .await?
-        } else {
-            crate::agent::bounded_dag_live::LiveFirstHop::SingleWork
-        };
-        #[cfg(feature = "ai-protocol")]
-        let use_live_dag = hop.is_plan();
-        #[cfg(not(feature = "ai-protocol"))]
-        let use_live_dag = false;
-
         // Auto-save user message to memory (skip short/trivial messages)
         if config.memory.auto_save && msg.chars().count() >= AUTOSAVE_MIN_MESSAGE_CHARS {
             let user_key = autosave_memory_key("user_msg");
@@ -585,7 +564,14 @@ pub async fn run(
             provider: provider.as_ref(),
             model: &model_name,
         };
-        if !use_live_dag {
+        #[cfg(feature = "ai-protocol")]
+        let skip_session_prepare = crate::agent::bounded_dag_live::skip_session_prepare_for_live(
+            config.agent.bounded_dag_live,
+            host_phase,
+        );
+        #[cfg(not(feature = "ai-protocol"))]
+        let skip_session_prepare = false;
+        if !skip_session_prepare {
             let extra_chunks = crate::agent::context_contract::retrieve_turn_extra_chunks(
                 &config.workspace_dir,
                 mem.as_ref(),
@@ -607,6 +593,24 @@ pub async fn run(
             )
             .await?;
         }
+
+        #[cfg(feature = "ai-protocol")]
+        let hop = if config.agent.bounded_dag_live {
+            crate::agent::bounded_dag_live::live_first_hop(
+                &config.agent,
+                mem.as_ref(),
+                session_id.as_str(),
+                provider.as_ref(),
+                &model_name,
+                &msg,
+                &history,
+                temperature,
+                host_phase,
+            )
+            .await?
+        } else {
+            crate::agent::bounded_dag_live::LiveFirstHop::SingleWork
+        };
 
         let turn_model = resolve_cli_turn_model(
             &config,
@@ -857,7 +861,10 @@ pub async fn run(
                             }
                         }
                     }
-                    crate::agent::bounded_dag_live::LiveFirstHop::ChatOnly { reply } => reply,
+                    crate::agent::bounded_dag_live::LiveFirstHop::ChatOnly { reply } => {
+                        history.push(ChatMessage::assistant(&reply));
+                        reply
+                    }
                     crate::agent::bounded_dag_live::LiveFirstHop::SingleWork => {
                         #[cfg(feature = "ai-protocol")]
                         let tools_for_turn = tools_registry.as_slice();
@@ -1147,32 +1154,19 @@ pub async fn run(
 
             history.push(ChatMessage::user(&enriched));
 
-            #[cfg(feature = "ai-protocol")]
-            let hop = if config.agent.bounded_dag_live {
-                crate::agent::bounded_dag_live::live_first_hop(
-                    &config.agent,
-                    mem.as_ref(),
-                    session_id.as_str(),
-                    provider.as_ref(),
-                    &session_model,
-                    &user_input,
-                    temperature,
-                    host_phase,
-                )
-                .await?
-            } else {
-                crate::agent::bounded_dag_live::LiveFirstHop::SingleWork
-            };
-            #[cfg(feature = "ai-protocol")]
-            let use_live_dag = hop.is_plan();
-            #[cfg(not(feature = "ai-protocol"))]
-            let use_live_dag = false;
-
             let summarizer = crate::agent::context_orch::HistorySummarizer {
                 provider: provider.as_ref(),
                 model: &session_model,
             };
-            let prepare_report = if use_live_dag {
+            #[cfg(feature = "ai-protocol")]
+            let skip_session_prepare =
+                crate::agent::bounded_dag_live::skip_session_prepare_for_live(
+                    config.agent.bounded_dag_live,
+                    host_phase,
+                );
+            #[cfg(not(feature = "ai-protocol"))]
+            let skip_session_prepare = false;
+            let prepare_report = if skip_session_prepare {
                 crate::agent::context_orch::PrepareHistoryReport::default()
             } else {
                 let extra_chunks = crate::agent::context_contract::retrieve_turn_extra_chunks(
@@ -1197,6 +1191,24 @@ pub async fn run(
                     },
                 )
                 .await?
+            };
+
+            #[cfg(feature = "ai-protocol")]
+            let hop = if config.agent.bounded_dag_live {
+                crate::agent::bounded_dag_live::live_first_hop(
+                    &config.agent,
+                    mem.as_ref(),
+                    session_id.as_str(),
+                    provider.as_ref(),
+                    &session_model,
+                    &user_input,
+                    &history,
+                    temperature,
+                    host_phase,
+                )
+                .await?
+            } else {
+                crate::agent::bounded_dag_live::LiveFirstHop::SingleWork
             };
             if prepare_report.compacted {
                 println!("🧹 Auto-compaction complete");
@@ -1546,6 +1558,7 @@ pub async fn run(
                             })
                         }
                             crate::agent::bounded_dag_live::LiveFirstHop::ChatOnly { reply } => {
+                                history.push(ChatMessage::assistant(&reply));
                                 Ok(reply)
                             }
                             crate::agent::bounded_dag_live::LiveFirstHop::SingleWork => {
@@ -1668,7 +1681,7 @@ pub async fn run(
             }
 
             // Post-turn prepare: compact overflow + layered (or trim kill-switch).
-            if !use_live_dag {
+            if !skip_session_prepare {
                 let summarizer = crate::agent::context_orch::HistorySummarizer {
                     provider: provider.as_ref(),
                     model: &session_model,

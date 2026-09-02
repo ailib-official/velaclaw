@@ -2,7 +2,8 @@
 //!
 //! ## Turn unification (ORCH cleanup / VL-CTX-001 / VL-CTX-002)
 //! - **Shared:** [`crate::orchestration::resolve_turn_model`] (CLI `loop_` + Web
-//!   [`agent::Agent::turn`]), [`context_orch::prepare_turn_history`] (compact + layered),
+//!   [`agent::Agent::turn`]), [`context_orch::prepare_turn_history`] (compact + layered;
+//!   live first hop consumes that history — VL-NA-030),
 //!   L2 tool_dispatcher merge, and tool iteration via [`loop_::run_tool_call_loop`]
 //!   (Web ApprovalHub / HITL still injected as `ToolBatchGateExtras` adapters).
 //! - **Still dual:** approval backend *adapters* (stdin vs ApprovalHub) and CLI

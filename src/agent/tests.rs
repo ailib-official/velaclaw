@@ -1499,6 +1499,38 @@ async fn bounded_dag_hello_skips_planner() {
 
 #[cfg(feature = "ai-protocol")]
 #[tokio::test]
+async fn bounded_dag_follow_up_first_hop_sees_prior_report() {
+    let provider = ScriptedProvider::new(vec![
+        text_response(LIVE_MODE_CHAT),
+        text_response(LIVE_OBS_CONTINUE),
+        text_response(r#"{"path":"chat_only","reply":"On piubt we already checked gProxy."}"#),
+        text_response(LIVE_OBS_CONTINUE),
+    ]);
+    let reqs = provider.recorded_requests();
+    let calls = provider.call_counter();
+    let mut agent = build_agent_with_config(
+        Box::new(provider),
+        vec![],
+        AgentConfig {
+            bounded_dag_live: true,
+            envelope_assemble: false,
+            ..AgentConfig::default()
+        },
+    );
+    agent.set_host_phase(crate::agent::host_phase::HostPhase::Build);
+    let first = agent.turn("hello").await.unwrap();
+    assert!(first.contains("Hi"), "{first}");
+    let _ = agent.turn("你忘了所有操作都在piubt上").await.unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 4, "two hops + two observe");
+    let hop2 = reqs.lock().unwrap()[2].clone();
+    assert!(
+        hop2.iter().any(|m| m.content.contains("Hi — ready.")),
+        "first hop of follow-up must see prior in-band reply, got {hop2:?}"
+    );
+}
+
+#[cfg(feature = "ai-protocol")]
+#[tokio::test]
 async fn bounded_dag_single_work_refines_then_runs_nodes() {
     let json = r#"{"schema_version":"0.1.0","id":"paper-slides","entry":"read","max_steps":8,"nodes":[{"id":"read","task_type":"summarize","model_selector":{"capabilities":["document_understanding"]},"next":"slides"},{"id":"slides","task_type":"write","model_selector":{"capabilities":["speed"]},"next":null}]}"#;
     let provider = ScriptedProvider::new(vec![

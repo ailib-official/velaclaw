@@ -797,7 +797,26 @@ impl Agent {
             )));
 
         #[cfg(feature = "ai-protocol")]
+        let skip_pre_envelope = crate::agent::bounded_dag_live::skip_session_prepare_for_live(
+            self.config.bounded_dag_live,
+            self.host_phase,
+        );
+        #[cfg(not(feature = "ai-protocol"))]
+        let skip_pre_envelope = false;
+        if !skip_pre_envelope {
+            self.prepare_conversation_history().await?;
+        }
+
+        #[cfg(feature = "ai-protocol")]
         let hop = if self.config.bounded_dag_live {
+            let hop_history: Vec<ChatMessage> = self
+                .history
+                .iter()
+                .filter_map(|m| match m {
+                    ConversationMessage::Chat(c) => Some(c.clone()),
+                    _ => None,
+                })
+                .collect();
             crate::agent::bounded_dag_live::live_first_hop(
                 &self.config,
                 self.memory.as_ref(),
@@ -805,6 +824,7 @@ impl Agent {
                 self.provider.as_ref(),
                 &self.model_name,
                 user_message,
+                &hop_history,
                 self.temperature,
                 self.host_phase,
             )
@@ -823,14 +843,6 @@ impl Agent {
         };
         #[cfg(not(feature = "ai-protocol"))]
         let use_live_dag = false;
-
-        #[cfg(feature = "ai-protocol")]
-        let skip_pre_envelope = use_live_dag;
-        #[cfg(not(feature = "ai-protocol"))]
-        let skip_pre_envelope = false;
-        if !skip_pre_envelope {
-            self.prepare_conversation_history().await?;
-        }
 
         #[cfg(feature = "ai-protocol")]
         if self.config.bounded_dag_live && !use_live_dag {
@@ -861,6 +873,9 @@ impl Agent {
                 );
                 use_live_dag = true;
             } else {
+                self.history
+                    .push(ConversationMessage::Chat(ChatMessage::assistant(&text)));
+                self.prepare_history_after_turn().await?;
                 return Ok(text);
             }
         }

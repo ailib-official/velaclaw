@@ -1,18 +1,17 @@
-//! Live bounded DAG: mode judge → planner (tool-free chat) → work nodes → observe.
+//! Live bounded DAG: first hop is chat_only or a linear graph; work is DAG nodes.
 //!
-//! When `[agent].bounded_dag_live` is on and `bounded_dag_path` is empty, a
-//! cheap JSON judge picks `chat_only` / `single_work` / `plan_dag`. The
-//! planner emits linear L2 JSON via `Provider::chat` (no tools). Invalid /
-//! non-linear output retries once, then falls back to the handwritten code-fix
-//! template. Successful plans are cached per session; fallback graphs are not
-//! cached. A non-empty `bounded_dag_path` skips the planner (operator-fixed graph).
+//! When `[agent].bounded_dag_live` is on and `bounded_dag_path` is empty, the
+//! first hop emits in-band `chat_only` or a 1–8 node linear DAG. There is no
+//! parallel `single_work` tool loop: that label (and invalid JSON) becomes a
+//! synthetic 1-node graph, then one split-refine chat before tools. Plan phase,
+//! fail cursor, and operator-fixed graphs skip refine. Dist default remains off.
 //!
-//! 有界 DAG live：LLM 判定回合模式；Planner 无工具单次 chat；节点后 observe 纠偏。
+//! 有界 DAG live：首跳仅 chat_only 或线性图；1 节点开工具前再拆一次。
 
 use super::bounded_dag::{format_preview, linear_node_ids, load_bounded_dag};
 use super::bounded_dag_context::contact_for_node;
 use super::candidate_dag::validate_candidate_dag_json;
-use super::dag_runner::{DagManifest, CODE_FIX_TEMPLATE_JSON};
+use super::dag_runner::{parse_dag_json, DagManifest, CODE_FIX_TEMPLATE_JSON};
 use super::host_phase::HostPhase;
 use crate::memory::{Memory, MemoryCategory};
 use crate::orchestration::dag_emit::{
@@ -54,15 +53,22 @@ pub enum ObserveVerdict {
 pub const LIVE_FIRST_HOP_SYSTEM_PROMPT: &str = "\
 Start this VelaClaw turn now. Reply with ONLY one JSON object, no markdown.\n\
 Greeting, thanks, or general knowledge (no repo/host/files): {\"path\":\"chat_only\",\"reply\":\"<full user-visible reply>\"}\n\
-One deliverable that needs tools: {\"path\":\"single_work\"}\n\
-Multiple distinct deliverables, or inspect/compare a local codebase, workspace, or named host: a linear DAG JSON object (schema_version 0.1.0, 1 to 8 nodes). That object is the plan — do not send a mode label without the graph.\n\
-Never use chat_only when the user asks to inspect a local repo, workspace, or host.\n";
+Any turn that needs tools: a linear DAG JSON object (schema_version 0.1.0, 1 to 8 nodes). That object is the plan — do not send a mode label without the graph.\n\
+One atomic action = 1 node. More than one distinct outcome (inspect then act, check then sync, a named host plus another result) = 2 to 8 nodes.\n\
+Never use chat_only when the user asks to inspect a local repo, workspace, or host. Do not use path single_work.\n";
+
+pub const SPLIT_ONE_NODE_SYSTEM_PROMPT: &str = "\
+You already chose a 1-node work graph. Reply with ONLY a linear DAG JSON object (schema_version 0.1.0, 1 to 8 nodes), no markdown.\n\
+If USER TASK has more than one distinct outcome (inspect then act, check then sync, a named host plus another result), emit 2 to 8 nodes, one per outcome.\n\
+If the task is one atomic action, reply with a 1-node graph.\n\
+Do not use path or mode labels. Do not use chat_only.\n";
 
 pub const TURN_OBSERVE_SYSTEM_PROMPT: &str = "\
 You judge whether the last assistant work advanced the USER TASK. Reply with ONLY one JSON object.\n\
 {\"verdict\":\"continue\"} — on track; remaining DAG nodes must run when remaining_nodes > 0.\n\
 {\"verdict\":\"replan_remaining\"} — last output lacked required evidence or went off-goal. Remaining work should be replanned.\n\
 {\"verdict\":\"stop\"} — the user task is done. Use stop only when remaining_nodes is 0 (or omitted). If remaining_nodes > 0 you MUST NOT use stop.\n\
+node_count is the live graph size (0 if this turn is chat_only). If node_count is 1 and USER TASK has more than one distinct outcome, and the assistant reply does not evidence each outcome, you MUST choose replan_remaining even when remaining_nodes is 0.\n\
 If the user task requires local/repo/host evidence and the assistant reply has no tool or observation evidence, you MUST choose replan_remaining.\n";
 
 const OBSERVE_REPLY_CHARS: usize = 4000;
@@ -82,7 +88,8 @@ impl LiveFirstHop {
     }
 }
 
-/// Parse first-hop JSON. Invalid / empty chat_only reply → [`LiveFirstHop::SingleWork`].
+/// Parse first-hop JSON. Invalid / empty chat_only / `single_work` →
+/// [`LiveFirstHop::SingleWork`] (host maps that to a 1-node DAG, not a second tool loop).
 #[must_use]
 pub fn parse_live_first_hop(text: &str, fallback_json: &str) -> LiveFirstHop {
     let Some(obj) = extract_json_object(text) else {
@@ -147,6 +154,80 @@ async fn structured_json_chat(
     Ok(response.text_or_empty().to_string())
 }
 
+/// Synthetic linear DAG for a tool turn that did not emit a graph.
+#[must_use]
+pub fn one_node_live_dag(user_task: &str) -> PlannedLiveDag {
+    let description: String = user_task.chars().take(200).collect();
+    let json = serde_json::json!({
+        "schema_version": "0.1.0",
+        "id": "one-node",
+        "description": description,
+        "entry": "work",
+        "max_steps": 8,
+        "nodes": [{
+            "id": "work",
+            "task_type": "execute",
+            "model_selector": { "capabilities": ["tool_calling"] },
+            "context_requirements": { "layers": [0, 1] },
+            "next": serde_json::Value::Null
+        }]
+    })
+    .to_string();
+    let dag = parse_dag_json(&json).expect("one-node fixture is valid");
+    let order = linear_node_ids(&dag).expect("one-node fixture is linear");
+    PlannedLiveDag {
+        dag,
+        order,
+        used_fallback: false,
+        source: "one_node",
+        resume_from: 0,
+        graph_task_override: None,
+    }
+}
+
+fn hop_kind(hop: &LiveFirstHop) -> &'static str {
+    match hop {
+        LiveFirstHop::ChatOnly { .. } => "chat_only",
+        LiveFirstHop::SingleWork => "single_work",
+        LiveFirstHop::Plan(plan) if plan.source == "split_refine" => "refined",
+        LiveFirstHop::Plan(plan) if plan.order.len() == 1 => "one_node",
+        LiveFirstHop::Plan(_) => "dag",
+    }
+}
+
+/// One extra structured hop when the first graph has a single work node.
+async fn refine_one_node_plan(
+    provider: &dyn Provider,
+    planner_model: &str,
+    temperature: f64,
+    user_task: &str,
+    seed: PlannedLiveDag,
+) -> Result<PlannedLiveDag> {
+    let json = planned_store_json(&seed, CODE_FIX_TEMPLATE_JSON);
+    let user = format!("USER TASK:\n{user_task}\n\nCurrent 1-node graph:\n{json}\n");
+    let text = structured_json_chat(
+        provider,
+        planner_model,
+        temperature,
+        SPLIT_ONE_NODE_SYSTEM_PROMPT,
+        &user,
+    )
+    .await?;
+    match parse_live_first_hop(&text, CODE_FIX_TEMPLATE_JSON) {
+        LiveFirstHop::Plan(mut plan)
+            if !plan.used_fallback && (1..=8).contains(&plan.order.len()) =>
+        {
+            if plan.order.len() >= 2 {
+                plan.source = "split_refine";
+                Ok(plan)
+            } else {
+                Ok(seed)
+            }
+        }
+        _ => Ok(seed),
+    }
+}
+
 pub async fn live_first_hop(
     agent: &crate::config::AgentConfig,
     mem: &dyn Memory,
@@ -191,6 +272,19 @@ pub async fn live_first_hop(
     )
     .await?;
     let hop = parse_live_first_hop(&text, &fallback);
+    let hop = match hop {
+        LiveFirstHop::ChatOnly { reply } => LiveFirstHop::ChatOnly { reply },
+        LiveFirstHop::Plan(plan) if plan.order.len() >= 2 => LiveFirstHop::Plan(plan),
+        LiveFirstHop::Plan(plan) => LiveFirstHop::Plan(
+            refine_one_node_plan(provider, planner_model, temperature, user_task, plan).await?,
+        ),
+        LiveFirstHop::SingleWork => {
+            let seed = one_node_live_dag(user_task);
+            LiveFirstHop::Plan(
+                refine_one_node_plan(provider, planner_model, temperature, user_task, seed).await?,
+            )
+        }
+    };
     if let LiveFirstHop::Plan(plan) = &hop {
         let json = planned_store_json(plan, &fallback);
         let _ = store_planned_json(mem, session_id, &json).await;
@@ -198,6 +292,7 @@ pub async fn live_first_hop(
     }
     tracing::info!(
         target: "bounded_dag_live",
+        kind = hop_kind(&hop),
         plan = hop.is_plan(),
         nodes = match &hop {
             LiveFirstHop::Plan(plan) => plan.order.len(),
@@ -208,6 +303,7 @@ pub async fn live_first_hop(
     Ok(hop)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn observe_turn_outcome(
     provider: &dyn Provider,
     planner_model: &str,
@@ -216,6 +312,7 @@ pub async fn observe_turn_outcome(
     last_reply: &str,
     node_id: Option<&str>,
     remaining_nodes: usize,
+    node_count: usize,
     fail_closed: ObserveVerdict,
 ) -> Result<ObserveVerdict> {
     let reply = if last_reply.chars().count() > OBSERVE_REPLY_CHARS {
@@ -226,7 +323,7 @@ pub async fn observe_turn_outcome(
     };
     let node = node_id.unwrap_or("(none)");
     let user = format!(
-        "USER TASK:\n{user_task}\n\nLast node id: {node}\nremaining_nodes: {remaining_nodes}\n\nAssistant reply:\n{reply}"
+        "USER TASK:\n{user_task}\n\nLast node id: {node}\nremaining_nodes: {remaining_nodes}\nnode_count: {node_count}\n\nAssistant reply:\n{reply}"
     );
     let text = structured_json_chat(
         provider,
@@ -242,6 +339,7 @@ pub async fn observe_turn_outcome(
         target: "bounded_dag_live",
         node_id = node,
         remaining_nodes,
+        node_count,
         parsed = ?parsed,
         verdict = ?verdict,
         "turn observe"
@@ -1357,6 +1455,107 @@ mod tests {
                 tool_calls: vec![],
             })
         }
+    }
+
+    fn live_mem() -> crate::memory::NoneMemory {
+        crate::memory::NoneMemory::new()
+    }
+
+    fn live_agent_cfg() -> crate::config::AgentConfig {
+        crate::config::AgentConfig {
+            bounded_dag_live: true,
+            ..crate::config::AgentConfig::default()
+        }
+    }
+
+    #[test]
+    fn one_node_live_dag_is_linear_not_code_fix() {
+        let plan = one_node_live_dag("check piubt then sync velaclaw");
+        assert_eq!(plan.order, vec!["work"]);
+        assert!(!plan.used_fallback);
+        assert_eq!(plan.source, "one_node");
+        assert_ne!(plan.order, vec!["locate", "patch", "verify"]);
+    }
+
+    #[tokio::test]
+    async fn live_first_hop_refines_single_work_into_multi_node() {
+        let provider = TwoShotPlanner {
+            responses: std::sync::Mutex::new(vec![
+                r#"{"path":"single_work"}"#.into(),
+                PAPER_JSON.into(),
+            ]),
+        };
+        let hop = live_first_hop(
+            &live_agent_cfg(),
+            &live_mem(),
+            "sess",
+            &provider,
+            "m",
+            "check piubt git then sync velaclaw",
+            0.0,
+            HostPhase::Build,
+        )
+        .await
+        .unwrap();
+        match hop {
+            LiveFirstHop::Plan(plan) => {
+                assert_eq!(plan.order, vec!["read", "slides"]);
+                assert_eq!(plan.source, "split_refine");
+            }
+            other => panic!("expected refined plan, got {other:?}"),
+        }
+        assert!(provider.responses.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn live_first_hop_skips_refine_for_multi_node() {
+        let provider = TwoShotPlanner {
+            responses: std::sync::Mutex::new(vec![
+                CODE_FIX_TEMPLATE_JSON.to_string(),
+                "MUST_NOT_REFINE".into(),
+            ]),
+        };
+        let hop = live_first_hop(
+            &live_agent_cfg(),
+            &live_mem(),
+            "sess",
+            &provider,
+            "m",
+            "fix the compiler error",
+            0.0,
+            HostPhase::Build,
+        )
+        .await
+        .unwrap();
+        match hop {
+            LiveFirstHop::Plan(plan) => assert_eq!(plan.order.len(), 3),
+            other => panic!("expected 3-node plan, got {other:?}"),
+        }
+        assert_eq!(provider.responses.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn live_first_hop_chat_only_skips_refine() {
+        let provider = TwoShotPlanner {
+            responses: std::sync::Mutex::new(vec![
+                r#"{"path":"chat_only","reply":"Hi — ready."}"#.into(),
+                "MUST_NOT_REFINE".into(),
+            ]),
+        };
+        let hop = live_first_hop(
+            &live_agent_cfg(),
+            &live_mem(),
+            "sess",
+            &provider,
+            "m",
+            "hello",
+            0.0,
+            HostPhase::Build,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(hop, LiveFirstHop::ChatOnly { .. }));
+        assert_eq!(provider.responses.lock().unwrap().len(), 1);
     }
 
     #[tokio::test]

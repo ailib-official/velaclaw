@@ -6,6 +6,12 @@
 //! synthetic 1-node graph, then one split-refine chat before tools. Plan phase,
 //! fail cursor, and operator-fixed graphs skip refine. Dist default remains off.
 //!
+//! Turn contract (VL-CTX-001 / VL-NA-019 / VL-NA-030): append the user message,
+//! run `prepare_turn_history` on the session (skip only HostPhase::Plan preview),
+//! then first hop **consumes that prepared history**. DAG nodes still slim via
+//! `reset_chat_scope` (intra-graph). Session follow-ups do not replace the
+//! stored graph task.
+//!
 //! 有界 DAG live：首跳仅 chat_only 或线性图；1 节点开工具前再拆一次。
 
 use super::bounded_dag::{format_preview, linear_node_ids, load_bounded_dag};
@@ -52,10 +58,71 @@ pub enum ObserveVerdict {
 
 pub const LIVE_FIRST_HOP_SYSTEM_PROMPT: &str = "\
 Start this VelaClaw turn now. Reply with ONLY one JSON object, no markdown.\n\
+Prior user/assistant messages are this same session. Continue that work (same hosts, paths, and findings). Do not claim you forgot earlier turns. Do not ask what to do if the session already did it.\n\
 Greeting, thanks, or general knowledge (no repo/host/files): {\"path\":\"chat_only\",\"reply\":\"<full user-visible reply>\"}\n\
 Any turn that needs tools: a linear DAG JSON object (schema_version 0.1.0, 1 to 8 nodes). That object is the plan — do not send a mode label without the graph.\n\
 One atomic action = 1 node. More than one distinct outcome (inspect then act, check then sync, a named host plus another result) = 2 to 8 nodes.\n\
 Never use chat_only when the user asks to inspect a local repo, workspace, or host. Do not use path single_work.\n";
+
+const GRAPH_USER_TASK_MAX_CHARS: usize = 4000;
+
+/// Skip session Envelope only for Plan-phase preview chrome (VL-NA-019).
+/// Live DAG work turns still run VL-CTX-001 `prepare_turn_history` first.
+#[must_use]
+pub fn skip_session_prepare_for_live(bounded_dag_live: bool, host_phase: HostPhase) -> bool {
+    bounded_dag_live && host_phase == HostPhase::Plan
+}
+
+/// Hop system first; session user/assistant after CTX prepare; skip product system.
+#[must_use]
+pub fn first_hop_chat_messages(
+    system: &str,
+    history: &[ChatMessage],
+    user_task: &str,
+) -> Vec<ChatMessage> {
+    let mut out = Vec::with_capacity(history.len().saturating_add(2));
+    out.push(ChatMessage::system(system));
+    let mut saw_user = false;
+    for message in history {
+        if message.role == "system" {
+            continue;
+        }
+        if message.role == "user" {
+            saw_user = true;
+        }
+        out.push(message.clone());
+    }
+    if !saw_user {
+        let trimmed = user_task.trim();
+        if !trimmed.is_empty() {
+            out.push(ChatMessage::user(trimmed));
+        }
+    }
+    out
+}
+
+/// Keep the original graph task when a follow-up continues the same session.
+#[must_use]
+pub fn merge_graph_user_task(previous: Option<&str>, current: &str) -> String {
+    let current = current.trim();
+    let Some(prev) = previous.map(str::trim).filter(|s| !s.is_empty()) else {
+        return current.to_string();
+    };
+    if prev == current {
+        return current.to_string();
+    }
+    if current.is_empty() {
+        return prev.to_string();
+    }
+    let merged = format!("{prev}\n\nFollow-up:\n{current}");
+    if merged.chars().count() <= GRAPH_USER_TASK_MAX_CHARS {
+        return merged;
+    }
+    let follow = format!("\n\nFollow-up:\n{current}");
+    let budget = GRAPH_USER_TASK_MAX_CHARS.saturating_sub(follow.chars().count());
+    let head: String = prev.chars().take(budget).collect();
+    format!("{head}{follow}")
+}
 
 pub const SPLIT_ONE_NODE_SYSTEM_PROMPT: &str = "\
 You already chose a 1-node work graph. Reply with ONLY a linear DAG JSON object (schema_version 0.1.0, 1 to 8 nodes), no markdown.\n\
@@ -146,9 +213,23 @@ async fn structured_json_chat(
     system: &str,
     user: &str,
 ) -> Result<String> {
-    let messages = [ChatMessage::system(system), ChatMessage::user(user)];
+    structured_json_chat_messages(
+        provider,
+        model,
+        temperature,
+        &[ChatMessage::system(system), ChatMessage::user(user)],
+    )
+    .await
+}
+
+async fn structured_json_chat_messages(
+    provider: &dyn Provider,
+    model: &str,
+    temperature: f64,
+    messages: &[ChatMessage],
+) -> Result<String> {
     let request = ChatRequest {
-        messages: &messages,
+        messages,
         tools: None,
     };
     let response = provider.chat(request, model, temperature).await?;
@@ -236,6 +317,7 @@ pub async fn live_first_hop(
     provider: &dyn Provider,
     planner_model: &str,
     user_task: &str,
+    history: &[ChatMessage],
     temperature: f64,
     host_phase: HostPhase,
 ) -> Result<LiveFirstHop> {
@@ -264,14 +346,9 @@ pub async fn live_first_hop(
         return Ok(LiveFirstHop::Plan(planned));
     }
     let fallback = fallback_template_json(agent)?;
-    let text = structured_json_chat(
-        provider,
-        planner_model,
-        temperature,
-        LIVE_FIRST_HOP_SYSTEM_PROMPT,
-        user_task,
-    )
-    .await?;
+    let hop_messages = first_hop_chat_messages(LIVE_FIRST_HOP_SYSTEM_PROMPT, history, user_task);
+    let text =
+        structured_json_chat_messages(provider, planner_model, temperature, &hop_messages).await?;
     let hop = parse_live_first_hop(&text, &fallback);
     let hop = match hop {
         LiveFirstHop::ChatOnly { reply } => LiveFirstHop::ChatOnly { reply },
@@ -289,7 +366,9 @@ pub async fn live_first_hop(
     if let LiveFirstHop::Plan(plan) = &hop {
         let json = planned_store_json(plan, &fallback);
         let _ = store_planned_json(mem, session_id, &json).await;
-        let _ = store_graph_user_task(mem, session_id, user_task).await;
+        let previous = load_graph_user_task(mem, session_id).await.ok().flatten();
+        let merged = merge_graph_user_task(previous.as_deref(), user_task);
+        let _ = store_graph_user_task(mem, session_id, &merged).await;
     }
     tracing::info!(
         target: "bounded_dag_live",
@@ -1400,6 +1479,44 @@ mod tests {
     }
 
     #[test]
+    fn skip_session_prepare_only_for_plan_phase() {
+        assert!(!skip_session_prepare_for_live(true, HostPhase::Build));
+        assert!(skip_session_prepare_for_live(true, HostPhase::Plan));
+        assert!(!skip_session_prepare_for_live(false, HostPhase::Plan));
+    }
+
+    #[test]
+    fn first_hop_chat_messages_keep_session_and_skip_product_system() {
+        let history = vec![
+            ChatMessage::system("product"),
+            ChatMessage::user("check gProxy on piubt"),
+            ChatMessage::assistant("google-route-review: gProxy is up"),
+            ChatMessage::user("你忘了在piubt上"),
+        ];
+        let msgs = first_hop_chat_messages(LIVE_FIRST_HOP_SYSTEM_PROMPT, &history, "ignored");
+        assert_eq!(msgs[0].role, "system");
+        assert!(msgs[0].content.contains("same session"));
+        assert!(msgs.iter().all(|m| m.content != "product"));
+        assert!(msgs
+            .iter()
+            .any(|m| m.content.contains("google-route-review")));
+        assert!(msgs.iter().any(|m| m.content.contains("你忘了在piubt上")));
+    }
+
+    #[test]
+    fn merge_graph_user_task_keeps_original() {
+        let merged = merge_graph_user_task(
+            Some("check xray then gProxy on piubt"),
+            "你是不是忘了都在piubt上",
+        );
+        assert!(merged.contains("check xray then gProxy on piubt"));
+        assert!(merged.contains("Follow-up:"));
+        assert!(merged.contains("piubt"));
+        assert_eq!(merge_graph_user_task(None, "hello"), "hello");
+        assert_eq!(merge_graph_user_task(Some("same"), "same"), "same");
+    }
+
+    #[test]
     fn parse_live_first_hop_in_band_or_single_work() {
         match parse_live_first_hop(
             r#"{"path":"chat_only","reply":"Hi — ready."}"#,
@@ -1571,6 +1688,7 @@ mod tests {
             &provider,
             "m",
             "check piubt git then sync velaclaw",
+            &[],
             0.0,
             HostPhase::Build,
         )
@@ -1601,6 +1719,7 @@ mod tests {
             &provider,
             "m",
             "fix the compiler error",
+            &[],
             0.0,
             HostPhase::Build,
         )
@@ -1628,6 +1747,7 @@ mod tests {
             &provider,
             "m",
             "hello",
+            &[],
             0.0,
             HostPhase::Build,
         )

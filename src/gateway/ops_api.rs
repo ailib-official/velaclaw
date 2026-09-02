@@ -181,7 +181,7 @@ pub async fn handle_run_cron(
         Ok(j) => j,
         Err(e) => return api_error(StatusCode::NOT_FOUND, &e.to_string()).into_response(),
     };
-    let (success, output) = execute_job_now(&config, &job).await;
+    let (success, output) = Box::pin(execute_job_now(&config, &job)).await;
     (StatusCode::OK, Json(CronRunResponse { success, output })).into_response()
 }
 

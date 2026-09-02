@@ -551,15 +551,22 @@ pub fn create_routed_provider_with_options(
     let routes: Vec<(String, router::Route)> = model_routes
         .iter()
         .map(|route| {
+            let (provider_name, model) =
+                crate::protocol_registry::rewrite_tombstoned_route(&route.provider, &route.model);
             (
                 route.hint.clone(),
                 router::Route {
-                    provider_name: route.provider.clone(),
-                    model: route.model.clone(),
+                    provider_name,
+                    model,
                     fallbacks: route
                         .fallbacks
                         .iter()
-                        .map(|p| (p.provider.clone(), p.model.clone()))
+                        .map(|p| {
+                            crate::protocol_registry::rewrite_tombstoned_route(
+                                &p.provider,
+                                &p.model,
+                            )
+                        })
                         .collect(),
                 },
             )

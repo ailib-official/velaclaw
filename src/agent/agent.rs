@@ -758,6 +758,10 @@ impl Agent {
     }
 
     pub async fn turn(&mut self, user_message: &str) -> Result<String> {
+        Box::pin(self.turn_inner(user_message)).await
+    }
+
+    async fn turn_inner(&mut self, user_message: &str) -> Result<String> {
         self.ensure_system_prompt()?;
 
         if self.auto_save {
@@ -799,33 +803,34 @@ impl Agent {
             )));
 
         #[cfg(feature = "ai-protocol")]
-        let live_mode = if self.config.bounded_dag_live {
-            crate::agent::bounded_dag_live::resolve_live_turn_mode(
-                &self.config,
-                self.memory.as_ref(),
-                self.session_id.as_str(),
-                self.provider.as_ref(),
-                &self.model_name,
-                user_message,
-                self.temperature,
-                self.host_phase,
+        let hop = if self.config.bounded_dag_live {
+            Some(
+                crate::agent::bounded_dag_live::live_first_hop(
+                    &self.config,
+                    self.memory.as_ref(),
+                    self.session_id.as_str(),
+                    self.provider.as_ref(),
+                    &self.model_name,
+                    user_message,
+                    self.temperature,
+                    self.host_phase,
+                )
+                .await?,
             )
-            .await?
         } else {
-            crate::agent::bounded_dag_live::TurnMode::SingleWork
+            None
         };
         #[cfg(feature = "ai-protocol")]
-        let mut use_live_dag = live_mode == crate::agent::bounded_dag_live::TurnMode::PlanDag;
+        let (mut use_live_dag, planned_from_first, chat_only_reply) = {
+            use crate::agent::bounded_dag_live::LiveFirstHop;
+            match hop {
+                Some(LiveFirstHop::Plan(plan)) => (true, Some(plan), None),
+                Some(LiveFirstHop::ChatOnly { reply }) => (false, None, Some(reply)),
+                Some(LiveFirstHop::SingleWork) | None => (false, None, None),
+            }
+        };
         #[cfg(not(feature = "ai-protocol"))]
         let use_live_dag = false;
-        #[cfg(feature = "ai-protocol")]
-        if self.config.bounded_dag_live && !use_live_dag {
-            tracing::info!(
-                target: "bounded_dag_live",
-                mode = ?live_mode,
-                "skip planner; chat_only or single_work"
-            );
-        }
 
         #[cfg(feature = "ai-protocol")]
         let skip_pre_envelope = use_live_dag;
@@ -837,19 +842,18 @@ impl Agent {
 
         #[cfg(feature = "ai-protocol")]
         if self.config.bounded_dag_live && !use_live_dag {
-            use crate::agent::bounded_dag_live::{observe_turn_outcome, ObserveVerdict, TurnMode};
+            use crate::agent::bounded_dag_live::{observe_turn_outcome, ObserveVerdict};
             self.last_turn_model = Some(crate::orchestration::TurnModelDecision {
                 model: self.model_name.clone(),
                 source: crate::orchestration::TurnModelSource::DefaultModel,
-                reason: match live_mode {
-                    TurnMode::ChatOnly => "live_chat_only".into(),
-                    _ => "live_single_work".into(),
-                },
+                reason: "live_first_hop".into(),
             });
-            let allow_tools = live_mode != TurnMode::ChatOnly;
-            let text = self
-                .invoke_tool_loop_resolved_with(self.model_name.clone(), allow_tools)
-                .await?;
+            let text = if let Some(reply) = chat_only_reply {
+                reply
+            } else {
+                self.invoke_tool_loop_resolved_with(self.model_name.clone(), true)
+                    .await?
+            };
             let verdict = observe_turn_outcome(
                 self.provider.as_ref(),
                 &self.model_name,
@@ -857,6 +861,7 @@ impl Agent {
                 user_message,
                 &text,
                 None,
+                0,
                 ObserveVerdict::Continue,
             )
             .await?;
@@ -879,9 +884,17 @@ impl Agent {
             use crate::agent::host_phase::HostPhase;
             use crate::agent::loop_::is_tool_loop_cancelled;
             use std::collections::HashSet;
-            let mut planned = self
-                .resolve_live_dag(dag_prefix_len, &enriched, user_message)
-                .await?;
+            let mut planned = if let Some(plan) = planned_from_first {
+                self.last_turn_model = Some(crate::orchestration::TurnModelDecision {
+                    model: self.model_name.clone(),
+                    source: crate::orchestration::TurnModelSource::DefaultModel,
+                    reason: "live_first_hop_plan".into(),
+                });
+                plan
+            } else {
+                self.resolve_live_dag(dag_prefix_len, &enriched, user_message)
+                    .await?
+            };
             if self.host_phase == HostPhase::Plan {
                 return Ok(planned.preview_with_contact(&self.model_name, &self.available_hints));
             }
@@ -1094,6 +1107,7 @@ impl Agent {
                     None,
                     Some(&contacts),
                 ));
+                let remaining = planned.order.len().saturating_sub(index + 1);
                 let verdict = crate::agent::bounded_dag_live::observe_turn_outcome(
                     self.provider.as_ref(),
                     &self.model_name,
@@ -1101,6 +1115,7 @@ impl Agent {
                     user_message,
                     &last_body,
                     Some(id.as_str()),
+                    remaining,
                     crate::agent::bounded_dag_live::ObserveVerdict::Continue,
                 )
                 .await?;

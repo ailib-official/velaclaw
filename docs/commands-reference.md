@@ -79,7 +79,7 @@ Turn model selection (CLI + Web) shares `orchestration::resolve_turn_model`: exp
 
 DAG flags (`template_dag`, `candidate_dag_shadow`, `candidate_dag_emit`) are **library/doctor** gates — they do **not** change live chat. Observe with doctor commands below.
 
-`[agent].bounded_dag_live` is a **separate** opt-in (default `false`): CLI + Web only. A tool-free JSON judge picks `chat_only` / `single_work` / `plan_dag`. Invalid JSON is `single_work`. `chat_only` sends no tools. Multi-step: empty path = planner then linear work nodes; envelope budget follows **that node's Contact model** window; work-node system is a small P0+P1 pack. After each hop, observe can replan remaining once. Not L4 `candidate_dag_emit`. See [config-reference.md](config-reference.md#agent).
+`[agent].bounded_dag_live` is a **separate** opt-in (default `false`): CLI + Web only. The first planner-model hop is the path: `chat_only` includes the full reply; `single_work` is `{path:single_work}` then the tool loop; a DAG JSON object is the plan (no mode-only judge round). Invalid / empty `chat_only` is `single_work`. After each hop, observe can replan remaining once; **stop** is coerced to continue while remaining nodes > 0. Not L4 `candidate_dag_emit`. See [config-reference.md](config-reference.md#agent).
 
 Opt-in template DAG shell (CR-L2 library): `agent::dag_runner` walks handwritten DAGs. The `[agent].template_dag` bool is reserved/unused on live turns. Observe with `velaclaw doctor template-dag --fixture <path>`.
 

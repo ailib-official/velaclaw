@@ -49,7 +49,7 @@ pub async fn execute_job_now(config: &Config, job: &CronJob) -> (bool, String) {
         Ok(s) => s,
         Err(e) => return (false, format!("Security policy error: {e}")),
     };
-    execute_job_with_retry(config, &security, job).await
+    Box::pin(execute_job_with_retry(config, &security, job)).await
 }
 
 async fn execute_job_with_retry(
@@ -64,7 +64,7 @@ async fn execute_job_with_retry(
     for attempt in 0..=retries {
         let (success, output) = match job.job_type {
             JobType::Shell => run_job_command(config, security, job).await,
-            JobType::Agent => run_agent_job(config, security, job).await,
+            JobType::Agent => Box::pin(run_agent_job(config, security, job)).await,
         };
         last_output = output;
 
@@ -97,13 +97,18 @@ async fn process_due_jobs(
     crate::health::mark_component_ok(component);
 
     let max_concurrent = config.scheduler.max_concurrent.max(1);
-    let mut in_flight = stream::iter(jobs.into_iter().map(|job| {
-        let config = config.clone();
-        let policy = security.snapshot();
-        let component = component.to_owned();
-        async move { execute_and_persist_job(&config, &policy, &job, &component).await }
-    }))
-    .buffer_unordered(max_concurrent);
+    let mut in_flight =
+        stream::iter(
+            jobs.into_iter().map(|job| {
+                let config = config.clone();
+                let policy = security.snapshot();
+                let component = component.to_owned();
+                async move {
+                    Box::pin(execute_and_persist_job(&config, &policy, &job, &component)).await
+                }
+            }),
+        )
+        .buffer_unordered(max_concurrent);
 
     while let Some((job_id, success)) = in_flight.next().await {
         if !success {
@@ -122,7 +127,7 @@ async fn execute_and_persist_job(
     warn_if_high_frequency_agent_job(job);
 
     let started_at = Utc::now();
-    let (success, output) = execute_job_with_retry(config, security, job).await;
+    let (success, output) = Box::pin(execute_job_with_retry(config, security, job)).await;
     let finished_at = Utc::now();
     let success = persist_job_result(config, job, success, &output, started_at, finished_at).await;
 

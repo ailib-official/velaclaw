@@ -62,21 +62,61 @@ pub enum ObserveVerdict {
     Stop,
 }
 
-pub const TURN_MODE_SYSTEM_PROMPT: &str = "\
-You classify the user's latest message for VelaClaw. Reply with ONLY one JSON object, no markdown.\n\
-{\"mode\":\"chat_only\"} — greeting, thanks, or a question answerable from general knowledge without reading files, running commands, or inspecting this workspace, repo, or a named host.\n\
-{\"mode\":\"single_work\"} — one deliverable that may need tools but does not need a multi-node plan.\n\
-{\"mode\":\"plan_dag\"} — multiple distinct deliverables, a sequence of independent checks, or a task that should be split before acting.\n\
-If the user asks to compare, research, inspect, or analyze a local codebase, workspace, or named host, do not use chat_only.\n";
+pub const LIVE_FIRST_HOP_SYSTEM_PROMPT: &str = "\
+Start this VelaClaw turn now. Reply with ONLY one JSON object, no markdown.\n\
+Greeting, thanks, or general knowledge (no repo/host/files): {\"path\":\"chat_only\",\"reply\":\"<full user-visible reply>\"}\n\
+One deliverable that needs tools: {\"path\":\"single_work\"}\n\
+Multiple distinct deliverables, or inspect/compare a local codebase, workspace, or named host: a linear DAG JSON object (schema_version 0.1.0, 1 to 8 nodes). That object is the plan — do not send a mode label without the graph.\n\
+Never use chat_only when the user asks to inspect a local repo, workspace, or host.\n";
 
 pub const TURN_OBSERVE_SYSTEM_PROMPT: &str = "\
 You judge whether the last assistant work advanced the USER TASK. Reply with ONLY one JSON object.\n\
-{\"verdict\":\"continue\"} — on track; remaining DAG nodes may run.\n\
-{\"verdict\":\"replan_remaining\"} — last output lacked required evidence (no tools when the task needs the repo, a host, or files) or went off-goal. Remaining work should be replanned.\n\
-{\"verdict\":\"stop\"} — the user task is done; do not run more DAG nodes.\n\
+{\"verdict\":\"continue\"} — on track; remaining DAG nodes must run when remaining_nodes > 0.\n\
+{\"verdict\":\"replan_remaining\"} — last output lacked required evidence or went off-goal. Remaining work should be replanned.\n\
+{\"verdict\":\"stop\"} — the user task is done. Use stop only when remaining_nodes is 0 (or omitted). If remaining_nodes > 0 you MUST NOT use stop.\n\
 If the user task requires local/repo/host evidence and the assistant reply has no tool or observation evidence, you MUST choose replan_remaining.\n";
 
 const OBSERVE_REPLY_CHARS: usize = 4000;
+
+/// First live hop: the JSON already contains the greeting or the DAG.
+#[derive(Debug)]
+pub enum LiveFirstHop {
+    ChatOnly { reply: String },
+    SingleWork,
+    Plan(PlannedLiveDag),
+}
+
+/// Parse first-hop JSON. Invalid / empty chat_only reply → [`LiveFirstHop::SingleWork`].
+#[must_use]
+pub fn parse_live_first_hop(text: &str, fallback_json: &str) -> LiveFirstHop {
+    let Some(obj) = extract_json_object(text) else {
+        return LiveFirstHop::SingleWork;
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&obj) else {
+        return LiveFirstHop::SingleWork;
+    };
+    let path = v
+        .get("path")
+        .or_else(|| v.get("mode"))
+        .and_then(|m| m.as_str());
+    match path {
+        Some("chat_only") => {
+            let reply = v.get("reply").and_then(|m| m.as_str()).unwrap_or("").trim();
+            if reply.is_empty() {
+                LiveFirstHop::SingleWork
+            } else {
+                LiveFirstHop::ChatOnly {
+                    reply: reply.to_string(),
+                }
+            }
+        }
+        Some("single_work") => LiveFirstHop::SingleWork,
+        _ => match resolve_planned_manifest(&obj, fallback_json) {
+            Ok(plan) if !plan.used_fallback => LiveFirstHop::Plan(plan),
+            _ => LiveFirstHop::SingleWork,
+        },
+    }
+}
 
 /// Parse judge JSON. Invalid or missing mode → [`TurnMode::SingleWork`] (never chat_only).
 #[must_use]
@@ -127,27 +167,71 @@ async fn structured_json_chat(
     Ok(response.text_or_empty().to_string())
 }
 
-pub async fn judge_turn_mode(
+pub async fn live_first_hop(
+    agent: &crate::config::AgentConfig,
+    mem: &dyn Memory,
+    session_id: &str,
     provider: &dyn Provider,
     planner_model: &str,
     user_task: &str,
     temperature: f64,
-) -> Result<TurnMode> {
+    host_phase: HostPhase,
+) -> Result<LiveFirstHop> {
+    if !agent.bounded_dag_live {
+        return Ok(LiveFirstHop::SingleWork);
+    }
+    if load_dag_fail(mem, session_id)
+        .await
+        .ok()
+        .flatten()
+        .is_some()
+        || host_phase == HostPhase::Plan
+        || operator_fixed_live_graph(agent)?.is_some()
+    {
+        let planned = prepare_session_live_dag(
+            agent,
+            mem,
+            session_id,
+            provider,
+            planner_model,
+            user_task,
+            temperature,
+            host_phase,
+        )
+        .await?;
+        return Ok(LiveFirstHop::Plan(planned));
+    }
+    let fallback = fallback_template_json(agent)?;
     let text = structured_json_chat(
         provider,
         planner_model,
         temperature,
-        TURN_MODE_SYSTEM_PROMPT,
+        LIVE_FIRST_HOP_SYSTEM_PROMPT,
         user_task,
     )
     .await?;
-    let mode = parse_turn_mode_json(&text);
-    tracing::info!(
-        target: "bounded_dag_live",
-        mode = ?mode,
-        "turn mode judge"
-    );
-    Ok(mode)
+    let hop = parse_live_first_hop(&text, &fallback);
+    if let LiveFirstHop::Plan(plan) = &hop {
+        let json = planned_store_json(plan, &fallback);
+        let _ = store_planned_json(mem, session_id, &json).await;
+        let _ = store_graph_user_task(mem, session_id, user_task).await;
+    }
+    match &hop {
+        LiveFirstHop::ChatOnly { .. } => tracing::info!(
+            target: "bounded_dag_live",
+            "first hop chat_only (reply in-band)"
+        ),
+        LiveFirstHop::SingleWork => tracing::info!(
+            target: "bounded_dag_live",
+            "first hop single_work"
+        ),
+        LiveFirstHop::Plan(plan) => tracing::info!(
+            target: "bounded_dag_live",
+            nodes = plan.order.len(),
+            "first hop plan_dag"
+        ),
+    }
+    Ok(hop)
 }
 
 pub async fn observe_turn_outcome(
@@ -157,6 +241,7 @@ pub async fn observe_turn_outcome(
     user_task: &str,
     last_reply: &str,
     node_id: Option<&str>,
+    remaining_nodes: usize,
     fail_closed: ObserveVerdict,
 ) -> Result<ObserveVerdict> {
     let reply = if last_reply.chars().count() > OBSERVE_REPLY_CHARS {
@@ -166,8 +251,9 @@ pub async fn observe_turn_outcome(
         last_reply.to_string()
     };
     let node = node_id.unwrap_or("(none)");
-    let user =
-        format!("USER TASK:\n{user_task}\n\nLast node id: {node}\n\nAssistant reply:\n{reply}");
+    let user = format!(
+        "USER TASK:\n{user_task}\n\nLast node id: {node}\nremaining_nodes: {remaining_nodes}\n\nAssistant reply:\n{reply}"
+    );
     let text = structured_json_chat(
         provider,
         planner_model,
@@ -176,17 +262,35 @@ pub async fn observe_turn_outcome(
         &user,
     )
     .await?;
-    let verdict = parse_observe_verdict(&text, fail_closed);
+    let parsed = parse_observe_verdict(&text, fail_closed);
+    let verdict = coerce_observe_remaining(parsed, remaining_nodes);
     tracing::info!(
         target: "bounded_dag_live",
         node_id = node,
+        remaining_nodes,
+        parsed = ?parsed,
         verdict = ?verdict,
         "turn observe"
     );
     Ok(verdict)
 }
 
-/// Fail cursor / Plan / operator path skip the judge. Else tool-free JSON judge.
+/// Stop is only valid when no DAG nodes remain. Mid-graph Stop is Continue.
+#[must_use]
+pub fn coerce_observe_remaining(verdict: ObserveVerdict, remaining_nodes: usize) -> ObserveVerdict {
+    if remaining_nodes > 0 && verdict == ObserveVerdict::Stop {
+        tracing::info!(
+            target: "bounded_dag_live",
+            remaining_nodes,
+            "observe stop coerced to continue"
+        );
+        ObserveVerdict::Continue
+    } else {
+        verdict
+    }
+}
+
+/// Fail cursor / Plan / operator skip the in-band first hop (go through [`live_first_hop`]).
 pub async fn resolve_live_turn_mode(
     agent: &crate::config::AgentConfig,
     mem: &dyn Memory,
@@ -197,24 +301,24 @@ pub async fn resolve_live_turn_mode(
     temperature: f64,
     host_phase: HostPhase,
 ) -> Result<TurnMode> {
-    if !agent.bounded_dag_live {
-        return Ok(TurnMode::SingleWork);
-    }
-    if load_dag_fail(mem, session_id)
-        .await
-        .ok()
-        .flatten()
-        .is_some()
-    {
-        return Ok(TurnMode::PlanDag);
-    }
-    if host_phase == HostPhase::Plan {
-        return Ok(TurnMode::PlanDag);
-    }
-    if operator_fixed_live_graph(agent)?.is_some() {
-        return Ok(TurnMode::PlanDag);
-    }
-    judge_turn_mode(provider, planner_model, user_task, temperature).await
+    Ok(
+        match live_first_hop(
+            agent,
+            mem,
+            session_id,
+            provider,
+            planner_model,
+            user_task,
+            temperature,
+            host_phase,
+        )
+        .await?
+        {
+            LiveFirstHop::ChatOnly { .. } => TurnMode::ChatOnly,
+            LiveFirstHop::SingleWork => TurnMode::SingleWork,
+            LiveFirstHop::Plan(_) => TurnMode::PlanDag,
+        },
+    )
 }
 
 /// Replan remaining nodes after observe (prefix includes the completed node).
@@ -1192,6 +1296,49 @@ mod tests {
         assert_eq!(
             parse_turn_mode_json("Sure.\n```json\n{\"mode\":\"single_work\"}\n```\n"),
             TurnMode::SingleWork
+        );
+    }
+
+    #[test]
+    fn parse_live_first_hop_in_band_or_single_work() {
+        match parse_live_first_hop(
+            r#"{"path":"chat_only","reply":"Hi — ready."}"#,
+            CODE_FIX_TEMPLATE_JSON,
+        ) {
+            LiveFirstHop::ChatOnly { reply } => assert!(reply.contains("Hi")),
+            other => panic!("expected chat_only, got {other:?}"),
+        }
+        assert!(matches!(
+            parse_live_first_hop(r#"{"path":"chat_only"}"#, CODE_FIX_TEMPLATE_JSON),
+            LiveFirstHop::SingleWork
+        ));
+        assert!(matches!(
+            parse_live_first_hop(r#"{"path":"single_work"}"#, CODE_FIX_TEMPLATE_JSON),
+            LiveFirstHop::SingleWork
+        ));
+        assert!(matches!(
+            parse_live_first_hop(CODE_FIX_TEMPLATE_JSON, CODE_FIX_TEMPLATE_JSON),
+            LiveFirstHop::Plan(_)
+        ));
+        assert!(matches!(
+            parse_live_first_hop(r#"{"mode":"plan_dag"}"#, CODE_FIX_TEMPLATE_JSON),
+            LiveFirstHop::SingleWork
+        ));
+    }
+
+    #[test]
+    fn observe_stop_coerced_when_nodes_remain() {
+        assert_eq!(
+            coerce_observe_remaining(ObserveVerdict::Stop, 2),
+            ObserveVerdict::Continue
+        );
+        assert_eq!(
+            coerce_observe_remaining(ObserveVerdict::Stop, 0),
+            ObserveVerdict::Stop
+        );
+        assert_eq!(
+            coerce_observe_remaining(ObserveVerdict::ReplanRemaining, 3),
+            ObserveVerdict::ReplanRemaining
         );
     }
 

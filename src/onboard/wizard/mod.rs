@@ -994,8 +994,8 @@ fn curated_models_fallback(canonical: &str) -> Vec<(String, String)> {
                 "DeepSeek V3.2 (advanced reasoning + coding)".to_string(),
             ),
             (
-                "nvidia/llama-3.3-nemotron-super-49b-v1.5".to_string(),
-                "Llama 3.3 Nemotron Super 49B v1.5 (NVIDIA-tuned)".to_string(),
+                "nvidia/llama-3.1-nemotron-70b-instruct".to_string(),
+                "Llama 3.1 Nemotron 70B Instruct (NVIDIA-tuned)".to_string(),
             ),
             (
                 "nvidia/llama-3.1-nemotron-ultra-253b-v1".to_string(),
@@ -2489,7 +2489,7 @@ mod tests {
 
         assert!(ids.contains(&"nvidia/meta/llama-3.3-70b-instruct".to_string()));
         assert!(ids.contains(&"nvidia/deepseek-ai/deepseek-v3.2".to_string()));
-        assert!(ids.contains(&"nvidia/llama-3.3-nemotron-super-49b-v1.5".to_string()));
+        assert!(ids.contains(&"nvidia/llama-3.1-nemotron-70b-instruct".to_string()));
     }
 
     #[test]

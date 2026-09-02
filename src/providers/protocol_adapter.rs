@@ -81,27 +81,10 @@ impl ProtocolBackedProvider {
                 "system" => ai_lib_rust::Message::system(&m.content),
                 "assistant" => ai_lib_rust::Message::assistant(&m.content),
                 "tool" => {
-                    if let Some(ref id) = m.tool_call_id {
-                        ai_lib_rust::Message::tool(id.as_str(), &m.content)
-                    } else if let Ok(json) = serde_json::from_str::<serde_json::Value>(&m.content) {
-                        if let Some(id) = json.get("tool_call_id").and_then(|v| v.as_str()) {
-                            let content = json
-                                .get("content")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or(&m.content);
-                            ai_lib_rust::Message::tool(id, content)
-                        } else {
-                            ai_lib_rust::Message::user(format!(
-                                "[tool role without tool_call_id] {}",
-                                m.content
-                            ))
-                        }
-                    } else {
-                        ai_lib_rust::Message::user(format!(
-                            "[tool role without tool_call_id] {}",
-                            m.content
-                        ))
-                    }
+                    // Adapter Message has no assistant tool_calls field. Emitting
+                    // role=tool after a text-only assistant causes DeepSeek HTTP 400.
+                    let id = m.tool_call_id.as_deref().unwrap_or("unknown");
+                    ai_lib_rust::Message::user(format!("[Tool result {id}] {}", m.content))
                 }
                 _ => ai_lib_rust::Message::user(&m.content),
             })
@@ -351,7 +334,8 @@ mod tests {
         let messages = vec![ChatMessage::tool_with_call_id("call_1", "result json")];
         let converted = ProtocolBackedProvider::convert_messages(&messages);
         assert_eq!(converted.len(), 1);
-        assert_eq!(converted[0].tool_call_id.as_deref(), Some("call_1"));
+        assert_eq!(converted[0].role, ai_lib_rust::MessageRole::User);
+        assert!(format!("{:?}", converted[0].content).contains("call_1"));
     }
 
     #[test]
@@ -365,12 +349,13 @@ mod tests {
         let converted = ProtocolBackedProvider::convert_messages(&messages);
 
         assert_eq!(converted.len(), 4);
-        assert_eq!(converted[2].tool_call_id.as_deref(), Some("call_1"));
+        assert_eq!(converted[2].role, ai_lib_rust::MessageRole::User);
+        assert!(format!("{:?}", converted[2].content).contains("call_1"));
 
         let serialized = serde_json::to_value(&converted).expect("serialize messages");
         assert_eq!(serialized[0]["role"], "user");
         assert_eq!(serialized[1]["role"], "assistant");
-        assert_eq!(serialized[2]["role"], "tool");
+        assert_eq!(serialized[2]["role"], "user");
         assert_eq!(serialized[3]["role"], "assistant");
     }
 

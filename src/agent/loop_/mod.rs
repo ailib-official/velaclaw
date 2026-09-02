@@ -520,8 +520,8 @@ pub async fn run(
         };
 
         #[cfg(feature = "ai-protocol")]
-        let live_mode = if config.agent.bounded_dag_live {
-            crate::agent::bounded_dag_live::resolve_live_turn_mode(
+        let hop = if config.agent.bounded_dag_live {
+            crate::agent::bounded_dag_live::live_first_hop(
                 &config.agent,
                 mem.as_ref(),
                 session_id.as_str(),
@@ -533,10 +533,10 @@ pub async fn run(
             )
             .await?
         } else {
-            crate::agent::bounded_dag_live::TurnMode::SingleWork
+            crate::agent::bounded_dag_live::LiveFirstHop::SingleWork
         };
         #[cfg(feature = "ai-protocol")]
-        let use_live_dag = live_mode == crate::agent::bounded_dag_live::TurnMode::PlanDag;
+        let use_live_dag = hop.is_plan();
         #[cfg(not(feature = "ai-protocol"))]
         let use_live_dag = false;
 
@@ -626,168 +626,163 @@ pub async fn run(
         let response = {
             #[cfg(feature = "ai-protocol")]
             {
-                if use_live_dag {
-                    let planned = crate::agent::bounded_dag_live::prepare_session_live_dag(
-                        &config.agent,
-                        mem.as_ref(),
-                        session_id.as_str(),
-                        provider.as_ref(),
-                        &model_name,
-                        &msg,
-                        temperature,
-                        host_phase,
-                    )
-                    .await?;
-                    if host_phase == crate::agent::host_phase::HostPhase::Plan {
-                        planned.preview_with_contact(&model_name, &available_hints)
-                    } else {
-                        let dag = &planned.dag;
-                        let order = &planned.order;
-                        let node_count = order.len();
-                        let outline = planned.brief_outline(&msg);
-                        let graph_task = match &planned.graph_task_override {
-                            Some(task) => task.clone(),
-                            None => {
-                                crate::agent::bounded_dag_live::work_node_user_task(
-                                    mem.as_ref(),
-                                    session_id.as_str(),
-                                    &history,
-                                    &msg,
+                match hop {
+                    crate::agent::bounded_dag_live::LiveFirstHop::Plan(planned) => {
+                        if host_phase == crate::agent::host_phase::HostPhase::Plan {
+                            planned.preview_with_contact(&model_name, &available_hints)
+                        } else {
+                            let dag = &planned.dag;
+                            let order = &planned.order;
+                            let node_count = order.len();
+                            let outline = planned.brief_outline(&msg);
+                            let graph_task = match &planned.graph_task_override {
+                                Some(task) => task.clone(),
+                                None => {
+                                    crate::agent::bounded_dag_live::work_node_user_task(
+                                        mem.as_ref(),
+                                        session_id.as_str(),
+                                        &history,
+                                        &msg,
+                                    )
+                                    .await
+                                }
+                            };
+                            let no_extra: &[ai_lib_rust::context::MessageChunk] = &[];
+                            let by_id: HashMap<_, _> =
+                                dag.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+                            let mut last_body = String::new();
+                            let mut prior: Vec<String> = Vec::new();
+                            for id in order.iter().take(planned.resume_from) {
+                                prior.push(id.clone());
+                            }
+                            let mut work_sys = crate::channels::build_work_node_system_prompt(
+                                &config.workspace_dir,
+                                &model_name,
+                                &tool_descs,
+                                &skills,
+                                Some(&config.identity),
+                                native_tools,
+                            );
+                            #[cfg(feature = "ai-protocol")]
+                            if let Some(ref dispatcher) = tool_dispatcher {
+                                let strategy = if text_tool_result_history {
+                                    ai_lib_rust::NativeStrategy::Hybrid
+                                } else if dispatcher.should_send_tool_specs() {
+                                    ai_lib_rust::NativeStrategy::Full
+                                } else {
+                                    ai_lib_rust::NativeStrategy::TextOnly
+                                };
+                                append_text_tool_prompt(
+                                    &mut work_sys,
+                                    dispatcher.as_ref(),
+                                    &tools_registry,
+                                    strategy,
+                                );
+                            }
+                            let mut force_default = false;
+                            let mut auto_used = false;
+                            let mut index = planned.resume_from;
+                            while index < order.len() {
+                                let id = &order[index];
+                                let node = by_id.get(id.as_str()).ok_or_else(|| {
+                                    anyhow::anyhow!("bounded DAG missing node {id}")
+                                })?;
+                                let retrieve =
+                                    crate::agent::bounded_dag_context::node_retrieve_texts(
+                                        mem.as_ref(),
+                                        &config.workspace_dir,
+                                        session_id.as_str(),
+                                        node,
+                                        &prior,
+                                    )
+                                    .await;
+                                let contact =
+                                    crate::agent::bounded_dag_context::contact_for_live_node(
+                                        node,
+                                        &model_name,
+                                        &available_hints,
+                                        force_default,
+                                    );
+                                crate::agent::bounded_dag_context::reset_chat_scope(
+                                    &mut history,
+                                    &crate::agent::bounded_dag_context::NodeWorkPacket {
+                                        dag_id: dag.id.as_str(),
+                                        node,
+                                        index: index + 1,
+                                        node_count,
+                                        user_task: &graph_task,
+                                        retrieve_texts: &retrieve,
+                                    },
+                                    Some(work_sys.as_str()),
+                                );
+                                let hop_window =
+                                    crate::protocol_registry::lookup_hop_context_window(
+                                        &contact.model,
+                                        &config.model_routes,
+                                    );
+                                crate::agent::context_orch::prepare_turn_history(
+                                    &mut history,
+                                    crate::agent::context_orch::PrepareHistoryOpts {
+                                        layered: config.agent.envelope_assemble,
+                                        compact_context: config.agent.compact_context,
+                                        async_pool: config.agent.envelope_assemble_async,
+                                        max_history: config.agent.max_history_messages,
+                                        extra_chunks: no_extra,
+                                        context_window: hop_window,
+                                        summarizer: Some(&summarizer),
+                                    },
                                 )
                                 .await
-                            }
-                        };
-                        let no_extra: &[ai_lib_rust::context::MessageChunk] = &[];
-                        let by_id: HashMap<_, _> =
-                            dag.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
-                        let mut last_body = String::new();
-                        let mut prior: Vec<String> = Vec::new();
-                        for id in order.iter().take(planned.resume_from) {
-                            prior.push(id.clone());
-                        }
-                        let mut work_sys = crate::channels::build_work_node_system_prompt(
-                            &config.workspace_dir,
-                            &model_name,
-                            &tool_descs,
-                            &skills,
-                            Some(&config.identity),
-                            native_tools,
-                        );
-                        #[cfg(feature = "ai-protocol")]
-                        if let Some(ref dispatcher) = tool_dispatcher {
-                            let strategy = if text_tool_result_history {
-                                ai_lib_rust::NativeStrategy::Hybrid
-                            } else if dispatcher.should_send_tool_specs() {
-                                ai_lib_rust::NativeStrategy::Full
-                            } else {
-                                ai_lib_rust::NativeStrategy::TextOnly
-                            };
-                            append_text_tool_prompt(
-                                &mut work_sys,
-                                dispatcher.as_ref(),
-                                &tools_registry,
-                                strategy,
-                            );
-                        }
-                        let mut force_default = false;
-                        let mut auto_used = false;
-                        let mut index = planned.resume_from;
-                        while index < order.len() {
-                            let id = &order[index];
-                            let node = by_id
-                                .get(id.as_str())
-                                .ok_or_else(|| anyhow::anyhow!("bounded DAG missing node {id}"))?;
-                            let retrieve = crate::agent::bounded_dag_context::node_retrieve_texts(
-                                mem.as_ref(),
-                                &config.workspace_dir,
-                                session_id.as_str(),
-                                node,
-                                &prior,
-                            )
-                            .await;
-                            let contact = crate::agent::bounded_dag_context::contact_for_live_node(
-                                node,
-                                &model_name,
-                                &available_hints,
-                                force_default,
-                            );
-                            crate::agent::bounded_dag_context::reset_chat_scope(
-                                &mut history,
-                                &crate::agent::bounded_dag_context::NodeWorkPacket {
-                                    dag_id: dag.id.as_str(),
-                                    node,
-                                    index: index + 1,
-                                    node_count,
-                                    user_task: &graph_task,
-                                    retrieve_texts: &retrieve,
-                                },
-                                Some(work_sys.as_str()),
-                            );
-                            let hop_window = crate::protocol_registry::lookup_hop_context_window(
-                                &contact.model,
-                                &config.model_routes,
-                            );
-                            crate::agent::context_orch::prepare_turn_history(
-                                &mut history,
-                                crate::agent::context_orch::PrepareHistoryOpts {
-                                    layered: config.agent.envelope_assemble,
-                                    compact_context: config.agent.compact_context,
-                                    async_pool: config.agent.envelope_assemble_async,
-                                    max_history: config.agent.max_history_messages,
-                                    extra_chunks: no_extra,
-                                    context_window: hop_window,
-                                    summarizer: Some(&summarizer),
-                                },
-                            )
-                            .await
-                            .map_err(|err| {
-                                crate::agent::envelope_pilot::annotate_hop_budget_error(
-                                    err,
+                                .map_err(|err| {
+                                    crate::agent::envelope_pilot::annotate_hop_budget_error(
+                                        err,
+                                        &contact.model,
+                                        hop_window,
+                                    )
+                                })?;
+                                let node_provider =
+                                    crate::protocol_registry::provider_id_from_logical(
+                                        &contact.model,
+                                    );
+                                let piece = match run_tool_call_loop(
+                                    provider.as_ref(),
+                                    &mut history,
+                                    &tools_registry,
+                                    &progress_obs,
+                                    node_provider,
                                     &contact.model,
-                                    hop_window,
+                                    temperature,
+                                    false,
+                                    Some(&approval_manager),
+                                    approval_channel,
+                                    &config.multimodal,
+                                    config.agent.max_tool_iterations,
+                                    None,
+                                    None,
+                                    tool_dispatcher_ref,
+                                    Some(&security),
+                                    None,
+                                    text_tool_result_history,
+                                    render_opts,
+                                    None,
+                                    Some(SoftFailLoopCtx {
+                                        session_key: session_id.as_str(),
+                                        config: Some(&config),
+                                        host_decide: None,
+                                        surface: velaclaw_agent_runtime::SoftFailSurface::Cli,
+                                        peer_logical_ids: &[],
+                                    }),
+                                    Some(&cli_gate_extras),
                                 )
-                            })?;
-                            let node_provider =
-                                crate::protocol_registry::provider_id_from_logical(&contact.model);
-                            let piece = match run_tool_call_loop(
-                                provider.as_ref(),
-                                &mut history,
-                                &tools_registry,
-                                &progress_obs,
-                                node_provider,
-                                &contact.model,
-                                temperature,
-                                false,
-                                Some(&approval_manager),
-                                approval_channel,
-                                &config.multimodal,
-                                config.agent.max_tool_iterations,
-                                None,
-                                None,
-                                tool_dispatcher_ref,
-                                Some(&security),
-                                None,
-                                text_tool_result_history,
-                                render_opts,
-                                None,
-                                Some(SoftFailLoopCtx {
-                                    session_key: session_id.as_str(),
-                                    config: Some(&config),
-                                    host_decide: None,
-                                    surface: velaclaw_agent_runtime::SoftFailSurface::Cli,
-                                    peer_logical_ids: &[],
-                                }),
-                                Some(&cli_gate_extras),
-                            )
-                            .await
-                            {
-                                Ok(piece) => piece,
-                                Err(err) if is_tool_loop_cancelled(&err) => return Err(err),
-                                Err(err) => {
-                                    let err_s = format!("{err:#}");
-                                    let class =
-                                        crate::providers::hint_peer::classify_hop_error(&err_s);
-                                    match crate::agent::bounded_dag_live::decide_work_node_fail(
+                                .await
+                                {
+                                    Ok(piece) => piece,
+                                    Err(err) if is_tool_loop_cancelled(&err) => return Err(err),
+                                    Err(err) => {
+                                        let err_s = format!("{err:#}");
+                                        let class =
+                                            crate::providers::hint_peer::classify_hop_error(&err_s);
+                                        match crate::agent::bounded_dag_live::decide_work_node_fail(
                                         config.agent.dag_fail_auto_replan,
                                         auto_used,
                                         &err_s,
@@ -837,83 +832,77 @@ pub async fn run(
                                             );
                                         }
                                     }
-                                }
-                            };
-                            let _ = crate::agent::bounded_dag_context::store_node_artifact(
+                                    }
+                                };
+                                let _ = crate::agent::bounded_dag_context::store_node_artifact(
+                                    mem.as_ref(),
+                                    session_id.as_str(),
+                                    &node.id,
+                                    &piece,
+                                )
+                                .await;
+                                last_body = piece;
+                                prior.push(node.id.clone());
+                                index += 1;
+                            }
+                            let _ = crate::agent::bounded_dag_live::clear_dag_fail(
                                 mem.as_ref(),
                                 session_id.as_str(),
-                                &node.id,
-                                &piece,
                             )
                             .await;
-                            last_body = piece;
-                            prior.push(node.id.clone());
-                            index += 1;
-                        }
-                        let _ = crate::agent::bounded_dag_live::clear_dag_fail(
-                            mem.as_ref(),
-                            session_id.as_str(),
-                        )
-                        .await;
-                        if last_body.is_empty() {
-                            outline
-                        } else {
-                            last_body
+                            if last_body.is_empty() {
+                                outline
+                            } else {
+                                last_body
+                            }
                         }
                     }
-                } else {
-                    #[cfg(feature = "ai-protocol")]
-                    let empty_tools: Vec<Box<dyn crate::tools::Tool>> = Vec::new();
-                    #[cfg(feature = "ai-protocol")]
-                    let tools_for_turn: &[Box<dyn crate::tools::Tool>] =
-                        if config.agent.bounded_dag_live
-                            && live_mode == crate::agent::bounded_dag_live::TurnMode::ChatOnly
-                        {
-                            empty_tools.as_slice()
+                    crate::agent::bounded_dag_live::LiveFirstHop::ChatOnly { reply } => reply,
+                    crate::agent::bounded_dag_live::LiveFirstHop::SingleWork => {
+                        #[cfg(feature = "ai-protocol")]
+                        let tools_for_turn = tools_registry.as_slice();
+                        #[cfg(not(feature = "ai-protocol"))]
+                        let tools_for_turn = tools_registry.as_slice();
+                        #[cfg(feature = "ai-protocol")]
+                        let hop_model = if config.agent.bounded_dag_live {
+                            model_name.as_str()
                         } else {
-                            tools_registry.as_slice()
+                            turn_model.as_str()
                         };
-                    #[cfg(not(feature = "ai-protocol"))]
-                    let tools_for_turn = tools_registry.as_slice();
-                    #[cfg(feature = "ai-protocol")]
-                    let hop_model = if config.agent.bounded_dag_live {
-                        model_name.as_str()
-                    } else {
-                        turn_model.as_str()
-                    };
-                    #[cfg(not(feature = "ai-protocol"))]
-                    let hop_model = turn_model.as_str();
-                    run_tool_call_loop(
-                        provider.as_ref(),
-                        &mut history,
-                        tools_for_turn,
-                        &progress_obs,
-                        provider_name,
-                        hop_model,
-                        temperature,
-                        false,
-                        Some(&approval_manager),
-                        approval_channel,
-                        &config.multimodal,
-                        config.agent.max_tool_iterations,
-                        None,
-                        None,
-                        tool_dispatcher_ref,
-                        Some(&security),
-                        None,
-                        text_tool_result_history,
-                        render_opts,
-                        None,
-                        Some(SoftFailLoopCtx {
-                            session_key: session_id.as_str(),
-                            config: Some(&config),
-                            host_decide: None,
-                            surface: velaclaw_agent_runtime::SoftFailSurface::Cli,
-                            peer_logical_ids: &[],
-                        }),
-                        Some(&cli_gate_extras),
-                    )
-                    .await?
+                        #[cfg(not(feature = "ai-protocol"))]
+                        let hop_model = turn_model.as_str();
+                        run_tool_call_loop(
+                            provider.as_ref(),
+                            &mut history,
+                            tools_for_turn,
+                            &progress_obs,
+                            provider_name,
+                            hop_model,
+                            temperature,
+                            false,
+                            Some(&approval_manager),
+                            approval_channel,
+                            &config.multimodal,
+                            config.agent.max_tool_iterations,
+                            None,
+                            None,
+                            tool_dispatcher_ref,
+                            Some(&security),
+                            None,
+                            text_tool_result_history,
+                            render_opts,
+                            None,
+                            Some(SoftFailLoopCtx {
+                                session_key: session_id.as_str(),
+                                config: Some(&config),
+                                host_decide: None,
+                                surface: velaclaw_agent_runtime::SoftFailSurface::Cli,
+                                peer_logical_ids: &[],
+                            }),
+                            Some(&cli_gate_extras),
+                        )
+                        .await?
+                    }
                 }
             }
             #[cfg(not(feature = "ai-protocol"))]
@@ -1159,8 +1148,8 @@ pub async fn run(
             history.push(ChatMessage::user(&enriched));
 
             #[cfg(feature = "ai-protocol")]
-            let live_mode = if config.agent.bounded_dag_live {
-                crate::agent::bounded_dag_live::resolve_live_turn_mode(
+            let hop = if config.agent.bounded_dag_live {
+                crate::agent::bounded_dag_live::live_first_hop(
                     &config.agent,
                     mem.as_ref(),
                     session_id.as_str(),
@@ -1172,10 +1161,10 @@ pub async fn run(
                 )
                 .await?
             } else {
-                crate::agent::bounded_dag_live::TurnMode::SingleWork
+                crate::agent::bounded_dag_live::LiveFirstHop::SingleWork
             };
             #[cfg(feature = "ai-protocol")]
-            let use_live_dag = live_mode == crate::agent::bounded_dag_live::TurnMode::PlanDag;
+            let use_live_dag = hop.is_plan();
             #[cfg(not(feature = "ai-protocol"))]
             let use_live_dag = false;
 
@@ -1236,18 +1225,8 @@ pub async fn run(
                 #[cfg(feature = "ai-protocol")]
                 {
                     async {
-                        if use_live_dag {
-                            let planned = crate::agent::bounded_dag_live::prepare_session_live_dag(
-                                &config.agent,
-                                mem.as_ref(),
-                                session_id.as_str(),
-                                provider.as_ref(),
-                                &session_model,
-                                &user_input,
-                                temperature,
-                                host_phase,
-                            )
-                            .await?;
+                        match hop {
+                            crate::agent::bounded_dag_live::LiveFirstHop::Plan(planned) => {
                             if host_phase == crate::agent::host_phase::HostPhase::Plan {
                                 return Ok(
                                     planned.preview_with_contact(&session_model, &available_hints)
@@ -1565,20 +1544,13 @@ pub async fn run(
                             } else {
                                 last_body
                             })
-                        } else {
+                        }
+                            crate::agent::bounded_dag_live::LiveFirstHop::ChatOnly { reply } => {
+                                Ok(reply)
+                            }
+                            crate::agent::bounded_dag_live::LiveFirstHop::SingleWork => {
                             #[cfg(feature = "ai-protocol")]
-                            let empty_tools: Vec<Box<dyn crate::tools::Tool>> = Vec::new();
-                            #[cfg(feature = "ai-protocol")]
-                            let tools_for_turn: &[Box<dyn crate::tools::Tool>] = if config
-                                .agent
-                                .bounded_dag_live
-                                && live_mode
-                                    == crate::agent::bounded_dag_live::TurnMode::ChatOnly
-                            {
-                                empty_tools.as_slice()
-                            } else {
-                                tools_registry.as_slice()
-                            };
+                            let tools_for_turn = tools_registry.as_slice();
                             #[cfg(not(feature = "ai-protocol"))]
                             let tools_for_turn = tools_registry.as_slice();
                             #[cfg(feature = "ai-protocol")]
@@ -1620,6 +1592,7 @@ pub async fn run(
                                 Some(&cli_gate_extras),
                             )
                             .await
+                            }
                         }
                     }
                     .await

@@ -142,6 +142,77 @@ fn upsert_model(models: &mut Vec<ProtocolModelInfo>, entry: ProtocolModelInfo) {
     models.push(entry);
 }
 
+/// If `model` (or a suffix/prefix form) is listed under provider `deprecated`
+/// with `maps_to`, return that successor wire id.
+///
+/// PT-NIM-002 tombstones stay in the catalog for old config; hosts must rewrite
+/// before the first HTTP hop so NIM HTTP 410 is not the live primary.
+#[must_use]
+pub fn maps_to_from_manifest_value(raw: &serde_json::Value, model: &str) -> Option<String> {
+    let model = model.trim();
+    if model.is_empty() {
+        return None;
+    }
+    let suffix = model.rsplit('/').next().unwrap_or(model);
+    let dep = raw.get("deprecated").and_then(|v| v.as_object())?;
+    for (key, spec) in dep {
+        let hit = key == model
+            || key == suffix
+            || model.ends_with(key)
+            || key.ends_with(&format!("/{suffix}"))
+            || key.ends_with(suffix);
+        if !hit {
+            continue;
+        }
+        let maps = spec.get("maps_to").and_then(|v| v.as_str())?.trim();
+        if maps.is_empty() {
+            continue;
+        }
+        return Some(maps.to_string());
+    }
+    None
+}
+
+/// Scan `$AI_PROTOCOL_DIR` provider manifests for a `deprecated.maps_to` successor.
+#[must_use]
+pub fn protocol_maps_to(model: &str) -> Option<String> {
+    let root = resolve_local_protocol_root()?;
+    for path in collect_provider_files(&root) {
+        let Ok(raw) = load_manifest_value(&path) else {
+            continue;
+        };
+        if let Some(succ) = maps_to_from_manifest_value(&raw, model) {
+            return Some(succ);
+        }
+    }
+    None
+}
+
+/// Rewrite a routed `(provider, model)` pair when the model id is tombstoned.
+#[must_use]
+pub fn rewrite_tombstoned_route(provider: &str, model: &str) -> (String, String) {
+    let Some(succ) = protocol_maps_to(model).or_else(|| protocol_maps_to(provider)) else {
+        return (provider.to_string(), model.to_string());
+    };
+    let old_tail = model.rsplit('/').next().unwrap_or(model);
+    let new_tail = succ.rsplit('/').next().unwrap_or(succ.as_str());
+    let new_model = if succ.contains('/') {
+        succ.clone()
+    } else if let Some((prefix, _)) = model.rsplit_once('/') {
+        format!("{prefix}/{succ}")
+    } else {
+        succ.clone()
+    };
+    let new_provider = provider.replace(old_tail, new_tail);
+    tracing::info!(
+        target: "protocol_registry",
+        from_model = model,
+        to_model = new_model.as_str(),
+        "rewrote tombstoned route via protocol maps_to"
+    );
+    (new_provider, new_model)
+}
+
 /// Compose a host logical id from provider + protocol catalog/wire key.
 ///
 /// Protocol YAML keys stay wire/catalog ids (e.g. `deepseek-ai/deepseek-v4-flash`
@@ -1137,5 +1208,28 @@ metadata:
         assert!(all
             .iter()
             .any(|r| r.model == "img-1" && r.capability == "speech_to_text" && !r.allowed));
+    }
+
+    #[test]
+    fn maps_to_rewrites_nemotron_49b_v15_tombstone() {
+        let raw = serde_json::json!({
+            "deprecated": {
+                "nvidia/llama-3.3-nemotron-super-49b-v1.5": {
+                    "maps_to": "nvidia/llama-3.1-nemotron-70b-instruct"
+                }
+            }
+        });
+        assert_eq!(
+            maps_to_from_manifest_value(&raw, "nvidia/llama-3.3-nemotron-super-49b-v1.5")
+                .as_deref(),
+            Some("nvidia/llama-3.1-nemotron-70b-instruct")
+        );
+        assert_eq!(
+            maps_to_from_manifest_value(&raw, "llama-3.3-nemotron-super-49b-v1.5").as_deref(),
+            Some("nvidia/llama-3.1-nemotron-70b-instruct")
+        );
+        assert!(
+            maps_to_from_manifest_value(&raw, "nvidia/llama-3.1-nemotron-70b-instruct").is_none()
+        );
     }
 }

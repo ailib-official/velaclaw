@@ -114,9 +114,9 @@ DAG-related keys below: **`template_dag` / candidate emit / shadow** stay librar
 | *(planner / default)* | — | DeepSeek | `deepseek/deepseek-v4-flash` |
 | `document` / `code` / `tools` | document_understanding, coding, tool_calling | DeepSeek | `deepseek/deepseek-v4-flash` |
 | `fast` | speed | Groq | `groq/openai/gpt-oss-20b` |
-| `reasoning` | high-reasoning | NVIDIA NIM | `nvidia/nvidia/llama-3.3-nemotron-super-49b-v1.5` |
+| `reasoning` | high-reasoning | NVIDIA NIM | `nvidia/nvidia/llama-3.1-nemotron-70b-instruct` |
 
-PT-NIM-002: that 49b-v1.5 id is **EOL** (NIM HTTP 410). Dist still ships `hint_peer_fallback = false`. Trial may keep the id as the route primary and list `fallbacks` (70b, then DeepSeek). After a successful hop the session pins the live peer.
+PT-NIM-002: `nvidia/llama-3.3-nemotron-super-49b-v1.5` is **EOL** (NIM HTTP 410). Catalog `deprecated.maps_to` still lists the id. Host `create_routed_provider` rewrites tombstoned route primaries **before** the first HTTP hop (VL-NA-027). Dist still ships `hint_peer_fallback = false`. Trial should pin `reasoning` to the successor, not the tombstone.
 
 Planner stays on session `default_model` (not `host_decide`). Invalid planner JSON still falls back to `locate` → `patch` → `verify`. Web Plan/Build send `host_phase`. This is not L4 emit.
 

@@ -791,16 +791,14 @@ impl Agent {
             format!("{context}{user_message}")
         };
 
-        #[cfg(feature = "ai-protocol")]
-        let dag_prefix_len = self.history.len();
         self.history
             .push(ConversationMessage::Chat(ChatMessage::user(
                 enriched.clone(),
             )));
 
         #[cfg(feature = "ai-protocol")]
-        let live_mode = if self.config.bounded_dag_live {
-            crate::agent::bounded_dag_live::resolve_live_turn_mode(
+        let hop = if self.config.bounded_dag_live {
+            crate::agent::bounded_dag_live::live_first_hop(
                 &self.config,
                 self.memory.as_ref(),
                 self.session_id.as_str(),
@@ -812,20 +810,19 @@ impl Agent {
             )
             .await?
         } else {
-            crate::agent::bounded_dag_live::TurnMode::SingleWork
+            crate::agent::bounded_dag_live::LiveFirstHop::SingleWork
         };
         #[cfg(feature = "ai-protocol")]
-        let mut use_live_dag = live_mode == crate::agent::bounded_dag_live::TurnMode::PlanDag;
+        let (mut use_live_dag, planned_from_first, chat_only_reply) = {
+            use crate::agent::bounded_dag_live::LiveFirstHop;
+            match hop {
+                LiveFirstHop::Plan(plan) => (true, Some(plan), None),
+                LiveFirstHop::ChatOnly { reply } => (false, None, Some(reply)),
+                LiveFirstHop::SingleWork => (false, None, None),
+            }
+        };
         #[cfg(not(feature = "ai-protocol"))]
         let use_live_dag = false;
-        #[cfg(feature = "ai-protocol")]
-        if self.config.bounded_dag_live && !use_live_dag {
-            tracing::info!(
-                target: "bounded_dag_live",
-                mode = ?live_mode,
-                "skip planner; chat_only or single_work"
-            );
-        }
 
         #[cfg(feature = "ai-protocol")]
         let skip_pre_envelope = use_live_dag;
@@ -837,19 +834,14 @@ impl Agent {
 
         #[cfg(feature = "ai-protocol")]
         if self.config.bounded_dag_live && !use_live_dag {
-            use crate::agent::bounded_dag_live::{observe_turn_outcome, ObserveVerdict, TurnMode};
-            self.last_turn_model = Some(crate::orchestration::TurnModelDecision {
-                model: self.model_name.clone(),
-                source: crate::orchestration::TurnModelSource::DefaultModel,
-                reason: match live_mode {
-                    TurnMode::ChatOnly => "live_chat_only".into(),
-                    _ => "live_single_work".into(),
-                },
-            });
-            let allow_tools = live_mode != TurnMode::ChatOnly;
-            let text = self
-                .invoke_tool_loop_resolved_with(self.model_name.clone(), allow_tools)
-                .await?;
+            use crate::agent::bounded_dag_live::{observe_turn_outcome, ObserveVerdict};
+            self.note_session_default("live_first_hop");
+            let text = if let Some(reply) = chat_only_reply {
+                reply
+            } else {
+                self.invoke_tool_loop_resolved_with(self.model_name.clone(), true)
+                    .await?
+            };
             let verdict = observe_turn_outcome(
                 self.provider.as_ref(),
                 &self.model_name,
@@ -857,6 +849,7 @@ impl Agent {
                 user_message,
                 &text,
                 None,
+                0,
                 ObserveVerdict::Continue,
             )
             .await?;
@@ -879,9 +872,12 @@ impl Agent {
             use crate::agent::host_phase::HostPhase;
             use crate::agent::loop_::is_tool_loop_cancelled;
             use std::collections::HashSet;
-            let mut planned = self
-                .resolve_live_dag(dag_prefix_len, &enriched, user_message)
-                .await?;
+            let mut planned = if let Some(plan) = planned_from_first {
+                self.note_session_default("live_first_hop_plan");
+                plan
+            } else {
+                self.resolve_live_dag(user_message).await?
+            };
             if self.host_phase == HostPhase::Plan {
                 return Ok(planned.preview_with_contact(&self.model_name, &self.available_hints));
             }
@@ -1094,6 +1090,7 @@ impl Agent {
                     None,
                     Some(&contacts),
                 ));
+                let remaining = planned.order.len().saturating_sub(index + 1);
                 let verdict = crate::agent::bounded_dag_live::observe_turn_outcome(
                     self.provider.as_ref(),
                     &self.model_name,
@@ -1101,6 +1098,7 @@ impl Agent {
                     user_message,
                     &last_body,
                     Some(id.as_str()),
+                    remaining,
                     crate::agent::bounded_dag_live::ObserveVerdict::Continue,
                 )
                 .await?;
@@ -1165,10 +1163,17 @@ impl Agent {
     }
 
     #[cfg(feature = "ai-protocol")]
+    fn note_session_default(&mut self, reason: &str) {
+        self.last_turn_model = Some(crate::orchestration::TurnModelDecision {
+            model: self.model_name.clone(),
+            source: crate::orchestration::TurnModelSource::DefaultModel,
+            reason: reason.into(),
+        });
+    }
+
+    #[cfg(feature = "ai-protocol")]
     async fn resolve_live_dag(
         &mut self,
-        _prefix_len: usize,
-        _enriched: &str,
         user_message: &str,
     ) -> Result<crate::agent::bounded_dag_live::PlannedLiveDag> {
         use crate::agent::bounded_dag_live::prepare_session_live_dag;
@@ -1184,11 +1189,7 @@ impl Agent {
             self.host_phase,
         )
         .await?;
-        self.last_turn_model = Some(crate::orchestration::TurnModelDecision {
-            model: self.model_name.clone(),
-            source: crate::orchestration::TurnModelSource::DefaultModel,
-            reason: "bounded_dag_planner_session_default".into(),
-        });
+        self.note_session_default("bounded_dag_planner_session_default");
         Ok(planned)
     }
 

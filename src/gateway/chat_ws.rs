@@ -79,6 +79,7 @@ fn progress_frame(progress: TurnProgress) -> WsServerMessage {
                 })
                 .collect(),
         },
+        TurnProgress::Note { text } => WsServerMessage::Delta { content: text },
     }
 }
 
@@ -222,6 +223,7 @@ async fn handle_ws_socket(socket: WebSocket, state: AppState) {
             Some(progress_tx),
         ));
 
+        let mut streamed_operator = String::new();
         let chat_result = loop {
             tokio::select! {
                 result = &mut chat_fut => {
@@ -229,6 +231,9 @@ async fn handle_ws_socket(socket: WebSocket, state: AppState) {
                 }
                 progress = progress_rx.recv() => {
                     if let Some(progress) = progress {
+                        if let crate::agent::turn_progress::TurnProgress::Note { text } = &progress {
+                            streamed_operator.push_str(text);
+                        }
                         let frame = progress_frame(progress);
                         if send_frame(sink.clone(), &frame).await.is_err() {
                             cancel.cancel();
@@ -267,7 +272,13 @@ async fn handle_ws_socket(socket: WebSocket, state: AppState) {
                 {
                     tracing::warn!("session persist failed: {e:#}");
                 }
-                for chunk in chunk_text_for_stream(&resp.content, WS_CHUNK_SIZE) {
+                for chunk in chunk_text_for_stream(
+                    crate::agent::bounded_dag_delivery::remaining_operator_delta(
+                        &streamed_operator,
+                        &resp.content,
+                    ),
+                    WS_CHUNK_SIZE,
+                ) {
                     let delta = WsServerMessage::Delta { content: chunk };
                     if send_frame(sink.clone(), &delta).await.is_err() {
                         return;

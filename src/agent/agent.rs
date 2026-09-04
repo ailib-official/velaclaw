@@ -411,6 +411,15 @@ impl Agent {
         }
     }
 
+    #[cfg(feature = "ai-protocol")]
+    fn push_operator_note(&self, prefix: &mut String, text: &str) {
+        if let Some(progress) =
+            crate::agent::bounded_dag_delivery::append_operator_chunk(prefix, text)
+        {
+            self.emit_turn_progress(progress);
+        }
+    }
+
     fn dag_contact_labels(
         &self,
         dag: &crate::agent::dag_runner::DagManifest,
@@ -927,6 +936,7 @@ impl Agent {
                 completed.insert(id.clone());
             }
             let mut last_body = String::new();
+            let mut operator_prefix = String::new();
             let contacts = self.dag_contact_labels(&planned.dag, &planned.order);
             self.emit_turn_progress(live_dag_progress(
                 &dag_id,
@@ -939,6 +949,15 @@ impl Agent {
                 None,
                 Some(&contacts),
             ));
+            self.push_operator_note(
+                &mut operator_prefix,
+                &crate::agent::bounded_dag_live::operator_plan_gist(
+                    user_message,
+                    &planned.dag,
+                    &planned.order,
+                    planned.used_fallback,
+                ),
+            );
             let work_sys = self.build_work_node_system_prompt()?;
             let mut force_default = false;
             let mut auto_used = false;
@@ -1068,7 +1087,8 @@ impl Agent {
                                     },
                                 )
                                 .await;
-                                return Ok(stop);
+                                self.push_operator_note(&mut operator_prefix, &stop);
+                                return Ok(operator_prefix);
                             }
                         }
                     }
@@ -1107,13 +1127,26 @@ impl Agent {
                     Some(&contacts),
                 ));
                 let remaining = planned.order.len().saturating_sub(index + 1);
+                if crate::agent::bounded_dag_delivery::should_emit_mid_hop_note(remaining) {
+                    self.push_operator_note(
+                        &mut operator_prefix,
+                        &crate::agent::bounded_dag_delivery::mid_hop_operator_note(
+                            &graph_task,
+                            &id,
+                            &last_body,
+                            None,
+                        ),
+                    );
+                }
                 if crate::agent::bounded_dag_delivery::last_hop_ends_graph(remaining) {
                     let _ = crate::agent::bounded_dag_live::clear_dag_fail(
                         self.memory.as_ref(),
                         self.session_id.as_str(),
                     )
                     .await;
-                    return self.parlor_live_reply(&graph_task, &last_body).await;
+                    return self
+                        .parlor_live_reply(&graph_task, &last_body, &operator_prefix)
+                        .await;
                 }
                 let verdict = crate::agent::bounded_dag_live::observe_turn_outcome(
                     self.provider.as_ref(),
@@ -1134,7 +1167,9 @@ impl Agent {
                             self.session_id.as_str(),
                         )
                         .await;
-                        return self.parlor_live_reply(&graph_task, &last_body).await;
+                        return self
+                            .parlor_live_reply(&graph_task, &last_body, &operator_prefix)
+                            .await;
                     }
                     crate::agent::bounded_dag_live::ObserveVerdict::ReplanRemaining
                         if remaining > 0 && !auto_used =>
@@ -1182,22 +1217,30 @@ impl Agent {
             } else {
                 last_body
             };
-            return self.parlor_live_reply(&graph_task, &raw).await;
+            return self
+                .parlor_live_reply(&graph_task, &raw, &operator_prefix)
+                .await;
         }
 
         self.invoke_tool_loop_once(user_message).await
     }
 
     #[cfg(feature = "ai-protocol")]
-    async fn parlor_live_reply(&self, user_task: &str, last_body: &str) -> Result<String> {
-        crate::agent::bounded_dag_delivery::host_delivery(
+    async fn parlor_live_reply(
+        &self,
+        user_task: &str,
+        last_body: &str,
+        prefix: &str,
+    ) -> Result<String> {
+        let parlor = crate::agent::bounded_dag_delivery::host_delivery(
             self.provider.as_ref(),
             &self.model_name,
             self.temperature,
             user_task,
             last_body,
         )
-        .await
+        .await?;
+        Ok(format!("{prefix}{parlor}"))
     }
 
     #[cfg(feature = "ai-protocol")]

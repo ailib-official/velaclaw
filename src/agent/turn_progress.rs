@@ -65,6 +65,10 @@ pub enum TurnProgress {
         outline: String,
         nodes: Vec<DagNodeProgress>,
     },
+    /// Operator-visible hop gist/conclusion (streamed as chat delta; not internodal HANDOFF).
+    Note {
+        text: String,
+    },
 }
 
 /// Truncate a display string (no secrets; caller should scrub first).
@@ -414,6 +418,10 @@ pub fn print_cli_progress(progress: &TurnProgress, fold_cache: Option<&FoldCache
                 console::style(format!("· dag `{dag_id}` running={running}")).dim()
             );
         }
+        TurnProgress::Note { text } => {
+            eprint!("{}", console::style(text.trim_end()).cyan());
+            eprintln!();
+        }
     }
 }
 
@@ -536,7 +544,9 @@ mod tests {
                 assert!(ok);
                 assert_eq!(expand.as_deref(), Some("On branch main"));
             }
-            TurnProgress::Status { .. } | TurnProgress::Dag { .. } => panic!("expected step"),
+            TurnProgress::Status { .. } | TurnProgress::Dag { .. } | TurnProgress::Note { .. } => {
+                panic!("expected step")
+            }
         }
     }
 

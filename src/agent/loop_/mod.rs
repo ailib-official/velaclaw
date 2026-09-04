@@ -655,6 +655,7 @@ pub async fn run(
                             let by_id: HashMap<_, _> =
                                 dag.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
                             let mut last_body = String::new();
+                            let mut operator_prefix = String::new();
                             let mut prior: Vec<String> = Vec::new();
                             for id in order.iter().take(planned.resume_from) {
                                 prior.push(id.clone());
@@ -686,6 +687,16 @@ pub async fn run(
                             let mut force_default = false;
                             let mut auto_used = false;
                             let mut index = planned.resume_from;
+                            crate::agent::bounded_dag_delivery::print_operator_note(
+                                &mut operator_prefix,
+                                &crate::agent::bounded_dag_live::operator_plan_gist(
+                                    &msg,
+                                    dag,
+                                    order,
+                                    planned.used_fallback,
+                                ),
+                                None,
+                            );
                             while index < order.len() {
                                 let id = &order[index];
                                 let node = by_id.get(id.as_str()).ok_or_else(|| {
@@ -825,15 +836,20 @@ pub async fn run(
                                                 },
                                             )
                                             .await;
-                                            return Ok(
-                                                crate::agent::bounded_dag_live::format_work_node_stop(
-                                                    &msg,
-                                                    &node.id,
-                                                    &err_s,
-                                                    index + 1,
-                                                    node_count,
-                                                ),
-                                            );
+                                            return Ok({
+                                                crate::agent::bounded_dag_delivery::print_operator_note(
+                                                    &mut operator_prefix,
+                                                    &crate::agent::bounded_dag_live::format_work_node_stop(
+                                                        &msg,
+                                                        &node.id,
+                                                        &err_s,
+                                                        index + 1,
+                                                        node_count,
+                                                    ),
+                                                    None,
+                                                );
+                                                operator_prefix
+                                            });
                                         }
                                     }
                                     }
@@ -847,6 +863,21 @@ pub async fn run(
                                 .await;
                                 last_body = piece;
                                 prior.push(node.id.clone());
+                                let remaining = order.len().saturating_sub(index + 1);
+                                if crate::agent::bounded_dag_delivery::should_emit_mid_hop_note(
+                                    remaining,
+                                ) {
+                                    crate::agent::bounded_dag_delivery::print_operator_note(
+                                        &mut operator_prefix,
+                                        &crate::agent::bounded_dag_delivery::mid_hop_operator_note(
+                                            &graph_task,
+                                            id,
+                                            &last_body,
+                                            None,
+                                        ),
+                                        None,
+                                    );
+                                }
                                 index += 1;
                             }
                             let _ = crate::agent::bounded_dag_live::clear_dag_fail(
@@ -859,14 +890,17 @@ pub async fn run(
                             } else {
                                 last_body
                             };
-                            crate::agent::bounded_dag_delivery::host_delivery(
-                                provider.as_ref(),
-                                &model_name,
-                                temperature,
-                                &graph_task,
-                                &raw,
+                            format!(
+                                "{operator_prefix}{}",
+                                crate::agent::bounded_dag_delivery::host_delivery(
+                                    provider.as_ref(),
+                                    &model_name,
+                                    temperature,
+                                    &graph_task,
+                                    &raw,
+                                )
+                                .await?
                             )
-                            .await?
                         }
                     }
                     crate::agent::bounded_dag_live::LiveFirstHop::ChatOnly { reply } => {
@@ -1272,6 +1306,7 @@ pub async fn run(
                             let by_id: HashMap<_, _> =
                                 dag.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
                             let mut last_body = String::new();
+                            let mut operator_prefix = String::new();
                             let mut prior: Vec<String> = Vec::new();
                             let mut completed: HashSet<String> = HashSet::new();
                             for id in order.iter().take(planned.resume_from) {
@@ -1302,7 +1337,6 @@ pub async fn run(
                                     strategy,
                                 );
                             }
-                            eprintln!("{outline}");
                             let contacts = crate::agent::bounded_dag_live::dag_contact_labels(
                                 provider.as_ref(),
                                 dag,
@@ -1321,6 +1355,16 @@ pub async fn run(
                                     &completed,
                                     None,
                                     Some(&contacts),
+                                ),
+                                Some(&fold_cache),
+                            );
+                            crate::agent::bounded_dag_delivery::print_operator_note(
+                                &mut operator_prefix,
+                                &crate::agent::bounded_dag_live::operator_plan_gist(
+                                    &user_input,
+                                    dag,
+                                    order,
+                                    planned.used_fallback,
                                 ),
                                 Some(&fold_cache),
                             );
@@ -1508,15 +1552,18 @@ pub async fn run(
                                             },
                                         )
                                         .await;
-                                        return Ok(
-                                            crate::agent::bounded_dag_live::format_work_node_stop(
+                                        crate::agent::bounded_dag_delivery::print_operator_note(
+                                            &mut operator_prefix,
+                                            &crate::agent::bounded_dag_live::format_work_node_stop(
                                                 &user_input,
                                                 &node.id,
                                                 &err_s,
                                                 index + 1,
                                                 node_count,
                                             ),
+                                            Some(&fold_cache),
                                         );
+                                        return Ok(operator_prefix);
                                             }
                                         }
                                     }
@@ -1552,6 +1599,21 @@ pub async fn run(
                                     ),
                                     Some(&fold_cache),
                                 );
+                                let remaining = order.len().saturating_sub(index + 1);
+                                if crate::agent::bounded_dag_delivery::should_emit_mid_hop_note(
+                                    remaining,
+                                ) {
+                                    crate::agent::bounded_dag_delivery::print_operator_note(
+                                        &mut operator_prefix,
+                                        &crate::agent::bounded_dag_delivery::mid_hop_operator_note(
+                                            &graph_task,
+                                            id,
+                                            &last_body,
+                                            None,
+                                        ),
+                                        Some(&fold_cache),
+                                    );
+                                }
                                 index += 1;
                             }
                             let _ = crate::agent::bounded_dag_live::clear_dag_fail(
@@ -1564,14 +1626,17 @@ pub async fn run(
                             } else {
                                 last_body
                             };
-                            Ok(crate::agent::bounded_dag_delivery::host_delivery(
-                                provider.as_ref(),
-                                &session_model,
-                                temperature,
-                                &graph_task,
-                                &raw,
-                            )
-                            .await?)
+                            Ok(format!(
+                                "{operator_prefix}{}",
+                                crate::agent::bounded_dag_delivery::host_delivery(
+                                    provider.as_ref(),
+                                    &session_model,
+                                    temperature,
+                                    &graph_task,
+                                    &raw,
+                                )
+                                .await?
+                            ))
                         }
                             crate::agent::bounded_dag_live::LiveFirstHop::ChatOnly { reply } => {
                                 history.push(ChatMessage::assistant(&reply));

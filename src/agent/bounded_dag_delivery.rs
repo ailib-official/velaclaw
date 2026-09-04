@@ -187,6 +187,105 @@ pub fn last_hop_ends_graph(remaining_nodes: usize) -> bool {
     remaining_nodes == 0
 }
 
+/// Mid-hops get an operator-visible note; the last hop is parlor only (VL-NA-037).
+#[must_use]
+pub fn should_emit_mid_hop_note(remaining_nodes: usize) -> bool {
+    remaining_nodes > 0
+}
+
+const OPERATOR_NOTE_MAX: usize = 1200;
+
+fn xml_tag_inner(text: &str, open: &str, close: &str) -> Option<String> {
+    let lower = text.to_ascii_lowercase();
+    let o = open.to_ascii_lowercase();
+    let c = close.to_ascii_lowercase();
+    let start = lower.find(&o)? + o.len();
+    let rest = &lower[start..];
+    let end = rest.find(&c).unwrap_or(rest.len());
+    let body = text[start..start + end].trim();
+    if body.is_empty() {
+        None
+    } else {
+        Some(body.to_string())
+    }
+}
+
+fn truncate_operator_note(text: &str) -> String {
+    let flat: String = text
+        .chars()
+        .map(|c| if c == '\r' { '\n' } else { c })
+        .collect();
+    let trimmed = flat.trim();
+    if trimmed.chars().count() <= OPERATOR_NOTE_MAX {
+        return trimmed.to_string();
+    }
+    let mut out: String = trimmed
+        .chars()
+        .take(OPERATOR_NOTE_MAX.saturating_sub(1))
+        .collect();
+    out.push('…');
+    out
+}
+
+/// Host-only mid-hop conclusion: internodal-free, no Delivery LLM.
+#[must_use]
+pub fn mid_hop_operator_note(
+    user_task: &str,
+    node_id: &str,
+    body: &str,
+    failed: Option<&str>,
+) -> String {
+    let label = crate::agent::bounded_dag_live::prettify_node_id(node_id);
+    let cjk = crate::agent::bounded_dag_live::user_prefers_cjk(user_task);
+    if let Some(err) = failed {
+        let err = truncate_operator_note(err);
+        return if cjk {
+            format!("步骤「{label}」未完成。{err}")
+        } else {
+            format!("Step `{label}` did not finish. {err}")
+        };
+    }
+    let extracted = xml_tag_inner(body, "<findings>", "</findings>")
+        .unwrap_or_else(|| ensure_user_visible(user_task, body));
+    let extracted = truncate_operator_note(&extracted);
+    format!("### {label}\n{extracted}")
+}
+
+/// Append a streamed operator chunk; returns the progress frame to emit.
+#[must_use]
+pub fn append_operator_chunk(
+    prefix: &mut String,
+    text: &str,
+) -> Option<crate::agent::turn_progress::TurnProgress> {
+    let t = text.trim();
+    if t.is_empty() {
+        return None;
+    }
+    let piece = format!("{t}\n\n");
+    prefix.push_str(&piece);
+    Some(crate::agent::turn_progress::TurnProgress::Note { text: piece })
+}
+
+/// CLI live notes: same text as Web `TurnProgress::Note` (VL-NA-037).
+pub fn print_operator_note(
+    prefix: &mut String,
+    text: &str,
+    fold_cache: Option<&crate::agent::turn_progress::FoldCache>,
+) {
+    if let Some(progress) = append_operator_chunk(prefix, text) {
+        crate::agent::turn_progress::print_cli_progress(&progress, fold_cache);
+    }
+}
+
+/// WS already streamed `already`; send only the parlor suffix of `full`.
+#[must_use]
+pub fn remaining_operator_delta<'a>(already: &str, full: &'a str) -> &'a str {
+    if already.is_empty() {
+        return full;
+    }
+    full.strip_prefix(already).unwrap_or(full)
+}
+
 /// Mid-graph only: last hop skips the observe LLM (latency + no splice).
 #[must_use]
 pub fn should_observe_after_hop(remaining_nodes: usize) -> bool {
@@ -303,6 +402,31 @@ mod tests {
         assert!(skip_replan_for_parlor(0, SMART_TUBE));
         assert!(skip_replan_for_parlor(0, "升级到 32.38s。"));
         assert!(!skip_replan_for_parlor(2, SMART_TUBE));
+        assert!(should_emit_mid_hop_note(1));
+        assert!(!should_emit_mid_hop_note(0));
+    }
+
+    #[test]
+    fn mid_hop_note_strips_xml_findings() {
+        let body = "Research complete.\n<handoff>\n<verdict>ok</verdict>\n<findings>\n- npm 2026.9.1\n</findings>\n<pointers>\nx\n</pointers>\n<gaps>\ny\n</gaps>\n</handoff>";
+        let note = mid_hop_operator_note(
+            "检查 openclaw",
+            "research-official-upgrade-method",
+            body,
+            None,
+        );
+        assert!(note.contains("2026.9.1"), "{note}");
+        assert!(!note.to_ascii_lowercase().contains("<handoff"), "{note}");
+        assert!(!note.contains("pointers"), "{note}");
+        assert!(should_emit_mid_hop_note(2));
+    }
+
+    #[test]
+    fn remaining_delta_skips_already_streamed_prefix() {
+        let already = "将按 2 步：a → b。\n\n";
+        let full = format!("{already}最终结论");
+        assert_eq!(remaining_operator_delta(already, &full), "最终结论");
+        assert_eq!(remaining_operator_delta("", "only"), "only");
     }
 
     #[test]

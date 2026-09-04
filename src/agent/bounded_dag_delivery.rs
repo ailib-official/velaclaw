@@ -21,18 +21,71 @@ pub fn looks_like_internodal_envelope(text: &str) -> bool {
         return false;
     }
     let head = trimmed.lines().next().unwrap_or("").trim();
-    if head.eq_ignore_ascii_case("handoff") || head.starts_with("HANDOFF") {
+    if is_handoff_heading(head) {
         return true;
     }
     let lower = trimmed.to_ascii_lowercase();
     let has_verdict = lower.contains("verdict:");
-    let has_pointers = ["\npointers:", "\n## pointers", "\npointers\n"]
-        .iter()
-        .any(|k| lower.contains(k));
-    let has_gaps = ["\ngaps:", "\n## gaps", "\ngaps\n"]
+    let has_pointers = [
+        "\npointers:",
+        "\n## pointers",
+        "\npointers\n",
+        "\n- pointers:",
+    ]
+    .iter()
+    .any(|k| lower.contains(k));
+    let has_gaps = ["\ngaps:", "\n## gaps", "\ngaps\n", "\n- gaps:"]
         .iter()
         .any(|k| lower.contains(k));
     has_verdict && has_pointers && has_gaps
+}
+
+fn internodal_line_key(line: &str) -> String {
+    let t = line.trim().trim_start_matches('#').trim();
+    let t = t.trim_start_matches(['-', '*']).trim();
+    t.trim_matches('*').trim().to_ascii_lowercase()
+}
+
+fn is_handoff_heading(line: &str) -> bool {
+    internodal_line_key(line).trim_end_matches(':').trim() == "handoff"
+}
+
+fn is_verdict_field_line(line: &str) -> bool {
+    let t = internodal_line_key(line);
+    t == "verdict" || t == "verdict:" || t.starts_with("verdict:")
+}
+
+/// Byte offset where an internodal suffix begins (`HANDOFF` / `verdict:` / `---` + those).
+#[must_use]
+pub fn internodal_suffix_start(text: &str) -> Option<usize> {
+    let mut offset = 0usize;
+    let mut after_rule = None;
+    for line in text.split_inclusive('\n') {
+        let trimmed = line.trim();
+        if trimmed == "---" {
+            after_rule = Some(offset);
+            offset += line.len();
+            continue;
+        }
+        let start = after_rule.unwrap_or(offset);
+        if is_handoff_heading(trimmed)
+            || (is_verdict_field_line(trimmed) && looks_like_internodal_envelope(&text[start..]))
+        {
+            return Some(start);
+        }
+        after_rule = None;
+        offset += line.len();
+    }
+    None
+}
+
+/// Drop internodal footer; keep the operator report prefix.
+#[must_use]
+pub fn strip_internodal_suffix(text: &str) -> String {
+    match internodal_suffix_start(text) {
+        Some(0) | None => text.to_string(),
+        Some(i) => text[..i].trim_end().to_string(),
+    }
 }
 
 /// Host template when Delivery rewrite is skipped or still internodal (no replan).
@@ -116,10 +169,14 @@ fn section_after(text: &str, headers: &[&str]) -> Option<String> {
 /// Hard gate: internodal skeleton never leaves as the chat body.
 #[must_use]
 pub fn ensure_user_visible(user_task: &str, body: &str) -> String {
-    if !looks_like_internodal_envelope(body) {
-        return body.to_string();
+    let stripped = strip_internodal_suffix(body);
+    if looks_like_internodal_envelope(&stripped) {
+        parlor_fallback(user_task, &stripped)
+    } else if stripped.is_empty() {
+        parlor_fallback(user_task, body)
+    } else {
+        stripped
     }
-    parlor_fallback(user_task, body)
 }
 
 /// Last hop ends the graph: parlor, never `replan_remaining` (VL-NA-035).
@@ -160,15 +217,17 @@ pub async fn host_delivery(
     user_task: &str,
     last_node_body: &str,
 ) -> Result<String> {
-    if !looks_like_internodal_envelope(last_node_body) {
-        return Ok(last_node_body.to_string());
-    }
-    let rewritten =
-        match delivery_chat(provider, model, temperature, user_task, last_node_body).await {
+    let stripped = strip_internodal_suffix(last_node_body);
+    if looks_like_internodal_envelope(&stripped) {
+        let rewritten = match delivery_chat(provider, model, temperature, user_task, &stripped)
+            .await
+        {
             Ok(text) if !text.trim().is_empty() && !looks_like_internodal_envelope(&text) => text,
-            Ok(_) | Err(_) => parlor_fallback(user_task, last_node_body),
+            Ok(_) | Err(_) => parlor_fallback(user_task, &stripped),
         };
-    Ok(ensure_user_visible(user_task, &rewritten))
+        return Ok(ensure_user_visible(user_task, &rewritten));
+    }
+    Ok(ensure_user_visible(user_task, last_node_body))
 }
 
 async fn delivery_chat(
@@ -206,6 +265,19 @@ mod tests {
         assert!(!looks_like_internodal_envelope(
             "升级到 32.38s，若仍卡在 1 分钟再切 Cronet。"
         ));
+    }
+
+    #[test]
+    fn strip_handoff_footer_keeps_report() {
+        let mixed = "已完成全部检查。\n\n## Google\n| 项 | 值 |\n|---|---|\n| gProxy | 204 |\n---\n**HANDOFF**\n- verdict: ok\n- findings: x\n- pointers: y\n- gaps: z";
+        let out = ensure_user_visible("检查 xray", mixed);
+        assert!(out.contains("gProxy"));
+        assert!(!out.to_ascii_lowercase().contains("handoff"));
+        assert!(!out.contains("verdict:"));
+        let no_heading = "表格报告。\n- verdict: ok\n- findings: a\n- pointers: b\n- gaps: c";
+        let out2 = ensure_user_visible("检查", no_heading);
+        assert!(out2.contains("表格报告"));
+        assert!(!out2.contains("verdict:"));
     }
 
     #[test]

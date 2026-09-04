@@ -1446,7 +1446,6 @@ async fn bounded_dag_build_one_loop_per_node() {
         text_response("patched"),
         text_response(LIVE_OBS_CONTINUE),
         text_response("verified"),
-        text_response(LIVE_OBS_CONTINUE),
     ]);
     let calls = provider.call_counter();
     let mut agent = build_agent_with_config(
@@ -1462,8 +1461,8 @@ async fn bounded_dag_build_one_loop_per_node() {
     let out = agent.turn("fix the compiler error").await.unwrap();
     assert_eq!(
         calls.load(Ordering::SeqCst),
-        7,
-        "first hop DAG plus work+observe per linear node"
+        6,
+        "first hop DAG plus work+observe per mid node; last hop skips observe"
     );
     assert!(out.contains("verified"), "{out}");
     assert!(!out.contains("## locate"), "{out}");
@@ -1539,7 +1538,6 @@ async fn bounded_dag_single_work_refines_then_runs_nodes() {
         text_response("checked"),
         text_response(LIVE_OBS_CONTINUE),
         text_response("synced"),
-        text_response(LIVE_OBS_CONTINUE),
     ]);
     let calls = provider.call_counter();
     let mut agent = build_agent_with_config(
@@ -1558,8 +1556,8 @@ async fn bounded_dag_single_work_refines_then_runs_nodes() {
         .unwrap();
     assert_eq!(
         calls.load(Ordering::SeqCst),
-        6,
-        "single_work + split refine + 2 work+observe"
+        5,
+        "single_work + split refine + mid-hop observe; last hop skips observe"
     );
     assert!(out.contains("synced"), "{out}");
 }
@@ -1577,7 +1575,6 @@ async fn bounded_dag_chat_only_observe_upgrades_to_plan() {
         text_response("patched"),
         text_response(LIVE_OBS_CONTINUE),
         text_response("verified"),
-        text_response(LIVE_OBS_CONTINUE),
     ]);
     let calls = provider.call_counter();
     let mut agent = build_agent_with_config(
@@ -1596,8 +1593,8 @@ async fn bounded_dag_chat_only_observe_upgrades_to_plan() {
         .unwrap();
     assert_eq!(
         calls.load(Ordering::SeqCst),
-        10,
-        "in-band chat_only + observe replan + planner retry + 3 work+observe"
+        9,
+        "in-band chat_only + observe replan + planner retry + mid work+observe; last hop skips observe"
     );
     assert!(out.contains("verified"), "{out}");
 }
@@ -1613,7 +1610,6 @@ async fn bounded_dag_writeback_and_node_contact() {
         text_response("PATCH_UNIQUE_BODY"),
         text_response(LIVE_OBS_CONTINUE),
         text_response("VERIFY_OK"),
-        text_response(LIVE_OBS_CONTINUE),
     ]);
     let reqs = provider.recorded_requests();
     let models = provider.recorded_models();
@@ -1653,7 +1649,7 @@ async fn bounded_dag_writeback_and_node_contact() {
     );
 
     let captured = reqs.lock().unwrap();
-    assert_eq!(captured.len(), 7);
+    assert_eq!(captured.len(), 6);
     let patch_msgs = &captured[3];
     assert!(
         !patch_msgs
@@ -1671,8 +1667,8 @@ async fn bounded_dag_writeback_and_node_contact() {
     let used = models.lock().unwrap().clone();
     assert_eq!(
         used.len(),
-        7,
-        "first hop DAG + 3 work + 3 observe; got {used:?}"
+        6,
+        "first hop DAG + 3 work + 2 mid observe (last hop skips observe); got {used:?}"
     );
     assert_eq!(
         used[1],
@@ -1701,7 +1697,6 @@ async fn bounded_dag_session_picker_does_not_override_contact() {
         text_response("patched"),
         text_response(LIVE_OBS_CONTINUE),
         text_response("verified"),
-        text_response(LIVE_OBS_CONTINUE),
     ]);
     let models = provider.recorded_models();
     let mut agent = Agent::builder()

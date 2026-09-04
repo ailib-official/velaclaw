@@ -492,7 +492,7 @@ async fn observe_turn_outcome_inner(
     )
     .await?;
     let parsed = parse_observe_verdict(&text, fail_closed);
-    let verdict = coerce_observe_remaining(parsed, remaining_nodes);
+    let verdict = coerce_observe_remaining(parsed, remaining_nodes, node_count);
     tracing::info!(
         target: "bounded_dag_live",
         node_id = node,
@@ -506,7 +506,11 @@ async fn observe_turn_outcome_inner(
 }
 
 /// Stop is only valid when no DAG nodes remain. Mid-graph Stop is Continue.
-fn coerce_observe_remaining(verdict: ObserveVerdict, remaining_nodes: usize) -> ObserveVerdict {
+fn coerce_observe_remaining(
+    verdict: ObserveVerdict,
+    remaining_nodes: usize,
+    node_count: usize,
+) -> ObserveVerdict {
     if remaining_nodes > 0 && verdict == ObserveVerdict::Stop {
         tracing::info!(
             target: "bounded_dag_live",
@@ -514,6 +518,13 @@ fn coerce_observe_remaining(verdict: ObserveVerdict, remaining_nodes: usize) -> 
             "observe stop coerced to continue"
         );
         ObserveVerdict::Continue
+    } else if node_count > 0 && remaining_nodes == 0 && verdict == ObserveVerdict::ReplanRemaining {
+        tracing::info!(
+            target: "bounded_dag_live",
+            node_count,
+            "observe replan_remaining coerced to stop on last hop"
+        );
+        ObserveVerdict::Stop
     } else {
         verdict
     }
@@ -1557,15 +1568,23 @@ mod tests {
     #[test]
     fn observe_stop_coerced_when_nodes_remain() {
         assert_eq!(
-            coerce_observe_remaining(ObserveVerdict::Stop, 2),
+            coerce_observe_remaining(ObserveVerdict::Stop, 2, 3),
             ObserveVerdict::Continue
         );
         assert_eq!(
-            coerce_observe_remaining(ObserveVerdict::Stop, 0),
+            coerce_observe_remaining(ObserveVerdict::Stop, 0, 3),
             ObserveVerdict::Stop
         );
         assert_eq!(
-            coerce_observe_remaining(ObserveVerdict::ReplanRemaining, 3),
+            coerce_observe_remaining(ObserveVerdict::ReplanRemaining, 3, 4),
+            ObserveVerdict::ReplanRemaining
+        );
+        assert_eq!(
+            coerce_observe_remaining(ObserveVerdict::ReplanRemaining, 0, 3),
+            ObserveVerdict::Stop
+        );
+        assert_eq!(
+            coerce_observe_remaining(ObserveVerdict::ReplanRemaining, 0, 0),
             ObserveVerdict::ReplanRemaining
         );
     }

@@ -854,11 +854,19 @@ pub async fn run(
                                 session_id.as_str(),
                             )
                             .await;
-                            if last_body.is_empty() {
+                            let raw = if last_body.is_empty() {
                                 outline
                             } else {
                                 last_body
-                            }
+                            };
+                            crate::agent::bounded_dag_delivery::host_delivery(
+                                provider.as_ref(),
+                                &model_name,
+                                temperature,
+                                &graph_task,
+                                &raw,
+                            )
+                            .await?
                         }
                     }
                     crate::agent::bounded_dag_live::LiveFirstHop::ChatOnly { reply } => {
@@ -1551,11 +1559,19 @@ pub async fn run(
                                 session_id.as_str(),
                             )
                             .await;
-                            Ok(if last_body.is_empty() {
+                            let raw = if last_body.is_empty() {
                                 outline
                             } else {
                                 last_body
-                            })
+                            };
+                            Ok(crate::agent::bounded_dag_delivery::host_delivery(
+                                provider.as_ref(),
+                                &session_model,
+                                temperature,
+                                &graph_task,
+                                &raw,
+                            )
+                            .await?)
                         }
                             crate::agent::bounded_dag_live::LiveFirstHop::ChatOnly { reply } => {
                                 history.push(ChatMessage::assistant(&reply));

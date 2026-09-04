@@ -53,6 +53,10 @@ pub struct DagNode {
     /// Static edge; JSON `null` → terminal.
     #[serde(default)]
     pub next: Option<String>,
+    /// Experimental (GOV-006): short name of the verifiable output this node must leave.
+    /// Omitted in existing graphs. Not an ai-protocol field.
+    #[serde(default)]
+    pub artifact: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

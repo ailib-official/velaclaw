@@ -15,7 +15,7 @@ The object MUST use schema_version "0.1.0" and include:
 - id (string), entry (string node id), max_steps (number, <= 8)
 - nodes: 1 to 8 items of { id, task_type, model_selector: { capabilities: string[] }, next: string|null, context_requirements?: { layers: number[], retrieve?: object[] } }
 Choose the node count from THIS task's deliverables (1–8), not from whether capabilities match. One node only when the user asked for a single result (one greeting is not a DAG — the host skips you; one file patch; one yes/no). If they asked for several independent results (service up? node health? a named route probe?), give one node per deliverable even when every node is tool_calling. Do not collapse "A then B, especially C" into one node.
-Do not invent inspect/diagnose/report splits, empty "gather context" nodes, or a final summarize node unless the user asked for a written report.
+Each node is a verifiable artifact state change, not a shell action. Work backward from the operator-visible deliverable. The host writes the user-facing conclusion after the last node. Do not invent inspect/diagnose/report splits, empty "gather context" nodes, or a final summarize hop unless the user asked for a written report as an artifact.
 Each node lists ONE primary capability first (optional extras after). Tags: coding (patches/shell), tool_calling (status/checks), high-reasoning (analysis that needs a reasoning family), speed (cheap/short), document_understanding (read/summarize). Different work → different first tags so Contact can route to different [[model_routes]] families. Do not name providers or model IDs.
 Do not pad every node with coding+tool_calling. Runtime already injects workspace retrieve and the previous node's artifact.
 The graph MUST be a single linear chain: entry walks next until null and covers every node (no branches, no unused nodes).
@@ -204,6 +204,8 @@ mod tests {
         assert!(DAG_PLAN_SYSTEM_PROMPT.contains("proxy-health"));
         assert!(DAG_PLAN_SYSTEM_PROMPT.contains("Do not collapse"));
         assert!(DAG_PLAN_SYSTEM_PROMPT.contains("one node per deliverable"));
+        assert!(DAG_PLAN_SYSTEM_PROMPT.contains("host writes the user-facing conclusion"));
+        assert!(DAG_PLAN_SYSTEM_PROMPT.contains("verifiable artifact"));
     }
 
     #[test]

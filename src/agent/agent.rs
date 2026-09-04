@@ -1119,6 +1119,15 @@ impl Agent {
                     crate::agent::bounded_dag_live::ObserveVerdict::Continue,
                 )
                 .await?;
+                if crate::agent::bounded_dag_delivery::skip_replan_for_parlor(remaining, &last_body)
+                {
+                    let _ = crate::agent::bounded_dag_live::clear_dag_fail(
+                        self.memory.as_ref(),
+                        self.session_id.as_str(),
+                    )
+                    .await;
+                    return self.parlor_live_reply(&graph_task, &last_body).await;
+                }
                 match verdict {
                     crate::agent::bounded_dag_live::ObserveVerdict::Stop => {
                         let _ = crate::agent::bounded_dag_live::clear_dag_fail(
@@ -1126,7 +1135,7 @@ impl Agent {
                             self.session_id.as_str(),
                         )
                         .await;
-                        return Ok(last_body);
+                        return self.parlor_live_reply(&graph_task, &last_body).await;
                     }
                     crate::agent::bounded_dag_live::ObserveVerdict::ReplanRemaining
                         if !auto_used =>
@@ -1169,14 +1178,27 @@ impl Agent {
                 self.session_id.as_str(),
             )
             .await;
-            return Ok(if last_body.is_empty() {
+            let raw = if last_body.is_empty() {
                 outline
             } else {
                 last_body
-            });
+            };
+            return self.parlor_live_reply(&graph_task, &raw).await;
         }
 
         self.invoke_tool_loop_once(user_message).await
+    }
+
+    #[cfg(feature = "ai-protocol")]
+    async fn parlor_live_reply(&self, user_task: &str, last_body: &str) -> Result<String> {
+        crate::agent::bounded_dag_delivery::host_delivery(
+            self.provider.as_ref(),
+            &self.model_name,
+            self.temperature,
+            user_task,
+            last_body,
+        )
+        .await
     }
 
     #[cfg(feature = "ai-protocol")]

@@ -122,10 +122,24 @@ pub fn ensure_user_visible(user_task: &str, body: &str) -> String {
     parlor_fallback(user_task, body)
 }
 
-/// Last hop: internodal envelope is parlor material, not a reason to replan the graph.
+/// Last hop ends the graph: parlor, never `replan_remaining` (VL-NA-035).
+///
+/// Ignores body shape. Envelope detection is only for rewriting internodal text.
 #[must_use]
-pub fn skip_replan_for_parlor(remaining_nodes: usize, last_body: &str) -> bool {
-    remaining_nodes == 0 && looks_like_internodal_envelope(last_body)
+pub fn last_hop_ends_graph(remaining_nodes: usize) -> bool {
+    remaining_nodes == 0
+}
+
+/// Mid-graph only: last hop skips the observe LLM (latency + no splice).
+#[must_use]
+pub fn should_observe_after_hop(remaining_nodes: usize) -> bool {
+    remaining_nodes > 0
+}
+
+/// Last hop never replans the remaining chain, even if the body is prose.
+#[must_use]
+pub fn skip_replan_for_parlor(remaining_nodes: usize, _last_body: &str) -> bool {
+    last_hop_ends_graph(remaining_nodes)
 }
 
 /// Per-hop RAO budget is the configured tool-iteration cap (not DAG hop count).
@@ -209,10 +223,14 @@ mod tests {
     }
 
     #[test]
-    fn last_hop_envelope_skips_replan() {
+    fn last_hop_always_ends_graph() {
+        assert!(last_hop_ends_graph(0));
+        assert!(!last_hop_ends_graph(2));
+        assert!(!should_observe_after_hop(0));
+        assert!(should_observe_after_hop(1));
         assert!(skip_replan_for_parlor(0, SMART_TUBE));
+        assert!(skip_replan_for_parlor(0, "升级到 32.38s。"));
         assert!(!skip_replan_for_parlor(2, SMART_TUBE));
-        assert!(!skip_replan_for_parlor(0, "升级到 32.38s。"));
     }
 
     #[test]

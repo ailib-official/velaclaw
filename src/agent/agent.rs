@@ -1107,6 +1107,14 @@ impl Agent {
                     Some(&contacts),
                 ));
                 let remaining = planned.order.len().saturating_sub(index + 1);
+                if crate::agent::bounded_dag_delivery::last_hop_ends_graph(remaining) {
+                    let _ = crate::agent::bounded_dag_live::clear_dag_fail(
+                        self.memory.as_ref(),
+                        self.session_id.as_str(),
+                    )
+                    .await;
+                    return self.parlor_live_reply(&graph_task, &last_body).await;
+                }
                 let verdict = crate::agent::bounded_dag_live::observe_turn_outcome(
                     self.provider.as_ref(),
                     &self.model_name,
@@ -1119,15 +1127,6 @@ impl Agent {
                     crate::agent::bounded_dag_live::ObserveVerdict::Continue,
                 )
                 .await?;
-                if crate::agent::bounded_dag_delivery::skip_replan_for_parlor(remaining, &last_body)
-                {
-                    let _ = crate::agent::bounded_dag_live::clear_dag_fail(
-                        self.memory.as_ref(),
-                        self.session_id.as_str(),
-                    )
-                    .await;
-                    return self.parlor_live_reply(&graph_task, &last_body).await;
-                }
                 match verdict {
                     crate::agent::bounded_dag_live::ObserveVerdict::Stop => {
                         let _ = crate::agent::bounded_dag_live::clear_dag_fail(
@@ -1138,7 +1137,7 @@ impl Agent {
                         return self.parlor_live_reply(&graph_task, &last_body).await;
                     }
                     crate::agent::bounded_dag_live::ObserveVerdict::ReplanRemaining
-                        if !auto_used =>
+                        if remaining > 0 && !auto_used =>
                     {
                         auto_used = true;
                         if let Some(spliced) =

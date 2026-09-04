@@ -90,15 +90,36 @@ pub fn format_preview(dag: &DagManifest, order: &[String]) -> String {
             continue;
         };
         let next = node.next.as_deref().unwrap_or("(end)");
-        let _ = writeln!(
-            out,
-            "{}. {}  task_type={}  caps={}  next={}",
-            i + 1,
-            node.id,
-            node.task_type,
-            node.model_selector.capabilities.join(","),
-            next
-        );
+        let artifact = node
+            .artifact
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        match artifact {
+            Some(art) => {
+                let _ = writeln!(
+                    out,
+                    "{}. {}  task_type={}  artifact={}  caps={}  next={}",
+                    i + 1,
+                    node.id,
+                    node.task_type,
+                    art,
+                    node.model_selector.capabilities.join(","),
+                    next
+                );
+            }
+            None => {
+                let _ = writeln!(
+                    out,
+                    "{}. {}  task_type={}  caps={}  next={}",
+                    i + 1,
+                    node.id,
+                    node.task_type,
+                    node.model_selector.capabilities.join(","),
+                    next
+                );
+            }
+        }
     }
     out
 }
@@ -235,5 +256,32 @@ mod tests {
     fn load_embedded_when_path_none() {
         let dag = load_bounded_dag(None).unwrap();
         assert_eq!(dag.id, "code-fix-template");
+    }
+
+    #[test]
+    fn artifact_optional_and_preview() {
+        let json = r#"{
+          "schema_version": "0.1.0",
+          "id": "one",
+          "entry": "a",
+          "max_steps": 8,
+          "nodes": [
+            {"id":"a","task_type":"ops-check","model_selector":{"capabilities":["tool_calling"]},"next":null}
+          ]
+        }"#;
+        let dag = parse_dag_json(json).unwrap();
+        assert!(dag.nodes[0].artifact.is_none());
+        let with = r#"{
+          "schema_version": "0.1.0",
+          "id": "one",
+          "entry": "a",
+          "max_steps": 8,
+          "nodes": [
+            {"id":"a","task_type":"ops-check","artifact":"official-issue-notes","model_selector":{"capabilities":["tool_calling"]},"next":null}
+          ]
+        }"#;
+        let dag = parse_dag_json(with).unwrap();
+        let preview = format_preview(&dag, &["a".into()]);
+        assert!(preview.contains("artifact=official-issue-notes"));
     }
 }

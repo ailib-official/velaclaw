@@ -125,8 +125,31 @@ pub fn format_preview(dag: &DagManifest, order: &[String]) -> String {
 }
 
 /// Host-filled work-node card (VL-NA-018). Fixed slots; not a domain prompt.
+/// Last hop (`next` is END): operator-visible conclusion, not internodal HANDOFF.
 pub fn node_task_card(dag_id: &str, node: &DagNode, index: usize, node_count: usize) -> String {
     let next = node.next.as_deref().unwrap_or("END");
+    let last = node.next.is_none();
+    let tools = "Prefer one compound shell (`&&` / pipes) over many tool rounds. \
+         Independent remote checks: one ssh, several commands inside. \
+         If USER TASK names a remote host, do not first run the same service check on this machine. \
+         Do not `find /` or open-ended local scans. \
+         You may emit multiple tool calls in one assistant message when they are independent.";
+    let success = if last {
+        "Stop with the operator-visible conclusion as the last assistant message. \
+         Do not emit internodal envelope headers (HANDOFF, verdict:, findings:, pointers:, gaps:). \
+         The host delivers this text to the user; internodal handoff is only for mid-graph nodes."
+    } else {
+        "Stop with a HANDOFF as the last assistant message:\n\
+         - verdict: ok | partial | failed\n\
+         - findings: facts this node established\n\
+         - pointers: identifiers the next node needs (not source dumps)\n\
+         - gaps: unknowns"
+    };
+    let mid_hint = if last {
+        "Aim for at most four shell rounds; then conclude."
+    } else {
+        "Aim for at most four shell rounds; then HANDOFF."
+    };
     format!(
         "NODE TASK (host-filled slots; do not rewrite this card)\n\
          - dag_id: {dag_id}\n\
@@ -140,18 +163,10 @@ pub fn node_task_card(dag_id: &str, node: &DagNode, index: usize, node_count: us
          Do not redo a prior node unless INPUTS lack pointers you need.\n\
          \n\
          TOOLS\n\
-         Prefer one compound shell (`&&` / pipes) over many tool rounds. \
-         Independent remote checks: one ssh, several commands inside. \
-         If USER TASK names a remote host, do not first run the same service check on this machine. \
-         Do not `find /` or open-ended local scans. Aim for at most four shell rounds; then HANDOFF.\n\
-         You may emit multiple tool calls in one assistant message when they are independent.\n\
+         {tools} {mid_hint}\n\
          \n\
          SUCCESS\n\
-         Stop with a HANDOFF as the last assistant message:\n\
-         - verdict: ok | partial | failed\n\
-         - findings: facts this node established\n\
-         - pointers: identifiers the next node needs (not source dumps)\n\
-         - gaps: unknowns",
+         {success}",
         id = node.id,
         task_type = node.task_type,
     )
@@ -243,6 +258,11 @@ mod tests {
         let verify = dag.nodes.iter().find(|n| n.id == "verify").unwrap();
         let end = node_task_card("code-fix-template", verify, 3, 3);
         assert!(end.contains("next_node_id: END"));
+        assert!(
+            !end.contains("Stop with a HANDOFF"),
+            "last hop must not demand internodal HANDOFF: {end}"
+        );
+        assert!(end.contains("operator-visible conclusion"));
     }
 
     #[test]

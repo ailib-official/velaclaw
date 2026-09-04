@@ -56,13 +56,18 @@ pub enum ObserveVerdict {
     Stop,
 }
 
-pub const LIVE_FIRST_HOP_SYSTEM_PROMPT: &str = "\
+/// Chat-only vs DAG. DAG rules are [`DAG_PLAN_SYSTEM_PROMPT`] (GOV-007; not a second planner).
+pub const LIVE_FIRST_HOP_PREAMBLE: &str = "\
 Start this VelaClaw turn now. Reply with ONLY one JSON object, no markdown.\n\
 Prior user/assistant messages are this same session. Continue that work (same hosts, paths, and findings). Do not claim you forgot earlier turns. Do not ask what to do if the session already did it.\n\
 Greeting, thanks, or general knowledge (no repo/host/files): {\"path\":\"chat_only\",\"reply\":\"<full user-visible reply>\"}\n\
-Any turn that needs tools: a linear DAG JSON object (schema_version 0.1.0, 1 to 8 nodes). That object is the plan — do not send a mode label without the graph.\n\
-One atomic action = 1 node. More than one distinct outcome (inspect then act, check then sync, a named host plus another result) = 2 to 8 nodes.\n\
+Any turn that needs tools: a linear DAG JSON object using the planner rules below (schema_version 0.1.0, 1 to 8 nodes). That object is the plan — do not send a mode label without the graph.\n\
 Never use chat_only when the user asks to inspect a local repo, workspace, or host. Do not use path single_work.\n";
+
+#[must_use]
+pub fn live_first_hop_system_prompt() -> String {
+    format!("{LIVE_FIRST_HOP_PREAMBLE}\n{DAG_PLAN_SYSTEM_PROMPT}")
+}
 
 const GRAPH_USER_TASK_MAX_CHARS: usize = 4000;
 
@@ -124,18 +129,22 @@ pub fn merge_graph_user_task(previous: Option<&str>, current: &str) -> String {
     format!("{head}{follow}")
 }
 
-pub const SPLIT_ONE_NODE_SYSTEM_PROMPT: &str = "\
-You already chose a 1-node work graph. Reply with ONLY a linear DAG JSON object (schema_version 0.1.0, 1 to 8 nodes), no markdown.\n\
-If USER TASK has more than one distinct outcome (inspect then act, check then sync, a named host plus another result), emit 2 to 8 nodes, one per outcome.\n\
-If the task is one atomic action, reply with a 1-node graph.\n\
-Do not use path or mode labels. Do not use chat_only.\n";
+pub fn split_one_node_system_prompt() -> String {
+    format!(
+        "You already chose a 1-node work graph. Reply with ONLY a linear DAG JSON object using the planner rules below, no markdown.\n\
+If USER TASK has more than one independently verifiable deliverable, emit 2 to 8 nodes, one per deliverable.\n\
+If the task is one atomic result, a 1-node graph is allowed.\n\
+Do not use path or mode labels. Do not use chat_only.\n\n{DAG_PLAN_SYSTEM_PROMPT}"
+    )
+}
 
 pub const TURN_OBSERVE_SYSTEM_PROMPT: &str = "\
 You judge whether the last assistant work advanced the USER TASK. Reply with ONLY one JSON object.\n\
 {\"verdict\":\"continue\"} — on track; remaining DAG nodes must run when remaining_nodes > 0.\n\
 {\"verdict\":\"replan_remaining\"} — last output lacked required evidence or went off-goal. Remaining work should be replanned.\n\
 {\"verdict\":\"stop\"} — the user task is done. Use stop only when remaining_nodes is 0 (or omitted). If remaining_nodes > 0 you MUST NOT use stop.\n\
-node_count is the live graph size (0 if this turn is chat_only). If node_count is 1 and USER TASK has more than one distinct outcome, and the assistant reply does not evidence each outcome, you MUST choose replan_remaining even when remaining_nodes is 0.\n\
+node_count is the live graph size (0 if this turn is chat_only). If remaining_nodes > 0 you MUST NOT use stop.\n\
+This observe is mid-graph only. Do not choose replan_remaining to invent nodes after the last hop; the host skips observe when remaining_nodes is 0.\n\
 If the user task requires local/repo/host evidence and the assistant reply has no tool or observation evidence, you MUST choose replan_remaining.\n";
 
 const OBSERVE_REPLY_CHARS: usize = 4000;
@@ -291,7 +300,7 @@ async fn refine_one_node_plan(
         provider,
         planner_model,
         temperature,
-        SPLIT_ONE_NODE_SYSTEM_PROMPT,
+        &split_one_node_system_prompt(),
         &user,
     )
     .await?;
@@ -346,7 +355,7 @@ pub async fn live_first_hop(
         return Ok(LiveFirstHop::Plan(planned));
     }
     let fallback = fallback_template_json(agent)?;
-    let hop_messages = first_hop_chat_messages(LIVE_FIRST_HOP_SYSTEM_PROMPT, history, user_task);
+    let hop_messages = first_hop_chat_messages(&live_first_hop_system_prompt(), history, user_task);
     let text =
         structured_json_chat_messages(provider, planner_model, temperature, &hop_messages).await?;
     let hop = parse_live_first_hop(&text, &fallback);
@@ -1504,7 +1513,7 @@ mod tests {
             ChatMessage::assistant("google-route-review: gProxy is up"),
             ChatMessage::user("你忘了在piubt上"),
         ];
-        let msgs = first_hop_chat_messages(LIVE_FIRST_HOP_SYSTEM_PROMPT, &history, "ignored");
+        let msgs = first_hop_chat_messages(&live_first_hop_system_prompt(), &history, "ignored");
         assert_eq!(msgs[0].role, "system");
         assert!(msgs[0].content.contains("same session"));
         assert!(msgs.iter().all(|m| m.content != "product"));
@@ -1690,6 +1699,19 @@ mod tests {
         assert!(!plan.used_fallback);
         assert_eq!(plan.source, "one_node");
         assert_ne!(plan.order, vec!["locate", "patch", "verify"]);
+    }
+
+    #[test]
+    fn first_hop_and_split_prompts_use_canonical_dag_plan() {
+        let first = live_first_hop_system_prompt();
+        let split = split_one_node_system_prompt();
+        assert!(first.contains("chat_only"));
+        assert!(first.contains("one node per deliverable"));
+        assert!(split.contains("one node per deliverable"));
+        assert!(split.contains("independently verifiable deliverable"));
+        assert!(first.contains(DAG_PLAN_SYSTEM_PROMPT));
+        assert!(split.contains(DAG_PLAN_SYSTEM_PROMPT));
+        assert!(!TURN_OBSERVE_SYSTEM_PROMPT.contains("even when remaining_nodes is 0"));
     }
 
     #[tokio::test]

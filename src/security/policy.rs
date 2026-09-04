@@ -281,6 +281,14 @@ enum QuoteState {
     Double,
 }
 
+/// Wait-only binaries stall the turn; never allow, even under Full / approval.
+fn command_is_wait_only_executable(command: &str) -> bool {
+    SecurityPolicy::base_executables(command).iter().any(|b| {
+        let b = b.to_ascii_lowercase();
+        b == "sleep" || b == "usleep"
+    })
+}
+
 /// Split a shell command into sub-commands by unquoted separators.
 ///
 /// Separators:
@@ -818,6 +826,14 @@ impl SecurityPolicy {
                     ));
                 }
             }
+        }
+
+        if command_is_wait_only_executable(command) {
+            return Err(self.format_command_policy_error(
+                "Command blocked: wait-only executables (sleep/usleep) are not allowed.",
+                command,
+                false,
+            ));
         }
 
         // Hard allowlist: human approval cannot widen allowed_commands (VL-SEC-009 / H).
@@ -1506,6 +1522,22 @@ mod tests {
         let p = full_policy();
         assert!(p.is_command_allowed("ls"));
         assert!(!p.is_command_allowed("rm -rf /"));
+    }
+
+    #[test]
+    fn wait_only_sleep_denied_even_if_allowlisted() {
+        let mut p = full_policy();
+        p.workspace_only = false;
+        p.allowed_commands.push("sleep".into());
+        let err = p
+            .validate_command_execution("sleep 150; echo waited", false)
+            .unwrap_err();
+        assert!(err.contains("wait-only") || err.contains("sleep"), "{err}");
+        assert!(
+            !err.contains("[needs_approval]"),
+            "sleep must not be approval-eligible: {err}"
+        );
+        assert!(p.validate_command_execution("echo waited", false).is_ok());
     }
 
     #[test]

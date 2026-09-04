@@ -855,6 +855,46 @@ pub fn brief_dag_outline(
     lines.join("\n")
 }
 
+/// One-line operator gist after the live plan is accepted (VL-NA-037). Not a second planner.
+#[must_use]
+pub fn operator_plan_gist(
+    user_message: &str,
+    dag: &crate::agent::dag_runner::DagManifest,
+    order: &[String],
+    used_fallback: bool,
+) -> String {
+    let cjk = user_prefers_cjk(user_message);
+    let by_id: std::collections::HashMap<&str, _> =
+        dag.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+    let hops: Vec<String> = order
+        .iter()
+        .map(|id| {
+            by_id
+                .get(id.as_str())
+                .and_then(|n| {
+                    n.artifact
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .map(ToOwned::to_owned)
+                })
+                .unwrap_or_else(|| prettify_node_id(id))
+        })
+        .collect();
+    let list = hops.join(" → ");
+    if cjk {
+        if used_fallback {
+            format!("改用回退图，将按 {} 步：{}。", order.len(), list)
+        } else {
+            format!("将按 {} 步：{}。", order.len(), list)
+        }
+    } else if used_fallback {
+        format!("Using a fallback graph in {} step(s): {list}.", order.len())
+    } else {
+        format!("Working in {} step(s): {list}.", order.len())
+    }
+}
+
 /// Persistable stop line when a work node fails (does not dump the graph).
 #[must_use]
 pub fn format_work_node_stop(
@@ -1957,6 +1997,34 @@ mod tests {
         assert!(out.contains("check install"));
         assert!(!out.contains("Bounded task DAG"));
         assert!(!out.contains("contact model="));
+    }
+
+    #[test]
+    fn operator_plan_gist_lists_artifacts_without_handoff() {
+        let dag = parse_dag_json(
+            r#"{
+              "schema_version":"0.1.0","id":"t","entry":"research-official-upgrade-method","max_steps":4,
+              "nodes":[
+                {"id":"research-official-upgrade-method","task_type":"research","artifact":"官方升级路径","model_selector":{"capabilities":["coding"]},"next":"apply-upgrade"},
+                {"id":"apply-upgrade","task_type":"ops","artifact":"执行升级","model_selector":{"capabilities":["coding"]},"next":null}
+              ]
+            }"#,
+        )
+        .unwrap();
+        let gist = operator_plan_gist(
+            "检查 openclaw 升级",
+            &dag,
+            &[
+                "research-official-upgrade-method".into(),
+                "apply-upgrade".into(),
+            ],
+            false,
+        );
+        assert!(gist.contains("将按 2 步"), "{gist}");
+        assert!(gist.contains("官方升级路径"), "{gist}");
+        assert!(gist.contains("执行升级"), "{gist}");
+        assert!(!gist.to_ascii_lowercase().contains("handoff"), "{gist}");
+        assert!(!gist.contains('\n'), "{gist}");
     }
 
     #[test]

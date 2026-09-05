@@ -96,7 +96,7 @@ pub async fn handle_create_cron(
         expr: body.expression,
         tz: body.tz,
     };
-    match add_shell_job(&config, body.name, schedule, &body.command) {
+    match add_shell_job(&config, body.name, schedule, &body.command, false) {
         Ok(job) => (StatusCode::CREATED, Json(job)).into_response(),
         Err(e) => api_error(StatusCode::BAD_REQUEST, &e.to_string()).into_response(),
     }

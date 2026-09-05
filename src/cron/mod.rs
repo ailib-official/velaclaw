@@ -15,7 +15,8 @@ pub use schedule::{
 #[allow(unused_imports)]
 pub use store::{
     add_agent_job, add_job, add_shell_job, due_jobs, get_job, list_jobs, list_runs,
-    record_last_run, record_run, remove_job, reschedule_after_run, update_job,
+    quarantine_spent_at_jobs, record_last_run, record_run, remove_job, reschedule_after_run,
+    update_job,
 };
 pub use types::{CronJob, CronJobPatch, CronRun, DeliveryConfig, JobType, Schedule, SessionTarget};
 
@@ -63,7 +64,7 @@ pub fn handle_command(command: crate::CronCommands, config: &Config) -> Result<(
                 expr: expression,
                 tz,
             };
-            let job = add_shell_job(config, None, schedule, &command)?;
+            let job = add_shell_job(config, None, schedule, &command, false)?;
             println!("✅ Added cron job {}", job.id);
             println!("  Expr: {}", job.expression);
             println!("  Next: {}", job.next_run.to_rfc3339());
@@ -75,7 +76,7 @@ pub fn handle_command(command: crate::CronCommands, config: &Config) -> Result<(
                 .map_err(|e| anyhow::anyhow!("Invalid RFC3339 timestamp for --at: {e}"))?
                 .with_timezone(&chrono::Utc);
             let schedule = Schedule::At { at };
-            let job = add_shell_job(config, None, schedule, &command)?;
+            let job = add_shell_job(config, None, schedule, &command, true)?;
             println!("✅ Added one-shot cron job {}", job.id);
             println!("  At  : {}", job.next_run.to_rfc3339());
             println!("  Cmd : {}", job.command);
@@ -83,7 +84,7 @@ pub fn handle_command(command: crate::CronCommands, config: &Config) -> Result<(
         }
         crate::CronCommands::AddEvery { every_ms, command } => {
             let schedule = Schedule::Every { every_ms };
-            let job = add_shell_job(config, None, schedule, &command)?;
+            let job = add_shell_job(config, None, schedule, &command, false)?;
             println!("✅ Added interval cron job {}", job.id);
             println!("  Every(ms): {every_ms}");
             println!("  Next     : {}", job.next_run.to_rfc3339());
@@ -175,7 +176,7 @@ pub fn add_once_at(
     command: &str,
 ) -> Result<CronJob> {
     let schedule = Schedule::At { at };
-    add_shell_job(config, None, schedule, command)
+    add_shell_job(config, None, schedule, command, true)
 }
 
 pub fn pause_job(config: &Config, id: &str) -> Result<CronJob> {
@@ -245,6 +246,7 @@ mod tests {
                 tz: tz.map(Into::into),
             },
             cmd,
+            false,
         )
         .unwrap()
     }
@@ -367,6 +369,7 @@ mod tests {
                 tz: None,
             },
             "echo original",
+            false,
         )
         .unwrap();
 

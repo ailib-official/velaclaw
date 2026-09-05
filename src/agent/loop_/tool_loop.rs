@@ -629,7 +629,7 @@ pub(crate) async fn run_tool_call_loop(
                 gate_extras,
             )
             .await?;
-            for (call_i, result) in runnable_idx.into_iter().zip(batch_results.into_iter()) {
+            for (call_i, result) in runnable_idx.into_iter().zip(batch_results) {
                 batch_outputs[call_i] = result.output;
             }
         }

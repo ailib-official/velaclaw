@@ -28,7 +28,7 @@ pub async fn run(config: Config) -> Result<()> {
     match quarantine_spent_at_jobs(&config) {
         Ok(0) => {}
         Ok(n) => {
-            tracing::warn!("Quarantined {n} spent Schedule::At cron job(s) on scheduler start")
+            tracing::warn!("Quarantined {n} spent Schedule::At cron job(s) on scheduler start");
         }
         Err(e) => tracing::warn!("Failed to quarantine spent Schedule::At cron jobs: {e}"),
     }

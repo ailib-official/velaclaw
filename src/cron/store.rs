@@ -24,7 +24,7 @@ pub fn add_job(config: &Config, expression: &str, command: &str) -> Result<CronJ
         expr: expression.to_string(),
         tz: None,
     };
-    add_shell_job(config, None, schedule, command)
+    add_shell_job(config, None, schedule, command, false)
 }
 
 pub fn add_shell_job(
@@ -32,6 +32,7 @@ pub fn add_shell_job(
     name: Option<String>,
     schedule: Schedule,
     command: &str,
+    delete_after_run: bool,
 ) -> Result<CronJob> {
     let now = Utc::now();
     validate_schedule(&schedule, now)?;
@@ -45,7 +46,7 @@ pub fn add_shell_job(
             "INSERT INTO cron_jobs (
                 id, expression, command, schedule, job_type, prompt, name, session_target, model,
                 enabled, delivery, delete_after_run, created_at, next_run
-             ) VALUES (?1, ?2, ?3, ?4, 'shell', NULL, ?5, 'isolated', NULL, 1, ?6, 0, ?7, ?8)",
+             ) VALUES (?1, ?2, ?3, ?4, 'shell', NULL, ?5, 'isolated', NULL, 1, ?6, ?7, ?8, ?9)",
             params![
                 id,
                 expression,
@@ -53,6 +54,7 @@ pub fn add_shell_job(
                 schedule_json,
                 name,
                 serde_json::to_string(&DeliveryConfig::default())?,
+                if delete_after_run { 1 } else { 0 },
                 now.to_rfc3339(),
                 next_run.to_rfc3339(),
             ],
@@ -62,6 +64,36 @@ pub fn add_shell_job(
     })?;
 
     get_job(config, &id)
+}
+
+/// Disable enabled `Schedule::At` jobs that already have a `last_run`.
+///
+/// Past `At` timestamps stay due forever if left enabled, so spent one-shots
+/// must be quarantined on scheduler start (generic; not command-specific).
+pub fn quarantine_spent_at_jobs(config: &Config) -> Result<usize> {
+    let mut quarantined = 0usize;
+    for job in list_jobs(config)? {
+        if !job.enabled || job.last_run.is_none() {
+            continue;
+        }
+        if !matches!(job.schedule, Schedule::At { .. }) {
+            continue;
+        }
+        update_job(
+            config,
+            &job.id,
+            CronJobPatch {
+                enabled: Some(false),
+                ..CronJobPatch::default()
+            },
+        )?;
+        quarantined += 1;
+        tracing::warn!(
+            "Quarantined spent Schedule::At cron job {} (already ran; preventing re-fire)",
+            job.id
+        );
+    }
+    Ok(quarantined)
 }
 
 #[allow(clippy::too_many_arguments)]

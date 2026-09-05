@@ -3,8 +3,9 @@ use crate::channels::{
 };
 use crate::config::Config;
 use crate::cron::{
-    due_jobs, next_run_for_schedule, record_last_run, record_run, remove_job, reschedule_after_run,
-    update_job, CronJob, CronJobPatch, DeliveryConfig, JobType, Schedule, SessionTarget,
+    due_jobs, next_run_for_schedule, quarantine_spent_at_jobs, record_last_run, record_run,
+    remove_job, reschedule_after_run, update_job, CronJob, CronJobPatch, DeliveryConfig, JobType,
+    Schedule, SessionTarget,
 };
 use crate::security::{PolicyHandle, SecurityPolicy};
 use anyhow::Result;
@@ -23,6 +24,14 @@ pub async fn run(config: Config) -> Result<()> {
     let mut interval = time::interval(Duration::from_secs(poll_secs));
     interval.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
     let security = PolicyHandle::from_workspace_config(&config)?;
+
+    match quarantine_spent_at_jobs(&config) {
+        Ok(0) => {}
+        Ok(n) => {
+            tracing::warn!("Quarantined {n} spent Schedule::At cron job(s) on scheduler start");
+        }
+        Err(e) => tracing::warn!("Failed to quarantine spent Schedule::At cron jobs: {e}"),
+    }
 
     crate::health::mark_component_ok(SCHEDULER_COMPONENT);
 
@@ -225,13 +234,15 @@ async fn persist_job_result(
         duration_ms,
     );
 
-    if is_one_shot_auto_delete(job) {
-        if success {
+    // Schedule::At is always one-shot: next_run_for_schedule returns the same
+    // past `at`, so leaving the job enabled re-fires forever (success or fail).
+    if is_one_shot_at(job) {
+        if success && job.delete_after_run {
             if let Err(e) = remove_job(config, &job.id) {
                 tracing::warn!("Failed to remove one-shot cron job after success: {e}");
             }
         } else {
-            let _ = record_last_run(config, &job.id, finished_at, false, output);
+            let _ = record_last_run(config, &job.id, finished_at, success, output);
             if let Err(e) = update_job(
                 config,
                 &job.id,
@@ -240,7 +251,7 @@ async fn persist_job_result(
                     ..CronJobPatch::default()
                 },
             ) {
-                tracing::warn!("Failed to disable failed one-shot cron job: {e}");
+                tracing::warn!("Failed to disable one-shot Schedule::At cron job: {e}");
             }
         }
         return success;
@@ -253,8 +264,8 @@ async fn persist_job_result(
     success
 }
 
-fn is_one_shot_auto_delete(job: &CronJob) -> bool {
-    job.delete_after_run && matches!(job.schedule, Schedule::At { .. })
+fn is_one_shot_at(job: &CronJob) -> bool {
+    matches!(job.schedule, Schedule::At { .. })
 }
 
 fn warn_if_high_frequency_agent_job(job: &CronJob) {
@@ -847,6 +858,66 @@ mod tests {
         let updated = cron::get_job(&config, &job.id).unwrap();
         assert!(!updated.enabled);
         assert_eq!(updated.last_status.as_deref(), Some("error"));
+    }
+
+    #[tokio::test]
+    async fn persist_job_result_at_without_delete_flag_disables_after_any_outcome() {
+        let tmp = TempDir::new().unwrap();
+        let config = test_config(&tmp).await;
+        let at = Utc::now() + ChronoDuration::minutes(10);
+
+        let fail_job = cron::add_shell_job(
+            &config,
+            Some("at-keep-fail".into()),
+            crate::cron::Schedule::At { at },
+            "echo fail",
+            false,
+        )
+        .unwrap();
+        assert!(!fail_job.delete_after_run);
+        let started = Utc::now();
+        let finished = started + ChronoDuration::milliseconds(10);
+        assert!(!persist_job_result(&config, &fail_job, false, "boom", started, finished).await);
+        let updated = cron::get_job(&config, &fail_job.id).unwrap();
+        assert!(!updated.enabled);
+        assert_eq!(updated.last_status.as_deref(), Some("error"));
+
+        let ok_job = cron::add_shell_job(
+            &config,
+            Some("at-keep-ok".into()),
+            crate::cron::Schedule::At {
+                at: at + ChronoDuration::minutes(1),
+            },
+            "echo ok",
+            false,
+        )
+        .unwrap();
+        assert!(persist_job_result(&config, &ok_job, true, "ok", started, finished).await);
+        let updated = cron::get_job(&config, &ok_job.id).unwrap();
+        assert!(!updated.enabled);
+        assert_eq!(updated.last_status.as_deref(), Some("ok"));
+    }
+
+    #[tokio::test]
+    async fn quarantine_spent_at_jobs_disables_enabled_spent_oneshots() {
+        let tmp = TempDir::new().unwrap();
+        let config = test_config(&tmp).await;
+        let at = Utc::now() + ChronoDuration::minutes(5);
+        let job = cron::add_shell_job(
+            &config,
+            Some("spent-at".into()),
+            crate::cron::Schedule::At { at },
+            "echo spent",
+            false,
+        )
+        .unwrap();
+        cron::record_last_run(&config, &job.id, Utc::now(), false, "prior fail").unwrap();
+
+        let n = cron::quarantine_spent_at_jobs(&config).unwrap();
+        assert_eq!(n, 1);
+        let updated = cron::get_job(&config, &job.id).unwrap();
+        assert!(!updated.enabled);
+        assert_eq!(cron::quarantine_spent_at_jobs(&config).unwrap(), 0);
     }
 
     #[tokio::test]

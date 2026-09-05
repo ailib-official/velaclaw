@@ -11,6 +11,11 @@ You write the operator-visible conclusion for USER TASK.\n\
 Use the node artifacts as evidence. Be direct.\n\
 Do not use internodal envelope headers: HANDOFF, verdict:, findings:, pointers:, gaps:.\n\
 Do not tell the operator to hand off to another node.\n\
+Every claim has a vantage (where evidence was gathered) and coverage (sample|partial|exhaustive).\n\
+Exclusive wording (only/none/all of a population) is allowed only when coverage is exhaustive.\n\
+Otherwise say what this vantage saw, not what the unseen rest of the world is.\n\
+If a later artifact expands vantage, revise earlier exclusive claims instead of leaving both.\n\
+Do not invent geography, identity, or type labels that are not in the artifacts; mark guesses as inference.\n\
 If evidence is incomplete, say what is known and the single next action.\n";
 
 /// True when `text` is a work-node internodal envelope, not a parlor reply.
@@ -91,15 +96,11 @@ pub fn strip_internodal_suffix(text: &str) -> String {
 /// Host template when Delivery rewrite is skipped or still internodal (no replan).
 #[must_use]
 pub fn parlor_fallback(user_task: &str, internodal: &str) -> String {
+    let _ = user_task;
     let findings = section_after(internodal, &["findings:", "findings"]);
     let next = section_after(internodal, &["pointers:", "pointers"])
         .or_else(|| section_after(internodal, &["gaps:", "gaps"]));
     let mut out = String::new();
-    let task = user_task.trim();
-    if !task.is_empty() {
-        out.push_str(task);
-        out.push_str("\n\n");
-    }
     if let Some(body) = findings {
         out.push_str(body.trim());
         out.push('\n');
@@ -138,6 +139,78 @@ pub fn parlor_fallback(user_task: &str, internodal: &str) -> String {
     } else {
         visible
     }
+}
+
+/// True when the text asserts a closed population (only / none / all) without
+/// a domain-specific denylist — host uses this to stamp vantage, not to ban topics.
+#[must_use]
+pub fn has_exclusivity_quantifier(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    const CJK: &[&str] = &[
+        "只有",
+        "仅有",
+        "唯一",
+        "无人",
+        "没有任何其他",
+        "不存在其他",
+        "全都没有",
+    ];
+    if CJK.iter().any(|p| text.contains(p)) {
+        return true;
+    }
+    const EN: &[&str] = &[
+        "only ",
+        "the only",
+        "no other",
+        "nobody else",
+        "none of the",
+        "no one else",
+    ];
+    EN.iter().any(|p| lower.contains(p))
+}
+
+#[must_use]
+pub fn declares_exhaustive_coverage(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("coverage: exhaustive")
+        || lower.contains("coverage=exhaustive")
+        || text.contains("穷尽")
+        || lower.contains("exhaustive census")
+}
+
+fn already_scope_stamped(text: &str) -> bool {
+    text.contains("当前观测所及") || text.contains("current vantage only")
+}
+
+/// If exclusive wording is unscoped, stamp that it is not a census.
+#[must_use]
+pub fn stamp_unscoped_exclusivity(text: &str, cjk: bool) -> String {
+    let trimmed = text.trim();
+    if trimmed.is_empty()
+        || !has_exclusivity_quantifier(trimmed)
+        || declares_exhaustive_coverage(trimmed)
+        || already_scope_stamped(trimmed)
+        || trimmed.to_ascii_lowercase().contains("vantage:")
+        || trimmed.contains("观测范围")
+    {
+        return text.to_string();
+    }
+    let stamp = if cjk {
+        "（范围：当前观测所及，并非全集穷尽。）\n"
+    } else {
+        "(Scope: current vantage only; not an exhaustive census.)\n"
+    };
+    format!("{stamp}{text}")
+}
+
+/// Last-hop user body: internodal-free, then unscoped-exclusivity stamp.
+#[must_use]
+pub fn finalize_operator_visible(user_task: &str, body: &str) -> String {
+    let visible = ensure_user_visible(user_task, body);
+    stamp_unscoped_exclusivity(
+        &visible,
+        crate::agent::bounded_dag_live::user_prefers_cjk(user_task),
+    )
 }
 
 fn section_after(text: &str, headers: &[&str]) -> Option<String> {
@@ -194,6 +267,8 @@ pub fn should_emit_mid_hop_note(remaining_nodes: usize) -> bool {
 }
 
 const OPERATOR_NOTE_MAX: usize = 1200;
+const MID_HOP_GIST_MAX: usize = 360;
+const MID_HOP_GIST_LINES: usize = 4;
 
 fn xml_tag_inner(text: &str, open: &str, close: &str) -> Option<String> {
     let lower = text.to_ascii_lowercase();
@@ -210,21 +285,67 @@ fn xml_tag_inner(text: &str, open: &str, close: &str) -> Option<String> {
     }
 }
 
+fn internodal_noise_line(line: &str) -> bool {
+    let k = internodal_line_key(line);
+    let k = k.trim_end_matches(':').trim();
+    matches!(
+        k,
+        "handoff"
+            | "verdict"
+            | "findings"
+            | "pointers"
+            | "gaps"
+            | "next_node"
+            | "next_node_id"
+            | "vantage"
+            | "coverage"
+            | "claim_kind"
+    ) || k.starts_with("verdict:")
+        || k.starts_with("pointers:")
+        || k.starts_with("next_node")
+        || k.starts_with("vantage:")
+        || k.starts_with("coverage:")
+        || k.starts_with("claim_kind:")
+}
+
+fn gist_from_node_body(body: &str) -> String {
+    if let Some(f) = xml_tag_inner(body, "<findings>", "</findings>") {
+        return truncate_chars(f.trim(), MID_HOP_GIST_MAX);
+    }
+    if let Some(f) = section_after(body, &["findings:", "findings"]) {
+        return truncate_chars(f.trim(), MID_HOP_GIST_MAX);
+    }
+    let stripped = strip_internodal_suffix(body);
+    let mut kept = Vec::new();
+    for line in stripped.lines() {
+        let t = line.trim();
+        if t.is_empty() || internodal_noise_line(t) {
+            continue;
+        }
+        kept.push(t);
+        if kept.len() >= MID_HOP_GIST_LINES {
+            break;
+        }
+    }
+    truncate_chars(&kept.join("\n"), MID_HOP_GIST_MAX)
+}
+
+fn truncate_chars(text: &str, max: usize) -> String {
+    let trimmed = text.trim();
+    if trimmed.chars().count() <= max {
+        return trimmed.to_string();
+    }
+    let mut out: String = trimmed.chars().take(max.saturating_sub(1)).collect();
+    out.push('…');
+    out
+}
+
 fn truncate_operator_note(text: &str) -> String {
     let flat: String = text
         .chars()
         .map(|c| if c == '\r' { '\n' } else { c })
         .collect();
-    let trimmed = flat.trim();
-    if trimmed.chars().count() <= OPERATOR_NOTE_MAX {
-        return trimmed.to_string();
-    }
-    let mut out: String = trimmed
-        .chars()
-        .take(OPERATOR_NOTE_MAX.saturating_sub(1))
-        .collect();
-    out.push('…');
-    out
+    truncate_chars(&flat, OPERATOR_NOTE_MAX)
 }
 
 /// Host-only mid-hop conclusion: internodal-free, no Delivery LLM.
@@ -245,9 +366,7 @@ pub fn mid_hop_operator_note(
             format!("Step `{label}` did not finish. {err}")
         };
     }
-    let extracted = xml_tag_inner(body, "<findings>", "</findings>")
-        .unwrap_or_else(|| ensure_user_visible(user_task, body));
-    let extracted = truncate_operator_note(&extracted);
+    let extracted = gist_from_node_body(body);
     format!("### {label}\n{extracted}")
 }
 
@@ -307,7 +426,8 @@ pub fn per_hop_tool_iteration_budget(configured: usize) -> usize {
         configured
     }
 }
-/// Host Delivery: optional no-tool rewrite, then [`ensure_user_visible`].
+
+/// Host Delivery: optional no-tool rewrite, then [`finalize_operator_visible`].
 /// Same provider as the turn (planner-style `chat`, empty tools). Not a second tool-loop.
 pub async fn host_delivery(
     provider: &dyn Provider,
@@ -324,9 +444,9 @@ pub async fn host_delivery(
             Ok(text) if !text.trim().is_empty() && !looks_like_internodal_envelope(&text) => text,
             Ok(_) | Err(_) => parlor_fallback(user_task, &stripped),
         };
-        return Ok(ensure_user_visible(user_task, &rewritten));
+        return Ok(finalize_operator_visible(user_task, &rewritten));
     }
-    Ok(ensure_user_visible(user_task, last_node_body))
+    Ok(finalize_operator_visible(user_task, last_node_body))
 }
 
 async fn delivery_chat(
@@ -433,5 +553,52 @@ mod tests {
     fn per_hop_budget_is_not_dag_hop_count() {
         assert_eq!(per_hop_tool_iteration_budget(0), 10);
         assert_eq!(per_hop_tool_iteration_budget(64), 64);
+    }
+
+    #[test]
+    fn parlor_fallback_does_not_echo_user_task() {
+        let out = parlor_fallback("请检查本地局域网有多少终端", SMART_TUBE);
+        assert!(!out.contains("请检查本地局域网"));
+        assert!(out.contains("5917"));
+    }
+
+    #[test]
+    fn mid_hop_gist_is_short_and_drops_internodal_keys() {
+        let body = "The ping scan shows 9 active hosts.\n\
+pointers:\n- 192.168.2.13:8889\n\
+next_node: xray-check\n\
+findings:\n- this host .98 has 6 ESTAB to .13:8889\n\
+- .87 did not answer ICMP\n\
+gaps:\n- other hosts unknown";
+        let note = mid_hop_operator_note("请检查局域网", "lan-scan", body, None);
+        assert!(note.contains("ESTAB") || note.contains(".98"), "{note}");
+        assert!(!note.contains("next_node"), "{note}");
+        assert!(!note.contains("pointers"), "{note}");
+        assert!(
+            note.chars().count() < 500,
+            "mid-hop must stay a gist, got {} chars: {note}",
+            note.chars().count()
+        );
+        assert!(!note.contains("请检查局域网"), "{note}");
+    }
+
+    #[test]
+    fn unscoped_exclusivity_gets_vantage_stamp() {
+        let t = "当前使用该链路的终端——只有本机一台。";
+        let out = stamp_unscoped_exclusivity(t, true);
+        assert!(out.contains("当前观测所及"), "{out}");
+        assert!(out.contains("只有本机"), "{out}");
+        let scoped = "vantage: this_host\n只有本机连上了监听端口。";
+        let out2 = stamp_unscoped_exclusivity(scoped, true);
+        assert_eq!(out2, scoped);
+        let exhaustive = "coverage: exhaustive\n只有这三台在 ARP 里。";
+        assert_eq!(stamp_unscoped_exclusivity(exhaustive, true), exhaustive);
+    }
+
+    #[test]
+    fn finalize_stamps_unscoped_census_wording() {
+        let out = finalize_operator_visible("请检查各终端", "当前使用该链路的终端——只有本机一台。");
+        assert!(out.contains("当前观测所及"), "{out}");
+        assert!(!out.to_ascii_lowercase().contains("handoff"));
     }
 }

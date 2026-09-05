@@ -130,20 +130,29 @@ pub fn node_task_card(dag_id: &str, node: &DagNode, index: usize, node_count: us
     let next = node.next.as_deref().unwrap_or("END");
     let last = node.next.is_none();
     let tools = "Prefer one compound shell (`&&` / pipes) over many tool rounds. \
-         Independent remote checks: one ssh, several commands inside. \
-         If USER TASK names a remote host, do not first run the same service check on this machine. \
-         Do not `find /` or open-ended local scans. \
-         You may emit multiple tool calls in one assistant message when they are independent.";
+         Independent checks: several commands in one ssh / one assistant message. \
+         Work in this node's vantage. If INPUTS or USER TASK already name a vantage \
+         (host, path, artifact), start there — do not substitute a local stand-in probe. \
+         Do not re-run a probe whose result is already in INPUTS. \
+         Do not rewrite the same check as a new script_v2/v3 file; fix or compound the command. \
+         Do not `find /` or open-ended local scans.";
     let success = if last {
         "Stop with the operator-visible conclusion as the last assistant message. \
          Do not emit internodal envelope headers (HANDOFF, verdict:, findings:, pointers:, gaps:). \
+         State vantage (where you looked) and coverage (sample|partial|exhaustive). \
+         Exclusive claims (only/none/all) require coverage=exhaustive; otherwise scope them \
+         to the vantage. Label guesses as inference. \
+         If later evidence revises an earlier exclusivity, say the revision. \
          The host delivers this text to the user; internodal handoff is only for mid-graph nodes."
     } else {
         "Stop with a HANDOFF as the last assistant message:\n\
+         - vantage: this_host | remote_host | artifact | lan_passive | mixed\n\
+         - coverage: sample | partial | exhaustive\n\
+         - claim_kind: observation | inference | exclusivity\n\
          - verdict: ok | partial | failed\n\
-         - findings: facts this node established\n\
+         - findings: facts at this vantage (not a census of unseen vantages)\n\
          - pointers: identifiers the next node needs (not source dumps)\n\
-         - gaps: unknowns"
+         - gaps: unknowns; keep exclusivity here until coverage=exhaustive"
     };
     let mid_hint = if last {
         "Aim for at most four shell rounds; then conclude."
@@ -253,8 +262,15 @@ mod tests {
         assert!(card.contains("next_node_id: patch"));
         assert!(card.contains("HANDOFF"));
         assert!(card.contains("compound shell"));
+        assert!(card.contains("vantage:"));
+        assert!(card.contains("coverage:"));
+        assert!(card.contains("claim_kind:"));
         assert!(card.contains("pointers:"));
         assert!(!card.contains("Approve Build"));
+        assert!(
+            !card.contains("names a remote host"),
+            "no host-name special case: {card}"
+        );
         let verify = dag.nodes.iter().find(|n| n.id == "verify").unwrap();
         let end = node_task_card("code-fix-template", verify, 3, 3);
         assert!(end.contains("next_node_id: END"));
@@ -263,6 +279,7 @@ mod tests {
             "last hop must not demand internodal HANDOFF: {end}"
         );
         assert!(end.contains("operator-visible conclusion"));
+        assert!(end.contains("coverage=exhaustive"));
     }
 
     #[test]

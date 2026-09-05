@@ -148,6 +148,11 @@ pub enum WsServerMessage {
         #[serde(skip_serializing_if = "Option::is_none")]
         message: Option<String>,
     },
+    /// Session title changed (background refine). Push even after `done`.
+    SessionTitle {
+        session_id: String,
+        title: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -249,5 +254,18 @@ mod tests {
         };
         let json = serde_json::to_string(&msg).expect("serialize");
         assert!(json.contains(r#""type":"cancelled""#));
+    }
+
+    #[test]
+    fn ws_server_session_title_serializes() {
+        let msg = WsServerMessage::SessionTitle {
+            session_id: "abc".into(),
+            title: "LAN Scan".into(),
+        };
+        let json = serde_json::to_string(&msg).expect("serialize");
+        assert_eq!(
+            json,
+            r#"{"type":"session_title","session_id":"abc","title":"LAN Scan"}"#
+        );
     }
 }

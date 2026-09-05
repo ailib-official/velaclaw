@@ -5,6 +5,7 @@ import {
   loadActiveSessionId,
   resolveInitialSessionId,
   saveActiveSessionId,
+  applySessionTitle,
 } from "./sessions";
 
 function mockLocalStorage() {
@@ -76,5 +77,22 @@ describe("formatSessionMeta", () => {
     expect(meta).toContain("1h ago");
     expect(meta).toContain("openai/gpt-4");
     vi.useRealTimers();
+  });
+
+  it("applies a pushed title to the matching session", () => {
+    const next = applySessionTitle(
+      [
+        {
+          id: "s1",
+          title: "New session",
+          created_at: "2026-07-30T10:00:00Z",
+          updated_at: "2026-07-30T11:00:00Z",
+          message_count: 3,
+        },
+      ],
+      "s1",
+      "LAN Scan and Xray Proxy Check",
+    );
+    expect(next[0]?.title).toBe("LAN Scan and Xray Proxy Check");
   });
 });

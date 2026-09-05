@@ -1,6 +1,7 @@
 //! Agent-loop chat execution for Local Control API (VL-ARCH-001).
 //! 本地控制 API 的 agent 循环对话执行（VL-ARCH-001）。
 
+use super::session_title::SessionTitleHub;
 use super::sessions::ChatSessionStore;
 use super::types::{ChatApiRequest, ChatApiResponse, ChatMessageInput};
 use crate::agent::agent::Agent;
@@ -197,6 +198,7 @@ pub async fn persist_chat_turn(
     session_id: Option<&str>,
     req: &ChatApiRequest,
     assistant_content: &str,
+    title_hub: Option<Arc<SessionTitleHub>>,
 ) -> Result<()> {
     let Some(id) = session_id.map(str::trim).filter(|s| !s.is_empty()) else {
         return Ok(());
@@ -224,7 +226,7 @@ pub async fn persist_chat_turn(
             let config = config.clone();
             let session_id = id.to_string();
             tokio::spawn(async move {
-                refine_session_title_background(config, session_id).await;
+                refine_session_title_background(config, session_id, title_hub.clone()).await;
             });
         }
     }
@@ -307,7 +309,11 @@ pub(crate) fn title_refine_model_candidates(config: &Config) -> Vec<String> {
     out
 }
 
-async fn refine_session_title_background(config: Config, session_id: String) {
+async fn refine_session_title_background(
+    config: Config,
+    session_id: String,
+    title_hub: Option<Arc<SessionTitleHub>>,
+) {
     let store = ChatSessionStore::new(&config.workspace_dir);
     let Some(session) = (match store.get(&session_id).await {
         Ok(s) => s,
@@ -372,6 +378,9 @@ async fn refine_session_title_background(config: Config, session_id: String) {
                     tracing::warn!(error = %format!("{e:#}"), "title refine: save failed");
                 } else {
                     tracing::info!(model = %logical, "title refine: updated session title");
+                    if let Some(hub) = &title_hub {
+                        hub.publish(&session_id, &cleaned);
+                    }
                 }
                 return;
             }

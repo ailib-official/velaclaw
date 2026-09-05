@@ -64,8 +64,14 @@ pub async fn handle_post_chat(
     .await
     {
         Ok(resp) => {
-            if let Err(e) =
-                persist_chat_turn(&config, req.session_id.as_deref(), &req, &resp.content).await
+            if let Err(e) = persist_chat_turn(
+                &config,
+                req.session_id.as_deref(),
+                &req,
+                &resp.content,
+                Some(state.session_title_hub.clone()),
+            )
+            .await
             {
                 tracing::warn!("session persist failed: {e:#}");
             }

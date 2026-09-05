@@ -3,5 +3,6 @@
 
 pub mod auth;
 pub mod runner;
+pub mod session_title;
 pub mod sessions;
 pub mod types;

@@ -43,6 +43,7 @@ pub mod host_phase;
 pub mod intent_route;
 pub mod loop_;
 pub mod memory_loader;
+pub mod probe_dedup;
 pub mod prompt;
 pub mod prompt_composer;
 pub mod session_resume;

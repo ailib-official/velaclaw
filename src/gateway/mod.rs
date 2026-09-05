@@ -303,6 +303,8 @@ pub struct AppState {
     pub approval_hub: Arc<crate::approval::ApprovalHub>,
     /// Interactive human-input prompts (choice / text / secret / handoff).
     pub human_input_hub: Arc<crate::approval::HumanInputHub>,
+    /// Refined session titles for live Web sidebar updates.
+    pub session_title_hub: Arc<local_control::session_title::SessionTitleHub>,
 }
 
 /// Run the HTTP gateway using axum with proper HTTP/1.1 compliance.
@@ -431,6 +433,7 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
     let approval_hub = Arc::new(crate::approval::ApprovalHub::new());
     let secret_slots = Arc::new(crate::approval::SecretSlotStore::new());
     let human_input_hub = Arc::new(crate::approval::HumanInputHub::new(secret_slots));
+    let session_title_hub = Arc::new(local_control::session_title::SessionTitleHub::new());
 
     let state = AppState {
         config: config_state,
@@ -454,6 +457,7 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
         cost_tracker,
         approval_hub,
         human_input_hub,
+        session_title_hub,
     };
 
     let app = http_router::build_gateway_router(state);
@@ -1374,6 +1378,7 @@ mod tests {
             human_input_hub: Arc::new(crate::approval::HumanInputHub::new(Arc::new(
                 crate::approval::SecretSlotStore::new(),
             ))),
+            session_title_hub: Arc::new(local_control::session_title::SessionTitleHub::new()),
         };
 
         let response = handle_metrics(State(state)).await.into_response();
@@ -1424,6 +1429,7 @@ mod tests {
             human_input_hub: Arc::new(crate::approval::HumanInputHub::new(Arc::new(
                 crate::approval::SecretSlotStore::new(),
             ))),
+            session_title_hub: Arc::new(local_control::session_title::SessionTitleHub::new()),
         };
 
         let response = handle_metrics(State(state)).await.into_response();
@@ -1791,6 +1797,7 @@ mod tests {
             human_input_hub: Arc::new(crate::approval::HumanInputHub::new(Arc::new(
                 crate::approval::SecretSlotStore::new(),
             ))),
+            session_title_hub: Arc::new(local_control::session_title::SessionTitleHub::new()),
         };
 
         let mut headers = HeaderMap::new();
@@ -1856,6 +1863,7 @@ mod tests {
             human_input_hub: Arc::new(crate::approval::HumanInputHub::new(Arc::new(
                 crate::approval::SecretSlotStore::new(),
             ))),
+            session_title_hub: Arc::new(local_control::session_title::SessionTitleHub::new()),
         };
 
         let headers = HeaderMap::new();
@@ -1933,6 +1941,7 @@ mod tests {
             human_input_hub: Arc::new(crate::approval::HumanInputHub::new(Arc::new(
                 crate::approval::SecretSlotStore::new(),
             ))),
+            session_title_hub: Arc::new(local_control::session_title::SessionTitleHub::new()),
         };
 
         let response = handle_webhook(
@@ -1982,6 +1991,7 @@ mod tests {
             human_input_hub: Arc::new(crate::approval::HumanInputHub::new(Arc::new(
                 crate::approval::SecretSlotStore::new(),
             ))),
+            session_title_hub: Arc::new(local_control::session_title::SessionTitleHub::new()),
         };
 
         let mut headers = HeaderMap::new();
@@ -2036,6 +2046,7 @@ mod tests {
             human_input_hub: Arc::new(crate::approval::HumanInputHub::new(Arc::new(
                 crate::approval::SecretSlotStore::new(),
             ))),
+            session_title_hub: Arc::new(local_control::session_title::SessionTitleHub::new()),
         };
 
         let mut headers = HeaderMap::new();
@@ -2095,6 +2106,7 @@ mod tests {
             human_input_hub: Arc::new(crate::approval::HumanInputHub::new(Arc::new(
                 crate::approval::SecretSlotStore::new(),
             ))),
+            session_title_hub: Arc::new(local_control::session_title::SessionTitleHub::new()),
         };
 
         let response = handle_nextcloud_talk_webhook(
@@ -2150,6 +2162,7 @@ mod tests {
             human_input_hub: Arc::new(crate::approval::HumanInputHub::new(Arc::new(
                 crate::approval::SecretSlotStore::new(),
             ))),
+            session_title_hub: Arc::new(local_control::session_title::SessionTitleHub::new()),
         };
 
         let mut headers = HeaderMap::new();

@@ -144,6 +144,8 @@ pub(crate) async fn run_tool_call_loop(
 
     let mut active_model = model.to_string();
     let mut peer_continue_used = false;
+    let mut probe_seen: HashSet<String> = HashSet::new();
+    let mut shell_rounds: u32 = 0;
 
     let tool_specs: Vec<crate::tools::ToolSpec> =
         tools_registry.iter().map(|tool| tool.spec()).collect();
@@ -588,19 +590,55 @@ pub(crate) async fn run_tool_call_loop(
         // When multiple tool calls are present and interactive CLI approval is not needed, run
         // tool executions concurrently for lower wall-clock latency.
         let mut tool_results = String::new();
-        let batch_results = tool_batch::execute_tool_batch(
-            &tool_calls,
-            tools_registry,
-            observer,
-            approval,
-            security,
-            channel_name,
-            channel_approval.clone(),
-            cancellation_token.as_ref(),
-            gate_extras,
-        )
-        .await?;
-        let individual_results: Vec<String> = batch_results.into_iter().map(|r| r.output).collect();
+        let mut skip_outputs: Vec<Option<String>> = vec![None; tool_calls.len()];
+        let mut runnable: Vec<ParsedToolCall> = Vec::new();
+        let mut runnable_idx: Vec<usize> = Vec::new();
+        let batch_has_shell = tool_calls
+            .iter()
+            .any(|c| c.name.eq_ignore_ascii_case("shell"));
+        if batch_has_shell {
+            shell_rounds = shell_rounds.saturating_add(1);
+        }
+        let shell_capped =
+            batch_has_shell && shell_rounds > crate::agent::probe_dedup::MAX_SHELL_ROUNDS_PER_HOP;
+        for (i, call) in tool_calls.iter().enumerate() {
+            if shell_capped && call.name.eq_ignore_ascii_case("shell") {
+                skip_outputs[i] = Some(crate::agent::probe_dedup::SHELL_ROUND_CAP_NOTICE.into());
+                continue;
+            }
+            let fp = crate::agent::probe_dedup::tool_probe_fingerprint(&call.name, &call.arguments);
+            if probe_seen.contains(&fp) {
+                skip_outputs[i] = Some(crate::agent::probe_dedup::REPEAT_PROBE_NOTICE.into());
+                continue;
+            }
+            probe_seen.insert(fp);
+            runnable.push(call.clone());
+            runnable_idx.push(i);
+        }
+        let mut batch_outputs: Vec<String> = vec![String::new(); tool_calls.len()];
+        if !runnable.is_empty() {
+            let batch_results = tool_batch::execute_tool_batch(
+                &runnable,
+                tools_registry,
+                observer,
+                approval,
+                security,
+                channel_name,
+                channel_approval.clone(),
+                cancellation_token.as_ref(),
+                gate_extras,
+            )
+            .await?;
+            for (call_i, result) in runnable_idx.into_iter().zip(batch_results.into_iter()) {
+                batch_outputs[call_i] = result.output;
+            }
+        }
+        for (i, skip) in skip_outputs.into_iter().enumerate() {
+            if let Some(msg) = skip {
+                batch_outputs[i] = msg;
+            }
+        }
+        let individual_results = batch_outputs;
 
         for (call, result) in tool_calls.iter().zip(individual_results.iter()) {
             let _ = writeln!(

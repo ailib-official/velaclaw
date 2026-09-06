@@ -602,16 +602,20 @@ pub(crate) async fn run_tool_call_loop(
         let shell_capped =
             batch_has_shell && shell_rounds > crate::agent::probe_dedup::MAX_SHELL_ROUNDS_PER_HOP;
         for (i, call) in tool_calls.iter().enumerate() {
-            if shell_capped && call.name.eq_ignore_ascii_case("shell") {
+            let is_shell = call.name.eq_ignore_ascii_case("shell");
+            if is_shell && shell_capped {
                 skip_outputs[i] = Some(crate::agent::probe_dedup::SHELL_ROUND_CAP_NOTICE.into());
                 continue;
             }
-            let fp = crate::agent::probe_dedup::tool_probe_fingerprint(&call.name, &call.arguments);
-            if probe_seen.contains(&fp) {
-                skip_outputs[i] = Some(crate::agent::probe_dedup::REPEAT_PROBE_NOTICE.into());
-                continue;
+            if is_shell {
+                let fp =
+                    crate::agent::probe_dedup::tool_probe_fingerprint(&call.name, &call.arguments);
+                if probe_seen.contains(&fp) {
+                    skip_outputs[i] = Some(crate::agent::probe_dedup::REPEAT_PROBE_NOTICE.into());
+                    continue;
+                }
+                probe_seen.insert(fp);
             }
-            probe_seen.insert(fp);
             runnable.push(call.clone());
             runnable_idx.push(i);
         }

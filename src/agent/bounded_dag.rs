@@ -142,6 +142,9 @@ pub fn node_task_card(dag_id: &str, node: &DagNode, index: usize, node_count: us
          State vantage (where you looked) and coverage (sample|partial|exhaustive). \
          Exclusive claims (only/none/all) require coverage=exhaustive; otherwise scope them \
          to the vantage. Label guesses as inference. \
+         Name evidence_layer (this-hop-tool | this-graph-artifact | prior-graph-artifact | \
+         host-config | protocol-dist | upstream-live | inference). \
+         Recommend changes only on a layer you observed this hop. \
          If later evidence revises an earlier exclusivity, say the revision. \
          The host delivers this text to the user; internodal handoff is only for mid-graph nodes."
     } else {
@@ -149,6 +152,7 @@ pub fn node_task_card(dag_id: &str, node: &DagNode, index: usize, node_count: us
          - vantage: this_host | remote_host | artifact | lan_passive | mixed\n\
          - coverage: sample | partial | exhaustive\n\
          - claim_kind: observation | inference | exclusivity\n\
+         - evidence_layer: this-hop-tool | this-graph-artifact | prior-graph-artifact | host-config | protocol-dist | upstream-live | inference\n\
          - verdict: ok | partial | failed\n\
          - findings: facts at this vantage (not a census of unseen vantages)\n\
          - pointers: identifiers the next node needs (not source dumps)\n\
@@ -265,6 +269,7 @@ mod tests {
         assert!(card.contains("vantage:"));
         assert!(card.contains("coverage:"));
         assert!(card.contains("claim_kind:"));
+        assert!(card.contains("evidence_layer:"));
         assert!(card.contains("pointers:"));
         assert!(!card.contains("Approve Build"));
         assert!(
@@ -279,6 +284,7 @@ mod tests {
             "last hop must not demand internodal HANDOFF: {end}"
         );
         assert!(end.contains("operator-visible conclusion"));
+        assert!(end.contains("evidence_layer"));
         assert!(end.contains("coverage=exhaustive"));
     }
 

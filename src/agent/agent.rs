@@ -11,6 +11,7 @@ use crate::security::PolicyHandle;
 use crate::tools::{HumanInputAttach, Tool, ToolSpec};
 use anyhow::Result;
 use parking_lot::Mutex;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 use velaclaw_agent_runtime::{conversation_from_tool_loop_history, reintegrate_prepared_chat};
@@ -65,6 +66,9 @@ pub struct Agent {
     progress_tx: Option<tokio::sync::mpsc::Sender<crate::agent::turn_progress::TurnProgress>>,
     /// VL-MA-004: Plan blocks mutating tools; default Build.
     host_phase: crate::agent::host_phase::HostPhase,
+    /// Per-node shell probe governor for the current live DAG (VL-NA-040).
+    hop_probes: HashMap<String, Arc<std::sync::Mutex<crate::agent::probe_dedup::HopProbeGovernor>>>,
+    current_hop_probe: Option<Arc<std::sync::Mutex<crate::agent::probe_dedup::HopProbeGovernor>>>,
 }
 
 pub struct AgentBuilder {
@@ -330,6 +334,8 @@ impl AgentBuilder {
             cancellation_token: None,
             progress_tx: None,
             host_phase: crate::agent::host_phase::HostPhase::Build,
+            hop_probes: HashMap::new(),
+            current_hop_probe: None,
         })
     }
 }
@@ -418,6 +424,29 @@ impl Agent {
         {
             self.emit_turn_progress(progress);
         }
+    }
+
+    #[cfg(feature = "ai-protocol")]
+    fn flush_hop_probe_notices(
+        &mut self,
+        probe: &Arc<std::sync::Mutex<crate::agent::probe_dedup::HopProbeGovernor>>,
+        prefix: &mut String,
+    ) {
+        self.current_hop_probe = None;
+        for note in probe
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .drain_notices()
+        {
+            self.push_operator_note(prefix, &note);
+        }
+    }
+
+    #[cfg(feature = "ai-protocol")]
+    fn end_live_graph_host_state(&mut self) {
+        self.security.set_graph_scratch_rel(None);
+        self.current_hop_probe = None;
+        self.hop_probes.clear();
     }
 
     fn dag_contact_labels(
@@ -937,6 +966,8 @@ impl Agent {
             }
             let mut last_body = String::new();
             let mut operator_prefix = String::new();
+            self.hop_probes.clear();
+            self.current_hop_probe = None;
             let contacts = self.dag_contact_labels(&planned.dag, &planned.order);
             self.emit_turn_progress(live_dag_progress(
                 &dag_id,
@@ -971,7 +1002,7 @@ impl Agent {
                     .find(|n| n.id == id)
                     .cloned()
                     .ok_or_else(|| anyhow::anyhow!("bounded DAG missing node {id}"))?;
-                let retrieve = crate::agent::bounded_dag_context::node_retrieve_texts(
+                let mut retrieve = crate::agent::bounded_dag_context::node_retrieve_texts(
                     self.memory.as_ref(),
                     &self.workspace_dir,
                     self.session_id.as_str(),
@@ -979,6 +1010,31 @@ impl Agent {
                     &prior,
                 )
                 .await;
+                let _ = crate::agent::bounded_dag_context::ensure_graph_scratch(
+                    &self.workspace_dir,
+                    self.session_id.as_str(),
+                    dag_id.as_str(),
+                );
+                let scratch = crate::agent::bounded_dag_context::graph_scratch_rel(
+                    self.session_id.as_str(),
+                    dag_id.as_str(),
+                );
+                self.security.set_graph_scratch_rel(Some(scratch));
+                if let Some(listing) = crate::agent::bounded_dag_context::scratch_retrieve_text(
+                    &self.workspace_dir,
+                    self.session_id.as_str(),
+                    dag_id.as_str(),
+                ) {
+                    retrieve.push(listing);
+                }
+                if let Ok(Some(fail)) = crate::agent::bounded_dag_live::load_dag_fail(
+                    self.memory.as_ref(),
+                    self.session_id.as_str(),
+                )
+                .await
+                {
+                    retrieve.push(crate::agent::bounded_dag_context::cached_fail_block(&fail));
+                }
                 let contact = crate::agent::bounded_dag_context::contact_for_live_node(
                     &node,
                     &self.model_name,
@@ -1005,6 +1061,16 @@ impl Agent {
                 self.prepare_conversation_history_inner(false, Some(contact.model.as_str()))
                     .await?;
                 self.last_turn_model = Some(contact.to_turn_decision());
+                let probe_rc = self
+                    .hop_probes
+                    .entry(id.clone())
+                    .or_insert_with(|| {
+                        Arc::new(std::sync::Mutex::new(
+                            crate::agent::probe_dedup::HopProbeGovernor::new(),
+                        ))
+                    })
+                    .clone();
+                self.current_hop_probe = Some(probe_rc.clone());
                 let contacts = self.dag_contact_labels(&planned.dag, &planned.order);
                 self.emit_turn_progress(live_dag_progress(
                     &dag_id,
@@ -1018,9 +1084,17 @@ impl Agent {
                     Some(&contacts),
                 ));
                 let text = match self.invoke_tool_loop_resolved(contact.model.clone()).await {
-                    Ok(text) => text,
-                    Err(err) if is_tool_loop_cancelled(&err) => return Err(err),
+                    Ok(text) => {
+                        self.flush_hop_probe_notices(&probe_rc, &mut operator_prefix);
+                        text
+                    }
+                    Err(err) if is_tool_loop_cancelled(&err) => {
+                        self.current_hop_probe = None;
+                        self.security.set_graph_scratch_rel(None);
+                        return Err(err);
+                    }
                     Err(err) => {
+                        self.flush_hop_probe_notices(&probe_rc, &mut operator_prefix);
                         let err_s = format!("{err:#}");
                         let class = crate::providers::hint_peer::classify_hop_error(&err_s);
                         match crate::agent::bounded_dag_live::decide_work_node_fail(
@@ -1088,6 +1162,7 @@ impl Agent {
                                 )
                                 .await;
                                 self.push_operator_note(&mut operator_prefix, &stop);
+                                self.end_live_graph_host_state();
                                 return Ok(operator_prefix);
                             }
                         }
@@ -1144,6 +1219,7 @@ impl Agent {
                         self.session_id.as_str(),
                     )
                     .await;
+                    self.end_live_graph_host_state();
                     return self
                         .parlor_live_reply(&graph_task, &last_body, &operator_prefix)
                         .await;
@@ -1167,6 +1243,7 @@ impl Agent {
                             self.session_id.as_str(),
                         )
                         .await;
+                        self.end_live_graph_host_state();
                         return self
                             .parlor_live_reply(&graph_task, &last_body, &operator_prefix)
                             .await;
@@ -1217,6 +1294,7 @@ impl Agent {
             } else {
                 last_body
             };
+            self.end_live_graph_host_state();
             return self
                 .parlor_live_reply(&graph_task, &raw, &operator_prefix)
                 .await;
@@ -1252,7 +1330,7 @@ impl Agent {
             &prior,
         )
         .await?;
-        Ok(format!("{prefix}{parlor}"))
+        Ok(parlor)
     }
 
     #[cfg(feature = "ai-protocol")]
@@ -1333,6 +1411,7 @@ impl Agent {
             host_decide: self.host_decide_host.as_ref(),
             surface: velaclaw_agent_runtime::SoftFailSurface::Web,
             peer_logical_ids: &self.peer_logical_ids,
+            probe: self.current_hop_probe.as_ref().map(|c| c.as_ref()),
         };
 
         let render_opts = self.cli_render.unwrap_or(RenderOpts {

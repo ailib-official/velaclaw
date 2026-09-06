@@ -14,7 +14,7 @@ use crate::orchestration::{TurnModelDecision, TurnModelSource};
 use crate::providers::ChatMessage;
 use anyhow::Result;
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Clip node output stored as a Daily memory row (layer-3 / tool_result retrieve).
 pub const ARTIFACT_MAX_CHARS: usize = 4_096;
@@ -205,6 +205,88 @@ pub async fn node_retrieve_texts(
     }
 
     out
+}
+
+#[must_use]
+pub fn graph_run_token(session_id: &str, dag_id: &str) -> String {
+    format!(
+        "{}-{}",
+        sanitize_id_token(session_id),
+        sanitize_id_token(dag_id)
+    )
+}
+
+#[must_use]
+pub fn graph_scratch_rel(session_id: &str, dag_id: &str) -> String {
+    format!(
+        "{}/graphs/{}/{}",
+        crate::security::policy::SCRATCH_REL,
+        sanitize_id_token(session_id),
+        sanitize_id_token(dag_id)
+    )
+}
+
+fn sanitize_id_token(raw: &str) -> String {
+    raw.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .take(48)
+        .collect()
+}
+
+pub fn ensure_graph_scratch(
+    workspace: &Path,
+    session_id: &str,
+    dag_id: &str,
+) -> std::io::Result<PathBuf> {
+    let rel = graph_scratch_rel(session_id, dag_id);
+    let dir = workspace.join(&rel);
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir)
+}
+
+#[must_use]
+pub fn cached_fail_block(fail: &crate::agent::bounded_dag_live::DagFailCursor) -> String {
+    format!(
+        "[cached hop_fail node={} class={} evidence_layer=prior-graph-artifact]\n{}",
+        fail.node_id,
+        fail.fail_class,
+        fail.err.chars().take(800).collect::<String>()
+    )
+}
+
+/// INPUTS listing: this-graph scratch + same-session prior runs. Never lists other sessions.
+#[must_use]
+pub fn scratch_retrieve_text(workspace: &Path, session_id: &str, dag_id: &str) -> Option<String> {
+    let current = graph_scratch_rel(session_id, dag_id);
+    let session_root = workspace.join(format!(
+        "{}/graphs/{}",
+        crate::security::policy::SCRATCH_REL,
+        sanitize_id_token(session_id)
+    ));
+    let mut lines = vec![format!(
+        "[this-graph-artifact scratch={current}]\nWrite temp files only under this directory. Do not treat other tmp files as this-task evidence."
+    )];
+    if let Ok(rd) = std::fs::read_dir(&session_root) {
+        for ent in rd.flatten() {
+            let name = ent.file_name();
+            let name = name.to_string_lossy();
+            if name.as_ref() == sanitize_id_token(dag_id) {
+                continue;
+            }
+            lines.push(format!(
+                "[prior-graph-artifact scratch={}/graphs/{session_seg}/{name}]",
+                crate::security::policy::SCRATCH_REL,
+                session_seg = sanitize_id_token(session_id)
+            ));
+        }
+    }
+    Some(lines.join("\n"))
 }
 
 fn prior_ids_for_node<'a>(node: &DagNode, prior_ids: &'a [String]) -> &'a [String] {
@@ -554,5 +636,44 @@ mod tests {
         let mid = node_retrieve_texts(mem.as_ref(), tmp.path(), "sess", b, &["a".into()]).await;
         assert!(mid.iter().any(|t| t.contains("ALPHA_ONLY")));
         assert!(!mid.iter().any(|t| t.contains("BETA_ONLY")));
+    }
+
+    #[test]
+    fn scratch_listing_labels_this_and_prior_graphs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let session = "sess-a";
+        ensure_graph_scratch(tmp.path(), session, "run1").unwrap();
+        ensure_graph_scratch(tmp.path(), session, "run2").unwrap();
+        std::fs::create_dir_all(
+            tmp.path()
+                .join(graph_scratch_rel("other-session", "foreign")),
+        )
+        .unwrap();
+        let text = scratch_retrieve_text(tmp.path(), session, "run1").unwrap();
+        assert!(text.contains("this-graph-artifact"), "{text}");
+        assert!(text.contains("prior-graph-artifact"), "{text}");
+        assert!(text.contains("run2"), "{text}");
+        assert!(!text.contains("foreign"), "{text}");
+        assert!(!text.contains("other-session"), "{text}");
+    }
+
+    #[test]
+    fn cached_fail_block_is_labeled_cached_not_upstream_live() {
+        let fail = crate::agent::bounded_dag_live::DagFailCursor {
+            node_id: "n1".into(),
+            index: 0,
+            err: "timeout talking to api".into(),
+            dag_id: "run1".into(),
+            auto_replan_count: 1,
+            fail_class: "timeout".into(),
+        };
+        let block = cached_fail_block(&fail);
+        assert!(block.contains("[cached hop_fail"), "{block}");
+        assert!(
+            block.contains("evidence_layer=prior-graph-artifact"),
+            "{block}"
+        );
+        assert!(!block.contains("upstream-live"), "{block}");
+        assert!(block.contains("n1"), "{block}");
     }
 }

@@ -656,6 +656,10 @@ pub async fn run(
                                 dag.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
                             let mut last_body = String::new();
                             let mut operator_prefix = String::new();
+                            let mut hop_probes: HashMap<
+                                String,
+                                Arc<Mutex<crate::agent::probe_dedup::HopProbeGovernor>>,
+                            > = HashMap::new();
                             let mut prior: Vec<String> = Vec::new();
                             for id in order.iter().take(planned.resume_from) {
                                 prior.push(id.clone());
@@ -702,7 +706,7 @@ pub async fn run(
                                 let node = by_id.get(id.as_str()).ok_or_else(|| {
                                     anyhow::anyhow!("bounded DAG missing node {id}")
                                 })?;
-                                let retrieve =
+                                let mut retrieve =
                                     crate::agent::bounded_dag_context::node_retrieve_texts(
                                         mem.as_ref(),
                                         &config.workspace_dir,
@@ -711,6 +715,37 @@ pub async fn run(
                                         &prior,
                                     )
                                     .await;
+                                let _ = crate::agent::bounded_dag_context::ensure_graph_scratch(
+                                    &config.workspace_dir,
+                                    session_id.as_str(),
+                                    dag.id.as_str(),
+                                );
+                                security.set_graph_scratch_rel(Some(
+                                    crate::agent::bounded_dag_context::graph_scratch_rel(
+                                        session_id.as_str(),
+                                        dag.id.as_str(),
+                                    ),
+                                ));
+                                if let Some(listing) =
+                                    crate::agent::bounded_dag_context::scratch_retrieve_text(
+                                        &config.workspace_dir,
+                                        session_id.as_str(),
+                                        dag.id.as_str(),
+                                    )
+                                {
+                                    retrieve.push(listing);
+                                }
+                                if let Ok(Some(fail)) =
+                                    crate::agent::bounded_dag_live::load_dag_fail(
+                                        mem.as_ref(),
+                                        session_id.as_str(),
+                                    )
+                                    .await
+                                {
+                                    retrieve.push(
+                                        crate::agent::bounded_dag_context::cached_fail_block(&fail),
+                                    );
+                                }
                                 let contact =
                                     crate::agent::bounded_dag_context::contact_for_live_node(
                                         node,
@@ -759,6 +794,14 @@ pub async fn run(
                                     crate::protocol_registry::provider_id_from_logical(
                                         &contact.model,
                                     );
+                                let probe_cell = hop_probes
+                                    .entry(node.id.clone())
+                                    .or_insert_with(|| {
+                                        Arc::new(Mutex::new(
+                                            crate::agent::probe_dedup::HopProbeGovernor::new(),
+                                        ))
+                                    })
+                                    .clone();
                                 let piece = match run_tool_call_loop(
                                     provider.as_ref(),
                                     &mut history,
@@ -786,13 +829,30 @@ pub async fn run(
                                         host_decide: None,
                                         surface: velaclaw_agent_runtime::SoftFailSurface::Cli,
                                         peer_logical_ids: &[],
+                                        probe: Some(probe_cell.as_ref()),
                                     }),
                                     Some(&cli_gate_extras),
                                 )
                                 .await
                                 {
-                                    Ok(piece) => piece,
-                                    Err(err) if is_tool_loop_cancelled(&err) => return Err(err),
+                                    Ok(piece) => {
+                                        let notes = probe_cell
+                                            .lock()
+                                            .unwrap_or_else(|e| e.into_inner())
+                                            .drain_notices();
+                                        for note in notes {
+                                            crate::agent::bounded_dag_delivery::print_operator_note(
+                                                &mut operator_prefix,
+                                                &note,
+                                                None,
+                                            );
+                                        }
+                                        piece
+                                    }
+                                    Err(err) if is_tool_loop_cancelled(&err) => {
+                                        security.set_graph_scratch_rel(None);
+                                        return Err(err);
+                                    }
                                     Err(err) => {
                                         let err_s = format!("{err:#}");
                                         let class =
@@ -836,6 +896,7 @@ pub async fn run(
                                                 },
                                             )
                                             .await;
+                                            security.set_graph_scratch_rel(None);
                                             return Ok({
                                                 crate::agent::bounded_dag_delivery::print_operator_note(
                                                     &mut operator_prefix,
@@ -885,6 +946,7 @@ pub async fn run(
                                 session_id.as_str(),
                             )
                             .await;
+                            security.set_graph_scratch_rel(None);
                             let raw = if last_body.is_empty() {
                                 outline
                             } else {
@@ -899,18 +961,15 @@ pub async fn run(
                                             .map(|m| m.content.as_str()),
                                     ),
                                 );
-                            format!(
-                                "{operator_prefix}{}",
-                                crate::agent::bounded_dag_delivery::host_delivery(
-                                    provider.as_ref(),
-                                    &model_name,
-                                    temperature,
-                                    &graph_task,
-                                    &raw,
-                                    &prior,
-                                )
-                                .await?
+                            crate::agent::bounded_dag_delivery::host_delivery(
+                                provider.as_ref(),
+                                &model_name,
+                                temperature,
+                                &graph_task,
+                                &raw,
+                                &prior,
                             )
+                            .await?
                         }
                     }
                     crate::agent::bounded_dag_live::LiveFirstHop::ChatOnly { reply } => {
@@ -957,6 +1016,7 @@ pub async fn run(
                                 host_decide: None,
                                 surface: velaclaw_agent_runtime::SoftFailSurface::Cli,
                                 peer_logical_ids: &[],
+                                probe: None,
                             }),
                             Some(&cli_gate_extras),
                         )
@@ -990,8 +1050,10 @@ pub async fn run(
                     Some(SoftFailLoopCtx {
                         session_key: session_id.as_str(),
                         config: Some(&config),
+                        host_decide: None,
                         surface: velaclaw_agent_runtime::SoftFailSurface::Cli,
                         peer_logical_ids: &[],
+                        probe: None,
                     }),
                     Some(&cli_gate_extras),
                 )
@@ -1317,6 +1379,10 @@ pub async fn run(
                                 dag.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
                             let mut last_body = String::new();
                             let mut operator_prefix = String::new();
+                            let mut hop_probes: HashMap<
+                                String,
+                                Arc<Mutex<crate::agent::probe_dedup::HopProbeGovernor>>,
+                            > = HashMap::new();
                             let mut prior: Vec<String> = Vec::new();
                             let mut completed: HashSet<String> = HashSet::new();
                             for id in order.iter().take(planned.resume_from) {
@@ -1386,7 +1452,7 @@ pub async fn run(
                                 let node = by_id.get(id.as_str()).ok_or_else(|| {
                                     anyhow::anyhow!("bounded DAG missing node {id}")
                                 })?;
-                                let retrieve =
+                                let mut retrieve =
                                     crate::agent::bounded_dag_context::node_retrieve_texts(
                                         mem.as_ref(),
                                         &config.workspace_dir,
@@ -1395,6 +1461,37 @@ pub async fn run(
                                         &prior,
                                     )
                                     .await;
+                                let _ = crate::agent::bounded_dag_context::ensure_graph_scratch(
+                                    &config.workspace_dir,
+                                    session_id.as_str(),
+                                    dag.id.as_str(),
+                                );
+                                security.set_graph_scratch_rel(Some(
+                                    crate::agent::bounded_dag_context::graph_scratch_rel(
+                                        session_id.as_str(),
+                                        dag.id.as_str(),
+                                    ),
+                                ));
+                                if let Some(listing) =
+                                    crate::agent::bounded_dag_context::scratch_retrieve_text(
+                                        &config.workspace_dir,
+                                        session_id.as_str(),
+                                        dag.id.as_str(),
+                                    )
+                                {
+                                    retrieve.push(listing);
+                                }
+                                if let Ok(Some(fail)) =
+                                    crate::agent::bounded_dag_live::load_dag_fail(
+                                        mem.as_ref(),
+                                        session_id.as_str(),
+                                    )
+                                    .await
+                                {
+                                    retrieve.push(
+                                        crate::agent::bounded_dag_context::cached_fail_block(&fail),
+                                    );
+                                }
                                 let contact = crate::agent::bounded_dag_context::contact_for_live_node(
                                     node,
                                     &session_model,
@@ -1463,6 +1560,14 @@ pub async fn run(
                                     ),
                                     Some(&fold_cache),
                                 );
+                                let probe_cell = hop_probes
+                                    .entry(node.id.clone())
+                                    .or_insert_with(|| {
+                                        Arc::new(Mutex::new(
+                                            crate::agent::probe_dedup::HopProbeGovernor::new(),
+                                        ))
+                                    })
+                                    .clone();
                                 let piece = match run_tool_call_loop(
                                     provider.as_ref(),
                                     &mut history,
@@ -1490,13 +1595,30 @@ pub async fn run(
                                         host_decide: None,
                                         surface: velaclaw_agent_runtime::SoftFailSurface::Cli,
                                         peer_logical_ids: &[],
+                                        probe: Some(probe_cell.as_ref()),
                                     }),
                                     Some(&cli_gate_extras),
                                 )
                                 .await
                                 {
-                                    Ok(piece) => piece,
-                                    Err(err) if is_tool_loop_cancelled(&err) => return Err(err),
+                                    Ok(piece) => {
+                                        let notes = probe_cell
+                                            .lock()
+                                            .unwrap_or_else(|e| e.into_inner())
+                                            .drain_notices();
+                                        for note in notes {
+                                            crate::agent::bounded_dag_delivery::print_operator_note(
+                                                &mut operator_prefix,
+                                                &note,
+                                                None,
+                                            );
+                                        }
+                                        piece
+                                    }
+                                    Err(err) if is_tool_loop_cancelled(&err) => {
+                                        security.set_graph_scratch_rel(None);
+                                        return Err(err);
+                                    }
                                     Err(err) => {
                                         let err_s = format!("{err:#}");
                                         let class =
@@ -1573,6 +1695,7 @@ pub async fn run(
                                             ),
                                             Some(&fold_cache),
                                         );
+                                        security.set_graph_scratch_rel(None);
                                         return Ok(operator_prefix);
                                             }
                                         }
@@ -1631,6 +1754,7 @@ pub async fn run(
                                 session_id.as_str(),
                             )
                             .await;
+                            security.set_graph_scratch_rel(None);
                             let raw = if last_body.is_empty() {
                                 outline
                             } else {
@@ -1644,9 +1768,7 @@ pub async fn run(
                                         .map(|m| m.content.as_str()),
                                 ),
                             );
-                            Ok(format!(
-                                "{operator_prefix}{}",
-                                crate::agent::bounded_dag_delivery::host_delivery(
+                            Ok(crate::agent::bounded_dag_delivery::host_delivery(
                                     provider.as_ref(),
                                     &session_model,
                                     temperature,
@@ -1654,8 +1776,7 @@ pub async fn run(
                                     &raw,
                                     &prior,
                                 )
-                                .await?
-                            ))
+                                .await?)
                         }
                             crate::agent::bounded_dag_live::LiveFirstHop::ChatOnly { reply } => {
                                 history.push(ChatMessage::assistant(&reply));
@@ -1701,6 +1822,7 @@ pub async fn run(
                                     host_decide: None,
                                     surface: velaclaw_agent_runtime::SoftFailSurface::Cli,
                                     peer_logical_ids: &[],
+                                        probe: None,
                                 }),
                                 Some(&cli_gate_extras),
                             )
@@ -1736,8 +1858,10 @@ pub async fn run(
                         Some(SoftFailLoopCtx {
                             session_key: session_id.as_str(),
                             config: Some(&config),
+                            host_decide: None,
                             surface: velaclaw_agent_runtime::SoftFailSurface::Cli,
                             peer_logical_ids: &[],
+                            probe: None,
                         }),
                         Some(&cli_gate_extras),
                     )

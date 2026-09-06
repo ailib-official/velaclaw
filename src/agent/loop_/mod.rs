@@ -890,6 +890,15 @@ pub async fn run(
                             } else {
                                 last_body
                             };
+                            let prior =
+                                crate::agent::bounded_dag_delivery::collect_prior_exclusivity(
+                                    std::iter::once(operator_prefix.as_str()).chain(
+                                        history
+                                            .iter()
+                                            .filter(|m| m.role == "assistant")
+                                            .map(|m| m.content.as_str()),
+                                    ),
+                                );
                             format!(
                                 "{operator_prefix}{}",
                                 crate::agent::bounded_dag_delivery::host_delivery(
@@ -898,6 +907,7 @@ pub async fn run(
                                     temperature,
                                     &graph_task,
                                     &raw,
+                                    &prior,
                                 )
                                 .await?
                             )
@@ -1626,6 +1636,14 @@ pub async fn run(
                             } else {
                                 last_body
                             };
+                            let prior = crate::agent::bounded_dag_delivery::collect_prior_exclusivity(
+                                std::iter::once(operator_prefix.as_str()).chain(
+                                    history
+                                        .iter()
+                                        .filter(|m| m.role == "assistant")
+                                        .map(|m| m.content.as_str()),
+                                ),
+                            );
                             Ok(format!(
                                 "{operator_prefix}{}",
                                 crate::agent::bounded_dag_delivery::host_delivery(
@@ -1634,6 +1652,7 @@ pub async fn run(
                                     temperature,
                                     &graph_task,
                                     &raw,
+                                    &prior,
                                 )
                                 .await?
                             ))

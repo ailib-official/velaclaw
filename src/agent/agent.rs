@@ -1232,12 +1232,24 @@ impl Agent {
         last_body: &str,
         prefix: &str,
     ) -> Result<String> {
+        let hist: Vec<&str> = self
+            .history
+            .iter()
+            .filter_map(|m| match m {
+                ConversationMessage::Chat(c) if c.role == "assistant" => Some(c.content.as_str()),
+                _ => None,
+            })
+            .collect();
+        let prior = crate::agent::bounded_dag_delivery::collect_prior_exclusivity(
+            std::iter::once(prefix).chain(hist),
+        );
         let parlor = crate::agent::bounded_dag_delivery::host_delivery(
             self.provider.as_ref(),
             &self.model_name,
             self.temperature,
             user_task,
             last_body,
+            &prior,
         )
         .await?;
         Ok(format!("{prefix}{parlor}"))

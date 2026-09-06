@@ -66,3 +66,14 @@ export function formatSessionMeta(session: SessionSummary): string {
   }
   return parts.join(" · ");
 }
+
+/** Apply a pushed session title without waiting for GET /api/sessions. */
+export function applySessionTitle(
+  sessions: SessionSummary[],
+  sessionId: string,
+  title: string,
+): SessionSummary[] {
+  const trimmed = title.trim();
+  if (!trimmed) return sessions;
+  return sessions.map((s) => (s.id === sessionId ? { ...s, title: trimmed } : s));
+}

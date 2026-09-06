@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, tick } from "svelte";
+  import { onDestroy, onMount, tick } from "svelte";
   import {
     appendAssistantDelta,
     appendSystemNotice,
@@ -7,6 +7,7 @@
     applyStepFrame,
     clearStatusMessages,
     lastAssistantHasVelaClawNotice,
+    listenSessionEvents,
     looksLikeVelaClawNotice,
     outboundChatHistory,
     streamChat,
@@ -49,6 +50,7 @@
   import { renderMarkdown } from "./lib/markdown";
   import type { ApprovalRequiredPayload, HumanInputRequiredPayload } from "./lib/chat";
   import {
+    applySessionTitle,
     formatSessionMeta,
     resolveInitialSessionId,
     saveActiveSessionId,
@@ -75,6 +77,7 @@
   let status = $state("connecting");
   let toast = $state("");
   let cancelStream: (() => void) | null = null;
+  let stopSessionEvents: (() => void) | null = null;
 
   let memoryQuery = $state("");
   let memoryEntries = $state<MemoryEntry[]>([]);
@@ -155,6 +158,20 @@
       status = "offline";
       showToast(e instanceof Error ? e.message : String(e));
     }
+  }
+
+  function applyPushedSessionTitle(sessionId: string, title: string) {
+    sessions = applySessionTitle(sessions, sessionId, title);
+  }
+
+  function startSessionEvents() {
+    stopSessionEvents?.();
+    stopSessionEvents = null;
+    if (!token) return;
+    stopSessionEvents = listenSessionEvents({
+      token,
+      onSessionTitle: applyPushedSessionTitle,
+    });
   }
 
   function stopStreaming() {
@@ -476,6 +493,7 @@
   }
 
   onMount(() => {
+    startSessionEvents();
     void (async () => {
       await refreshMeta();
       await loadSessions();
@@ -491,8 +509,14 @@
     })();
   });
 
+  onDestroy(() => {
+    stopSessionEvents?.();
+    stopSessionEvents = null;
+  });
+
   async function saveTokenAndRefresh() {
     saveToken(token);
+    startSessionEvents();
     await refreshMeta();
     await loadSessions();
     await resumeInitialSession();
@@ -586,6 +610,7 @@
         pendingHumanInput = null;
         void focusChatInput();
       },
+      onSessionTitle: applyPushedSessionTitle,
       onDone: () => {
         streaming = false;
         cancelStream = null;

@@ -40,7 +40,8 @@ export interface WsServerFrame {
     | "status"
     | "step"
     | "dag"
-    | "cancelled";
+    | "cancelled"
+    | "session_title";
   content?: string;
   message?: string;
   usage?: { input_tokens: number; output_tokens: number };
@@ -63,6 +64,8 @@ export interface WsServerFrame {
   fallback?: boolean;
   outline?: string;
   nodes?: DagNodeFrame[];
+  session_id?: string;
+  title?: string;
 }
 
 export interface DagNodeFrame {
@@ -119,6 +122,7 @@ export interface StreamChatOptions {
   }) => void;
   onDag?: (payload: DagFrame) => void;
   onCancelled?: (message?: string) => void;
+  onSessionTitle?: (sessionId: string, title: string) => void;
 }
 
 function wsUrl(token: string): string {
@@ -209,6 +213,8 @@ export function streamChat(opts: StreamChatOptions): () => void {
         options: frame.options ?? [],
         risk_note: frame.risk_note,
       });
+    } else if (frame.type === "session_title" && frame.session_id && frame.title) {
+      opts.onSessionTitle?.(frame.session_id, frame.title);
     } else if (frame.type === "done") {
       opts.onDone(frame);
       socket.close();
@@ -236,6 +242,50 @@ export function streamChat(opts: StreamChatOptions): () => void {
       }
     }
     socket.close();
+  };
+}
+
+/** Long-lived WebSocket that receives `session_title` after background refine. */
+export function listenSessionEvents(opts: {
+  token: string;
+  onSessionTitle: (sessionId: string, title: string) => void;
+  onError?: (message: string) => void;
+}): () => void {
+  let closed = false;
+  let socket: WebSocket | null = null;
+  let retry: number | undefined;
+
+  const connect = () => {
+    if (closed) return;
+    socket = new WebSocket(wsUrl(opts.token));
+    socket.addEventListener("open", () => {
+      socket?.send(JSON.stringify({ type: "listen" }));
+    });
+    socket.addEventListener("message", (ev) => {
+      let frame: WsServerFrame;
+      try {
+        frame = JSON.parse(String(ev.data));
+      } catch {
+        return;
+      }
+      if (frame.type === "session_title" && frame.session_id && frame.title) {
+        opts.onSessionTitle(frame.session_id, frame.title);
+      }
+    });
+    socket.addEventListener("error", () => {
+      if (!closed) opts.onError?.("Session event socket failed");
+    });
+    socket.addEventListener("close", () => {
+      if (closed) return;
+      retry = window.setTimeout(connect, 2000);
+    });
+  };
+
+  connect();
+  return () => {
+    closed = true;
+    if (retry !== undefined) window.clearTimeout(retry);
+    socket?.close();
   };
 }
 

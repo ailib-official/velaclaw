@@ -101,6 +101,28 @@ async fn handle_ws_socket(socket: WebSocket, state: AppState) {
     let (sink, mut stream) = socket.split();
     let sink = Arc::new(Mutex::new(sink));
 
+    let mut title_sub = state.session_title_hub.subscribe();
+    let title_sink = sink.clone();
+    let title_forwarder = tokio::spawn(async move {
+        loop {
+            match title_sub.recv().await {
+                Ok(ev) => {
+                    let frame = WsServerMessage::SessionTitle {
+                        session_id: ev.session_id,
+                        title: ev.title,
+                    };
+                    if send_frame(title_sink.clone(), &frame).await.is_err() {
+                        break;
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    tracing::warn!(skipped = n, "session title subscriber lagged; continuing");
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
+
     loop {
         let msg = match stream.next().await {
             Some(Ok(Message::Text(text))) => text,
@@ -124,6 +146,17 @@ async fn handle_ws_socket(socket: WebSocket, state: AppState) {
                 continue;
             }
         };
+
+        if client.msg_type == "listen" {
+            // Park until the client closes; title_forwarder keeps pushing.
+            while let Some(frame) = stream.next().await {
+                match frame {
+                    Ok(Message::Close(_)) | Err(_) => break,
+                    Ok(_) => {}
+                }
+            }
+            break;
+        }
 
         if client.msg_type == "cancel" {
             continue;
@@ -267,8 +300,14 @@ async fn handle_ws_socket(socket: WebSocket, state: AppState) {
 
         match classify_turn_result(chat_result) {
             TurnFinish::Completed(resp) => {
-                if let Err(e) =
-                    persist_chat_turn(&config, req.session_id.as_deref(), &req, &resp.content).await
+                if let Err(e) = persist_chat_turn(
+                    &config,
+                    req.session_id.as_deref(),
+                    &req,
+                    &resp.content,
+                    Some(state.session_title_hub.clone()),
+                )
+                .await
                 {
                     tracing::warn!("session persist failed: {e:#}");
                 }
@@ -313,6 +352,7 @@ async fn handle_ws_socket(socket: WebSocket, state: AppState) {
             }
         }
     }
+    title_forwarder.abort();
 }
 
 async fn send_frame(sink: Arc<Mutex<WsSink>>, frame: &WsServerMessage) -> Result<(), ()> {

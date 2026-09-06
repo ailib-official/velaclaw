@@ -16,7 +16,8 @@ Exclusive wording (only/none/all of a population) is allowed only when coverage 
 Otherwise say what this vantage saw, not what the unseen rest of the world is.\n\
 If a later artifact expands vantage, revise earlier exclusive claims instead of leaving both.\n\
 Do not invent geography, identity, or type labels that are not in the artifacts; mark guesses as inference.\n\
-If evidence is incomplete, say what is known and the single next action.\n";
+If evidence is incomplete, say what is known and the single next action.\n\
+When PRIOR OPERATOR-VISIBLE CLAIMS are provided, later evidence supersedes earlier exclusivity.\n";
 
 /// True when `text` is a work-node internodal envelope, not a parlor reply.
 #[must_use]
@@ -201,6 +202,47 @@ pub fn stamp_unscoped_exclusivity(text: &str, cjk: bool) -> String {
         "(Scope: current vantage only; not an exhaustive census.)\n"
     };
     format!("{stamp}{text}")
+}
+
+/// Join earlier operator-visible text that used exclusive wording (session or mid-hop).
+#[must_use]
+pub fn collect_prior_exclusivity<'a, I>(chunks: I) -> String
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    let mut out = String::new();
+    for chunk in chunks {
+        if !has_exclusivity_quantifier(chunk) {
+            continue;
+        }
+        if !out.is_empty() {
+            out.push_str("\n---\n");
+        }
+        let clip: String = chunk.chars().take(800).collect();
+        out.push_str(&clip);
+    }
+    out.chars().take(4_000).collect()
+}
+
+/// Lead-in when later evidence must supersede earlier exclusive wording.
+#[must_use]
+pub fn revision_lead(prior_visible: &str, latest: &str, cjk: bool) -> Option<String> {
+    if !has_exclusivity_quantifier(prior_visible) {
+        return None;
+    }
+    let later_expands = declares_exhaustive_coverage(latest)
+        || latest.to_ascii_lowercase().contains("vantage: remote")
+        || latest.to_ascii_lowercase().contains("vantage: artifact")
+        || latest.contains("观测范围")
+        || latest.chars().count() > 120;
+    if !later_expands && has_exclusivity_quantifier(latest) {
+        return None;
+    }
+    Some(if cjk {
+        "修订：此前排他结论来自更窄观测；以下以后续证据为准。\n".into()
+    } else {
+        "Revision: earlier exclusive claims were from a narrower vantage; later evidence below supersedes them.\n".into()
+    })
 }
 
 /// Last-hop user body: internodal-free, then unscoped-exclusivity stamp.
@@ -435,18 +477,32 @@ pub async fn host_delivery(
     temperature: f64,
     user_task: &str,
     last_node_body: &str,
+    prior_visible: &str,
 ) -> Result<String> {
     let stripped = strip_internodal_suffix(last_node_body);
-    if looks_like_internodal_envelope(&stripped) {
-        let rewritten = match delivery_chat(provider, model, temperature, user_task, &stripped)
-            .await
+    let body = if looks_like_internodal_envelope(&stripped) {
+        match delivery_chat(
+            provider,
+            model,
+            temperature,
+            user_task,
+            &stripped,
+            prior_visible,
+        )
+        .await
         {
             Ok(text) if !text.trim().is_empty() && !looks_like_internodal_envelope(&text) => text,
             Ok(_) | Err(_) => parlor_fallback(user_task, &stripped),
-        };
-        return Ok(finalize_operator_visible(user_task, &rewritten));
+        }
+    } else {
+        last_node_body.to_string()
+    };
+    let mut visible = finalize_operator_visible(user_task, &body);
+    let cjk = crate::agent::bounded_dag_live::user_prefers_cjk(user_task);
+    if let Some(lead) = revision_lead(prior_visible, &visible, cjk) {
+        visible = format!("{lead}{visible}");
     }
-    Ok(finalize_operator_visible(user_task, last_node_body))
+    Ok(visible)
 }
 
 async fn delivery_chat(
@@ -455,11 +511,23 @@ async fn delivery_chat(
     temperature: f64,
     user_task: &str,
     internodal: &str,
+    prior_visible: &str,
 ) -> Result<String> {
     let clip: String = internodal.chars().take(6_000).collect();
+    let prior: String = prior_visible.chars().take(4_000).collect();
+    let mut user = format!("USER TASK\n{user_task}\n\n");
+    if !prior.trim().is_empty() {
+        user.push_str(
+            "PRIOR OPERATOR-VISIBLE CLAIMS (supersede exclusive wording if later evidence expands vantage)\n",
+        );
+        user.push_str(&prior);
+        user.push_str("\n\n");
+    }
+    user.push_str("NODE ARTIFACT\n");
+    user.push_str(&clip);
     let messages = [
         ChatMessage::system(DELIVERY_SYSTEM_PROMPT),
-        ChatMessage::user(format!("USER TASK\n{user_task}\n\nNODE ARTIFACT\n{clip}")),
+        ChatMessage::user(user),
     ];
     let request = ChatRequest {
         messages: &messages,
@@ -593,6 +661,22 @@ gaps:\n- other hosts unknown";
         assert_eq!(out2, scoped);
         let exhaustive = "coverage: exhaustive\n只有这三台在 ARP 里。";
         assert_eq!(stamp_unscoped_exclusivity(exhaustive, true), exhaustive);
+    }
+
+    #[test]
+    fn revision_lead_when_later_vantage_expands() {
+        let prior = "当前使用该链路的终端——只有本机一台。";
+        let later = "coverage: exhaustive\nvantage: artifact\n日志里 6 台主机有 ESTAB。";
+        let lead = revision_lead(prior, later, true).expect("lead");
+        assert!(lead.contains("修订"), "{lead}");
+        assert!(revision_lead("no exclusive", later, true).is_none());
+    }
+
+    #[test]
+    fn collect_prior_keeps_exclusive_chunks() {
+        let s = collect_prior_exclusivity(["hello", "只有 .98", "ok"]);
+        assert!(s.contains("只有 .98"));
+        assert!(!s.contains("hello"));
     }
 
     #[test]

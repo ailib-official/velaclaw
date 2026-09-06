@@ -98,6 +98,8 @@ pub(crate) struct SoftFailLoopCtx<'a> {
     pub surface: velaclaw_agent_runtime::SoftFailSurface,
     /// Logical model ids from `[[model_routes]]` (capability catalog, not cost order).
     pub peer_logical_ids: &'a [String],
+    /// Shared per-node probe governor (DAG hops). None → local to this loop call.
+    pub probe: Option<&'a std::sync::Mutex<crate::agent::probe_dedup::HopProbeGovernor>>,
 }
 
 #[cfg(feature = "ai-protocol")]
@@ -105,6 +107,19 @@ impl SoftFailLoopCtx<'_> {
     fn host_decide_owned(&self) -> Option<crate::orchestration::HostDecideHost> {
         self.config
             .map(crate::orchestration::HostDecideHost::from_config)
+    }
+}
+
+fn with_probe<R>(
+    soft_fail: Option<SoftFailLoopCtx<'_>>,
+    local: &mut crate::agent::probe_dedup::HopProbeGovernor,
+    f: impl FnOnce(&mut crate::agent::probe_dedup::HopProbeGovernor) -> R,
+) -> R {
+    if let Some(cell) = soft_fail.and_then(|c| c.probe) {
+        let mut g = cell.lock().unwrap_or_else(|e| e.into_inner());
+        f(&mut g)
+    } else {
+        f(local)
     }
 }
 
@@ -144,8 +159,7 @@ pub(crate) async fn run_tool_call_loop(
 
     let mut active_model = model.to_string();
     let mut peer_continue_used = false;
-    let mut probe_seen: HashSet<String> = HashSet::new();
-    let mut shell_rounds: u32 = 0;
+    let mut local_probe = Box::new(crate::agent::probe_dedup::HopProbeGovernor::new());
 
     let tool_specs: Vec<crate::tools::ToolSpec> =
         tools_registry.iter().map(|tool| tool.spec()).collect();
@@ -342,7 +356,7 @@ pub(crate) async fn run_tool_call_loop(
                     error_message: Some(crate::providers::sanitize_api_error(&e.to_string())),
                 });
                 #[cfg(feature = "ai-protocol")]
-                if let Some(ctx) = soft_fail {
+                if let Some(ctx) = &soft_fail {
                     let host_owned = ctx.host_decide_owned();
                     let host = ctx.host_decide.or(host_owned.as_ref());
                     return Err(crate::orchestration::map_provider_limit_error(
@@ -471,11 +485,13 @@ pub(crate) async fn run_tool_call_loop(
             && velaclaw_agent_runtime::needs_tool_format_correction(&response_text, 0)
         {
             let peers = soft_fail
+                .as_ref()
                 .map(|c| c.peer_logical_ids)
                 .unwrap_or(&[])
                 .to_vec();
             let peers = if peers.is_empty() {
                 soft_fail
+                    .as_ref()
                     .and_then(|c| c.config)
                     .map(logical_ids_from_config)
                     .unwrap_or_default()
@@ -515,13 +531,15 @@ pub(crate) async fn run_tool_call_loop(
                 velaclaw_agent_runtime::strip_isolated_tool_json_artifacts(&final_text, &known);
             if strip_fail_closed {
                 let surface = soft_fail
+                    .as_ref()
                     .map(|c| c.surface)
                     .unwrap_or(velaclaw_agent_runtime::SoftFailSurface::Cli);
-                let session_key = soft_fail.map(|c| c.session_key).unwrap_or("");
+                let session_key = soft_fail.as_ref().map(|c| c.session_key).unwrap_or("");
                 #[cfg(feature = "ai-protocol")]
                 {
-                    let host_owned = soft_fail.and_then(|c| c.host_decide_owned());
+                    let host_owned = soft_fail.as_ref().and_then(|c| c.host_decide_owned());
                     let host = soft_fail
+                        .as_ref()
                         .and_then(|c| c.host_decide)
                         .or(host_owned.as_ref());
                     final_text = crate::orchestration::finalize_tool_format_exhausted(
@@ -597,24 +615,29 @@ pub(crate) async fn run_tool_call_loop(
             .iter()
             .any(|c| c.name.eq_ignore_ascii_case("shell"));
         if batch_has_shell {
-            shell_rounds = shell_rounds.saturating_add(1);
+            with_probe(soft_fail, &mut local_probe, |g| {
+                g.begin_shell_round();
+            });
         }
-        let shell_capped =
-            batch_has_shell && shell_rounds > crate::agent::probe_dedup::MAX_SHELL_ROUNDS_PER_HOP;
         for (i, call) in tool_calls.iter().enumerate() {
             let is_shell = call.name.eq_ignore_ascii_case("shell");
-            if is_shell && shell_capped {
-                skip_outputs[i] = Some(crate::agent::probe_dedup::SHELL_ROUND_CAP_NOTICE.into());
-                continue;
-            }
             if is_shell {
                 let fp =
                     crate::agent::probe_dedup::tool_probe_fingerprint(&call.name, &call.arguments);
-                if probe_seen.contains(&fp) {
-                    skip_outputs[i] = Some(crate::agent::probe_dedup::REPEAT_PROBE_NOTICE.into());
-                    continue;
+                let decision = with_probe(soft_fail, &mut local_probe, |g| g.decide_shell(&fp));
+                match decision {
+                    crate::agent::probe_dedup::ProbeShellDecision::Cap => {
+                        skip_outputs[i] =
+                            Some(crate::agent::probe_dedup::SHELL_ROUND_CAP_NOTICE.into());
+                        continue;
+                    }
+                    crate::agent::probe_dedup::ProbeShellDecision::SkipRepeat => {
+                        skip_outputs[i] =
+                            Some(crate::agent::probe_dedup::REPEAT_PROBE_NOTICE.into());
+                        continue;
+                    }
+                    crate::agent::probe_dedup::ProbeShellDecision::Run => {}
                 }
-                probe_seen.insert(fp);
             }
             runnable.push(call.clone());
             runnable_idx.push(i);

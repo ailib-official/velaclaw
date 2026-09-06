@@ -163,6 +163,8 @@ pub struct SecurityPolicy {
     /// Unfolded `[security.profile]` if set.
     pub profile: Option<crate::config::SecurityProfile>,
     pub tracker: ActionTracker,
+    /// When set, `/tmp` rewrites into this workspace-relative graph scratch (VL-NA-040).
+    pub graph_scratch_rel: Option<String>,
 }
 
 impl Default for SecurityPolicy {
@@ -217,6 +219,7 @@ impl Default for SecurityPolicy {
             secret_path_mode: SecretPathMode::Deny,
             profile: None,
             tracker: ActionTracker::new(),
+            graph_scratch_rel: None,
         }
     }
 }
@@ -1082,8 +1085,8 @@ self_adjust, use the `policy_patch` tool; otherwise edit config.toml (no silent 
             return false;
         }
 
-        // VL-SEC-012: host temp roots rewrite into workspace scratch (relative).
-        let path = rewrite_temp_tool_path(path);
+        // VL-SEC-012 / VL-NA-040: host temp roots rewrite into workspace or graph scratch.
+        let path = self.rewrite_temp_tool_path(path);
 
         // Expand tilde for comparison
         let expanded = if let Some(stripped) = path.strip_prefix("~/") {
@@ -1125,13 +1128,33 @@ self_adjust, use the `policy_patch` tool; otherwise edit config.toml (no silent 
     /// Map `/tmp` / `/var/tmp` onto workspace `.velaclaw/tmp` (VL-SEC-012).
     #[must_use]
     pub fn rewrite_temp_tool_path(&self, path: &str) -> String {
-        rewrite_temp_tool_path(path)
+        let rewritten = rewrite_temp_tool_path(path);
+        let Some(root) = self.graph_scratch_rel.as_deref() else {
+            return rewritten;
+        };
+        if rewritten.starts_with(root) {
+            return rewritten;
+        }
+        if rewritten == SCRATCH_REL || rewritten.starts_with(&format!("{SCRATCH_REL}/")) {
+            let rest = rewritten
+                .strip_prefix(SCRATCH_REL)
+                .unwrap_or("")
+                .trim_start_matches('/');
+            if rest.starts_with("graphs/") {
+                return rewritten;
+            }
+            if rest.is_empty() {
+                return root.to_string();
+            }
+            return format!("{root}/{rest}");
+        }
+        rewritten
     }
 
     /// Workspace join after temp rewrite (file tools must not `join("/tmp/...")`).
     #[must_use]
     pub fn tool_fs_path(&self, path: &str) -> PathBuf {
-        let rewritten = rewrite_temp_tool_path(path);
+        let rewritten = self.rewrite_temp_tool_path(path);
         let p = Path::new(&rewritten);
         if p.is_absolute() {
             PathBuf::from(rewritten)
@@ -1373,6 +1396,7 @@ self_adjust, use the `policy_patch` tool; otherwise edit config.toml (no silent 
             secret_path_mode: SecretPathMode::Deny,
             profile: None,
             tracker: ActionTracker::new(),
+            graph_scratch_rel: None,
         }
     }
 }
@@ -1901,6 +1925,26 @@ mod tests {
         assert!(p
             .tool_fs_path("/tmp/notes.txt")
             .starts_with(&p.workspace_dir));
+    }
+
+    #[test]
+    fn graph_scratch_rewrites_tmp_under_this_run() {
+        let p = SecurityPolicy {
+            graph_scratch_rel: Some(".velaclaw/tmp/graphs/sess/run1".into()),
+            ..SecurityPolicy::default()
+        };
+        assert_eq!(
+            p.rewrite_temp_tool_path("/tmp/notes.txt"),
+            ".velaclaw/tmp/graphs/sess/run1/notes.txt"
+        );
+        assert_eq!(
+            p.rewrite_temp_tool_path(".velaclaw/tmp/graphs/sess/run1/keep.txt"),
+            ".velaclaw/tmp/graphs/sess/run1/keep.txt"
+        );
+        assert_eq!(
+            p.rewrite_temp_tool_path(".velaclaw/tmp/graphs/other/x.txt"),
+            ".velaclaw/tmp/graphs/other/x.txt"
+        );
     }
 
     #[test]

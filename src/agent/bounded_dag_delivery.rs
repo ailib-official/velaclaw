@@ -15,6 +15,9 @@ Every claim has a vantage (where evidence was gathered) and coverage (sample|par
 Exclusive wording (only/none/all of a population) is allowed only when coverage is exhaustive.\n\
 Otherwise say what this vantage saw, not what the unseen rest of the world is.\n\
 If a later artifact expands vantage, revise earlier exclusive claims instead of leaving both.\n\
+Name evidence_layer on each claim: this-hop-tool | this-graph-artifact | prior-graph-artifact | host-config | protocol-dist | upstream-live | inference.\n\
+Recommend changes only to a layer you observed. Do not treat leftover workspace tmp from other graphs as this-task evidence.\n\
+Cached hop_fail blocks are prior errors, not this-hop upstream-live.\n\
 Do not invent geography, identity, or type labels that are not in the artifacts; mark guesses as inference.\n\
 If evidence is incomplete, say what is known and the single next action.\n\
 When PRIOR OPERATOR-VISIBLE CLAIMS are provided, later evidence supersedes earlier exclusivity.\n";
@@ -348,6 +351,20 @@ fn internodal_noise_line(line: &str) -> bool {
         || k.starts_with("vantage:")
         || k.starts_with("coverage:")
         || k.starts_with("claim_kind:")
+        || k.starts_with("evidence_layer")
+}
+
+fn process_noise_line(line: &str) -> bool {
+    let t = line.trim();
+    if t.starts_with("**:") || t.contains("Node Result") {
+        return true;
+    }
+    let l = t.to_ascii_lowercase();
+    l.starts_with("let me ")
+        || l.starts_with("there's ")
+        || l.starts_with("there is ")
+        || l.starts_with("i'll ")
+        || l.starts_with("i will ")
 }
 
 fn gist_from_node_body(body: &str) -> String {
@@ -361,7 +378,7 @@ fn gist_from_node_body(body: &str) -> String {
     let mut kept = Vec::new();
     for line in stripped.lines() {
         let t = line.trim();
-        if t.is_empty() || internodal_noise_line(t) {
+        if t.is_empty() || internodal_noise_line(t) || process_noise_line(t) {
             continue;
         }
         kept.push(t);
@@ -555,6 +572,12 @@ mod tests {
     }
 
     #[test]
+    fn delivery_prompt_names_evidence_layer() {
+        assert!(DELIVERY_SYSTEM_PROMPT.contains("evidence_layer"));
+        assert!(DELIVERY_SYSTEM_PROMPT.contains("prior-graph-artifact"));
+    }
+
+    #[test]
     fn strip_handoff_footer_keeps_report() {
         let mixed = "已完成全部检查。\n\n## Google\n| 项 | 值 |\n|---|---|\n| gProxy | 204 |\n---\n**HANDOFF**\n- verdict: ok\n- findings: x\n- pointers: y\n- gaps: z";
         let out = ensure_user_visible("检查 xray", mixed);
@@ -648,6 +671,25 @@ gaps:\n- other hosts unknown";
             note.chars().count()
         );
         assert!(!note.contains("请检查局域网"), "{note}");
+    }
+
+    #[test]
+    fn mid_hop_gist_drops_process_english() {
+        let body =
+            "Let me do one GraphQL call.\nThere's latency.\n## Node Result\nrepos listed: 15";
+        let note = mid_hop_operator_note("检查仓库", "discover", body, None);
+        assert!(!note.to_ascii_lowercase().contains("let me"), "{note}");
+        assert!(!note.contains("Node Result"), "{note}");
+        assert!(note.contains("15") || note.contains("repos"), "{note}");
+    }
+
+    #[test]
+    fn persist_delta_is_parlor_when_prefix_not_in_body() {
+        let prefix = "将按 2 步：a → b。\n\n### source trace\nshort gist\n\n";
+        let parlor = "发行链已对齐 dist/v2。";
+        assert_eq!(remaining_operator_delta(prefix, parlor), parlor);
+        assert!(!parlor.contains("###"));
+        assert!(!parlor.contains("将按"));
     }
 
     #[test]

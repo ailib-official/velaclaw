@@ -63,6 +63,13 @@ impl PolicyHandle {
         self.read().rewrite_temp_tool_path(path)
     }
 
+    pub fn set_graph_scratch_rel(&self, rel: Option<String>) {
+        self.0
+            .write()
+            .expect("security policy lock poisoned")
+            .graph_scratch_rel = rel;
+    }
+
     pub fn tool_fs_path(&self, path: &str) -> PathBuf {
         self.read().tool_fs_path(path)
     }

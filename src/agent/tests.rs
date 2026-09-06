@@ -1465,9 +1465,14 @@ async fn bounded_dag_build_one_loop_per_node() {
         "first hop DAG plus work+observe per mid node; last hop skips observe"
     );
     assert!(out.contains("verified"), "{out}");
-    assert!(out.contains("Working in 3 step(s)"), "{out}");
-    assert!(out.contains("### locate"), "{out}");
-    assert!(out.contains("located"), "{out}");
+    assert!(
+        !out.contains("Working in 3 step(s)"),
+        "plan gist is live-only, not persist: {out}"
+    );
+    assert!(
+        !out.contains("### locate"),
+        "mid-hop notes are live-only, not persist: {out}"
+    );
     assert!(!out.contains("HANDOFF"), "{out}");
     assert!(!out.contains("Bounded task DAG"), "{out}");
 }

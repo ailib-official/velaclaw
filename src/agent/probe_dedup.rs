@@ -2,12 +2,63 @@
 //! 同一 hop 内跳过重复探测与 script_vN 梯子。
 
 use serde_json::Value;
+use std::collections::HashSet;
 
 pub const REPEAT_PROBE_NOTICE: &str = "Host skipped a repeat probe (same fingerprint as an earlier call this hop). Use INPUTS; compound remaining work or HANDOFF.";
 
 pub const SHELL_ROUND_CAP_NOTICE: &str = "Host capped this hop at four shell rounds. HANDOFF with current INPUTS; do not start script_v2/v3.";
 
 pub const MAX_SHELL_ROUNDS_PER_HOP: u32 = 4;
+
+/// Probe skip/cap state for one DAG node (survives peer_continue and same-node re-entry).
+#[derive(Debug, Default, Clone)]
+pub struct HopProbeGovernor {
+    seen: HashSet<String>,
+    shell_rounds: u32,
+    pub notices: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProbeShellDecision {
+    Run,
+    SkipRepeat,
+    Cap,
+}
+
+impl HopProbeGovernor {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Count one assistant batch that includes at least one shell call.
+    pub fn begin_shell_round(&mut self) {
+        self.shell_rounds = self.shell_rounds.saturating_add(1);
+    }
+
+    #[must_use]
+    pub fn shell_rounds(&self) -> u32 {
+        self.shell_rounds
+    }
+
+    #[must_use]
+    pub fn decide_shell(&mut self, fingerprint: &str) -> ProbeShellDecision {
+        if self.shell_rounds > MAX_SHELL_ROUNDS_PER_HOP {
+            self.notices.push(SHELL_ROUND_CAP_NOTICE.to_string());
+            return ProbeShellDecision::Cap;
+        }
+        if self.seen.contains(fingerprint) {
+            self.notices.push(REPEAT_PROBE_NOTICE.to_string());
+            return ProbeShellDecision::SkipRepeat;
+        }
+        self.seen.insert(fingerprint.to_string());
+        ProbeShellDecision::Run
+    }
+
+    pub fn drain_notices(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.notices)
+    }
+}
 
 /// Fingerprint a tool call so equivalent probes collapse (whitespace + script version).
 #[must_use]
@@ -33,15 +84,23 @@ pub fn normalize_shell_command(command: &str) -> String {
         .join(" ")
 }
 
+const SCRIPT_SUFFIXES: &[&str] = &[".py", ".sh", ".bash", ".js", ".ts"];
+
 fn normalize_path_token(token: &str) -> String {
-    let Some(stem) = token.strip_suffix(".py") else {
-        return token.to_string();
-    };
-    let (dir, file) = match stem.rfind('/') {
-        Some(i) => (&stem[..=i], &stem[i + 1..]),
-        None => ("", stem),
-    };
-    format!("{dir}{}.py", strip_script_version(file))
+    let lower = token.to_ascii_lowercase();
+    for suffix in SCRIPT_SUFFIXES {
+        let Some(_) = lower.strip_suffix(suffix) else {
+            continue;
+        };
+        let orig_stem_len = token.len().saturating_sub(suffix.len());
+        let orig = &token[..orig_stem_len];
+        let (dir, file) = match orig.rfind('/') {
+            Some(i) => (&orig[..=i], &orig[i + 1..]),
+            None => ("", orig),
+        };
+        return format!("{dir}{}{suffix}", strip_script_version(file));
+    }
+    token.to_string()
 }
 
 /// `xray_audit2` / `script_v3` / `confirm_v2` → unversioned stem.
@@ -109,5 +168,49 @@ mod tests {
         assert!(!seen.contains(&fp));
         seen.insert(fp.clone());
         assert!(seen.contains(&fp));
+    }
+
+    #[test]
+    fn collapses_shell_script_version_ladder() {
+        let a =
+            tool_probe_fingerprint("shell", &json!({"command": "bash /tmp/.velaclaw/final.sh"}));
+        let b = tool_probe_fingerprint(
+            "shell",
+            &json!({"command": "bash /tmp/.velaclaw/final2.sh"}),
+        );
+        let c = tool_probe_fingerprint(
+            "shell",
+            &json!({"command": "bash /tmp/.velaclaw/final_v3.sh"}),
+        );
+        assert_eq!(a, b);
+        assert_eq!(a, c);
+    }
+
+    #[test]
+    fn governor_survives_reentry_and_caps_fifth_round() {
+        let mut g = HopProbeGovernor::new();
+        for round in 1..=4 {
+            g.begin_shell_round();
+            let fp = tool_probe_fingerprint("shell", &json!({"command": format!("echo {round}")}));
+            assert_eq!(g.decide_shell(&fp), ProbeShellDecision::Run);
+        }
+        g.begin_shell_round();
+        let fp = tool_probe_fingerprint("shell", &json!({"command": "echo 5"}));
+        assert_eq!(g.decide_shell(&fp), ProbeShellDecision::Cap);
+        // Same node re-enters tool loop with the same governor.
+        g.begin_shell_round();
+        let fp2 = tool_probe_fingerprint("shell", &json!({"command": "echo 6"}));
+        assert_eq!(g.decide_shell(&fp2), ProbeShellDecision::Cap);
+        assert!(g.shell_rounds() >= 5);
+    }
+
+    #[test]
+    fn governor_skips_repeat_fingerprint() {
+        let mut g = HopProbeGovernor::new();
+        g.begin_shell_round();
+        let fp = tool_probe_fingerprint("shell", &json!({"command": "pwd"}));
+        assert_eq!(g.decide_shell(&fp), ProbeShellDecision::Run);
+        g.begin_shell_round();
+        assert_eq!(g.decide_shell(&fp), ProbeShellDecision::SkipRepeat);
     }
 }

@@ -140,24 +140,27 @@ endpoint = "https://api.prism.ailib.info"
 
 ## Feature Flags
 
-**Default build** (`cargo build`) enables `ai-protocol` + `prism-router`.
+**Default build** (`cargo build`) enables `ai-protocol` + `sandbox-landlock`.
+`ai-protocol` also pulls `prism-router`. There is no `smart-routing` or `multi-model` Cargo feature.
 
 | Flag | Description |
 |------|-------------|
 | `ai-protocol` *(default)* | Protocol-driven providers via ai-lib-rust |
-| `prism-router` *(default)* | In-process prism-core routing for unknown providers |
-| `channel-matrix` | Matrix with E2EE |
-| `channel-lark` | Lark / Feishu |
-| `browser-native` | Rust-native browser automation (fantoccini) |
-| `hardware` | GPIO, serial peripherals |
-| `peripheral-rpi` | Raspberry Pi GPIO (rppal) |
-| `remote-deploy` | SSH-based remote deployment |
-| `memory-postgres` | PostgreSQL memory backend |
-| `observability-otel` | OpenTelemetry metrics |
-| `sandbox-landlock` | Linux Landlock sandboxing (**on by default**) |
-| `whatsapp-web` | Native WhatsApp Web client |
-| `probe` | probe-rs for Nucleo memory |
-| `rag-pdf` | PDF ingestion for RAG |
+| `sandbox-landlock` *(default)* | Linux Landlock sandboxing |
+| `prism-router` | In-process prism-core routing (enabled by `ai-protocol`) |
+| `channel-matrix` | Matrix with E2EE *(optional)* |
+| `channel-lark` | Lark / Feishu *(optional)* |
+| `browser-native` | Rust-native browser automation (fantoccini) *(optional)* |
+| `hardware` | GPIO, serial peripherals *(optional)* |
+| `peripheral-rpi` | Raspberry Pi GPIO (rppal) *(optional)* |
+| `remote-deploy` | SSH-based remote deployment *(optional)* |
+| `memory-postgres` | PostgreSQL memory backend *(optional)* |
+| `observability-otel` | OpenTelemetry metrics *(optional)* |
+| `whatsapp-web` | Native WhatsApp Web client *(optional)* |
+| `probe` | probe-rs for Nucleo memory *(optional)* |
+| `rag-pdf` | PDF ingestion for RAG *(optional)* |
+| `runtime-wasm` | In-process wasmi interpreter for WIT plugins *(optional, not default)* |
+| `routing_mvp` | Experimental ai-lib-rust multi-endpoint routing *(optional)* |
 
 ---
 

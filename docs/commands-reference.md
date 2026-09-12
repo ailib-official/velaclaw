@@ -2,7 +2,7 @@
 
 This reference is derived from the current CLI surface (`velaclaw --help`).
 
-Last verified: **July 30, 2026**.
+Last verified: **September 12, 2026**.
 
 ## Top-Level Commands
 
@@ -24,7 +24,11 @@ Last verified: **July 30, 2026**.
 | `migrate` | Import from external runtimes (currently OpenClaw) |
 | `config` | Export machine-readable config schema |
 | `completions` | Generate shell completion scripts to stdout |
-| `hardware` | Discover and introspect USB hardware |
+| `undo` | Restore tracked workspace files to HEAD when `.git` exists |
+| `auth` | OAuth / credential helpers |
+| `memory` | Conversation storage backends |
+| `deploy` | Remote SSH deploy (`--features remote-deploy`) |
+| `hardware` | Discover and introspect USB hardware (`--features hardware`) |
 | `peripheral` | Configure and flash peripherals |
 
 ## Command Groups
@@ -322,6 +326,22 @@ Skill manifests (`SKILL.toml`) support `prompts` and `[[tools]]`; both are injec
 - `velaclaw peripheral flash [--port <serial_port>]`
 - `velaclaw peripheral setup-uno-q [--host <ip_or_host>]`
 - `velaclaw peripheral flash-nucleo`
+
+### `undo` / `auth` / `memory` / `deploy`
+
+- `velaclaw undo` — restore tracked workspace files to HEAD when `.git` exists
+- `velaclaw auth …` — credential helpers (`--help` for subcommands)
+- `velaclaw memory …` — memory backends (`--help` for subcommands)
+- `velaclaw deploy …` — SSH deploy; requires `--features remote-deploy`
+
+## Removed flags (do not document as live)
+
+These clap flags **do not exist** on current `Commands`:
+
+- `velaclaw agent --smart` / `velaclaw daemon --smart` / `velaclaw --smart`
+- `velaclaw agent --negotiate …` / `velaclaw daemon --negotiate …` / `velaclaw --negotiate …`
+
+Task-type model selection is config: `[[model_routes]]` plus optional `[agent].intent_capability_route`. See [config-reference.md](config-reference.md#agent). WASM plugins use `--features runtime-wasm`, not a `wasm` feature name.
 
 ## Validation Tip
 

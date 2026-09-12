@@ -64,14 +64,11 @@ ls target/aarch64-unknown-linux-gnu/release/velaclaw
 ### 运行
 
 ```bash
-# 启用智能模型选择
-cargo run --features smart-routing -- --smart
-
-# 启用多模型协商
-cargo run --features multi-model -- --negotiate
-
-# 使用默认协议模型 ID（openai/gpt-5.2）发送一条消息
+# 默认 feature：ai-protocol + sandbox-landlock
 cargo run -- agent -m "Hello"
+
+# 可选 WASM 解释器（非默认）
+# cargo run --features runtime-wasm -- daemon
 ```
 
 ### Web 控制台（`/chat`）
@@ -123,7 +120,7 @@ default_model = "openai/gpt-5.2"
 2. [基本概念](docs/user-guide/02-basic-concepts.md)
 3. [与 AI 聊天](docs/user-guide/03-chat-with-ai.md)
 4. [Provider 配置](docs/user-guide/04-providers.md)
-5. [智能路由](docs/user-guide/05-smart-routing.md)
+5. [模型路由（`[[model_routes]]`）](docs/user-guide/05-smart-routing.md)
 6. [通道配置](docs/user-guide/06-channels.md)
 7. [Telegram 集成](docs/user-guide/07-telegram.md)
 8. [工具使用](docs/user-guide/10-tools.md)
@@ -141,12 +138,12 @@ default_model = "openai/gpt-5.2"
 
 | 标志 | 描述 |
 |------|------|
-| `ai-protocol` | 启用 ai-lib-rust 集成（通过 `protocol:provider/model` 使用协议驱动 Provider） |
-| `smart-routing` | 启用 Provider 评分和自适应模型选择 |
-| `multi-model` | 启用多模型协商和并行任务 |
-| `remote-deploy` | 启用受控远程部署 |
-| `hardware` | 启用硬件外设支持 |
-| `channel-matrix` | 启用带 E2EE 的 Matrix 通道 |
+| `ai-protocol` *(默认)* | 协议驱动 Provider（ai-lib-rust）；同时启用 `prism-router` |
+| `sandbox-landlock` *(默认)* | Linux Landlock 沙箱 |
+| `runtime-wasm` *(可选)* | wasmi WIT 插件解释器（非默认） |
+| `remote-deploy` *(可选)* | 受控远程部署 |
+| `hardware` *(可选)* | 硬件外设 |
+| `channel-matrix` *(可选)* | 带 E2EE 的 Matrix 通道 |
 
 ## 仪表盘
 

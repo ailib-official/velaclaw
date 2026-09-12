@@ -1,6 +1,10 @@
 # 第十三章：多模型协商
 
-本章介绍 VelaClaw 的多模型协商功能，让多个 AI 共同完成任务。
+> **VL-DOC-003：** `velaclaw agent --negotiate`、`velaclaw daemon --negotiate`、
+> Cargo feature `multi-model` **均已删除**。下文策略描述对应库类型
+> `agent::negotiation`，**不是**当前 CLI。按任务分流请用 `[[model_routes]]`。
+
+本章介绍库内协商策略类型（投票 / cascade 等），避免与已删除的 clap 开关混淆。
 
 ---
 
@@ -148,49 +152,11 @@ VelaClaw 提供多种协商策略：
 
 ## 启用协商
 
-### 方式一：命令行
+当前 **没有** clap 开关。不要运行 `velaclaw agent --negotiate …` 或
+`velaclaw daemon --negotiate …`。
 
-```bash
-# 使用投票模式
-velaclaw agent --negotiate voting
-
-# 使用最佳答案模式
-velaclaw agent --negotiate best
-
-# 使用级联优化模式
-velaclaw agent --negotiate cascade
-```
-
-### 方式二：配置文件
-
-编辑 `~/.velaclaw/config.yaml`：
-
-```yaml
-negotiation:
-  # 启用协商
-  enabled: true
-  
-  # 默认策略
-  strategy: voting  # voting/best/cascade/consensus/self-consistency
-  
-  # 参与协商的模型
-  models:
-    - provider: openai
-      model: gpt-4o
-    - provider: anthropic
-      model: claude-sonnet
-    - provider: deepseek
-      model: deepseek-chat
-  
-  # 置信度阈值
-  confidence_threshold: 0.7
-```
-
-### 方式三：守护进程模式
-
-```bash
-velaclaw daemon --negotiate voting
-```
+配置合同是 `config.toml`（不是 `config.yaml`）。任务分流用
+`[[model_routes]]`，见 [config-reference.md](../config-reference.md#agent)。
 
 ---
 

@@ -325,7 +325,7 @@ agent:
 学会了基本对话后，可以：
 
 1. **了解支持的模型** → [AI 模型与 Provider](./04-providers.md)
-2. **启用智能选择** → [智能模型选择](./05-smart-routing.md)
+2. **按任务选模型** → [模型路由](./05-smart-routing.md)
 3. **接入更多平台** → [通信渠道概览](./06-channels.md)
 
 ---

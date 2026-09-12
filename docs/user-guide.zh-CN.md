@@ -56,19 +56,10 @@ VelaClaw 会从以下维度评估每个 AI 模型：
 
 ### 如何启用？
 
-在启动 VelaClaw 时添加 `--smart` 参数：
-
-```bash
-velaclaw --smart
-```
-
-或者在配置文件中设置：
-
-```yaml
-# ~/.velaclaw/config.yaml
-routing:
-  smart_selection: true
-```
+`--smart` 与 Cargo feature `smart-routing` **已删除**。当前用
+`config.toml` 的 `[[model_routes]]`（可选 `[agent].intent_capability_route`）。
+见 [config-reference.md](config-reference.md#agent) 与
+[用户指南第五章](user-guide/05-smart-routing.md)。
 
 ### 实际例子
 
@@ -201,31 +192,9 @@ VelaClaw 让三个模型各写一首诗，
 
 ### 如何启用？
 
-**方法 1：命令行**
-
-```bash
-# 使用投票模式
-velaclaw --negotiate voting
-
-# 使用最佳答案模式
-velaclaw --negotiate best
-
-# 使用级联优化模式
-velaclaw --negotiate cascade
-```
-
-**方法 2：配置文件**
-
-```yaml
-# ~/.velaclaw/config.yaml
-negotiation:
-  enabled: true
-  strategy: voting  # voting/best/cascade
-  models:           # 参与协商的模型
-    - openai/gpt-4o
-    - anthropic/claude-sonnet
-    - deepseek/deepseek-chat
-```
+`--negotiate` 与 Cargo feature `multi-model` **已删除**，不是当前 clap 合同。
+库内仍有 `agent::negotiation` 类型，但 **没有** CLI 开关。不要写
+`velaclaw --negotiate …`。按任务分流用 `[[model_routes]]`。
 
 ### 什么时候用多模型协商？
 

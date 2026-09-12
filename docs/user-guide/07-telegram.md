@@ -362,7 +362,7 @@ channels:
 
 1. **设置 Discord** → [Discord 配置](./08-discord.md)
 2. **了解工具系统** → [工具系统](./10-tools.md)
-3. **启用智能选择** → [智能模型选择](./05-smart-routing.md)
+3. **按任务选模型** → [模型路由](./05-smart-routing.md)
 
 ---
 

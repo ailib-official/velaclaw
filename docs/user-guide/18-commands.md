@@ -61,11 +61,8 @@ velaclaw agent --provider openai --model gpt-4o
 # 设置温度
 velaclaw agent --temperature 0.7
 
-# 启用智能选择
-velaclaw agent --smart
-
-# 启用多模型协商
-velaclaw agent --negotiate voting
+# `--smart` / `--negotiate` 已删除。按任务选模型见 [[model_routes]]
+# 与 docs/config-reference.md
 ```
 
 ---

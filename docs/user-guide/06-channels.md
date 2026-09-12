@@ -231,4 +231,4 @@ channels:
 
 ---
 
-[← 上一章：智能模型选择](./05-smart-routing.md) | [返回目录](./README.md) | [下一章：Telegram 配置 →](./07-telegram.md)
+[← 上一章：模型路由](./05-smart-routing.md) | [返回目录](./README.md) | [下一章：Telegram 配置 →](./07-telegram.md)

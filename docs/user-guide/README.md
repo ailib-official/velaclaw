@@ -13,7 +13,7 @@
 
 3. [与 AI 对话](./03-chat-with-ai.md) - 如何与 AI 模型交流
 4. [AI 模型与 Provider](./04-providers.md) - 支持的模型和提供商
-5. [智能模型选择](./05-smart-routing.md) - 自动选择最佳模型
+5. [模型路由](./05-smart-routing.md) - `[[model_routes]]` 与已删除的 `--smart`
 
 ### 第三部分：通信渠道
 
@@ -86,7 +86,7 @@ VelaClaw 是一个 **AI 助手平台**，可以帮你：
 - **快速开始使用** → [快速入门](./01-getting-started.md)
 - **了解支持哪些 AI 模型** → [AI 模型与 Provider](./04-providers.md)
 - **接入 Telegram** → [Telegram 设置](./07-telegram.md)
-- **让 AI 自动选模型** → [智能模型选择](./05-smart-routing.md)
+- **按任务选模型** → [模型路由](./05-smart-routing.md)
 - **设置定时任务** → [自动化与定时任务](./14-automation.md)
 - **连接硬件设备** → [硬件外设](./16-hardware.md)
 - **部署到服务器** → [远程部署](./15-deployment.md)

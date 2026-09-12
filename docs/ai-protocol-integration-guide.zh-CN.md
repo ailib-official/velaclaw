@@ -9,14 +9,12 @@
 在构建时添加以下功能标志：
 
 ```bash
-# 启用所有新功能
-cargo build --features ai-protocol,smart-routing,multi-model,remote-deploy
+# 默认已含 ai-protocol（含 prism-router）与 sandbox-landlock
+cargo build
 
-# 或启用特定功能
-cargo build --features ai-protocol           # 仅协议驱动 Provider
-cargo build --features smart-routing          # Provider 评分 + 自适应选择
-cargo build --features multi-model            # 协商 + 并行任务
-cargo build --features remote-deploy          # 远程部署
+# Cargo.toml [features] 中的可选项
+cargo build --features remote-deploy
+cargo build --features runtime-wasm
 ```
 
 ### 前置条件
@@ -396,10 +394,10 @@ deployer.rollback("prod-1").await?;
 
 | 标志 | 依赖 | 描述 |
 |------|------|------|
-| `ai-protocol` | ai-lib-rust | 协议驱动 Provider |
-| `smart-routing` | - | 评分 + 自适应选择 |
-| `multi-model` | - | 协商 + 并行任务 |
-| `remote-deploy` | - | 远程部署 |
+| `ai-protocol` | ai-lib-rust | 协议驱动 Provider *(默认)* |
+| `sandbox-landlock` | landlock | Linux 沙箱 *(默认)* |
+| `runtime-wasm` | wasmi | 可选 WIT 插件解释器 |
+| `remote-deploy` | - | 远程部署 *(可选)* |
 
 ---
 
@@ -465,7 +463,7 @@ Error: Failed to build client for openai/gpt-4o: Protocol not found
 如果看到与功能相关的编译错误，确保使用正确的功能标志构建：
 
 ```bash
-cargo build --features ai-protocol,smart-routing
+cargo build --features ai-protocol
 ```
 
 ### 并行执行超时

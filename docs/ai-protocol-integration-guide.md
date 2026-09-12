@@ -1,6 +1,6 @@
 # AI Protocol Integration - User Guide
 
-This guide covers the new features introduced in the `feat/ai-protocol-integration` branch, enabling protocol-driven provider configuration, intelligent model selection, multi-model negotiation, parallel task execution, and remote deployment.
+This guide covers protocol-driven provider configuration, `[[model_routes]]` task routing, and optional remote deployment (`--features remote-deploy`).
 
 ## Quick Start
 
@@ -9,14 +9,12 @@ This guide covers the new features introduced in the `feat/ai-protocol-integrati
 Add the following features to your build:
 
 ```bash
-# Enable all new features
-cargo build --features ai-protocol,smart-routing,multi-model,remote-deploy
+# Default crate features already include ai-protocol (+ prism-router) and sandbox-landlock
+cargo build
 
-# Or enable specific features
-cargo build --features ai-protocol           # Protocol-driven providers only
-cargo build --features smart-routing          # Provider scoring + adaptive selection
-cargo build --features multi-model            # Negotiation + parallel tasks
-cargo build --features remote-deploy          # Remote deployment
+# Optional extras from Cargo.toml [features]
+cargo build --features remote-deploy
+cargo build --features runtime-wasm
 ```
 
 ### Prerequisites
@@ -396,10 +394,10 @@ deployer.rollback("prod-1").await?;
 
 | Flag | Dependencies | Description |
 |------|--------------|-------------|
-| `ai-protocol` | ai-lib-rust | Protocol-driven providers |
-| `smart-routing` | - | Scoring + adaptive selection |
-| `multi-model` | - | Negotiation + parallel tasks |
-| `remote-deploy` | - | Remote deployment |
+| `ai-protocol` | ai-lib-rust | Protocol-driven providers *(default)* |
+| `sandbox-landlock` | landlock | Linux sandbox *(default)* |
+| `runtime-wasm` | wasmi | Optional WIT plugin interpreter |
+| `remote-deploy` | - | Remote deployment *(optional)* |
 
 ---
 
@@ -465,7 +463,7 @@ Error: Failed to build client for openai/gpt-4o: Protocol not found
 If you see feature-related compilation errors, ensure you're building with the correct features:
 
 ```bash
-cargo build --features ai-protocol,smart-routing
+cargo build --features ai-protocol
 ```
 
 ### Timeout in Parallel Execution

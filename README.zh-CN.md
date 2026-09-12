@@ -75,7 +75,7 @@ cargo run -- agent -m "Hello"
 
 ```bash
 velaclaw daemon
-# 浏览器打开 http://127.0.0.1:8080/chat
+# 浏览器打开 http://127.0.0.1:3000/chat
 # 配对：POST /pair，请求头 X-Pairing-Code: <启动码>
 # 在 UI 中保存 bearer token；Sessions 标签或 ?session=<id> 可恢复会话
 ```
@@ -102,8 +102,8 @@ export ANTHROPIC_API_KEY=sk-ant-...
 
 ```toml
 # ~/.velaclaw/config.toml
-default_provider = "openai/gpt-5.2"
-default_model = "openai/gpt-5.2"
+default_provider = "nvidia/nemotron-mini-4b-instruct"
+default_model = "nvidia/nemotron-mini-4b-instruct"
 ```
 
 ---
@@ -120,7 +120,7 @@ default_model = "openai/gpt-5.2"
 2. [基本概念](docs/user-guide/02-basic-concepts.md)
 3. [与 AI 聊天](docs/user-guide/03-chat-with-ai.md)
 4. [Provider 配置](docs/user-guide/04-providers.md)
-5. [模型路由（`[[model_routes]]`）](docs/user-guide/05-smart-routing.md)
+5. [智能路由](docs/user-guide/05-smart-routing.md)
 6. [通道配置](docs/user-guide/06-channels.md)
 7. [Telegram 集成](docs/user-guide/07-telegram.md)
 8. [工具使用](docs/user-guide/10-tools.md)

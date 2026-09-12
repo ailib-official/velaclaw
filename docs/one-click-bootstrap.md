@@ -113,13 +113,13 @@ it pulls `ghcr.io/velaclaw-labs/velaclaw:latest` and tags it locally before runn
 ### Quick onboarding (non-interactive)
 
 ```bash
-./bootstrap.sh --onboard --api-key "sk-..." --provider openai/gpt-5.2
+./bootstrap.sh --onboard --api-key "sk-..." --provider nvidia/nemotron-mini-4b-instruct
 ```
 
 Or with environment variables:
 
 ```bash
-VELACLAW_API_KEY="sk-..." VELACLAW_PROVIDER="openai/gpt-5.2" ./bootstrap.sh --onboard
+VELACLAW_API_KEY="sk-..." VELACLAW_PROVIDER="nvidia/nemotron-mini-4b-instruct" ./bootstrap.sh --onboard
 ```
 
 ### Interactive onboarding

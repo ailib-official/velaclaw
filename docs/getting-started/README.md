@@ -12,7 +12,7 @@ For first-time setup and quick orientation.
 
 | Scenario | Command |
 |----------|---------|
-| I have an API key, want fastest setup | `velaclaw onboard --api-key sk-... --provider openai/gpt-5.2` |
+| I have an API key, want fastest setup | `velaclaw onboard --api-key sk-... --provider nvidia/nemotron-mini-4b-instruct` |
 | I want guided prompts | `velaclaw onboard --interactive` |
 | Config exists, just fix channels | `velaclaw onboard --channels-only` |
 | Config exists, I intentionally want full overwrite | `velaclaw onboard --force` |
@@ -20,7 +20,7 @@ For first-time setup and quick orientation.
 
 ## Onboarding and Validation
 
-- Quick onboarding: `velaclaw onboard --api-key "sk-..." --provider openai/gpt-5.2`
+- Quick onboarding: `velaclaw onboard --api-key "sk-..." --provider nvidia/nemotron-mini-4b-instruct`
 - Interactive onboarding: `velaclaw onboard --interactive`
 - Existing config protection: reruns require explicit confirmation (or `--force` in non-interactive flows)
 - Ollama cloud models (`:cloud`) require a remote `api_url` and API key (for example `api_url = "https://ollama.com"`).

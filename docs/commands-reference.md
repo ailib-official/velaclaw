@@ -143,7 +143,7 @@ Both start the HTTP gateway (REST + WebSocket + embedded Web UI). `daemon` also 
 
 #### Web Control UI (`/chat`)
 
-After the gateway is listening (default `http://127.0.0.1:8080`):
+After the gateway is listening (default `http://127.0.0.1:3000`):
 
 1. Open **`GET /chat`** in a browser — Svelte SPA (Chat, Sessions, Memory, Cron, Tools, Settings).
 2. If pairing is enabled, exchange the one-time startup code via **`POST /pair`** (header `X-Pairing-Code: <code>`) to obtain a bearer token.
@@ -189,7 +189,7 @@ Channel webhooks (`/whatsapp`, `/linq`, `/nextcloud-talk`) follow channel-specif
 Pairing flow example:
 
 ```bash
-curl -sS -X POST http://127.0.0.1:8080/pair \
+curl -sS -X POST http://127.0.0.1:3000/pair \
   -H 'X-Pairing-Code: 123456'
 # → { "token": "...", "paired": true, ... }
 ```

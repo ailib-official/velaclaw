@@ -70,9 +70,10 @@ pub struct Config {
     pub api_key: Option<String>,
     /// Base URL override for provider API (e.g. "http://10.0.0.1:11434" for remote Ollama)
     pub api_url: Option<String>,
-    /// Default provider/model ID (e.g. `"openai/gpt-5.2"`). Default: `"openai/gpt-5.2"`.
+    /// Default provider/model ID (e.g. `"nvidia/nemotron-mini-4b-instruct"`).
+    /// Default: [`crate::config::DEFAULT_PROTOCOL_MODEL_ID`].
     pub default_provider: Option<String>,
-    /// Default model routed through the selected provider (e.g. `"anthropic/claude-sonnet-4-6"`).
+    /// Default model routed through the selected provider (same default as `default_provider`).
     pub default_model: Option<String>,
     /// Default model temperature (0.0–2.0). Default: `0.7`.
     pub default_temperature: f64,

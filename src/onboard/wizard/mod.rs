@@ -326,7 +326,7 @@ pub async fn run_channels_repair_wizard() -> Result<Config> {
 // ── Quick setup (zero prompts) ───────────────────────────────────
 
 /// Non-interactive setup: generates a sensible default config instantly.
-/// Use `velaclaw onboard` or `velaclaw onboard --api-key sk-... --provider openai/gpt-5.2 --memory sqlite|lucid`.
+/// Use `velaclaw onboard` or `velaclaw onboard --api-key sk-... --provider nvidia/nemotron-mini-4b-instruct --memory sqlite|lucid`.
 /// Use `velaclaw onboard --interactive` for the full wizard.
 fn backend_key_from_choice(choice: usize) -> &'static str {
     selectable_memory_backends()
@@ -573,7 +573,7 @@ async fn run_quick_setup_with_home_inner(
     println!(
         "  {} Gateway:    {}",
         style("✓").green().bold(),
-        style("pairing required (127.0.0.1:8080)").green()
+        style("pairing required (127.0.0.1:3000)").green()
     );
     println!(
         "  {} Tunnel:     {}",

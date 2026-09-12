@@ -839,20 +839,30 @@ pub async fn run(
                                 .await
                                 {
                                     Ok(piece) => {
-                                        let (notes, close) = {
+                                        let (notes, close, deny_class) = {
                                             let mut g = probe_cell
                                                 .lock()
                                                 .unwrap_or_else(|e| e.into_inner());
-                                            (g.drain_notices(), g.hop_close())
+                                            (
+                                                g.drain_notices(),
+                                                g.hop_close(),
+                                                g.last_policy_deny_class(),
+                                            )
                                         };
-                                        for note in notes {
+                                        for note in
+                                            crate::agent::probe_dedup::operator_visible_notices(
+                                                notes,
+                                            )
+                                        {
                                             crate::agent::bounded_dag_delivery::print_operator_note(
                                                 &mut operator_prefix,
                                                 &note,
                                                 None,
                                             );
                                         }
-                                        if close == crate::agent::hop_stop::HopClose::PolicyDeny {
+                                        if crate::agent::hop_stop::after_hop_close(close)
+                                            .fail_cursor()
+                                        {
                                             let _ = crate::agent::bounded_dag_live::store_dag_fail(
                                                 mem.as_ref(),
                                                 session_id.as_str(),
@@ -867,7 +877,9 @@ pub async fn run(
                                                 &crate::agent::bounded_dag_live::format_work_node_stop(
                                                     &msg,
                                                     &node.id,
-                                                    "repeated policy denials of the same class",
+                                                    crate::agent::hop_stop::policy_deny_stop_reason(
+                                                        deny_class,
+                                                    ),
                                                     index + 1,
                                                     node_count,
                                                 ),
@@ -1651,20 +1663,30 @@ pub async fn run(
                                 .await
                                 {
                                     Ok(piece) => {
-                                        let (notes, close) = {
+                                        let (notes, close, deny_class) = {
                                             let mut g = probe_cell
                                                 .lock()
                                                 .unwrap_or_else(|e| e.into_inner());
-                                            (g.drain_notices(), g.hop_close())
+                                            (
+                                                g.drain_notices(),
+                                                g.hop_close(),
+                                                g.last_policy_deny_class(),
+                                            )
                                         };
-                                        for note in notes {
+                                        for note in
+                                            crate::agent::probe_dedup::operator_visible_notices(
+                                                notes,
+                                            )
+                                        {
                                             crate::agent::bounded_dag_delivery::print_operator_note(
                                                 &mut operator_prefix,
                                                 &note,
                                                 None,
                                             );
                                         }
-                                        if close == crate::agent::hop_stop::HopClose::PolicyDeny {
+                                        if crate::agent::hop_stop::after_hop_close(close)
+                                            .fail_cursor()
+                                        {
                                             let _ = crate::agent::bounded_dag_live::store_dag_fail(
                                                 mem.as_ref(),
                                                 session_id.as_str(),
@@ -1679,7 +1701,9 @@ pub async fn run(
                                                 &crate::agent::bounded_dag_live::format_work_node_stop(
                                                     &user_input,
                                                     &node.id,
-                                                    "repeated policy denials of the same class",
+                                                    crate::agent::hop_stop::policy_deny_stop_reason(
+                                                        deny_class,
+                                                    ),
                                                     index + 1,
                                                     node_count,
                                                 ),

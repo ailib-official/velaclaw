@@ -16,8 +16,9 @@ use tokio::sync::mpsc::Sender;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-/// Config for one Web/API turn. Live bounded DAG keeps session `default_model`
-/// (UI picker must not send first-hop/observe to a hung aggregator id).
+/// Config for one Web/API turn. Live bounded DAG keeps planner/observe on
+/// session `default_model` (avoid a hung aggregator id). Work hops still use
+/// the Web picker via [`explicit_model_from_request`] (VL-NA-043).
 pub fn effective_chat_config(config: &Config, req: &ChatApiRequest) -> Config {
     if config.agent.bounded_dag_live {
         config.clone()
@@ -104,11 +105,7 @@ pub async fn run_agent_chat(
     progress_tx: Option<Sender<crate::agent::turn_progress::TurnProgress>>,
 ) -> Result<ChatApiResponse> {
     let user_message = extract_last_user_message(&req.messages)?;
-    let explicit_model = if config.agent.bounded_dag_live {
-        None
-    } else {
-        explicit_model_from_request(req)
-    };
+    let explicit_model = explicit_model_from_request(req);
     let effective_config = effective_chat_config(config, req);
 
     let mut agent = Agent::from_config(&effective_config).context("failed to build agent")?;
@@ -581,6 +578,22 @@ mod tests {
             Some("deepseek/deepseek-v4-flash")
         );
         assert_eq!(updated.default_provider.as_deref(), Some("deepseek"));
+    }
+
+    #[test]
+    fn live_work_hop_still_honors_web_picker() {
+        let req = ChatApiRequest {
+            messages: vec![],
+            session_id: None,
+            model_id: Some("nvidia/nemotron-3-ultra-550b-a55b".into()),
+            temperature: None,
+            max_tokens: None,
+            host_phase: None,
+        };
+        assert_eq!(
+            explicit_model_from_request(&req).as_deref(),
+            Some("nvidia/nemotron-3-ultra-550b-a55b")
+        );
     }
 
     #[test]

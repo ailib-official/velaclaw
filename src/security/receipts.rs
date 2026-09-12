@@ -27,6 +27,9 @@ pub struct ToolReceipt {
     pub command: String,
     pub sandbox: String,
     pub human_approved: bool,
+    /// Policy-deny subclass (`allowlist`, `malformed`, …); omitted on allow.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deny_class: Option<String>,
 }
 
 /// Append-only receipt log at `<workspace>/.velaclaw/tool_receipts.jsonl`.
@@ -53,10 +56,19 @@ impl ToolReceiptLog {
         command: &str,
         sandbox: &str,
         human_approved: bool,
+        deny_class: Option<&str>,
     ) -> std::io::Result<()> {
         if let Some(parent) = self.path.parent() {
             create_dir_all(parent)?;
         }
+        let deny_class = if decision == ReceiptDecision::Deny {
+            deny_class
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+        } else {
+            None
+        };
         let receipt = ToolReceipt {
             timestamp: Utc::now(),
             tool: tool.to_string(),
@@ -64,6 +76,7 @@ impl ToolReceiptLog {
             command: truncate_command(&crate::security::redact_secret_literals(command)),
             sandbox: sandbox.to_string(),
             human_approved,
+            deny_class,
         };
         let line = serde_json::to_string(&receipt)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
@@ -96,10 +109,24 @@ mod tests {
     fn receipts_write_allow_and_deny_without_secrets() {
         let tmp = tempfile::tempdir().unwrap();
         let log = ToolReceiptLog::in_workspace(tmp.path());
-        log.record("shell", ReceiptDecision::Allow, "echo hello", "none", false)
-            .unwrap();
-        log.record("shell", ReceiptDecision::Deny, "rm -rf /", "none", true)
-            .unwrap();
+        log.record(
+            "shell",
+            ReceiptDecision::Allow,
+            "echo hello",
+            "none",
+            false,
+            None,
+        )
+        .unwrap();
+        log.record(
+            "shell",
+            ReceiptDecision::Deny,
+            "rm -rf /",
+            "none",
+            true,
+            None,
+        )
+        .unwrap();
         let body = std::fs::read_to_string(log.path()).unwrap();
         assert!(body.contains("\"decision\":\"allow\""));
         assert!(body.contains("\"decision\":\"deny\""));
@@ -127,11 +154,31 @@ mod tests {
             &format!("echo {tok}"),
             "gate",
             false,
+            None,
         )
         .unwrap();
         let body = std::fs::read_to_string(log.path()).unwrap();
         assert!(!body.contains(&tok), "{body}");
         assert!(body.contains("[REDACTED_TOKEN]"));
         assert!(body.contains("\"decision\":\"deny\""));
+    }
+
+    #[test]
+    fn receipts_deny_records_policy_class() {
+        let tmp = tempfile::tempdir().unwrap();
+        let log = ToolReceiptLog::in_workspace(tmp.path());
+        log.record(
+            "shell",
+            ReceiptDecision::Deny,
+            "git status || true",
+            "gate",
+            false,
+            Some("allowlist"),
+        )
+        .unwrap();
+        let body = std::fs::read_to_string(log.path()).unwrap();
+        let rec: ToolReceipt = serde_json::from_str(body.lines().next().unwrap()).unwrap();
+        assert_eq!(rec.deny_class.as_deref(), Some("allowlist"));
+        assert!(!body.to_lowercase().contains("api_key"));
     }
 }

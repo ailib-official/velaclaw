@@ -1008,11 +1008,16 @@ impl SecurityPolicy {
 
         // Hard allowlist: human approval cannot widen allowed_commands (VL-SEC-009 / H).
         if !self.segments_are_allowlisted(command) {
-            return Err(self.format_command_policy_error(
-                "Command not allowed by security policy (not in allowed_commands).",
-                command,
-                false,
-            ));
+            let rejected = self.allowlist_rejected_basenames(command);
+            let headline = if rejected.is_empty() {
+                "Command not allowed by security policy (not in allowed_commands).".to_string()
+            } else {
+                format!(
+                    "Command not allowed by security policy (not in allowed_commands): {}.",
+                    rejected.join(", ")
+                )
+            };
+            return Err(self.format_command_policy_error(&headline, command, false));
         }
 
         // Secret material: argv tokens, workspace bash/sh bodies (after admission).
@@ -1137,7 +1142,8 @@ impl SecurityPolicy {
                 continue;
             }
 
-            let args: Vec<String> = words.map(|w| w.to_ascii_lowercase()).collect();
+            // Keep original case: POSIX short flags are case-sensitive (`git -C` ≠ `git -c`).
+            let args: Vec<String> = words.map(str::to_string).collect();
             if !self.is_args_safe(base_cmd, &args) {
                 return false;
             }
@@ -1176,6 +1182,17 @@ impl SecurityPolicy {
         })
     }
 
+    fn allowlist_rejected_basenames(&self, command: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        for base in Self::base_executables(command) {
+            let listed = self.allowed_commands.iter().any(|allowed| allowed == &base);
+            if !listed && !out.iter().any(|seen| seen == &base) {
+                out.push(base);
+            }
+        }
+        out
+    }
+
     fn format_command_policy_error(
         &self,
         headline: &str,
@@ -1202,9 +1219,11 @@ impl SecurityPolicy {
             );
         } else if !self.segments_are_allowlisted(command) {
             use std::fmt::Write as _;
+            let rejected = self.allowlist_rejected_basenames(command);
             let _ = write!(
                 msg,
-                "\n\n   Next steps (CLI + Web):\n\
+                "\n\n   Tool loop: retry without [{}]; approval cannot widen allowed_commands.\n\
+                   Next steps (operator, not the agent hop):\n\
                    1. Add the executable basename to [autonomy].allowed_commands in config.toml \
 (current: {}).\n\
                    2. For common ops reads (df/du/free/uname/…), merge \
@@ -1213,6 +1232,11 @@ impl SecurityPolicy {
 self_adjust, use the `policy_patch` tool; otherwise edit config.toml (no silent rewrite).\n\
                    4. Interactive approval cannot widen the allowlist (VL-SEC-009).\n\
                    Docs: docs/policy-approval-reference.md#ops-readonly-profile",
+                if rejected.is_empty() {
+                    "unlisted executables".to_string()
+                } else {
+                    rejected.join(", ")
+                },
                 self.allowed_commands.join(", ")
             );
         }
@@ -1229,18 +1253,18 @@ self_adjust, use the `policy_patch` tool; otherwise edit config.toml (no silent 
     fn is_args_safe(&self, base: &str, args: &[String]) -> bool {
         let base = base.to_ascii_lowercase();
         match base.as_str() {
-            "find" => {
-                // find -exec and find -ok allow arbitrary command execution
-                !args.iter().any(|arg| arg == "-exec" || arg == "-ok")
-            }
+            "find" => !args.iter().any(|arg| {
+                let l = arg.to_ascii_lowercase();
+                l == "-exec" || l == "-ok"
+            }),
             "git" => {
-                // git config, alias, and -c can be used to set dangerous options
-                // (e.g. git config core.editor "rm -rf /")
+                // Subcommands are case-insensitive; `-c` (config) must not match `-C` (chdir).
                 !args.iter().any(|arg| {
-                    arg == "config"
-                        || arg.starts_with("config.")
-                        || arg == "alias"
-                        || arg.starts_with("alias.")
+                    let l = arg.to_ascii_lowercase();
+                    l == "config"
+                        || l.starts_with("config.")
+                        || l == "alias"
+                        || l.starts_with("alias.")
                         || arg == "-c"
                 })
             }
@@ -1887,7 +1911,18 @@ mod tests {
         assert!(err.contains("ops-readonly"));
         assert!(err.contains("VL-SEC-009"));
         assert!(err.contains("allowed_commands"));
+        assert!(err.contains("df"), "{err}");
         assert!(err.contains("policy_patch") || err.contains("config.toml"));
+    }
+
+    #[test]
+    fn allowlist_deny_names_rejected_executables() {
+        let p = default_policy();
+        let err = p
+            .validate_command_execution("pwd && id -un && ls", false)
+            .expect_err("id is not allowlisted");
+        assert!(err.contains("not in allowed_commands): id"), "{err}");
+        assert!(err.contains("retry without [id]"), "{err}");
     }
 
     #[test]
@@ -2529,6 +2564,10 @@ mod tests {
         assert!(!p.is_command_allowed("git config core.editor \"rm -rf /\""));
         assert!(!p.is_command_allowed("git alias.st status"));
         assert!(!p.is_command_allowed("git -c core.editor=calc.exe commit"));
+        assert!(
+            p.is_command_allowed("git -C /tmp/workspace-repo status"),
+            "git -C is a path switch, not git -c config"
+        );
         // Legitimate commands should still work
         assert!(p.is_command_allowed("find . -name '*.txt'"));
         assert!(p.is_command_allowed("git status"));

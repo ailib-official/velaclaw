@@ -131,7 +131,7 @@ cd velaclaw
 cargo build --release --locked
 cargo install --path . --force --locked
 
-velaclaw onboard --api-key sk-... --provider openai/gpt-5.2
+velaclaw onboard --api-key sk-... --provider nvidia/nemotron-mini-4b-instruct
 velaclaw onboard --interactive
 
 velaclaw agent -m "Hello, VelaClaw!"
@@ -140,7 +140,7 @@ velaclaw agent -m "Hello, VelaClaw!"
 velaclaw gateway
 
 velaclaw daemon
-# Web UI: http://127.0.0.1:8080/chat (POST /pair → bearer token)
+# Web UI: http://127.0.0.1:3000/chat (POST /pair → bearer token)
 ```
 
 ## Subscription Auth (OpenAI Codex / Claude Code)
@@ -198,7 +198,7 @@ velaclaw agent --provider anthropic -m "hello"
 
 | Подсистема | Trait | Встроенные реализации | Расширение |
 |-----------|-------|---------------------|------------|
-| **AI-модели** | `Provider` | Каталог через `velaclaw providers` (ai-protocol `provider/model` ID) | `openai/gpt-5.2` |
+| **AI-модели** | `Provider` | Каталог через `velaclaw providers` (ai-protocol `provider/model` ID) | `nvidia/nemotron-mini-4b-instruct` |
 | **Каналы** | `Channel` | CLI, Telegram, Discord, Slack, Mattermost, iMessage, Matrix, Signal, WhatsApp, Email, IRC, Lark, DingTalk, QQ, Webhook | Любой messaging API |
 | **Память** | `Memory` | SQLite гибридный поиск, PostgreSQL-бэкенд, Lucid-мост, Markdown-файлы, явный `none`-бэкенд, snapshot/hydrate, опциональный кэш ответов | Любой persistence-бэкенд |
 | **Инструменты** | `Tool` | shell/file/memory, cron/schedule, git, pushover, browser, http_request, screenshot/image_info, composio (opt-in), delegate, аппаратные инструменты | Любая функциональность |
@@ -256,8 +256,8 @@ keyword_weight = 0.3
 
 ```toml
 api_key = "sk-..."
-default_provider = "openai/gpt-5.2"
-default_model = "anthropic/claude-sonnet-4-6"
+default_provider = "nvidia/nemotron-mini-4b-instruct"
+default_model = "nvidia/nemotron-mini-4b-instruct"
 default_temperature = 0.7
 
 [memory]

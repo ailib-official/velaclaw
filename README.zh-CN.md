@@ -70,7 +70,7 @@ cargo run --features smart-routing -- --smart
 # 启用多模型协商
 cargo run --features multi-model -- --negotiate
 
-# 使用默认协议模型 ID（openai/gpt-5.2）发送一条消息
+# 使用默认协议模型 ID（nvidia/nemotron-mini-4b-instruct）发送一条消息
 cargo run -- agent -m "Hello"
 ```
 
@@ -78,7 +78,7 @@ cargo run -- agent -m "Hello"
 
 ```bash
 velaclaw daemon
-# 浏览器打开 http://127.0.0.1:8080/chat
+# 浏览器打开 http://127.0.0.1:3000/chat
 # 配对：POST /pair，请求头 X-Pairing-Code: <启动码>
 # 在 UI 中保存 bearer token；Sessions 标签或 ?session=<id> 可恢复会话
 ```
@@ -105,8 +105,8 @@ export ANTHROPIC_API_KEY=sk-ant-...
 
 ```toml
 # ~/.velaclaw/config.toml
-default_provider = "openai/gpt-5.2"
-default_model = "openai/gpt-5.2"
+default_provider = "nvidia/nemotron-mini-4b-instruct"
+default_model = "nvidia/nemotron-mini-4b-instruct"
 ```
 
 ---

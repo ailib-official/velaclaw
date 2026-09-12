@@ -84,8 +84,8 @@ velaclaw agent -m "Hello" --provider-mode prism
 
 ```bash
 velaclaw daemon
-# Open http://127.0.0.1:8080/chat
-# Pair: POST http://127.0.0.1:8080/pair with header X-Pairing-Code: <code>
+# Open http://127.0.0.1:3000/chat
+# Pair: POST http://127.0.0.1:3000/pair with header X-Pairing-Code: <code>
 # Save bearer token in the UI; use Sessions tab or ?session=<id> to resume
 ```
 

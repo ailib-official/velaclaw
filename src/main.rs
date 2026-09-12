@@ -111,7 +111,7 @@ enum Commands {
         #[arg(long)]
         api_key: Option<String>,
 
-        /// Provider/model id (used in quick mode, default: openai/gpt-5.2)
+        /// Provider/model id (used in quick mode, default: nvidia/nemotron-mini-4b-instruct)
         #[arg(long)]
         provider: Option<String>,
         /// Model ID override (used in quick mode)

@@ -2,7 +2,7 @@
 
 This is a high-signal reference for common config sections and defaults.
 
-Last verified: **February 19, 2026**.
+Last verified: **September 12, 2026**.
 
 Config path resolution at startup:
 
@@ -24,8 +24,8 @@ Schema export command:
 
 | Key | Default | Notes |
 |---|---|---|
-| `default_provider` | `openrouter` | provider ID or alias |
-| `default_model` | `anthropic/claude-sonnet-4-6` | model routed through selected provider |
+| `default_provider` | `nvidia/nemotron-mini-4b-instruct` | same as `DEFAULT_PROTOCOL_MODEL_ID` / `defaults.toml` |
+| `default_model` | `nvidia/nemotron-mini-4b-instruct` | model routed through selected provider |
 | `default_temperature` | `0.7` | model temperature |
 
 ## `[observability]`
@@ -55,12 +55,12 @@ otel_service_name = "velaclaw"
 Provider selection can also be controlled by environment variables. Precedence is:
 
 1. `VELACLAW_PROVIDER` (explicit override, always wins when non-empty)
-2. `PROVIDER` (legacy fallback, only applied when config provider is unset or still the protocol default `openai/gpt-5.2`)
+2. `PROVIDER` (legacy fallback, only applied when config provider is unset or still the protocol default `nvidia/nemotron-mini-4b-instruct`)
 3. `default_provider` in `config.toml`
 
 Operational note for container users:
 
-- If your `config.toml` sets an explicit provider/model id like `local-gateway/my-model`, a default `PROVIDER=openai/gpt-5.2` from Docker/container env will no longer replace it.
+- If your `config.toml` sets an explicit provider/model id like `local-gateway/my-model`, a default `PROVIDER` from Docker/container env will no longer replace it.
 - Use `VELACLAW_PROVIDER` when you intentionally want runtime env to override a non-default configured provider.
 
 ## `[agent]`

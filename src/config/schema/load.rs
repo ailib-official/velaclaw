@@ -612,6 +612,38 @@ impl Config {
         // Proxy (delegate to existing validation)
         self.proxy.validate()?;
 
+        // VL-CFG-001: configured-but-unwired capabilities fail closed at load.
+        self.validate_wired_capabilities()?;
+
+        Ok(())
+    }
+
+    /// Fail closed when config enables a capability this binary cannot run.
+    fn validate_wired_capabilities(&self) -> Result<()> {
+        let kind = self.runtime.kind.trim();
+        if kind.eq_ignore_ascii_case("wasm") && !cfg!(feature = "runtime-wasm") {
+            anyhow::bail!(
+                "runtime.kind='{kind}' requires a build with `--features runtime-wasm`. \
+                 Rebuild with that Cargo feature, or set runtime.kind = \"native\"."
+            );
+        }
+        if self.runtime.wasm.enabled && !cfg!(feature = "runtime-wasm") {
+            anyhow::bail!(
+                "[runtime.wasm] enabled=true requires `--features runtime-wasm`. \
+                 Rebuild with that Cargo feature, or set enabled = false. \
+                 Config load fails closed so wasm_invoke is not registered as a stub."
+            );
+        }
+        let hardware_requested = self.hardware.enabled
+            || self.peripherals.enabled
+            || !self.peripherals.boards.is_empty();
+        if hardware_requested && !cfg!(feature = "hardware") {
+            anyhow::bail!(
+                "hardware/peripherals are enabled in config but this binary was built without \
+                 `--features hardware`. Rebuild with that Cargo feature, or set \
+                 [hardware] enabled=false and [peripherals] enabled=false with empty boards."
+            );
+        }
         Ok(())
     }
 
@@ -2690,6 +2722,62 @@ default_temperature = 0.7
         std::env::remove_var("OLLAMA_API_KEY");
 
         assert!(result.is_ok(), "expected validation to pass: {result:?}");
+    }
+
+    #[test]
+    async fn validate_default_config_accepts_native_without_optional_features() {
+        Config::default()
+            .validate()
+            .expect("default native config must stay valid");
+    }
+
+    #[cfg(not(feature = "runtime-wasm"))]
+    #[test]
+    async fn validate_rejects_wasm_enabled_without_feature() {
+        let mut config = Config::default();
+        config.runtime.wasm.enabled = true;
+        let error = config
+            .validate()
+            .expect_err("wasm.enabled without runtime-wasm must fail");
+        let msg = error.to_string();
+        assert!(msg.contains("runtime-wasm"), "{msg}");
+        assert!(msg.contains("enabled=true"), "{msg}");
+    }
+
+    #[cfg(not(feature = "runtime-wasm"))]
+    #[test]
+    async fn validate_rejects_runtime_kind_wasm_without_feature() {
+        let mut config = Config::default();
+        config.runtime.kind = "wasm".into();
+        let error = config
+            .validate()
+            .expect_err("runtime.kind=wasm without runtime-wasm must fail");
+        assert!(error.to_string().contains("runtime-wasm"), "{}", error);
+    }
+
+    #[cfg(feature = "runtime-wasm")]
+    #[test]
+    async fn validate_accepts_wasm_enabled_when_feature_present() {
+        let mut config = Config::default();
+        config.runtime.wasm.enabled = true;
+        config
+            .validate()
+            .expect("wasm.enabled is valid when runtime-wasm is compiled");
+    }
+
+    #[cfg(not(feature = "hardware"))]
+    #[test]
+    async fn validate_rejects_peripherals_without_hardware_feature() {
+        let mut config = Config::default();
+        config.peripherals.enabled = true;
+        let error = config
+            .validate()
+            .expect_err("peripherals.enabled without hardware must fail");
+        assert!(
+            error.to_string().contains("--features hardware"),
+            "{}",
+            error
+        );
     }
 
     #[test]

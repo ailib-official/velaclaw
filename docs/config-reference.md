@@ -331,7 +331,7 @@ Notes:
 Notes:
 
 - Guest ABI is `wit/velaclaw-plugin.wit`: core WebAssembly export `run() -> s32`, interpreted by **wasmi**. This is **not** a wasmtime Component Model runtime.
-- Execution requires a build with `--features runtime-wasm`. Without the feature, `wasm_invoke` still registers when `enabled = true` but module execution fails closed.
+- Execution requires a build with `--features runtime-wasm`. If `enabled = true` (or `runtime.kind = "wasm"`) without that feature, **config load fails closed** (VL-CFG-001). Set `enabled = false` and `kind = "native"` on the default binary.
 - `wasm_invoke` uses the existing tool loop and Plan mutating pin (blocked in Plan). Module names are ASCII alphanumeric / `_` / `-` only.
 
 ## `[skills]`

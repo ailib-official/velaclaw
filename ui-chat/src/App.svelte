@@ -103,9 +103,9 @@
   let liveDag = $state<DagFrame | null>(null);
   let liveDagOutlinePosted = $state(false);
 
-  let listEl: HTMLDivElement | undefined;
-  let inputEl: HTMLTextAreaElement | undefined;
-  let modelSelectEl: HTMLSelectElement | undefined;
+  let listEl = $state<HTMLDivElement | undefined>(undefined);
+  let inputEl = $state<HTMLTextAreaElement | undefined>(undefined);
+  let modelSelectEl = $state<HTMLSelectElement | undefined>(undefined);
 
   /** Return focus to the chat composer after a turn ends (textarea was disabled while streaming). */
   async function focusChatInput() {

@@ -268,4 +268,26 @@ mod tests {
             r#"{"type":"session_title","session_id":"abc","title":"LAN Scan"}"#
         );
     }
+
+    #[test]
+    fn ws_done_matches_ui_golden_fixture() {
+        let msg = WsServerMessage::Done {
+            usage: Some(ChatUsage {
+                input_tokens: 1,
+                output_tokens: 2,
+            }),
+            cost: Some(0.001),
+            selected_model: Some("nvidia/nemotron-mini-4b-instruct".into()),
+            model_selection_reason: Some("explicit_user_pick".into()),
+        };
+        let actual = serde_json::to_value(&msg).expect("serialize");
+        let path = format!(
+            "{}/ui-chat/src/lib/fixtures/ws_done.json",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let golden: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("fixture"))
+                .expect("parse golden");
+        assert_eq!(actual, golden);
+    }
 }

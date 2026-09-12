@@ -1,0 +1,16 @@
+{
+  "entries": [
+    {
+      "id": "mem-1",
+      "key": "project",
+      "content": "notes",
+      "category": "project_notes",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "session_id": "sess-1",
+      "score": 0.91
+    }
+  ],
+  "total": 1,
+  "limit": 50,
+  "offset": 0
+}

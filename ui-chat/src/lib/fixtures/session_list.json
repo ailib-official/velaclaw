@@ -1,0 +1,12 @@
+{
+  "sessions": [
+    {
+      "id": "sess-1",
+      "title": "LAN Scan",
+      "created_at": "2026-09-12T00:00:00Z",
+      "updated_at": "2026-09-12T01:00:00Z",
+      "model_id": "nvidia/nemotron-mini-4b-instruct",
+      "message_count": 2
+    }
+  ]
+}

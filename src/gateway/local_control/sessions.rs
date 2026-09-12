@@ -496,4 +496,25 @@ mod tests {
         let after = store.get(&created.id).await.unwrap().unwrap();
         assert_eq!(after.title, "pinned-title");
     }
+
+    #[test]
+    fn session_list_matches_ui_golden_fixture() {
+        let summary = ChatSessionSummary {
+            id: "sess-1".into(),
+            title: "LAN Scan".into(),
+            created_at: "2026-09-12T00:00:00Z".into(),
+            updated_at: "2026-09-12T01:00:00Z".into(),
+            model_id: Some("nvidia/nemotron-mini-4b-instruct".into()),
+            message_count: 2,
+        };
+        let body = serde_json::json!({ "sessions": [summary] });
+        let path = format!(
+            "{}/ui-chat/src/lib/fixtures/session_list.json",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let golden: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("fixture"))
+                .expect("parse golden");
+        assert_eq!(body, golden);
+    }
 }

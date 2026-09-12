@@ -1,0 +1,10 @@
+{
+  "type": "done",
+  "usage": {
+    "input_tokens": 1,
+    "output_tokens": 2
+  },
+  "cost": 0.001,
+  "selected_model": "nvidia/nemotron-mini-4b-instruct",
+  "model_selection_reason": "explicit_user_pick"
+}

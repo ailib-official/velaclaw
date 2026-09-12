@@ -46,6 +46,8 @@ export interface WsServerFrame {
   message?: string;
   usage?: { input_tokens: number; output_tokens: number };
   cost?: number;
+  selected_model?: string;
+  model_selection_reason?: string;
   id?: string;
   tool_name?: string;
   arguments_summary?: string;

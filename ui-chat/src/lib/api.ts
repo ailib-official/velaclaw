@@ -115,8 +115,11 @@ export interface MemoryEntry {
   id: string;
   key: string;
   content: string;
+  /** Gateway Display string: core/daily/conversation or custom name. */
   category: string;
   timestamp: string;
+  session_id?: string;
+  score?: number;
 }
 
 export async function fetchMemory(

@@ -609,7 +609,7 @@ fn check_config_semantics(config: &Config, items: &mut Vec<DiagItem>) {
     {
         let line = crate::runtime::WasmRuntime::doctor_line(&config.runtime);
         if config.runtime.wasm.enabled && !crate::runtime::WasmRuntime::is_available() {
-            items.push(DiagItem::warn("runtime", line));
+            items.push(DiagItem::error("runtime", line));
         } else {
             items.push(DiagItem::ok("runtime", line));
         }

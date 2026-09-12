@@ -15,7 +15,15 @@ pub fn create_runtime(config: &RuntimeConfig) -> anyhow::Result<Box<dyn RuntimeA
     match config.kind.as_str() {
         "native" => Ok(Box::new(NativeRuntime::new())),
         "docker" => Ok(Box::new(DockerRuntime::new(config.docker.clone()))),
-        "wasm" => Ok(Box::new(WasmRuntime::new(config.wasm.clone()))),
+        "wasm" => {
+            if !WasmRuntime::is_available() {
+                anyhow::bail!(
+                    "runtime.kind='wasm' requires `--features runtime-wasm`. \
+                     Rebuild with that Cargo feature, or set runtime.kind='native'."
+                );
+            }
+            Ok(Box::new(WasmRuntime::new(config.wasm.clone())))
+        }
         "cloudflare" => anyhow::bail!(
             "runtime.kind='cloudflare' is not implemented yet. Use runtime.kind='native' for now."
         ),
@@ -96,8 +104,18 @@ mod tests {
             kind: "wasm".into(),
             ..RuntimeConfig::default()
         };
-        let rt = create_runtime(&cfg).unwrap();
-        assert_eq!(rt.name(), "wasm");
-        assert!(!rt.has_shell_access());
+        #[cfg(feature = "runtime-wasm")]
+        {
+            let rt = create_runtime(&cfg).unwrap();
+            assert_eq!(rt.name(), "wasm");
+            assert!(!rt.has_shell_access());
+        }
+        #[cfg(not(feature = "runtime-wasm"))]
+        {
+            match create_runtime(&cfg) {
+                Err(err) => assert!(err.to_string().contains("runtime-wasm"), "{err}"),
+                Ok(_) => panic!("wasm kind without feature must fail"),
+            }
+        }
     }
 }

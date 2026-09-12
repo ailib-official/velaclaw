@@ -18,6 +18,7 @@ pub struct HopProbeGovernor {
     shell_rounds: u32,
     policy_denies: HashMap<&'static str, u32>,
     hop_close: HopClose,
+    last_policy_class: Option<&'static str>,
     pub notices: Vec<String>,
 }
 
@@ -37,6 +38,9 @@ impl HopProbeGovernor {
     /// Count one assistant batch that actually ran a shell (not deny / skip / cap).
     pub fn record_executed_round(&mut self) {
         self.shell_rounds = self.shell_rounds.saturating_add(1);
+        if self.shell_rounds >= MAX_SHELL_ROUNDS_PER_HOP {
+            self.hop_close = HopClose::Cap;
+        }
     }
 
     /// Drop a fingerprint that was reserved for Run but never executed (policy-deny / approval).
@@ -77,17 +81,47 @@ impl HopProbeGovernor {
         let Some(class) = policy_deny_class(output) else {
             return;
         };
+        self.last_policy_class = Some(class);
         let n = self.policy_denies.entry(class).or_insert(0);
         *n = n.saturating_add(1);
-        if crate::agent::hop_stop::policy_deny_closes_on_first(class) || *n >= 2 {
-            self.hop_close = HopClose::PolicyDeny;
-        }
+        let proposed = crate::agent::hop_stop::hop_close_after_policy_tally(class, *n);
+        self.hop_close = crate::agent::hop_stop::merge_hop_close(self.hop_close, proposed);
     }
 
     #[must_use]
     pub fn hop_close(&self) -> HopClose {
         self.hop_close
     }
+
+    #[must_use]
+    pub fn last_policy_deny_class(&self) -> Option<&'static str> {
+        self.last_policy_class
+    }
+}
+
+/// Cap / skip chrome is internodal (tool results), not the operator bubble.
+#[must_use]
+pub fn is_governor_chrome(text: &str) -> bool {
+    let t = text.trim();
+    t.contains(SHELL_ROUND_CAP_NOTICE) || t.contains(REPEAT_PROBE_NOTICE)
+}
+
+/// Notices that may be appended to the operator-visible prefix (VL-NA-045).
+#[must_use]
+pub fn operator_visible_notices(notices: Vec<String>) -> Vec<String> {
+    notices
+        .into_iter()
+        .filter(|n| !is_governor_chrome(n))
+        .collect()
+}
+
+/// User-visible hop body after tool-loop close. Must not substitute chrome.
+#[must_use]
+pub fn hop_close_visible_body(visible_text: &str, close: HopClose) -> String {
+    if close == HopClose::None {
+        return visible_text.to_string();
+    }
+    visible_text.trim().to_string()
 }
 
 /// True when this tool result consumed a host shell-round (VL-NA-041).
@@ -252,6 +286,22 @@ mod tests {
         let fp2 = tool_probe_fingerprint("shell", &json!({"command": "echo 6"}));
         assert_eq!(g.decide_shell(&fp2), ProbeShellDecision::Cap);
         assert_eq!(g.shell_rounds(), 4);
+        assert_eq!(g.hop_close(), HopClose::Cap);
+    }
+
+    #[test]
+    fn four_executed_rounds_close_hop_without_fifth_shell() {
+        let mut g = HopProbeGovernor::new();
+        for round in 1..=4 {
+            let fp = tool_probe_fingerprint("shell", &json!({"command": format!("echo {round}")}));
+            assert_eq!(g.decide_shell(&fp), ProbeShellDecision::Run);
+            g.record_executed_round();
+        }
+        assert_eq!(g.hop_close(), HopClose::Cap);
+        assert_eq!(
+            crate::agent::hop_stop::after_hop_close(g.hop_close()),
+            crate::agent::hop_stop::AfterHopClose::NextRemainingSkipObserve
+        );
     }
 
     #[test]
@@ -278,7 +328,7 @@ mod tests {
             assert_eq!(g.decide_shell(&fp), ProbeShellDecision::Run);
             // deny / skip: do not record
         }
-        let fp = tool_probe_fingerprint("shell", &json!({"command": "ssh piubt true"}));
+        let fp = tool_probe_fingerprint("shell", &json!({"command": "ssh host.example echo ok"}));
         assert_eq!(g.decide_shell(&fp), ProbeShellDecision::Run);
         g.record_executed_round();
         assert_eq!(g.shell_rounds(), 1);
@@ -287,7 +337,7 @@ mod tests {
     #[test]
     fn retract_unexecuted_allows_retry_after_deny() {
         let mut g = HopProbeGovernor::new();
-        let fp = tool_probe_fingerprint("shell", &json!({"command": "ssh piubt true"}));
+        let fp = tool_probe_fingerprint("shell", &json!({"command": "ssh host.example echo ok"}));
         assert_eq!(g.decide_shell(&fp), ProbeShellDecision::Run);
         g.retract_unexecuted(&fp);
         assert_eq!(g.decide_shell(&fp), ProbeShellDecision::Run);
@@ -302,13 +352,52 @@ mod tests {
     }
 
     #[test]
-    fn two_same_policy_denies_close_hop() {
+    fn two_wait_denies_do_not_fail_the_dag() {
+        let mut g = HopProbeGovernor::new();
+        g.note_shell_output(
+            "Command blocked: wait-only executables (sleep/usleep) are not allowed.",
+        );
+        g.note_shell_output(
+            "[policy_deny] Command blocked: wait-only executables (sleep/usleep) are not allowed.",
+        );
+        assert_eq!(g.hop_close(), HopClose::None);
+    }
+
+    #[test]
+    fn two_allowlist_denies_do_not_fail_the_dag() {
         let mut g = HopProbeGovernor::new();
         g.note_shell_output("Command not allowed by security policy (not in allowed_commands).");
         assert_eq!(g.hop_close(), HopClose::None);
         g.note_shell_output(
             "[policy_deny] Command not allowed by security policy (not in allowed_commands).",
         );
+        assert_eq!(g.hop_close(), HopClose::None);
+        assert_eq!(
+            crate::agent::hop_stop::after_hop_close(g.hop_close()),
+            crate::agent::hop_stop::AfterHopClose::ObserveThenContinue
+        );
+    }
+
+    #[test]
+    fn four_allowlist_denies_cap_hop_and_keep_remaining() {
+        let mut g = HopProbeGovernor::new();
+        let msg = "[policy_deny] Command not allowed by security policy (not in allowed_commands).";
+        for _ in 0..crate::agent::hop_stop::MAX_RECOVERABLE_POLICY_DENIES_BEFORE_CAP {
+            g.note_shell_output(msg);
+        }
+        assert_eq!(g.hop_close(), HopClose::Cap);
+        assert_eq!(
+            crate::agent::hop_stop::after_hop_close(g.hop_close()),
+            crate::agent::hop_stop::AfterHopClose::NextRemainingSkipObserve
+        );
+    }
+
+    #[test]
+    fn two_same_unsafe_denies_close_hop() {
+        let mut g = HopProbeGovernor::new();
+        g.note_shell_output("unsafe shell construct (injection, redirect, or dangerous args).");
+        assert_eq!(g.hop_close(), HopClose::None);
+        g.note_shell_output("unsafe shell construct (injection, redirect, or dangerous args).");
         assert_eq!(g.hop_close(), HopClose::PolicyDeny);
     }
 
@@ -331,5 +420,27 @@ mod tests {
         let mut g3 = HopProbeGovernor::new();
         g3.note_shell_output("Denied by user.");
         assert_eq!(g3.hop_close(), HopClose::None);
+    }
+
+    #[test]
+    fn operator_visible_notices_drop_cap_and_skip_chrome() {
+        let kept = operator_visible_notices(vec![
+            SHELL_ROUND_CAP_NOTICE.to_string(),
+            REPEAT_PROBE_NOTICE.to_string(),
+            "### repo-origin\nFour shells ran.".to_string(),
+        ]);
+        assert!(kept.iter().all(|n| !is_governor_chrome(n)), "{kept:?}");
+        assert_eq!(kept.len(), 1);
+        assert!(kept[0].contains("Four shells ran."));
+    }
+
+    #[test]
+    fn hop_close_visible_body_does_not_fill_empty_with_cap_notice() {
+        assert!(hop_close_visible_body("", HopClose::Cap).is_empty());
+        assert_eq!(
+            hop_close_visible_body("envelope gist", HopClose::Cap),
+            "envelope gist"
+        );
+        assert!(hop_close_visible_body("  ", HopClose::PolicyDeny).is_empty());
     }
 }

@@ -380,7 +380,7 @@ async fn execute_tools_sequential_with_gate(
 
         let (shell_human_approved, proceed) = match decision {
             GateDecision::Denied { message } => {
-                record_gate_denied(policy, &call.name, &call.arguments);
+                record_gate_denied(policy, &call.name, &call.arguments, &message);
                 results.push(ToolBatchResult {
                     output: scrub_credentials(&message),
                     success: false,
@@ -435,7 +435,7 @@ async fn execute_tools_sequential_with_gate(
                 };
                 match elevation {
                     GateDecision::Denied { message } => {
-                        record_gate_denied(policy, &call.name, &call.arguments);
+                        record_gate_denied(policy, &call.name, &call.arguments, &message);
                         results.pop();
                         results.push(ToolBatchResult {
                             output: scrub_credentials(&message),
@@ -482,13 +482,26 @@ async fn execute_tools_sequential_with_gate(
     Ok(results)
 }
 
-fn record_gate_denied(policy: Option<&PolicyHandle>, tool_name: &str, args: &serde_json::Value) {
+fn record_gate_denied(
+    policy: Option<&PolicyHandle>,
+    tool_name: &str,
+    args: &serde_json::Value,
+    message: &str,
+) {
     let Some(policy) = policy else {
         return;
     };
     let summary = shell_command_from_args(tool_name, args).unwrap_or(tool_name);
     let log = ToolReceiptLog::in_workspace(&policy.workspace_dir());
-    if let Err(e) = log.record(tool_name, ReceiptDecision::Deny, summary, "gate", false) {
+    let class = crate::agent::hop_stop::policy_deny_class(message);
+    if let Err(e) = log.record(
+        tool_name,
+        ReceiptDecision::Deny,
+        summary,
+        "gate",
+        false,
+        class,
+    ) {
         tracing::warn!("tool receipt write failed: {e}");
     }
 }
@@ -774,8 +787,49 @@ mod tests {
             std::fs::read_to_string(tmp.path().join(".velaclaw/tool_receipts.jsonl")).unwrap();
         assert!(body.contains("\"decision\":\"deny\""));
         assert!(body.contains("github_token_list.txt"));
+        assert!(body.contains("\"deny_class\":\"other_policy\""), "{body}");
         let tok = format!("ghp_{}", "C".repeat(36));
         assert!(!body.contains(&tok));
+    }
+
+    #[tokio::test]
+    async fn gate_denied_allowlist_writes_deny_class() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut approval_cfg = AutonomyConfig::default();
+        approval_cfg.level = crate::security::AutonomyLevel::Full;
+        approval_cfg.always_ask.clear();
+        let approval_mgr = ApprovalManager::from_config(&approval_cfg);
+        let policy = PolicyHandle::new(crate::security::SecurityPolicy {
+            autonomy: crate::security::AutonomyLevel::Full,
+            workspace_dir: tmp.path().to_path_buf(),
+            allowed_commands: vec!["cat".into()],
+            secret_path_mode: crate::security::SecretPathMode::Allow,
+            ..crate::security::SecurityPolicy::default()
+        });
+        let calls = vec![ParsedToolCall {
+            name: "shell".to_string(),
+            arguments: serde_json::json!({"command": "true"}),
+        }];
+        let observer = crate::observability::NoopObserver;
+        let results = execute_tool_batch(
+            &calls,
+            &[],
+            &observer,
+            Some(&approval_mgr),
+            Some(&policy),
+            "cli",
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(!results[0].success);
+        let body =
+            std::fs::read_to_string(tmp.path().join(".velaclaw/tool_receipts.jsonl")).unwrap();
+        assert!(body.contains("\"decision\":\"deny\""), "{body}");
+        assert!(body.contains("\"deny_class\":\"allowlist\""), "{body}");
     }
 
     #[test]

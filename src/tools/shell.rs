@@ -63,9 +63,17 @@ impl ShellTool {
         command: &str,
         human_approved: bool,
         sandbox_name: &str,
+        deny_class: Option<&str>,
     ) {
         if let Some(log) = &self.receipts {
-            if let Err(e) = log.record("shell", decision, command, sandbox_name, human_approved) {
+            if let Err(e) = log.record(
+                "shell",
+                decision,
+                command,
+                sandbox_name,
+                human_approved,
+                deny_class,
+            ) {
                 tracing::warn!("tool receipt write failed: {e}");
             }
         }
@@ -197,6 +205,7 @@ impl Tool for ShellTool {
                     command,
                     human_approved,
                     self.sandbox.name(),
+                    crate::agent::hop_stop::policy_deny_class(&reason),
                 );
                 return Ok(ToolResult {
                     success: false,
@@ -251,6 +260,7 @@ impl Tool for ShellTool {
                     command,
                     human_approved,
                     sandbox_name,
+                    None,
                 );
                 return Ok(ToolResult {
                     success: false,
@@ -268,6 +278,7 @@ impl Tool for ShellTool {
             command,
             human_approved,
             sandbox_name,
+            None,
         );
 
         let stdin_secret = ctx.stdin_secret.clone();

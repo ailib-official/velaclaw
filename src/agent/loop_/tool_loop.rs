@@ -719,20 +719,10 @@ pub(crate) async fn run_tool_call_loop(
             }
         }
         if hop_close != crate::agent::hop_stop::HopClose::None {
-            let notice = match hop_close {
-                crate::agent::hop_stop::HopClose::Cap => {
-                    crate::agent::probe_dedup::SHELL_ROUND_CAP_NOTICE
-                }
-                crate::agent::hop_stop::HopClose::PolicyDeny => {
-                    "Host stopped this hop after repeated policy denials of the same class."
-                }
-                crate::agent::hop_stop::HopClose::None => "",
-            };
-            let mut closing = visible_text.trim().to_string();
-            if closing.is_empty() {
-                closing = notice.to_string();
-            }
-            return Ok(closing);
+            return Ok(crate::agent::probe_dedup::hop_close_visible_body(
+                &visible_text,
+                hop_close,
+            ));
         }
     }
 

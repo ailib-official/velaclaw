@@ -442,11 +442,11 @@ impl Agent {
         prefix: &mut String,
     ) {
         self.current_hop_probe = None;
-        for note in probe
+        let notes = probe
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .drain_notices()
-        {
+            .drain_notices();
+        for note in crate::agent::probe_dedup::operator_visible_notices(notes) {
             self.push_operator_note(prefix, &note);
         }
     }
@@ -1109,50 +1109,61 @@ impl Agent {
                     None,
                     Some(&contacts),
                 ));
-                let text = match self.invoke_tool_loop_resolved(contact.model.clone()).await {
-                    Ok(text) => {
-                        self.flush_hop_probe_notices(&probe_rc, &mut operator_prefix);
-                        let close = probe_rc.lock().map(|g| g.hop_close()).unwrap_or_default();
-                        if close == crate::agent::hop_stop::HopClose::PolicyDeny {
+                let (text, skip_observe) =
+                    match self.invoke_tool_loop_resolved(contact.model.clone()).await {
+                        Ok(text) => {
+                            self.flush_hop_probe_notices(&probe_rc, &mut operator_prefix);
+                            let (close, deny_class) = probe_rc
+                                .lock()
+                                .map(|g| (g.hop_close(), g.last_policy_deny_class()))
+                                .unwrap_or_default();
+                            match crate::agent::hop_stop::after_hop_close(close) {
+                                crate::agent::hop_stop::AfterHopClose::FailCursorStop => {
+                                    let _ = crate::agent::bounded_dag_live::store_dag_fail(
+                                        self.memory.as_ref(),
+                                        self.session_id.as_str(),
+                                        &crate::agent::bounded_dag_live::policy_deny_fail_cursor(
+                                            &node.id, index, &dag_id,
+                                        ),
+                                    )
+                                    .await;
+                                    let stop = format_work_node_stop(
+                                        user_message,
+                                        &node.id,
+                                        crate::agent::hop_stop::policy_deny_stop_reason(deny_class),
+                                        index + 1,
+                                        node_count,
+                                    );
+                                    self.push_operator_note(&mut operator_prefix, &stop);
+                                    self.end_live_graph_host_state();
+                                    return Ok(operator_prefix);
+                                }
+                                crate::agent::hop_stop::AfterHopClose::NextRemainingSkipObserve => {
+                                    (text, true)
+                                }
+                                crate::agent::hop_stop::AfterHopClose::ObserveThenContinue => {
+                                    (text, false)
+                                }
+                            }
+                        }
+                        Err(err) if is_tool_loop_cancelled(&err) => {
                             let _ = crate::agent::bounded_dag_live::store_dag_fail(
                                 self.memory.as_ref(),
                                 self.session_id.as_str(),
-                                &crate::agent::bounded_dag_live::policy_deny_fail_cursor(
+                                &crate::agent::bounded_dag_live::cancelled_fail_cursor(
                                     &node.id, index, &dag_id,
                                 ),
                             )
                             .await;
-                            let stop = format_work_node_stop(
-                                user_message,
-                                &node.id,
-                                "repeated policy denials of the same class",
-                                index + 1,
-                                node_count,
-                            );
-                            self.push_operator_note(&mut operator_prefix, &stop);
-                            self.end_live_graph_host_state();
-                            return Ok(operator_prefix);
+                            self.current_hop_probe = None;
+                            self.security.set_graph_scratch_rel(None);
+                            return Err(err);
                         }
-                        text
-                    }
-                    Err(err) if is_tool_loop_cancelled(&err) => {
-                        let _ = crate::agent::bounded_dag_live::store_dag_fail(
-                            self.memory.as_ref(),
-                            self.session_id.as_str(),
-                            &crate::agent::bounded_dag_live::cancelled_fail_cursor(
-                                &node.id, index, &dag_id,
-                            ),
-                        )
-                        .await;
-                        self.current_hop_probe = None;
-                        self.security.set_graph_scratch_rel(None);
-                        return Err(err);
-                    }
-                    Err(err) => {
-                        self.flush_hop_probe_notices(&probe_rc, &mut operator_prefix);
-                        let err_s = format!("{err:#}");
-                        let class = crate::providers::hint_peer::classify_hop_error(&err_s);
-                        match crate::agent::bounded_dag_live::decide_work_node_fail(
+                        Err(err) => {
+                            self.flush_hop_probe_notices(&probe_rc, &mut operator_prefix);
+                            let err_s = format!("{err:#}");
+                            let class = crate::providers::hint_peer::classify_hop_error(&err_s);
+                            match crate::agent::bounded_dag_live::decide_work_node_fail(
                             self.config.dag_fail_auto_replan,
                             auto_used,
                             &err_s,
@@ -1221,8 +1232,8 @@ impl Agent {
                                 return Ok(operator_prefix);
                             }
                         }
-                    }
-                };
+                        }
+                    };
                 if let Err(err) = crate::agent::bounded_dag_context::store_node_artifact(
                     self.memory.as_ref(),
                     self.session_id.as_str(),
@@ -1280,6 +1291,10 @@ impl Agent {
                     return self
                         .parlor_live_reply(&graph_task, &last_body, &operator_prefix)
                         .await;
+                }
+                if skip_observe {
+                    index += 1;
+                    continue;
                 }
                 let verdict = crate::agent::bounded_dag_live::observe_turn_outcome(
                     self.provider.as_ref(),

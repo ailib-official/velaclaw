@@ -17,6 +17,7 @@
 use super::bounded_dag::{format_preview, linear_node_ids, load_bounded_dag, schedule_node_ids};
 use super::bounded_dag_context::contact_for_live_node;
 use super::candidate_dag::validate_candidate_dag_json;
+use super::capability_contract::admit_capability_contract;
 use super::dag_runner::{parse_dag_json, DagManifest, CODE_FIX_TEMPLATE_JSON};
 use super::host_phase::HostPhase;
 use crate::memory::{Memory, MemoryCategory};
@@ -24,6 +25,7 @@ use crate::orchestration::dag_emit::{
     extract_json_object, planner_chat_text, DAG_PLAN_SYSTEM_PROMPT,
 };
 use crate::providers::{ChatMessage, ChatRequest, Provider};
+use crate::security::SecurityPolicy;
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
@@ -276,6 +278,18 @@ pub fn one_node_live_dag(user_task: &str) -> PlannedLiveDag {
     }
 }
 
+fn admit_planned_dag(plan: &mut PlannedLiveDag, user_task: &str) -> Result<()> {
+    admit_capability_contract(&mut plan.dag, user_task, &SecurityPolicy::default(), &[])
+}
+
+fn plan_rejected_chat(err: &anyhow::Error) -> LiveFirstHop {
+    LiveFirstHop::ChatOnly {
+        reply: format!(
+            "Plan rejected before execute: {err}. Use a simple allowed command (no substitution, redirect, or find -exec), or rephrase the task."
+        ),
+    }
+}
+
 fn hop_kind(hop: &LiveFirstHop) -> &'static str {
     match hop {
         LiveFirstHop::ChatOnly { .. } => "chat_only",
@@ -316,6 +330,23 @@ async fn refine_one_node_plan(
             }
         }
         _ => Ok(seed),
+    }
+}
+
+fn admit_live_first_hop(hop: LiveFirstHop, user_task: &str) -> LiveFirstHop {
+    match hop {
+        LiveFirstHop::Plan(mut plan) => match admit_planned_dag(&mut plan, user_task) {
+            Ok(()) => LiveFirstHop::Plan(plan),
+            Err(err) => {
+                tracing::info!(
+                    target: "bounded_dag_live",
+                    error = %err,
+                    "capability contract rejected plan"
+                );
+                plan_rejected_chat(&err)
+            }
+        },
+        other => other,
     }
 }
 
@@ -372,6 +403,7 @@ pub async fn live_first_hop(
             )
         }
     };
+    let hop = admit_live_first_hop(hop, user_task);
     if let LiveFirstHop::Plan(plan) = &hop {
         let json = planned_store_json(plan, &fallback);
         let _ = store_planned_json(mem, session_id, &json).await;
@@ -1155,18 +1187,21 @@ pub async fn obtain_planned_live_dag_with_provider(
         }
     } else if let Some((dag, order)) = operator_fixed_live_graph(agent)? {
         let _ = store_graph_user_task(mem, session_id, user_task).await;
-        return Ok(PlannedLiveDag {
+        let mut planned = PlannedLiveDag {
             dag,
             order,
             used_fallback: false,
             source: "operator_path",
             resume_from: 0,
             graph_task_override: None,
-        });
+        };
+        admit_planned_dag(&mut planned, user_task)?;
+        return Ok(planned);
     }
     let fallback = fallback_template_json(agent)?;
-    let planned =
+    let mut planned =
         run_live_planner_chat(provider, planner_model, user_task, temperature, &fallback).await?;
+    admit_planned_dag(&mut planned, user_task)?;
     if planned.used_fallback {
         tracing::info!(
             target: "bounded_dag_live",
@@ -1337,7 +1372,7 @@ pub async fn prepare_session_live_dag(
             let completed: Vec<String> = stored.order.iter().take(fail.index).cloned().collect();
             let repair_user = repair_planner_user_prompt(&original, &fail, &completed, user_task);
             let fallback = fallback_template_json(agent)?;
-            let remaining = run_live_planner_chat(
+            let mut remaining = run_live_planner_chat(
                 provider,
                 planner_model,
                 &repair_user,
@@ -1345,6 +1380,7 @@ pub async fn prepare_session_live_dag(
                 &fallback,
             )
             .await?;
+            admit_planned_dag(&mut remaining, &original)?;
             if remaining.used_fallback {
                 stored.resume_from = fail.index.min(stored.order.len());
                 stored.graph_task_override = Some(override_task);

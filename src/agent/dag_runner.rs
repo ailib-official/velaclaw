@@ -60,6 +60,12 @@ pub struct DagNode {
     /// Omitted in existing graphs. Not an ai-protocol field.
     #[serde(default)]
     pub artifact: Option<String>,
+    /// Execution class Σ (VL-APE-011). Omitted in existing graphs.
+    #[serde(default)]
+    pub sigma: Option<String>,
+    /// Execution locus: `workspace` or `remote:<alias>` (VL-APE-011).
+    #[serde(default)]
+    pub locus: Option<String>,
 }
 
 impl DagNode {

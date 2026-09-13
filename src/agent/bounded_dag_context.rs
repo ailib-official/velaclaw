@@ -395,8 +395,11 @@ pub fn contact_for_node(
     }
 }
 
-/// Live work hop: session picker is the default model (VL-NA-043).
-/// Capability hints apply only after [`force_default`] fail-strategy (peer / retry).
+/// Live work hop: Route(C, Context) (VL-APE-002).
+///
+/// Tier 1: session picker for work-cognition nodes. Tier 2: capability hints
+/// when there is no picker or the node is non-session-only. Tier 3:
+/// [`force_default`] after typed provider fail — never first-hop caps→hint:code.
 pub fn contact_for_live_node(
     node: &DagNode,
     default_model: &str,
@@ -404,17 +407,21 @@ pub fn contact_for_live_node(
     force_default: bool,
 ) -> NodeContact {
     if force_default {
-        return NodeContact {
-            model: default_model.to_string(),
-            reason: "fail_strategy:default_model".into(),
-            capabilities: node.model_selector.capabilities.clone(),
-        };
+        return crate::agent::capability_route::fail_peer_default(
+            default_model,
+            node.model_selector.capabilities.clone(),
+        );
     }
     let session = default_model.trim();
-    if session.is_empty() {
-        return contact_for_node(node, default_model, available_hints, None);
-    }
-    contact_for_node(node, default_model, available_hints, Some(session))
+    let pref = crate::agent::capability_route::work_preference(
+        &node.model_selector.capabilities,
+        if session.is_empty() {
+            None
+        } else {
+            Some(session)
+        },
+    );
+    contact_for_node(node, default_model, available_hints, pref)
 }
 
 #[cfg(test)]
@@ -484,6 +491,28 @@ mod tests {
         );
         assert_eq!(retried.reason, "fail_strategy:default_model");
         assert_eq!(retried.model, "nvidia/nemotron-3-ultra-550b-a55b");
+    }
+
+    #[test]
+    fn embed_node_skips_session_picker() {
+        let json = r#"{
+          "schema_version": "0.1.0",
+          "id": "emb",
+          "entry": "n",
+          "max_steps": 8,
+          "nodes": [
+            {"id":"n","task_type":"embed","model_selector":{"capabilities":["embed"]},"next":null}
+          ]
+        }"#;
+        let dag = parse_dag_json(json).unwrap();
+        let c = contact_for_live_node(
+            &dag.nodes[0],
+            "nvidia/nemotron-3-ultra-550b-a55b",
+            &["embed".into()],
+            false,
+        );
+        assert_eq!(c.model, "hint:embed", "{}", c.reason);
+        assert!(c.reason.contains("embed"), "{}", c.reason);
     }
 
     #[test]

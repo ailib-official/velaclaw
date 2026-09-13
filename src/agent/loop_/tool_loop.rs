@@ -711,6 +711,15 @@ pub(crate) async fn run_tool_call_loop(
         // reconstruct proper OpenAI-format tool_calls and tool result messages.
         // Prompt mode: use XML-based text format as before.
         history.push(ChatMessage::assistant(assistant_history_content));
+        #[cfg(feature = "ai-protocol")]
+        crate::agent::graph_scheduler::append_loop_tool_results(
+            history,
+            &native_tool_calls,
+            &individual_results,
+            &tool_results,
+            text_tool_result_history,
+        );
+        #[cfg(not(feature = "ai-protocol"))]
         if native_tool_calls.is_empty() || text_tool_result_history {
             history.push(ChatMessage::user(format!("[Tool results]\n{tool_results}")));
         } else {

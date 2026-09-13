@@ -1628,7 +1628,51 @@ pub async fn run(
                                         ))
                                     })
                                     .clone();
-                                let piece = match run_tool_call_loop(
+                                let hop_text_history =
+                                    crate::agent::graph_scheduler::live_work_text_history(
+                                        config.agent.bounded_dag_live,
+                                        text_tool_result_history,
+                                    );
+                                let hop_result = if crate::agent::graph_scheduler::node_sigma(node)
+                                    == crate::agent::graph_scheduler::NodeSigma::ToolDirect
+                                {
+                                    let call =
+                                        crate::agent::graph_scheduler::direct_tool_call(node)?;
+                                    let hop_cancel = cancel.token();
+                                    let results = crate::agent::tool_batch::execute_tool_batch(
+                                        std::slice::from_ref(&call),
+                                        &tools_registry,
+                                        &progress_obs,
+                                        Some(&approval_manager),
+                                        Some(&security),
+                                        approval_channel,
+                                        None,
+                                        Some(&hop_cancel),
+                                        Some(&cli_gate_extras),
+                                    )
+                                    .await?;
+                                    {
+                                        let mut g = probe_cell
+                                            .lock()
+                                            .unwrap_or_else(|e| e.into_inner());
+                                        for result in &results {
+                                            g.note_shell_output(&result.output);
+                                            if result.success && call.name == "shell" {
+                                                g.record_executed_round();
+                                            }
+                                        }
+                                    }
+                                    crate::agent::graph_scheduler::append_role_tool_results(
+                                        &mut history,
+                                        &results,
+                                    );
+                                    Ok(crate::agent::graph_scheduler::tool_direct_body(&results))
+                                } else {
+                                    crate::agent::graph_scheduler::ensure_live_llm_native(
+                                        config.agent.tool_dispatcher.as_str(),
+                                        provider.supports_native_tools(),
+                                    )?;
+                                    run_tool_call_loop(
                                     provider.as_ref(),
                                     &mut history,
                                     &tools_registry,
@@ -1646,7 +1690,7 @@ pub async fn run(
                                     tool_dispatcher_ref,
                                     Some(&security),
                                     None,
-                                    text_tool_result_history,
+                                    hop_text_history,
                                     render_opts,
                                     Some(&fold_cache),
                                     Some(SoftFailLoopCtx {
@@ -1662,6 +1706,8 @@ pub async fn run(
                                     Some(&cli_gate_extras),
                                 )
                                 .await
+                                };
+                                let piece = match hop_result
                                 {
                                     Ok(piece) => {
                                         let (notes, close, deny_class) = {
@@ -1908,6 +1954,13 @@ pub async fn run(
                             };
                             #[cfg(not(feature = "ai-protocol"))]
                             let hop_model = turn_model.as_str();
+                            #[cfg(feature = "ai-protocol")]
+                            if config.agent.bounded_dag_live {
+                                crate::agent::graph_scheduler::ensure_live_llm_native(
+                                    config.agent.tool_dispatcher.as_str(),
+                                    provider.supports_native_tools(),
+                                )?;
+                            }
                             run_tool_call_loop(
                                 provider.as_ref(),
                                 &mut history,
@@ -1926,7 +1979,10 @@ pub async fn run(
                                 tool_dispatcher_ref,
                                 Some(&security),
                                 None,
-                                text_tool_result_history,
+                                crate::agent::graph_scheduler::live_work_text_history(
+                                    config.agent.bounded_dag_live,
+                                    text_tool_result_history,
+                                ),
                                 render_opts,
                                 Some(&fold_cache),
                                 Some(SoftFailLoopCtx {

@@ -1118,24 +1118,24 @@ impl Agent {
                             crate::agent::hop_stop::AfterHopClose::NextRemainingSkipObserve => text,
                         }
                     }
-                        Err(err) if is_tool_loop_cancelled(&err) => {
-                            let _ = crate::agent::bounded_dag_live::store_dag_fail(
-                                self.memory.as_ref(),
-                                self.session_id.as_str(),
-                                &crate::agent::bounded_dag_live::cancelled_fail_cursor(
-                                    &node.id, index, &dag_id,
-                                ),
-                            )
-                            .await;
-                            self.current_hop_probe = None;
-                            self.security.set_graph_scratch_rel(None);
-                            return Err(err);
-                        }
-                        Err(err) => {
-                            self.flush_hop_probe_notices(&probe_rc, &mut operator_prefix);
-                            let err_s = format!("{err:#}");
-                            let class = crate::providers::hint_peer::classify_hop_error(&err_s);
-                            match crate::agent::bounded_dag_live::decide_work_node_fail(
+                    Err(err) if is_tool_loop_cancelled(&err) => {
+                        let _ = crate::agent::bounded_dag_live::store_dag_fail(
+                            self.memory.as_ref(),
+                            self.session_id.as_str(),
+                            &crate::agent::bounded_dag_live::cancelled_fail_cursor(
+                                &node.id, index, &dag_id,
+                            ),
+                        )
+                        .await;
+                        self.current_hop_probe = None;
+                        self.security.set_graph_scratch_rel(None);
+                        return Err(err);
+                    }
+                    Err(err) => {
+                        self.flush_hop_probe_notices(&probe_rc, &mut operator_prefix);
+                        let err_s = format!("{err:#}");
+                        let class = crate::providers::hint_peer::classify_hop_error(&err_s);
+                        match crate::agent::bounded_dag_live::decide_work_node_fail(
                             self.config.dag_fail_auto_replan,
                             auto_used,
                             &err_s,
@@ -1204,8 +1204,8 @@ impl Agent {
                                 return Ok(operator_prefix);
                             }
                         }
-                        }
-                    };
+                    }
+                };
                 if let Err(err) = crate::agent::bounded_dag_context::store_node_artifact(
                     self.memory.as_ref(),
                     self.session_id.as_str(),

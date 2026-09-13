@@ -50,13 +50,35 @@ pub struct DagNode {
     pub context_requirements: ContextRequirements,
     #[serde(default)]
     pub max_steps: Option<u32>,
-    /// Static edge; JSON `null` → terminal.
+    /// Static edge; JSON `null` → terminal. Linear graphs use only this field.
     #[serde(default)]
     pub next: Option<String>,
+    /// Extra successors besides `next` (VL-APE-004 fork). Empty on linear graphs.
+    #[serde(default)]
+    pub fork: Vec<String>,
     /// Experimental (GOV-006): short name of the verifiable output this node must leave.
     /// Omitted in existing graphs. Not an ai-protocol field.
     #[serde(default)]
     pub artifact: Option<String>,
+}
+
+impl DagNode {
+    /// Outgoing edges: `next` then `fork` (no duplicates).
+    #[must_use]
+    pub fn successors(&self) -> Vec<&str> {
+        let mut out = Vec::new();
+        if let Some(n) = self.next.as_deref() {
+            if !n.is_empty() {
+                out.push(n);
+            }
+        }
+        for f in &self.fork {
+            if !f.is_empty() && !out.contains(&f.as_str()) {
+                out.push(f.as_str());
+            }
+        }
+        out
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -14,7 +14,7 @@
 //!
 //! 有界 DAG live：首跳仅 chat_only 或线性图；1 节点开工具前再拆一次。
 
-use super::bounded_dag::{format_preview, linear_node_ids, load_bounded_dag};
+use super::bounded_dag::{format_preview, linear_node_ids, load_bounded_dag, schedule_node_ids};
 use super::bounded_dag_context::contact_for_live_node;
 use super::candidate_dag::validate_candidate_dag_json;
 use super::dag_runner::{parse_dag_json, DagManifest, CODE_FIX_TEMPLATE_JSON};
@@ -547,6 +547,8 @@ fn coerce_observe_remaining(
 }
 
 /// Replan remaining nodes after observe (prefix includes the completed node).
+/// VL-APE-004: success path must not call this (`success_path_splices_remaining` is false).
+#[allow(dead_code)]
 #[allow(clippy::too_many_arguments)]
 pub async fn replan_remaining_after_observe(
     agent: &crate::config::AgentConfig,
@@ -591,7 +593,7 @@ pub async fn replan_remaining_after_observe(
         return Ok(None);
     }
     let mut spliced = splice_remaining_plan(stored, &fail, remaining);
-    if linear_node_ids(&spliced.dag).is_err() {
+    if schedule_node_ids(&spliced.dag).is_err() {
         return Ok(None);
     }
     spliced.graph_task_override = Some(repair_graph_task(
@@ -1350,7 +1352,7 @@ pub async fn prepare_session_live_dag(
                 return Ok(stored);
             }
             let mut spliced = splice_remaining_plan(&stored, &fail, remaining);
-            if linear_node_ids(&spliced.dag).is_err() {
+            if schedule_node_ids(&spliced.dag).is_err() {
                 stored.resume_from = fail.index.min(stored.order.len());
                 stored.graph_task_override = Some(override_task);
                 stored.source = "repair_keep";
@@ -1433,7 +1435,7 @@ pub fn operator_fixed_live_graph(
         return Ok(None);
     };
     let dag = load_bounded_dag(Some(Path::new(raw)))?;
-    let order = linear_node_ids(&dag)?;
+    let order = schedule_node_ids(&dag)?;
     Ok(Some((dag, order)))
 }
 
@@ -1456,7 +1458,7 @@ pub fn resolve_planned_manifest(planner_text: &str, fallback_json: &str) -> Resu
     let report = validate_candidate_dag_json(&extracted);
     if report.valid {
         if let Some(dag) = report.dag {
-            if let Ok(order) = linear_node_ids(&dag) {
+            if let Ok(order) = schedule_node_ids(&dag) {
                 return Ok(PlannedLiveDag {
                     dag,
                     order,
@@ -1469,7 +1471,7 @@ pub fn resolve_planned_manifest(planner_text: &str, fallback_json: &str) -> Resu
         }
     }
     let dag = super::dag_runner::parse_dag_json(fallback_json)?;
-    let order = linear_node_ids(&dag)?;
+    let order = schedule_node_ids(&dag)?;
     Ok(PlannedLiveDag {
         dag,
         order,

@@ -662,8 +662,10 @@ pub async fn run(
                                 Arc<Mutex<crate::agent::probe_dedup::HopProbeGovernor>>,
                             > = HashMap::new();
                             let mut prior: Vec<String> = Vec::new();
+                            let mut completed: HashSet<String> = HashSet::new();
                             for id in order.iter().take(planned.resume_from) {
                                 prior.push(id.clone());
+                                completed.insert(id.clone());
                             }
                             let mut work_sys = crate::channels::build_work_node_system_prompt(
                                 &config.workspace_dir,
@@ -691,7 +693,6 @@ pub async fn run(
                             }
                             let mut force_default = false;
                             let mut auto_used = false;
-                            let mut index = planned.resume_from;
                             crate::agent::bounded_dag_delivery::print_operator_note(
                                 &mut operator_prefix,
                                 &crate::agent::bounded_dag_live::operator_plan_gist(
@@ -702,8 +703,17 @@ pub async fn run(
                                 ),
                                 None,
                             );
-                            while index < order.len() {
-                                let id = &order[index];
+                            loop {
+                                let run_ids =
+                                    crate::agent::graph_scheduler::pick_run_ids(dag, &completed);
+                                if run_ids.is_empty() {
+                                    break;
+                                }
+                                let id = &run_ids[0];
+                                let index = order
+                                    .iter()
+                                    .position(|x| x == id)
+                                    .unwrap_or(completed.len());
                                 let node = by_id.get(id.as_str()).ok_or_else(|| {
                                     anyhow::anyhow!("bounded DAG missing node {id}")
                                 })?;
@@ -974,7 +984,8 @@ pub async fn run(
                                 .await;
                                 last_body = piece;
                                 prior.push(node.id.clone());
-                                let remaining = order.len().saturating_sub(index + 1);
+                                completed.insert(node.id.clone());
+                                let remaining = order.len().saturating_sub(completed.len());
                                 if crate::agent::bounded_dag_delivery::should_emit_mid_hop_note(
                                     remaining,
                                 ) {
@@ -989,7 +1000,6 @@ pub async fn run(
                                         None,
                                     );
                                 }
-                                index += 1;
                                 if crate::agent::bounded_dag_delivery::hop_body_closes_graph(
                                     &last_body,
                                 ) {
@@ -1506,9 +1516,18 @@ pub async fn run(
                             );
                             let mut force_default = false;
                             let mut auto_used = false;
-                            let mut index = planned.resume_from;
-                            while index < order.len() {
-                                let id = &order[index];
+                            loop {
+                                let run_ids = crate::agent::graph_scheduler::pick_run_ids(
+                                    dag, &completed,
+                                );
+                                if run_ids.is_empty() {
+                                    break;
+                                }
+                                let id = &run_ids[0];
+                                let index = order
+                                    .iter()
+                                    .position(|x| x == id)
+                                    .unwrap_or(completed.len());
                                 let node = by_id.get(id.as_str()).ok_or_else(|| {
                                     anyhow::anyhow!("bounded DAG missing node {id}")
                                 })?;
@@ -1887,7 +1906,7 @@ pub async fn run(
                                     ),
                                     Some(&fold_cache),
                                 );
-                                let remaining = order.len().saturating_sub(index + 1);
+                                let remaining = order.len().saturating_sub(completed.len());
                                 if crate::agent::bounded_dag_delivery::should_emit_mid_hop_note(
                                     remaining,
                                 ) {
@@ -1902,7 +1921,6 @@ pub async fn run(
                                         Some(&fold_cache),
                                     );
                                 }
-                                index += 1;
                                 if crate::agent::bounded_dag_delivery::hop_body_closes_graph(
                                     &last_body,
                                 ) {

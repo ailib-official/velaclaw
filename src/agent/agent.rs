@@ -459,11 +459,22 @@ impl Agent {
     }
 
     fn session_work_model(&self) -> &str {
-        self.explicit_model
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .unwrap_or(self.model_name.as_str())
+        #[cfg(feature = "ai-protocol")]
+        {
+            crate::orchestration::work_cognition_model(
+                self.session_id.as_str(),
+                self.explicit_model.as_deref(),
+                self.model_name.as_str(),
+            )
+        }
+        #[cfg(not(feature = "ai-protocol"))]
+        {
+            self.explicit_model
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .unwrap_or(self.model_name.as_str())
+        }
     }
 
     fn dag_contact_labels(
@@ -757,6 +768,7 @@ impl Agent {
                 intent_route: self.intent_route_host.as_ref(),
                 classification: &self.classification_config,
                 available_hints: &self.available_hints,
+                lane: crate::orchestration::TurnLane::WorkCognition,
             };
             let decision = crate::orchestration::resolve_turn_model(&req)?;
             Ok(decision.model)
@@ -786,6 +798,7 @@ impl Agent {
                 intent_route: self.intent_route_host.as_ref(),
                 classification: &self.classification_config,
                 available_hints: &self.available_hints,
+                lane: crate::orchestration::TurnLane::WorkCognition,
             };
             let decision = crate::orchestration::resolve_turn_model(&req)?;
             let model = decision.model.clone();
@@ -873,12 +886,21 @@ impl Agent {
                     _ => None,
                 })
                 .collect();
+            let planner_model = {
+                let fast = crate::orchestration::fast_route_logical_id(&self.model_routes);
+                crate::agent::capability_route::cheap_planner_model(
+                    self.model_name.as_str(),
+                    fast.as_deref(),
+                    self.explicit_model.as_deref(),
+                )
+                .to_string()
+            };
             crate::agent::bounded_dag_live::live_first_hop(
                 &self.config,
                 self.memory.as_ref(),
                 self.session_id.as_str(),
                 self.provider.as_ref(),
-                &self.model_name,
+                planner_model.as_str(),
                 user_message,
                 &hop_history,
                 self.temperature,

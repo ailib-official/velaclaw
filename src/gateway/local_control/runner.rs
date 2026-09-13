@@ -427,27 +427,43 @@ pub fn user_facing_turn_error(err: &anyhow::Error, model: Option<&str>) -> Strin
     }
     let full = format!("{err:#}");
     let sanitized = crate::providers::sanitize_api_error(&full);
+    let picker = model.map(str::trim).filter(|s| !s.is_empty());
+    let executed = picker.unwrap_or("the selected model");
     if velaclaw_agent_runtime::looks_like_model_retired(&full) {
-        let model = model
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .unwrap_or("the selected model");
-        return velaclaw_agent_runtime::provider_retired_user_message(
+        let mut msg = velaclaw_agent_runtime::provider_retired_user_message(
             &sanitized,
-            model,
+            executed,
             velaclaw_agent_runtime::SoftFailSurface::Web,
         );
+        #[cfg(feature = "ai-protocol")]
+        {
+            msg.push('\n');
+            msg.push_str(&crate::orchestration::executed_route_notice(
+                "eol",
+                executed,
+                "provider_http",
+                picker,
+            ));
+        }
+        return msg;
     }
     if velaclaw_agent_runtime::looks_like_provider_limit(&full) {
-        let model = model
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .unwrap_or("the selected model");
-        velaclaw_agent_runtime::provider_limit_user_message(
+        let mut msg = velaclaw_agent_runtime::provider_limit_user_message(
             &sanitized,
-            model,
+            executed,
             velaclaw_agent_runtime::SoftFailSurface::Web,
-        )
+        );
+        #[cfg(feature = "ai-protocol")]
+        {
+            msg.push('\n');
+            msg.push_str(&crate::orchestration::executed_route_notice(
+                "quota",
+                executed,
+                "provider_http",
+                picker,
+            ));
+        }
+        msg
     } else {
         sanitized
     }
@@ -748,5 +764,35 @@ metadata:
         assert!(msg.contains("VelaClaw notice:"));
         assert!(msg.contains("deepseek/deepseek-v4-pro"));
         assert!(msg.contains("model picker"));
+        assert!(
+            msg.contains("executed model `deepseek/deepseek-v4-pro`"),
+            "{msg}"
+        );
+    }
+
+    #[test]
+    fn user_facing_turn_error_prefers_executed_notice_over_picker() {
+        let mapped = crate::orchestration::map_provider_limit_error(
+            anyhow::anyhow!(
+                "Protocol provider error: Remote error: HTTP 402 (insufficient_quota): Insufficient Balance"
+            ),
+            "deepseek/deepseek-v4-flash",
+            velaclaw_agent_runtime::SoftFailSurface::Web,
+            None,
+            "runner-i9-sess",
+        )
+        .context("agent turn failed");
+        let msg = user_facing_turn_error(&mapped, Some("nvidia/z-ai/glm-5.2"));
+        assert!(msg.contains("deepseek/deepseek-v4-flash"), "{msg}");
+        assert!(
+            msg.contains("executed model `deepseek/deepseek-v4-flash`"),
+            "{msg}"
+        );
+        let picker_pos = msg.find("nvidia/z-ai/glm-5.2");
+        let executed_pos = msg.find("deepseek/deepseek-v4-flash");
+        assert!(executed_pos.is_some(), "{msg}");
+        if let (Some(p), Some(e)) = (picker_pos, executed_pos) {
+            assert!(e < p, "executed Route must be cited before picker: {msg}");
+        }
     }
 }

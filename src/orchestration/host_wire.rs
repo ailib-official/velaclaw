@@ -157,6 +157,17 @@ pub fn finalize_tool_format_exhausted(
     out
 }
 
+fn with_executed_route_honesty(mut msg: String, kind: &str, model: &str) -> String {
+    msg.push('\n');
+    msg.push_str(&crate::orchestration::executed_route_notice(
+        kind,
+        model,
+        "provider_http",
+        None,
+    ));
+    msg
+}
+
 /// Map a provider hard-fail into an actionable user error when it looks like limit/quota.
 pub fn map_provider_limit_error(
     err: anyhow::Error,
@@ -166,10 +177,14 @@ pub fn map_provider_limit_error(
     session_key: &str,
 ) -> anyhow::Error {
     let raw = err.to_string();
+    let class = crate::providers::hint_peer::classify_hop_error(&raw);
+    crate::orchestration::tombstone_executed(session_key, model, class);
     let sanitized = crate::providers::sanitize_api_error(&raw);
     if velaclaw_agent_runtime::looks_like_model_retired(&raw) {
-        return anyhow::anyhow!(velaclaw_agent_runtime::provider_retired_user_message(
-            &sanitized, model, surface,
+        return anyhow::anyhow!(with_executed_route_honesty(
+            velaclaw_agent_runtime::provider_retired_user_message(&sanitized, model, surface),
+            "eol",
+            model,
         ));
     }
     if !velaclaw_agent_runtime::looks_like_provider_limit(&raw) {
@@ -184,7 +199,7 @@ pub fn map_provider_limit_error(
             ));
         }
     }
-    anyhow::anyhow!(msg)
+    anyhow::anyhow!(with_executed_route_honesty(msg, "quota", model))
 }
 
 /// When host Decide is enabled, return selection details or `Ok(None)`.
@@ -240,7 +255,17 @@ pub fn try_host_decide_selection(
     }
 
     let reachable = filter_reachable(declared, provider_has_usable_key);
-    let decidable = decidable_reachable(&reachable);
+    let decidable: Vec<_> = decidable_reachable(&reachable)
+        .into_iter()
+        .filter(|c| {
+            let id = match &c.logical_model_id {
+                Some(logical) if logical.contains('/') => logical.clone(),
+                Some(bare) => format!("{}/{}", c.provider_id, bare),
+                None => return true,
+            };
+            !crate::orchestration::is_tombstoned(session_key, &id)
+        })
+        .collect();
     if decidable.is_empty() {
         tracing::debug!("host_decide: no decidable reachable models; skip");
         return Ok(None);

@@ -970,6 +970,7 @@ pub(crate) fn resolve_cli_turn_model(
         intent_route: Some(&intent_route),
         classification: &config.query_classification,
         available_hints,
+        lane: crate::orchestration::TurnLane::WorkCognition,
     };
     Ok(crate::orchestration::resolve_turn_model(&req)?.model)
 }

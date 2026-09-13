@@ -478,12 +478,6 @@ pub fn remaining_operator_delta<'a>(already: &str, full: &'a str) -> &'a str {
     full.strip_prefix(already).unwrap_or(full)
 }
 
-/// Mid-graph only: last hop skips the observe LLM (latency + no splice).
-#[must_use]
-pub fn should_observe_after_hop(remaining_nodes: usize) -> bool {
-    remaining_nodes > 0
-}
-
 /// Tool-format recovery already failed: do not observe or start later hops.
 #[must_use]
 pub fn hop_body_closes_graph(last_body: &str) -> bool {
@@ -668,8 +662,6 @@ mod tests {
     fn last_hop_always_ends_graph() {
         assert!(last_hop_ends_graph(0));
         assert!(!last_hop_ends_graph(2));
-        assert!(!should_observe_after_hop(0));
-        assert!(should_observe_after_hop(1));
         assert!(hop_body_closes_graph(
             "VelaClaw notice: tool-format recovery exhausted for model `x`."
         ));

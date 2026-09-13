@@ -1366,8 +1366,6 @@ async fn run_single_delegates_to_turn() {
 const LIVE_MODE_CHAT: &str = r#"{"path":"chat_only","reply":"Hi — ready."}"#;
 const LIVE_MODE_CHAT_EMPTY: &str =
     r#"{"path":"chat_only","reply":"I compared agent runtimes from memory."}"#;
-const LIVE_OBS_CONTINUE: &str = r#"{"verdict":"continue"}"#;
-const LIVE_OBS_REPLAN: &str = r#"{"verdict":"replan_remaining"}"#;
 
 #[cfg(feature = "ai-protocol")]
 #[tokio::test]
@@ -1442,9 +1440,7 @@ async fn bounded_dag_build_one_loop_per_node() {
     let provider = ScriptedProvider::new(vec![
         text_response(crate::agent::dag_runner::CODE_FIX_TEMPLATE_JSON),
         text_response("located"),
-        text_response(LIVE_OBS_CONTINUE),
         text_response("patched"),
-        text_response(LIVE_OBS_CONTINUE),
         text_response("verified"),
     ]);
     let calls = provider.call_counter();
@@ -1461,8 +1457,8 @@ async fn bounded_dag_build_one_loop_per_node() {
     let out = agent.turn("fix the compiler error").await.unwrap();
     assert_eq!(
         calls.load(Ordering::SeqCst),
-        6,
-        "first hop DAG plus work+observe per mid node; last hop skips observe"
+        4,
+        "first hop DAG plus one work hop per node; no per-hop observe"
     );
     assert!(out.contains("verified"), "{out}");
     assert!(
@@ -1480,10 +1476,7 @@ async fn bounded_dag_build_one_loop_per_node() {
 #[cfg(feature = "ai-protocol")]
 #[tokio::test]
 async fn bounded_dag_hello_skips_planner() {
-    let provider = ScriptedProvider::new(vec![
-        text_response(LIVE_MODE_CHAT),
-        text_response(LIVE_OBS_CONTINUE),
-    ]);
+    let provider = ScriptedProvider::new(vec![text_response(LIVE_MODE_CHAT)]);
     let calls = provider.call_counter();
     let mut agent = build_agent_with_config(
         Box::new(provider),
@@ -1498,8 +1491,8 @@ async fn bounded_dag_hello_skips_planner() {
     let out = agent.turn("hello").await.unwrap();
     assert_eq!(
         calls.load(Ordering::SeqCst),
-        2,
-        "greeting: in-band chat_only reply + observe; no planner"
+        1,
+        "greeting: in-band chat_only reply; no observe; no planner"
     );
     assert!(out.contains("Hi"), "{out}");
 }
@@ -1509,9 +1502,7 @@ async fn bounded_dag_hello_skips_planner() {
 async fn bounded_dag_follow_up_first_hop_sees_prior_report() {
     let provider = ScriptedProvider::new(vec![
         text_response(LIVE_MODE_CHAT),
-        text_response(LIVE_OBS_CONTINUE),
         text_response(r#"{"path":"chat_only","reply":"On piubt we already checked gProxy."}"#),
-        text_response(LIVE_OBS_CONTINUE),
     ]);
     let reqs = provider.recorded_requests();
     let calls = provider.call_counter();
@@ -1528,8 +1519,12 @@ async fn bounded_dag_follow_up_first_hop_sees_prior_report() {
     let first = agent.turn("hello").await.unwrap();
     assert!(first.contains("Hi"), "{first}");
     let _ = agent.turn("你忘了所有操作都在piubt上").await.unwrap();
-    assert_eq!(calls.load(Ordering::SeqCst), 4, "two hops + two observe");
-    let hop2 = reqs.lock().unwrap()[2].clone();
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        2,
+        "two chat_only hops; no observe"
+    );
+    let hop2 = reqs.lock().unwrap()[1].clone();
     assert!(
         hop2.iter().any(|m| m.content.contains("Hi — ready.")),
         "first hop of follow-up must see prior in-band reply, got {hop2:?}"
@@ -1544,7 +1539,6 @@ async fn bounded_dag_single_work_refines_then_runs_nodes() {
         text_response(r#"{"path":"single_work"}"#),
         text_response(json),
         text_response("checked"),
-        text_response(LIVE_OBS_CONTINUE),
         text_response("synced"),
     ]);
     let calls = provider.call_counter();
@@ -1564,26 +1558,16 @@ async fn bounded_dag_single_work_refines_then_runs_nodes() {
         .unwrap();
     assert_eq!(
         calls.load(Ordering::SeqCst),
-        5,
-        "single_work + split refine + mid-hop observe; last hop skips observe"
+        4,
+        "single_work + split refine + two work hops; no mid-hop observe"
     );
     assert!(out.contains("synced"), "{out}");
 }
 
 #[cfg(feature = "ai-protocol")]
 #[tokio::test]
-async fn bounded_dag_chat_only_observe_upgrades_to_plan() {
-    let provider = ScriptedProvider::new(vec![
-        text_response(LIVE_MODE_CHAT_EMPTY),
-        text_response(LIVE_OBS_REPLAN),
-        text_response("not a dag"),
-        text_response("not a dag"),
-        text_response("located"),
-        text_response(LIVE_OBS_CONTINUE),
-        text_response("patched"),
-        text_response(LIVE_OBS_CONTINUE),
-        text_response("verified"),
-    ]);
+async fn bounded_dag_chat_only_does_not_observe_upgrade() {
+    let provider = ScriptedProvider::new(vec![text_response(LIVE_MODE_CHAT_EMPTY)]);
     let calls = provider.call_counter();
     let mut agent = build_agent_with_config(
         Box::new(provider),
@@ -1601,10 +1585,11 @@ async fn bounded_dag_chat_only_observe_upgrades_to_plan() {
         .unwrap();
     assert_eq!(
         calls.load(Ordering::SeqCst),
-        9,
-        "in-band chat_only + observe replan + planner retry + mid work+observe; last hop skips observe"
+        1,
+        "chat_only stays chat_only; no observe upgrade"
     );
-    assert!(out.contains("verified"), "{out}");
+    assert!(out.contains("compared agent runtimes"), "{out}");
+    assert!(!out.contains("verified"), "{out}");
 }
 
 #[cfg(feature = "ai-protocol")]
@@ -1614,9 +1599,7 @@ async fn bounded_dag_writeback_and_node_contact() {
     let provider = ScriptedProvider::new(vec![
         text_response(crate::agent::dag_runner::CODE_FIX_TEMPLATE_JSON),
         text_response("LOCATE_UNIQUE_BODY"),
-        text_response(LIVE_OBS_CONTINUE),
         text_response("PATCH_UNIQUE_BODY"),
-        text_response(LIVE_OBS_CONTINUE),
         text_response("VERIFY_OK"),
     ]);
     let reqs = provider.recorded_requests();
@@ -1657,8 +1640,8 @@ async fn bounded_dag_writeback_and_node_contact() {
     );
 
     let captured = reqs.lock().unwrap();
-    assert_eq!(captured.len(), 6);
-    let patch_msgs = &captured[3];
+    assert_eq!(captured.len(), 4);
+    let patch_msgs = &captured[2];
     assert!(
         !patch_msgs
             .iter()
@@ -1675,8 +1658,8 @@ async fn bounded_dag_writeback_and_node_contact() {
     let used = models.lock().unwrap().clone();
     assert_eq!(
         used.len(),
-        6,
-        "first hop DAG + 3 work + 2 mid observe (last hop skips observe); got {used:?}"
+        4,
+        "first hop DAG + 3 work; no mid observe; got {used:?}"
     );
     let session = crate::config::DEFAULT_PROTOCOL_MODEL_ID;
     assert_eq!(
@@ -1685,12 +1668,12 @@ async fn bounded_dag_writeback_and_node_contact() {
         "locate uses session default; got {used:?}"
     );
     assert_eq!(
-        used[3],
+        used[2],
         session.to_string(),
         "patch uses session default; got {used:?}"
     );
     assert_eq!(
-        used[5],
+        used[3],
         session.to_string(),
         "verify uses session default; got {used:?}"
     );
@@ -1702,9 +1685,7 @@ async fn bounded_dag_session_picker_runs_work_hops() {
     let provider = ScriptedProvider::new(vec![
         text_response(crate::agent::dag_runner::CODE_FIX_TEMPLATE_JSON),
         text_response("located"),
-        text_response(LIVE_OBS_CONTINUE),
         text_response("patched"),
-        text_response(LIVE_OBS_CONTINUE),
         text_response("verified"),
     ]);
     let models = provider.recorded_models();
@@ -1736,12 +1717,12 @@ async fn bounded_dag_session_picker_runs_work_hops() {
         "work hops must use the session picker; got {used:?}"
     );
     assert_eq!(
-        used[3],
+        used[2],
         "nvidia/nemotron-3-ultra-550b-a55b".to_string(),
         "got {used:?}"
     );
     assert_eq!(
-        used[5],
+        used[3],
         "nvidia/nemotron-3-ultra-550b-a55b".to_string(),
         "got {used:?}"
     );

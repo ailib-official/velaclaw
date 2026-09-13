@@ -12,23 +12,20 @@ pub enum HopClose {
     PolicyDeny,
 }
 
-/// DAG / observe follow-up for [`HopClose`] (VL-NA-045 / P10 table).
+/// DAG follow-up for [`HopClose`] (VL-NA-045 / VL-APE-001).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AfterHopClose {
-    /// Store artifact; LLM observe may replan remaining.
-    ObserveThenContinue,
     /// Store artifact; skip observe; walk the original remaining order.
     NextRemainingSkipObserve,
     /// `store_dag_fail`; do not start later hops; skip observe.
     FailCursorStop,
 }
 
-/// Host contract after a tool-loop hop. Cap must not fall through to observe.
+/// Host contract after a tool-loop hop. Success never observe (VL-APE-001).
 #[must_use]
 pub fn after_hop_close(close: HopClose) -> AfterHopClose {
     match close {
-        HopClose::None => AfterHopClose::ObserveThenContinue,
-        HopClose::Cap => AfterHopClose::NextRemainingSkipObserve,
+        HopClose::None | HopClose::Cap => AfterHopClose::NextRemainingSkipObserve,
         HopClose::PolicyDeny => AfterHopClose::FailCursorStop,
     }
 }
@@ -36,7 +33,7 @@ pub fn after_hop_close(close: HopClose) -> AfterHopClose {
 impl AfterHopClose {
     #[must_use]
     pub fn skip_observe(self) -> bool {
-        !matches!(self, AfterHopClose::ObserveThenContinue)
+        matches!(self, AfterHopClose::NextRemainingSkipObserve)
     }
 
     #[must_use]
@@ -212,8 +209,9 @@ mod tests {
         );
         assert_eq!(
             after_hop_close(HopClose::None),
-            AfterHopClose::ObserveThenContinue
+            AfterHopClose::NextRemainingSkipObserve
         );
+        assert!(after_hop_close(HopClose::None).skip_observe());
         assert!(after_hop_close(HopClose::Cap).skip_observe());
         assert!(after_hop_close(HopClose::PolicyDeny).fail_cursor());
         assert!(policy_deny_stop_reason(Some("unsafe_construct")).contains("unsafe"));

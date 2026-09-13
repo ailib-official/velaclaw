@@ -1458,7 +1458,11 @@ async fn bounded_dag_build_one_loop_per_node() {
     assert_eq!(
         calls.load(Ordering::SeqCst),
         4,
-        "first hop DAG plus one work hop per node; no per-hop observe"
+        "MS-APE-R1: 1 first hop + N work hops; observe_llm_on_successful_hops(3)==0"
+    );
+    assert_eq!(
+        crate::agent::graph_scheduler::observe_llm_on_successful_hops(3),
+        0
     );
     assert!(out.contains("verified"), "{out}");
     assert!(
@@ -1491,8 +1495,8 @@ async fn bounded_dag_hello_skips_planner() {
     let out = agent.turn("hello").await.unwrap();
     assert_eq!(
         calls.load(Ordering::SeqCst),
-        1,
-        "greeting: in-band chat_only reply; no observe; no planner"
+        crate::agent::graph_scheduler::chat_only_success_llm_calls(),
+        "MS-APE-R1: chat_only provider calls == 1"
     );
     assert!(out.contains("Hi"), "{out}");
 }

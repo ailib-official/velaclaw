@@ -330,6 +330,27 @@ pub fn append_loop_tool_results(
     }
 }
 
+/// VL-APE-005 / §3: `chat_only` success path is one LLM call (no observe, no parlor).
+#[must_use]
+pub const fn chat_only_success_llm_calls() -> usize {
+    1
+}
+
+/// VL-APE-005 / §3: successful work hops add zero observe LLM calls.
+#[must_use]
+pub const fn observe_llm_on_successful_hops(_work_hops: usize) -> usize {
+    0
+}
+
+/// VL-APE-005 / §3: parlor LLM is at most one, and zero when skip_parlor_llm.
+#[must_use]
+pub fn parlor_llm_budget(node_count: usize, last_body: &str) -> usize {
+    match after_successful_hop(0, node_count, last_body) {
+        AfterSuccessfulHop::FinishParlor => 1,
+        AfterSuccessfulHop::FinishDeliver | AfterSuccessfulHop::NextRemaining => 0,
+    }
+}
+
 /// Graph-end delivery used by [`crate::agent::agent::Agent::turn`] and CLI live DAG.
 pub async fn finish_live_graph(
     provider: &dyn Provider,
@@ -534,5 +555,87 @@ mod tests {
         assert!(typed_fail_allows_a_replan(true, false));
         assert!(!typed_fail_allows_a_replan(true, true));
         assert!(!typed_fail_allows_a_replan(false, false));
+    }
+
+    #[test]
+    fn ms_ape_r1_llm_budget_table() {
+        assert_eq!(chat_only_success_llm_calls(), 1);
+        assert_eq!(observe_llm_on_successful_hops(3), 0);
+        assert_eq!(observe_llm_on_successful_hops(8), 0);
+        assert_eq!(parlor_llm_budget(1, "Google 路由当前可用。"), 0);
+        assert_eq!(parlor_llm_budget(3, "verified"), 1);
+        assert!(parlor_llm_budget(8, "verified") <= 1);
+        assert!(!success_path_splices_remaining());
+        assert!(!crate::config::AgentConfig::default().bounded_dag_live);
+        assert!(!crate::config::AgentConfig::default().candidate_dag_emit);
+    }
+
+    struct CountChat {
+        n: std::sync::atomic::AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl Provider for CountChat {
+        async fn chat_with_system(
+            &self,
+            _system_prompt: Option<&str>,
+            _message: &str,
+            _model: &str,
+            _temperature: f64,
+        ) -> anyhow::Result<String> {
+            Ok(String::new())
+        }
+
+        async fn chat(
+            &self,
+            _request: crate::providers::ChatRequest<'_>,
+            _model: &str,
+            _temperature: f64,
+        ) -> anyhow::Result<crate::providers::ChatResponse> {
+            self.n.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(crate::providers::ChatResponse {
+                text: Some("ok".into()),
+                tool_calls: vec![],
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn ms_ape_r1_parlor_counts_at_most_one_provider_chat() {
+        const ENVELOPE: &str =
+            "HANDOFF\nverdict: partial\nfindings:\n- issue\npointers:\n- next\ngaps:\n- unknown";
+        let p = CountChat {
+            n: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let _ = finish_live_graph(&p, "m", 0.0, "task", ENVELOPE, "", 3)
+            .await
+            .unwrap();
+        let envelope_calls = p.n.load(std::sync::atomic::Ordering::SeqCst);
+        assert!(
+            envelope_calls <= 1,
+            "parlor LLM must be ≤1, got {envelope_calls}"
+        );
+        assert_eq!(
+            envelope_calls, 1,
+            "internodal last hop spends the parlor budget"
+        );
+        let vis = CountChat {
+            n: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let _ = finish_live_graph(&vis, "m", 0.0, "task", "verified", "", 3)
+            .await
+            .unwrap();
+        assert_eq!(
+            vis.n.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "visible last hop must not add a parlor LLM"
+        );
+        let p0 = CountChat {
+            n: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let _ = finish_live_graph(&p0, "m", 0.0, "task", "Google 路由当前可用。", "", 1)
+            .await
+            .unwrap();
+        assert_eq!(p0.n.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 }

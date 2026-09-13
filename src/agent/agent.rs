@@ -1087,7 +1087,10 @@ impl Agent {
                     None,
                     Some(&contacts),
                 ));
-                let text = match self.invoke_tool_loop_resolved(contact.model.clone()).await {
+                let text = match self
+                    .invoke_live_work_node(&node, contact.model.clone())
+                    .await
+                {
                     Ok(text) => {
                         self.flush_hop_probe_notices(&probe_rc, &mut operator_prefix);
                         let (close, deny_class) = probe_rc
@@ -1382,6 +1385,67 @@ impl Agent {
             .await
     }
 
+    #[cfg(feature = "ai-protocol")]
+    async fn invoke_live_work_node(
+        &mut self,
+        node: &crate::agent::dag_runner::DagNode,
+        effective_model: String,
+    ) -> Result<String> {
+        if crate::agent::graph_scheduler::node_sigma(node)
+            == crate::agent::graph_scheduler::NodeSigma::ToolDirect
+        {
+            return self.invoke_tool_direct(node).await;
+        }
+        crate::agent::graph_scheduler::ensure_live_llm_native(
+            self.config.tool_dispatcher.as_str(),
+            self.tool_dispatcher.should_send_tool_specs(),
+        )?;
+        self.invoke_tool_loop_resolved_with(effective_model, true)
+            .await
+    }
+
+    #[cfg(feature = "ai-protocol")]
+    async fn invoke_tool_direct(
+        &mut self,
+        node: &crate::agent::dag_runner::DagNode,
+    ) -> Result<String> {
+        let call = crate::agent::graph_scheduler::direct_tool_call(node)?;
+        let gate_extras = crate::agent::tool_batch::ToolBatchGateExtras {
+            approval_hub: self
+                .gateway_approval
+                .as_ref()
+                .map(|(_, hub)| Arc::clone(hub)),
+            human_input_hub: self.human_input_hub.clone(),
+            host_phase: self.host_phase,
+        };
+        let approval_mgr = self.gateway_approval.as_ref().map(|(mgr, _)| mgr);
+        let results = crate::agent::tool_batch::execute_tool_batch(
+            std::slice::from_ref(&call),
+            &self.tools,
+            self.observer.as_ref(),
+            approval_mgr,
+            Some(&self.security),
+            "web",
+            None,
+            self.cancellation_token.as_ref(),
+            Some(&gate_extras),
+        )
+        .await?;
+        if let Some(probe) = &self.current_hop_probe {
+            let mut g = probe.lock().unwrap_or_else(|e| e.into_inner());
+            for result in &results {
+                g.note_shell_output(&result.output);
+                if result.success && call.name == "shell" {
+                    g.record_executed_round();
+                }
+            }
+        }
+        let mut loop_history = self.tool_dispatcher.to_provider_messages(&self.history);
+        crate::agent::graph_scheduler::append_role_tool_results(&mut loop_history, &results);
+        self.history = conversation_from_tool_loop_history(&loop_history);
+        Ok(crate::agent::graph_scheduler::tool_direct_body(&results))
+    }
+
     async fn invoke_tool_loop_resolved_with(
         &mut self,
         effective_model: String,
@@ -1392,11 +1456,15 @@ impl Agent {
         let mut loop_history = self.tool_dispatcher.to_provider_messages(&self.history);
         let provider_name = crate::protocol_registry::provider_id_from_logical(&effective_model);
         #[cfg(feature = "ai-protocol")]
-        let text_tool_result_history = self
-            .execution
-            .as_ref()
-            .map(|e| e.tool_calling_policy().native_strategy == ai_lib_rust::NativeStrategy::Hybrid)
-            .unwrap_or(false);
+        let text_tool_result_history = crate::agent::graph_scheduler::live_work_text_history(
+            self.config.bounded_dag_live,
+            self.execution
+                .as_ref()
+                .map(|e| {
+                    e.tool_calling_policy().native_strategy == ai_lib_rust::NativeStrategy::Hybrid
+                })
+                .unwrap_or(false),
+        );
         #[cfg(not(feature = "ai-protocol"))]
         let text_tool_result_history = !self.tool_dispatcher.should_send_tool_specs();
 

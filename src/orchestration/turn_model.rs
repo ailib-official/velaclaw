@@ -12,6 +12,7 @@ use crate::capability_index::{
 use crate::config::QueryClassificationConfig;
 use crate::execution::provider_has_usable_key;
 use crate::orchestration::host_wire::{try_host_decide_selection, HostDecideHost};
+use crate::orchestration::route_truth::{host_decide_allowed_for_lane, is_tombstoned, TurnLane};
 use anyhow::{bail, Result};
 use serde::Serialize;
 
@@ -40,6 +41,8 @@ pub struct TurnModelRequest<'a> {
     pub intent_route: Option<&'a IntentRouteHost>,
     pub classification: &'a QueryClassificationConfig,
     pub available_hints: &'a [String],
+    /// Work vs planner/judge (VL-APE-010). Default work: cost Decide must not steal.
+    pub lane: TurnLane,
 }
 
 /// Result of [`resolve_turn_model`].
@@ -53,6 +56,85 @@ pub struct TurnModelDecision {
 
 /// Resolve the effective turn model with a single precedence ladder.
 pub fn resolve_turn_model(req: &TurnModelRequest<'_>) -> Result<TurnModelDecision> {
+    if req.lane == TurnLane::WorkCognition {
+        if let Some(raw) = req.explicit_model.map(str::trim).filter(|s| !s.is_empty()) {
+            if !is_tombstoned(req.session_key, raw) {
+                let model = honor_explicit_pick(raw, req.host_decide)?;
+                if !is_tombstoned(req.session_key, &model) {
+                    tracing::info!(
+                        target: "turn_model",
+                        model = %model,
+                        source = "explicit_user_pick",
+                        "turn model selected"
+                    );
+                    return Ok(TurnModelDecision {
+                        model,
+                        source: TurnModelSource::ExplicitUserPick,
+                        reason: "explicit_user_pick".into(),
+                    });
+                }
+            }
+        }
+        // Work hops never take host_decide=cost (or any Decide) as first-path steal.
+        if req
+            .host_decide
+            .is_some_and(|h| h.enabled && !host_decide_allowed_for_lane(req.lane))
+        {
+            tracing::info!(
+                target: "turn_model",
+                model = %req.default_model,
+                source = "default_model",
+                "work hop skipped host_decide"
+            );
+            return Ok(TurnModelDecision {
+                model: req.default_model.to_string(),
+                source: TurnModelSource::DefaultModel,
+                reason: "work_cognition_default_skip_host_decide".into(),
+            });
+        }
+    }
+
+    if req.lane == TurnLane::PlannerJudge {
+        if let Some(host) = req.host_decide {
+            if host.enabled {
+                if let Some(selected) =
+                    try_host_decide_selection(host, req.user_message, req.session_key)?
+                {
+                    if !is_tombstoned(req.session_key, &selected.logical_id) {
+                        let reason = format!(
+                            "host_decide:{}:optimize={}:cost_router={}",
+                            selected.reason, selected.optimize, selected.used_cost_router
+                        );
+                        tracing::info!(
+                            target: "turn_model",
+                            model = %selected.logical_id,
+                            source = "host_decide",
+                            reason = %reason,
+                            lane = "planner_judge",
+                            "turn model selected"
+                        );
+                        return Ok(TurnModelDecision {
+                            model: selected.logical_id,
+                            source: TurnModelSource::HostDecide,
+                            reason,
+                        });
+                    }
+                }
+            }
+        }
+        tracing::info!(
+            target: "turn_model",
+            model = %req.default_model,
+            source = "default_model",
+            "planner/judge default"
+        );
+        return Ok(TurnModelDecision {
+            model: req.default_model.to_string(),
+            source: TurnModelSource::DefaultModel,
+            reason: "planner_judge_default".into(),
+        });
+    }
+
     if let Some(raw) = req.explicit_model.map(str::trim).filter(|s| !s.is_empty()) {
         let model = honor_explicit_pick(raw, req.host_decide)?;
         tracing::info!(
@@ -69,7 +151,7 @@ pub fn resolve_turn_model(req: &TurnModelRequest<'_>) -> Result<TurnModelDecisio
     }
 
     if let Some(host) = req.host_decide {
-        if host.enabled {
+        if host.enabled && host_decide_allowed_for_lane(req.lane) {
             if let Some(selected) =
                 try_host_decide_selection(host, req.user_message, req.session_key)?
             {
@@ -235,6 +317,7 @@ mod tests {
             intent_route: None,
             classification: &classification,
             available_hints: &hints,
+            lane: TurnLane::WorkCognition,
         };
         let d = resolve_turn_model(&req).unwrap();
         assert_eq!(d.model, "nvidia/nemotron-mini");
@@ -261,6 +344,7 @@ mod tests {
             intent_route: None,
             classification: &classification,
             available_hints: &hints,
+            lane: TurnLane::WorkCognition,
         };
         let d = resolve_turn_model(&req).unwrap();
         assert_eq!(d.model, "deepseek/deepseek-v4-flash");
@@ -286,6 +370,7 @@ mod tests {
             intent_route: None,
             classification: &classification,
             available_hints: &hints,
+            lane: TurnLane::WorkCognition,
         };
         let d = resolve_turn_model(&req).unwrap();
         assert_eq!(d.source, TurnModelSource::DefaultModel);

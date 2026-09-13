@@ -24,6 +24,9 @@ pub mod host_wire;
 pub mod turn_model;
 
 #[cfg(feature = "ai-protocol")]
+pub mod route_truth;
+
+#[cfg(feature = "ai-protocol")]
 pub use host_wire::{
     finalize_tool_format_exhausted, map_provider_limit_error, maybe_apply_host_decide_failover,
     try_host_decide_model, try_host_decide_selection, HostDecideHost, HostDecideSelection,
@@ -31,3 +34,9 @@ pub use host_wire::{
 
 #[cfg(feature = "ai-protocol")]
 pub use turn_model::{resolve_turn_model, TurnModelDecision, TurnModelRequest, TurnModelSource};
+
+#[cfg(feature = "ai-protocol")]
+pub use route_truth::{
+    exclude_tombstoned, executed_route_notice, fast_route_logical_id, host_decide_allowed_for_lane,
+    is_tombstoned, tombstone_executed, work_cognition_model, TurnLane,
+};

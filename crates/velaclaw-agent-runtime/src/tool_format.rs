@@ -326,6 +326,7 @@ pub fn looks_like_provider_limit(err_msg: &str) -> bool {
         "insufficient_quota",
         "insufficient balance",
         "out of credits",
+        "http 402",
     ];
     HINTS.iter().any(|h| lower.contains(h))
 }

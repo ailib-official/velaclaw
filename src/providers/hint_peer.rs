@@ -123,6 +123,8 @@ fn looks_like_model_unavailable(lower: &str) -> bool {
 
 fn looks_like_rate_or_quota(lower: &str) -> bool {
     lower.contains("429")
+        || lower.contains("http 402")
+        || lower.contains("status\":402")
         || lower.contains("rate limit")
         || lower.contains("rate_limited")
         || lower.contains("insufficient quota")

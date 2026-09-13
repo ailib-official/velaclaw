@@ -26,10 +26,17 @@ pub fn is_work_cognition_node(capabilities: &[String]) -> bool {
     capabilities.iter().any(|c| !is_non_session_capability(c))
 }
 
-/// Planner/judge cheap default: never the Web picker.
+/// Planner/judge cheap default: `fast` route if set, else session default; never picker.
 #[must_use]
-pub fn cheap_planner_model<'a>(session_default: &'a str, _picker: Option<&str>) -> &'a str {
-    session_default
+pub fn cheap_planner_model<'a>(
+    session_default: &'a str,
+    fast_route: Option<&'a str>,
+    _picker: Option<&str>,
+) -> &'a str {
+    fast_route
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(session_default)
 }
 
 /// SoT identity on a planner node is the capability list, not a provider id.
@@ -76,8 +83,16 @@ mod tests {
     #[test]
     fn planner_ignores_picker() {
         assert_eq!(
-            cheap_planner_model("deepseek/deepseek-v4-flash", Some("nvidia/ultra")),
+            cheap_planner_model("deepseek/deepseek-v4-flash", None, Some("nvidia/ultra"),),
             "deepseek/deepseek-v4-flash"
+        );
+        assert_eq!(
+            cheap_planner_model(
+                "nvidia/super",
+                Some("groq/openai/gpt-oss-20b"),
+                Some("nvidia/ultra"),
+            ),
+            "groq/openai/gpt-oss-20b"
         );
     }
 

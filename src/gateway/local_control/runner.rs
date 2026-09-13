@@ -241,10 +241,17 @@ pub async fn persist_assistant_message(
     let Some(id) = session_id.map(str::trim).filter(|s| !s.is_empty()) else {
         return Ok(());
     };
+    let user_task = extract_last_user_message(&req.messages).unwrap_or_else(|_| String::new());
+    #[cfg(feature = "ai-protocol")]
+    let content =
+        crate::agent::bounded_dag_delivery::session_assistant_body(&user_task, assistant_content);
+    #[cfg(not(feature = "ai-protocol"))]
+    let content = assistant_content.to_string();
+    let _ = user_task;
     let store = ChatSessionStore::new(&config.workspace_dir);
     let to_store = vec![ChatMessageInput {
         role: "assistant".into(),
-        content: assistant_content.to_string(),
+        content,
     }];
     store
         .append_messages(id, &to_store, req.model_id.as_deref())

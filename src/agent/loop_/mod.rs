@@ -895,7 +895,10 @@ pub async fn run(
                                                 ),
                                                 None,
                                             );
-                                            return Ok(operator_prefix);
+                                            return Ok(crate::agent::bounded_dag_delivery::session_assistant_body(
+                                                &msg,
+                                                &operator_prefix,
+                                            ));
                                         }
                                         piece
                                     }
@@ -1039,6 +1042,9 @@ pub async fn run(
                         }
                     }
                     crate::agent::bounded_dag_live::LiveFirstHop::ChatOnly { reply } => {
+                        let reply = crate::agent::bounded_dag_delivery::session_assistant_body(
+                            &msg, &reply,
+                        );
                         history.push(ChatMessage::assistant(&reply));
                         reply
                     }
@@ -1777,7 +1783,10 @@ pub async fn run(
                                                 ),
                                                 Some(&fold_cache),
                                             );
-                                            return Ok(operator_prefix);
+                                            return Ok(crate::agent::bounded_dag_delivery::session_assistant_body(
+                                                &user_input,
+                                                &operator_prefix,
+                                            ));
                                         }
                                         piece
                                     }
@@ -1870,7 +1879,10 @@ pub async fn run(
                                             Some(&fold_cache),
                                         );
                                         security.set_graph_scratch_rel(None);
-                                        return Ok(operator_prefix);
+                                        return Ok(crate::agent::bounded_dag_delivery::session_assistant_body(
+                                            &user_input,
+                                            &operator_prefix,
+                                        ));
                                             }
                                         }
                                     }
@@ -1958,6 +1970,10 @@ pub async fn run(
                                 .await?)
                         }
                             crate::agent::bounded_dag_live::LiveFirstHop::ChatOnly { reply } => {
+                                let reply = crate::agent::bounded_dag_delivery::session_assistant_body(
+                                    &user_input,
+                                    &reply,
+                                );
                                 history.push(ChatMessage::assistant(&reply));
                                 Ok(reply)
                             }

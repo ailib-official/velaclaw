@@ -931,13 +931,8 @@ impl Agent {
                 self.invoke_tool_loop_resolved_with(self.model_name.clone(), true)
                     .await?
             };
-            let visible = if crate::agent::bounded_dag_delivery::hop_body_closes_graph(&text)
-                || crate::agent::graph_scheduler::skip_parlor_llm(1, &text)
-            {
-                crate::agent::bounded_dag_delivery::ensure_user_visible(user_message, &text)
-            } else {
-                text
-            };
+            let visible =
+                crate::agent::bounded_dag_delivery::session_assistant_body(user_message, &text);
             self.history
                 .push(ConversationMessage::Chat(ChatMessage::assistant(&visible)));
             self.prepare_history_after_turn().await?;
@@ -1122,7 +1117,10 @@ impl Agent {
                             );
                             self.push_operator_note(&mut operator_prefix, &stop);
                             self.end_live_graph_host_state();
-                            return Ok(operator_prefix);
+                            return Ok(crate::agent::bounded_dag_delivery::session_assistant_body(
+                                user_message,
+                                &operator_prefix,
+                            ));
                         }
                     }
                 }
@@ -1249,7 +1247,12 @@ impl Agent {
                                 );
                                 self.push_operator_note(&mut operator_prefix, &stop);
                                 self.end_live_graph_host_state();
-                                return Ok(operator_prefix);
+                                return Ok(
+                                    crate::agent::bounded_dag_delivery::session_assistant_body(
+                                        user_message,
+                                        &operator_prefix,
+                                    ),
+                                );
                             }
                             crate::agent::hop_stop::AfterHopClose::NextRemainingSkipObserve => text,
                         }
@@ -1337,7 +1340,12 @@ impl Agent {
                                 .await;
                                 self.push_operator_note(&mut operator_prefix, &stop);
                                 self.end_live_graph_host_state();
-                                return Ok(operator_prefix);
+                                return Ok(
+                                    crate::agent::bounded_dag_delivery::session_assistant_body(
+                                        user_message,
+                                        &operator_prefix,
+                                    ),
+                                );
                             }
                         }
                     }

@@ -1,14 +1,17 @@
-//! Host graph scheduler (VL-APE-001 / VL-APE-003). Hop-end plus node Σ dispatch.
-//! 宿主图调度：成功路径不 observe；LLM 节点 native；工具节点直调。
+//! Host graph scheduler (VL-APE-001 / VL-APE-003 / VL-APE-004).
+//! 宿主图调度：成功路径不 observe；LLM native；工具直调；就绪集并行。
 
 use crate::agent::bounded_dag_delivery::{
     ensure_user_visible, hop_body_closes_graph, host_delivery, last_hop_ends_graph,
     looks_like_internodal_envelope, strip_internodal_suffix,
 };
+use crate::agent::dag_runner::DagManifest;
 use crate::agent::dag_runner::DagNode;
 use crate::agent::tool_batch::{ParsedToolCall, ToolBatchResult};
 use crate::providers::{ChatMessage, Provider};
 use anyhow::{bail, Result};
+use std::collections::{HashMap, HashSet};
+use std::hash::BuildHasher;
 
 /// After a successful hop: walk remaining, or finish the graph.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,6 +35,100 @@ pub fn hop_text_is_user_visible(body: &str) -> bool {
 #[must_use]
 pub fn skip_parlor_llm(node_count: usize, last_body: &str) -> bool {
     node_count <= 1 && hop_text_is_user_visible(last_body)
+}
+
+/// Bounded ready-wave size (VL-APE-004). Not a new config key.
+pub const MAX_READY_WAVE: usize = 4;
+
+/// Success hops never splice remaining plan (I4). Typed fail uses freeze + A.
+#[must_use]
+pub fn success_path_splices_remaining() -> bool {
+    false
+}
+
+/// Completed prefix at typed fail: failed id is excluded; unrun nodes are dropped.
+#[must_use]
+pub fn freeze_completed_prefix(completed: &[String], failed_id: &str) -> Vec<String> {
+    completed
+        .iter()
+        .filter(|id| id.as_str() != failed_id)
+        .cloned()
+        .collect()
+}
+
+/// One A replan budget, same flag as `dag_fail_auto_replan`.
+#[must_use]
+pub fn typed_fail_allows_a_replan(auto_enabled: bool, auto_used: bool) -> bool {
+    auto_enabled && !auto_used
+}
+
+/// Nodes whose predecessors are all completed, preserving manifest order, capped.
+#[must_use]
+pub fn ready_set<S: BuildHasher>(
+    dag: &DagManifest,
+    completed: &HashSet<String, S>,
+    max: usize,
+) -> Vec<String> {
+    let preds = predecessor_map(dag);
+    let cap = max.max(1);
+    dag.nodes
+        .iter()
+        .filter(|n| !completed.contains(&n.id))
+        .filter(|n| {
+            preds
+                .get(n.id.as_str())
+                .map(|p| p.iter().all(|pred| completed.contains(*pred)))
+                .unwrap_or(true)
+        })
+        .map(|n| n.id.clone())
+        .take(cap)
+        .collect()
+}
+
+#[must_use]
+pub fn predecessor_map(dag: &DagManifest) -> HashMap<&str, Vec<&str>> {
+    let mut preds: HashMap<&str, Vec<&str>> = dag
+        .nodes
+        .iter()
+        .map(|n| (n.id.as_str(), Vec::new()))
+        .collect();
+    for node in &dag.nodes {
+        for suc in node.successors() {
+            if let Some(list) = preds.get_mut(suc) {
+                if !list.contains(&node.id.as_str()) {
+                    list.push(node.id.as_str());
+                }
+            }
+        }
+    }
+    preds
+}
+
+/// Next ids to run: full tool-direct wave, else the first ready node.
+#[must_use]
+pub fn pick_run_ids<S: BuildHasher>(
+    dag: &DagManifest,
+    completed: &HashSet<String, S>,
+) -> Vec<String> {
+    let ready = ready_set(dag, completed, MAX_READY_WAVE);
+    if ready.len() > 1 && wave_is_tool_direct(dag, &ready) {
+        ready
+    } else {
+        ready.into_iter().take(1).collect()
+    }
+}
+
+/// True when every id in `wave` is a tool-only Σ (safe to one `execute_tool_batch`).
+#[must_use]
+pub fn wave_is_tool_direct(dag: &DagManifest, wave: &[String]) -> bool {
+    !wave.is_empty()
+        && wave.iter().all(|id| {
+            dag.nodes
+                .iter()
+                .find(|n| n.id == *id)
+                .map(node_sigma)
+                .is_some_and(|s| s == NodeSigma::ToolDirect)
+        })
 }
 
 /// GOV-007 hop-end table. Success never observe; typed fail is HopClose, not this fn.
@@ -402,5 +499,40 @@ mod tests {
         let mut hist = Vec::new();
         append_role_tool_results(&mut hist, &results);
         assert!(hist.iter().all(|m| m.role == "tool"));
+    }
+
+    #[test]
+    fn independent_fork_nodes_are_co_ready() {
+        let dag = crate::agent::dag_runner::parse_dag_json(
+            r#"{"schema_version":"0.1.0","id":"fork","entry":"start","max_steps":8,"nodes":[
+            {"id":"start","task_type":"coding","model_selector":{"capabilities":["coding"]},"next":"a","fork":["b"]},
+            {"id":"a","task_type":"shell.exec","model_selector":{"capabilities":["shell.exec"]},"artifact":"pwd","next":"join"},
+            {"id":"b","task_type":"shell.exec","model_selector":{"capabilities":["shell.exec"]},"artifact":"pwd","next":"join"},
+            {"id":"join","task_type":"coding","model_selector":{"capabilities":["coding"]},"next":null}
+            ]}"#,
+        )
+        .unwrap();
+        let empty = HashSet::new();
+        let after_start = HashSet::from(["start".into()]);
+        let ready0 = ready_set(&dag, &empty, MAX_READY_WAVE);
+        assert_eq!(ready0, vec!["start".to_string()]);
+        let ready1 = ready_set(&dag, &after_start, MAX_READY_WAVE);
+        assert!(ready1.contains(&"a".to_string()) && ready1.contains(&"b".to_string()));
+        assert!(!ready1.contains(&"join".to_string()));
+        assert!(wave_is_tool_direct(&dag, &ready1));
+        assert_eq!(pick_run_ids(&dag, &after_start), ready1);
+        let both = HashSet::from(["start".into(), "a".into(), "b".into()]);
+        assert_eq!(
+            ready_set(&dag, &both, MAX_READY_WAVE),
+            vec!["join".to_string()]
+        );
+        assert!(!success_path_splices_remaining());
+        assert_eq!(
+            freeze_completed_prefix(&["start".into(), "a".into()], "b"),
+            vec!["start".to_string(), "a".to_string()]
+        );
+        assert!(typed_fail_allows_a_replan(true, false));
+        assert!(!typed_fail_allows_a_replan(true, true));
+        assert!(!typed_fail_allows_a_replan(false, false));
     }
 }

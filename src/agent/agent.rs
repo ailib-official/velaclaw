@@ -996,9 +996,120 @@ impl Agent {
             let work_sys = self.build_work_node_system_prompt()?;
             let mut force_default = false;
             let mut auto_used = false;
-            let mut index = planned.resume_from;
-            while index < planned.order.len() {
-                let id = planned.order[index].clone();
+            loop {
+                let run_ids = crate::agent::graph_scheduler::pick_run_ids(&planned.dag, &completed);
+                if run_ids.is_empty() {
+                    break;
+                }
+                if run_ids.len() > 1 {
+                    let index = planned
+                        .order
+                        .iter()
+                        .position(|x| x == &run_ids[0])
+                        .unwrap_or(completed.len());
+                    match self.invoke_tool_direct_wave(&planned.dag, &run_ids).await {
+                        Ok(bodies) => {
+                            for (id, text) in run_ids.iter().zip(bodies.into_iter()) {
+                                let _ = crate::agent::bounded_dag_context::store_node_artifact(
+                                    self.memory.as_ref(),
+                                    self.session_id.as_str(),
+                                    id,
+                                    &text,
+                                )
+                                .await;
+                                completed.insert(id.clone());
+                                prior.push(id.clone());
+                                last_body = text;
+                            }
+                            chat_hist = self
+                                .history
+                                .iter()
+                                .filter_map(|m| match m {
+                                    ConversationMessage::Chat(c) => Some(c.clone()),
+                                    _ => None,
+                                })
+                                .collect();
+                            let remaining = planned.order.len().saturating_sub(completed.len());
+                            if remaining == 0
+                                || crate::agent::bounded_dag_delivery::hop_body_closes_graph(
+                                    &last_body,
+                                )
+                            {
+                                let _ = crate::agent::bounded_dag_live::clear_dag_fail(
+                                    self.memory.as_ref(),
+                                    self.session_id.as_str(),
+                                )
+                                .await;
+                                self.end_live_graph_host_state();
+                                return self
+                                    .parlor_live_reply(
+                                        &graph_task,
+                                        &last_body,
+                                        &operator_prefix,
+                                        node_count,
+                                    )
+                                    .await;
+                            }
+                            continue;
+                        }
+                        Err(err) if is_tool_loop_cancelled(&err) => {
+                            let _ = crate::agent::bounded_dag_live::store_dag_fail(
+                                self.memory.as_ref(),
+                                self.session_id.as_str(),
+                                &crate::agent::bounded_dag_live::cancelled_fail_cursor(
+                                    &run_ids[0],
+                                    index,
+                                    &dag_id,
+                                ),
+                            )
+                            .await;
+                            self.current_hop_probe = None;
+                            self.security.set_graph_scratch_rel(None);
+                            return Err(err);
+                        }
+                        Err(err) => {
+                            let err_s = format!("{err:#}");
+                            let _ = crate::agent::bounded_dag_live::store_dag_fail(
+                                self.memory.as_ref(),
+                                self.session_id.as_str(),
+                                &crate::agent::bounded_dag_live::DagFailCursor {
+                                    node_id: run_ids[0].clone(),
+                                    index,
+                                    err: err_s.clone(),
+                                    dag_id: dag_id.clone(),
+                                    auto_replan_count: u32::from(
+                                        crate::agent::graph_scheduler::typed_fail_allows_a_replan(
+                                            self.config.dag_fail_auto_replan,
+                                            auto_used,
+                                        ),
+                                    ),
+                                    fail_class: crate::providers::hint_peer::classify_hop_error(
+                                        &err_s,
+                                    )
+                                    .as_str()
+                                    .into(),
+                                },
+                            )
+                            .await;
+                            let stop = format_work_node_stop(
+                                user_message,
+                                &run_ids[0],
+                                &err_s,
+                                index + 1,
+                                node_count,
+                            );
+                            self.push_operator_note(&mut operator_prefix, &stop);
+                            self.end_live_graph_host_state();
+                            return Ok(operator_prefix);
+                        }
+                    }
+                }
+                let id = run_ids[0].clone();
+                let index = planned
+                    .order
+                    .iter()
+                    .position(|x| x == &id)
+                    .unwrap_or(completed.len());
                 let node = planned
                     .dag
                     .nodes
@@ -1242,7 +1353,7 @@ impl Agent {
                     None,
                     Some(&contacts),
                 ));
-                let remaining = planned.order.len().saturating_sub(index + 1);
+                let remaining = planned.order.len().saturating_sub(completed.len());
                 if crate::agent::bounded_dag_delivery::should_emit_mid_hop_note(remaining) {
                     self.push_operator_note(
                         &mut operator_prefix,
@@ -1270,9 +1381,7 @@ impl Agent {
                 match crate::agent::graph_scheduler::after_successful_hop(
                     remaining, node_count, &last_body,
                 ) {
-                    crate::agent::graph_scheduler::AfterSuccessfulHop::NextRemaining => {
-                        index += 1;
-                    }
+                    crate::agent::graph_scheduler::AfterSuccessfulHop::NextRemaining => {}
                     crate::agent::graph_scheduler::AfterSuccessfulHop::FinishDeliver
                     | crate::agent::graph_scheduler::AfterSuccessfulHop::FinishParlor => {
                         let _ = crate::agent::bounded_dag_live::clear_dag_fail(
@@ -1444,6 +1553,69 @@ impl Agent {
         crate::agent::graph_scheduler::append_role_tool_results(&mut loop_history, &results);
         self.history = conversation_from_tool_loop_history(&loop_history);
         Ok(crate::agent::graph_scheduler::tool_direct_body(&results))
+    }
+
+    #[cfg(feature = "ai-protocol")]
+    async fn invoke_tool_direct_wave(
+        &mut self,
+        dag: &crate::agent::dag_runner::DagManifest,
+        ids: &[String],
+    ) -> Result<Vec<String>> {
+        let mut calls = Vec::new();
+        for id in ids {
+            let node = dag
+                .nodes
+                .iter()
+                .find(|n| n.id == *id)
+                .ok_or_else(|| anyhow::anyhow!("bounded DAG missing node {id}"))?;
+            calls.push(crate::agent::graph_scheduler::direct_tool_call(node)?);
+        }
+        let gate_extras = crate::agent::tool_batch::ToolBatchGateExtras {
+            approval_hub: self
+                .gateway_approval
+                .as_ref()
+                .map(|(_, hub)| Arc::clone(hub)),
+            human_input_hub: self.human_input_hub.clone(),
+            host_phase: self.host_phase,
+        };
+        let approval_mgr = self.gateway_approval.as_ref().map(|(mgr, _)| mgr);
+        let results = crate::agent::tool_batch::execute_tool_batch(
+            &calls,
+            &self.tools,
+            self.observer.as_ref(),
+            approval_mgr,
+            Some(&self.security),
+            "web",
+            None,
+            self.cancellation_token.as_ref(),
+            Some(&gate_extras),
+        )
+        .await?;
+        if let Some(failed) = results.iter().find(|r| !r.success) {
+            anyhow::bail!("{}", failed.output);
+        }
+        if let Some(probe) = &self.current_hop_probe {
+            let mut g = probe.lock().unwrap_or_else(|e| e.into_inner());
+            for (call, result) in calls.iter().zip(results.iter()) {
+                g.note_shell_output(&result.output);
+                if result.success && call.name == "shell" {
+                    g.record_executed_round();
+                }
+            }
+        }
+        let mut loop_history = self.tool_dispatcher.to_provider_messages(&self.history);
+        crate::agent::graph_scheduler::append_role_tool_results(&mut loop_history, &results);
+        self.history = conversation_from_tool_loop_history(&loop_history);
+        Ok(results
+            .iter()
+            .map(|r| {
+                if r.output.trim().is_empty() {
+                    "ok".into()
+                } else {
+                    r.output.clone()
+                }
+            })
+            .collect())
     }
 
     async fn invoke_tool_loop_resolved_with(

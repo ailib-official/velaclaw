@@ -374,7 +374,7 @@ mod tests {
         assert_eq!(g.hop_close(), HopClose::None);
         assert_eq!(
             crate::agent::hop_stop::after_hop_close(g.hop_close()),
-            crate::agent::hop_stop::AfterHopClose::ObserveThenContinue
+            crate::agent::hop_stop::AfterHopClose::NextRemainingSkipObserve
         );
     }
 

@@ -1016,13 +1016,14 @@ pub async fn run(
                                             .map(|m| m.content.as_str()),
                                     ),
                                 );
-                            crate::agent::bounded_dag_delivery::host_delivery(
+                            crate::agent::graph_scheduler::finish_live_graph(
                                 provider.as_ref(),
                                 &model_name,
                                 temperature,
                                 &graph_task,
                                 &raw,
                                 &prior,
+                                node_count,
                             )
                             .await?
                         }
@@ -1879,13 +1880,14 @@ pub async fn run(
                                         .map(|m| m.content.as_str()),
                                 ),
                             );
-                            Ok(crate::agent::bounded_dag_delivery::host_delivery(
+                            Ok(crate::agent::graph_scheduler::finish_live_graph(
                                     provider.as_ref(),
                                     &session_model,
                                     temperature,
                                     &graph_task,
                                     &raw,
                                     &prior,
+                                    node_count,
                                 )
                                 .await?)
                         }

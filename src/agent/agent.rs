@@ -889,7 +889,7 @@ impl Agent {
             crate::agent::bounded_dag_live::LiveFirstHop::SingleWork
         };
         #[cfg(feature = "ai-protocol")]
-        let (mut use_live_dag, planned_from_first, chat_only_reply) = {
+        let (use_live_dag, planned_from_first, chat_only_reply) = {
             use crate::agent::bounded_dag_live::LiveFirstHop;
             match hop {
                 LiveFirstHop::Plan(plan) => (true, Some(plan), None),
@@ -902,7 +902,6 @@ impl Agent {
 
         #[cfg(feature = "ai-protocol")]
         if self.config.bounded_dag_live && !use_live_dag {
-            use crate::agent::bounded_dag_live::{observe_turn_outcome, ObserveVerdict};
             self.note_session_default("live_first_hop");
             let text = if let Some(reply) = chat_only_reply {
                 reply
@@ -910,38 +909,17 @@ impl Agent {
                 self.invoke_tool_loop_resolved_with(self.model_name.clone(), true)
                     .await?
             };
-            if crate::agent::bounded_dag_delivery::hop_body_closes_graph(&text) {
-                let visible =
-                    crate::agent::bounded_dag_delivery::ensure_user_visible(user_message, &text);
-                self.history
-                    .push(ConversationMessage::Chat(ChatMessage::assistant(&visible)));
-                self.prepare_history_after_turn().await?;
-                return Ok(visible);
-            }
-            let verdict = observe_turn_outcome(
-                self.provider.as_ref(),
-                &self.model_name,
-                self.temperature,
-                user_message,
-                &text,
-                None,
-                0,
-                0,
-                ObserveVerdict::Continue,
-            )
-            .await?;
-            if verdict == ObserveVerdict::ReplanRemaining {
-                tracing::info!(
-                    target: "bounded_dag_live",
-                    "observe upgraded turn to plan_dag"
-                );
-                use_live_dag = true;
+            let visible = if crate::agent::bounded_dag_delivery::hop_body_closes_graph(&text)
+                || crate::agent::graph_scheduler::skip_parlor_llm(1, &text)
+            {
+                crate::agent::bounded_dag_delivery::ensure_user_visible(user_message, &text)
             } else {
-                self.history
-                    .push(ConversationMessage::Chat(ChatMessage::assistant(&text)));
-                self.prepare_history_after_turn().await?;
-                return Ok(text);
-            }
+                text
+            };
+            self.history
+                .push(ConversationMessage::Chat(ChatMessage::assistant(&visible)));
+            self.prepare_history_after_turn().await?;
+            return Ok(visible);
         }
 
         #[cfg(feature = "ai-protocol")]
@@ -952,7 +930,7 @@ impl Agent {
             use crate::agent::host_phase::HostPhase;
             use crate::agent::loop_::is_tool_loop_cancelled;
             use std::collections::HashSet;
-            let mut planned = if let Some(plan) = planned_from_first {
+            let planned = if let Some(plan) = planned_from_first {
                 self.note_session_default("live_first_hop_plan");
                 plan
             } else {
@@ -962,8 +940,8 @@ impl Agent {
                 return Ok(planned.preview_with_contact(&self.model_name, &self.available_hints));
             }
             let dag_id = planned.dag.id.clone();
-            let mut node_count = planned.order.len();
-            let mut outline = planned.brief_outline(user_message);
+            let node_count = planned.order.len();
+            let outline = planned.brief_outline(user_message);
             let mut chat_hist: Vec<ChatMessage> = self
                 .history
                 .iter()
@@ -972,7 +950,7 @@ impl Agent {
                     _ => None,
                 })
                 .collect();
-            let mut graph_task = match &planned.graph_task_override {
+            let graph_task = match &planned.graph_task_override {
                 Some(task) => task.clone(),
                 None => {
                     work_node_user_task(
@@ -1109,61 +1087,55 @@ impl Agent {
                     None,
                     Some(&contacts),
                 ));
-                let (text, skip_observe) =
-                    match self.invoke_tool_loop_resolved(contact.model.clone()).await {
-                        Ok(text) => {
-                            self.flush_hop_probe_notices(&probe_rc, &mut operator_prefix);
-                            let (close, deny_class) = probe_rc
-                                .lock()
-                                .map(|g| (g.hop_close(), g.last_policy_deny_class()))
-                                .unwrap_or_default();
-                            match crate::agent::hop_stop::after_hop_close(close) {
-                                crate::agent::hop_stop::AfterHopClose::FailCursorStop => {
-                                    let _ = crate::agent::bounded_dag_live::store_dag_fail(
-                                        self.memory.as_ref(),
-                                        self.session_id.as_str(),
-                                        &crate::agent::bounded_dag_live::policy_deny_fail_cursor(
-                                            &node.id, index, &dag_id,
-                                        ),
-                                    )
-                                    .await;
-                                    let stop = format_work_node_stop(
-                                        user_message,
-                                        &node.id,
-                                        crate::agent::hop_stop::policy_deny_stop_reason(deny_class),
-                                        index + 1,
-                                        node_count,
-                                    );
-                                    self.push_operator_note(&mut operator_prefix, &stop);
-                                    self.end_live_graph_host_state();
-                                    return Ok(operator_prefix);
-                                }
-                                crate::agent::hop_stop::AfterHopClose::NextRemainingSkipObserve => {
-                                    (text, true)
-                                }
-                                crate::agent::hop_stop::AfterHopClose::ObserveThenContinue => {
-                                    (text, false)
-                                }
+                let text = match self.invoke_tool_loop_resolved(contact.model.clone()).await {
+                    Ok(text) => {
+                        self.flush_hop_probe_notices(&probe_rc, &mut operator_prefix);
+                        let (close, deny_class) = probe_rc
+                            .lock()
+                            .map(|g| (g.hop_close(), g.last_policy_deny_class()))
+                            .unwrap_or_default();
+                        match crate::agent::hop_stop::after_hop_close(close) {
+                            crate::agent::hop_stop::AfterHopClose::FailCursorStop => {
+                                let _ = crate::agent::bounded_dag_live::store_dag_fail(
+                                    self.memory.as_ref(),
+                                    self.session_id.as_str(),
+                                    &crate::agent::bounded_dag_live::policy_deny_fail_cursor(
+                                        &node.id, index, &dag_id,
+                                    ),
+                                )
+                                .await;
+                                let stop = format_work_node_stop(
+                                    user_message,
+                                    &node.id,
+                                    crate::agent::hop_stop::policy_deny_stop_reason(deny_class),
+                                    index + 1,
+                                    node_count,
+                                );
+                                self.push_operator_note(&mut operator_prefix, &stop);
+                                self.end_live_graph_host_state();
+                                return Ok(operator_prefix);
                             }
+                            crate::agent::hop_stop::AfterHopClose::NextRemainingSkipObserve => text,
                         }
-                        Err(err) if is_tool_loop_cancelled(&err) => {
-                            let _ = crate::agent::bounded_dag_live::store_dag_fail(
-                                self.memory.as_ref(),
-                                self.session_id.as_str(),
-                                &crate::agent::bounded_dag_live::cancelled_fail_cursor(
-                                    &node.id, index, &dag_id,
-                                ),
-                            )
-                            .await;
-                            self.current_hop_probe = None;
-                            self.security.set_graph_scratch_rel(None);
-                            return Err(err);
-                        }
-                        Err(err) => {
-                            self.flush_hop_probe_notices(&probe_rc, &mut operator_prefix);
-                            let err_s = format!("{err:#}");
-                            let class = crate::providers::hint_peer::classify_hop_error(&err_s);
-                            match crate::agent::bounded_dag_live::decide_work_node_fail(
+                    }
+                    Err(err) if is_tool_loop_cancelled(&err) => {
+                        let _ = crate::agent::bounded_dag_live::store_dag_fail(
+                            self.memory.as_ref(),
+                            self.session_id.as_str(),
+                            &crate::agent::bounded_dag_live::cancelled_fail_cursor(
+                                &node.id, index, &dag_id,
+                            ),
+                        )
+                        .await;
+                        self.current_hop_probe = None;
+                        self.security.set_graph_scratch_rel(None);
+                        return Err(err);
+                    }
+                    Err(err) => {
+                        self.flush_hop_probe_notices(&probe_rc, &mut operator_prefix);
+                        let err_s = format!("{err:#}");
+                        let class = crate::providers::hint_peer::classify_hop_error(&err_s);
+                        match crate::agent::bounded_dag_live::decide_work_node_fail(
                             self.config.dag_fail_auto_replan,
                             auto_used,
                             &err_s,
@@ -1232,8 +1204,8 @@ impl Agent {
                                 return Ok(operator_prefix);
                             }
                         }
-                        }
-                    };
+                    }
+                };
                 if let Err(err) = crate::agent::bounded_dag_context::store_node_artifact(
                     self.memory.as_ref(),
                     self.session_id.as_str(),
@@ -1289,27 +1261,17 @@ impl Agent {
                     .await;
                     self.end_live_graph_host_state();
                     return self
-                        .parlor_live_reply(&graph_task, &last_body, &operator_prefix)
+                        .parlor_live_reply(&graph_task, &last_body, &operator_prefix, node_count)
                         .await;
                 }
-                if skip_observe {
-                    index += 1;
-                    continue;
-                }
-                let verdict = crate::agent::bounded_dag_live::observe_turn_outcome(
-                    self.provider.as_ref(),
-                    &self.model_name,
-                    self.temperature,
-                    user_message,
-                    &last_body,
-                    Some(id.as_str()),
-                    remaining,
-                    node_count,
-                    crate::agent::bounded_dag_live::ObserveVerdict::Continue,
-                )
-                .await?;
-                match verdict {
-                    crate::agent::bounded_dag_live::ObserveVerdict::Stop => {
+                match crate::agent::graph_scheduler::after_successful_hop(
+                    remaining, node_count, &last_body,
+                ) {
+                    crate::agent::graph_scheduler::AfterSuccessfulHop::NextRemaining => {
+                        index += 1;
+                    }
+                    crate::agent::graph_scheduler::AfterSuccessfulHop::FinishDeliver
+                    | crate::agent::graph_scheduler::AfterSuccessfulHop::FinishParlor => {
                         let _ = crate::agent::bounded_dag_live::clear_dag_fail(
                             self.memory.as_ref(),
                             self.session_id.as_str(),
@@ -1317,42 +1279,13 @@ impl Agent {
                         .await;
                         self.end_live_graph_host_state();
                         return self
-                            .parlor_live_reply(&graph_task, &last_body, &operator_prefix)
-                            .await;
-                    }
-                    crate::agent::bounded_dag_live::ObserveVerdict::ReplanRemaining
-                        if remaining > 0 && !auto_used =>
-                    {
-                        auto_used = true;
-                        if let Some(spliced) =
-                            crate::agent::bounded_dag_live::replan_remaining_after_observe(
-                                &self.config,
-                                self.memory.as_ref(),
-                                self.session_id.as_str(),
-                                self.provider.as_ref(),
-                                &self.model_name,
-                                self.temperature,
-                                &planned,
-                                &id,
-                                index,
-                                user_message,
-                                "observe_off_goal",
+                            .parlor_live_reply(
+                                &graph_task,
+                                &last_body,
+                                &operator_prefix,
+                                node_count,
                             )
-                            .await?
-                        {
-                            planned = spliced;
-                            node_count = planned.order.len();
-                            outline = planned.brief_outline(user_message);
-                            if let Some(task) = &planned.graph_task_override {
-                                graph_task = task.clone();
-                            }
-                            index = planned.resume_from;
-                            continue;
-                        }
-                        index += 1;
-                    }
-                    _ => {
-                        index += 1;
+                            .await;
                     }
                 }
             }
@@ -1368,7 +1301,7 @@ impl Agent {
             };
             self.end_live_graph_host_state();
             return self
-                .parlor_live_reply(&graph_task, &raw, &operator_prefix)
+                .parlor_live_reply(&graph_task, &raw, &operator_prefix, node_count)
                 .await;
         }
 
@@ -1381,6 +1314,7 @@ impl Agent {
         user_task: &str,
         last_body: &str,
         prefix: &str,
+        node_count: usize,
     ) -> Result<String> {
         let hist: Vec<&str> = self
             .history
@@ -1393,16 +1327,16 @@ impl Agent {
         let prior = crate::agent::bounded_dag_delivery::collect_prior_exclusivity(
             std::iter::once(prefix).chain(hist),
         );
-        let parlor = crate::agent::bounded_dag_delivery::host_delivery(
+        crate::agent::graph_scheduler::finish_live_graph(
             self.provider.as_ref(),
             &self.model_name,
             self.temperature,
             user_task,
             last_body,
             &prior,
+            node_count,
         )
-        .await?;
-        Ok(parlor)
+        .await
     }
 
     #[cfg(feature = "ai-protocol")]

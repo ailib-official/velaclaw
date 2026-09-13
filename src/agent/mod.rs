@@ -6,6 +6,9 @@
 //!   live first hop consumes that history — VL-NA-030),
 //!   L2 tool_dispatcher merge, and tool iteration via [`loop_::run_tool_call_loop`]
 //!   (Web ApprovalHub / HITL still injected as `ToolBatchGateExtras` adapters).
+//! - **Live DAG hop-end:** [`graph_scheduler`] is the GOV-007 entry for
+//!   successful hops (CLI `loop_` + Web [`agent::Agent::turn`]); no per-hop
+//!   observe on the success path (VL-APE-001).
 //! - **Still dual:** approval backend *adapters* (stdin vs ApprovalHub) and CLI
 //!   fold/render — not a second policy or tool-loop body.
 //!
@@ -38,6 +41,8 @@ pub mod dispatcher;
 pub mod double_esc;
 #[cfg(feature = "ai-protocol")]
 pub mod envelope_pilot;
+#[cfg(feature = "ai-protocol")]
+pub mod graph_scheduler;
 pub mod hop_stop;
 pub mod host_phase;
 #[cfg(feature = "ai-protocol")]

@@ -1009,7 +1009,7 @@ impl Agent {
                         .unwrap_or(completed.len());
                     match self.invoke_tool_direct_wave(&planned.dag, &run_ids).await {
                         Ok(bodies) => {
-                            for (id, text) in run_ids.iter().zip(bodies.into_iter()) {
+                            for (id, text) in run_ids.iter().zip(bodies) {
                                 let _ = crate::agent::bounded_dag_context::store_node_artifact(
                                     self.memory.as_ref(),
                                     self.session_id.as_str(),

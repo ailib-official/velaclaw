@@ -48,6 +48,8 @@ pub fn looks_like_internodal_envelope(text: &str) -> bool {
         .iter()
         .any(|k| lower.contains(k));
     has_verdict && has_pointers && has_gaps
+        || (lower.contains("\"pointers\"")
+            && (is_handoff_heading(head) || has_verdict || lower.contains("handoff")))
 }
 
 fn internodal_line_key(line: &str) -> String {
@@ -309,6 +311,12 @@ pub fn ensure_user_visible(user_task: &str, body: &str) -> String {
     } else {
         stripped
     }
+}
+
+/// Session/bubble assistant body (I12). Same entry as last-hop delivery.
+#[must_use]
+pub fn session_assistant_body(user_task: &str, body: &str) -> String {
+    ensure_user_visible(user_task, body)
 }
 
 /// Last hop ends the graph: parlor, never `replan_remaining` (VL-NA-035).
@@ -656,6 +664,33 @@ mod tests {
     fn ensure_passes_clean_text() {
         let clean = "Google 路由当前可用。";
         assert_eq!(ensure_user_visible("check", clean), clean);
+    }
+
+    #[test]
+    fn policy_deny_persisted_body_is_not_internodal() {
+        let raw = "HANDOFF\nverdict: policy_deny\nfindings:\n- unsafe_construct\npointers:\n- {\"path\":\"/tmp/x\"}\ngaps:\n- none";
+        let out = session_assistant_body("list files", raw);
+        assert!(!looks_like_internodal_envelope(&out), "{out}");
+        assert!(!out.trim_start().to_ascii_lowercase().starts_with("handoff"));
+    }
+
+    #[test]
+    fn cap_persisted_body_is_not_internodal() {
+        let raw = format!(
+            "{}\nHANDOFF\nverdict: hop_cap\npointers:\n- {{\"node\":\"n1\"}}\ngaps:\n- remaining",
+            crate::agent::probe_dedup::SHELL_ROUND_CAP_NOTICE
+        );
+        let out = session_assistant_body("inspect workspace", &raw);
+        assert!(!looks_like_internodal_envelope(&out), "{out}");
+        assert!(!out.trim_start().to_ascii_lowercase().starts_with("handoff"));
+    }
+
+    #[test]
+    fn parlor_strips_handoff_pointers() {
+        let out = session_assistant_body("upgrade SmartTube", SMART_TUBE);
+        assert!(!looks_like_internodal_envelope(&out), "{out}");
+        assert!(!out.trim_start().eq_ignore_ascii_case("handoff"));
+        assert!(!out.trim().is_empty());
     }
 
     #[test]

@@ -31,6 +31,8 @@ pub mod bounded_dag_delivery;
 pub mod bounded_dag_live;
 #[cfg(feature = "ai-protocol")]
 pub mod candidate_dag;
+#[cfg(feature = "ai-protocol")]
+pub mod capability_route;
 pub mod classifier;
 #[cfg(feature = "ai-protocol")]
 pub mod context_contract;

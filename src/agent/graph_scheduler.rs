@@ -166,6 +166,14 @@ pub const LIVE_NATIVE_TOOLS_REQUIRED: &str = "live LLM hop requires native tool_
 /// Classify a planner node: tool-only contracts skip `run_tool_call_loop`.
 #[must_use]
 pub fn node_sigma(node: &DagNode) -> NodeSigma {
+    if let Some(s) = node.sigma.as_deref().map(str::trim) {
+        if s.eq_ignore_ascii_case("tool_direct") {
+            return NodeSigma::ToolDirect;
+        }
+        if s.eq_ignore_ascii_case("llm_cognition") {
+            return NodeSigma::LlmWork;
+        }
+    }
     if is_tool_only_node(node) {
         NodeSigma::ToolDirect
     } else {

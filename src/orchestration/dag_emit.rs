@@ -20,6 +20,7 @@ Each node lists ONE primary capability first (optional extras after). Tags: codi
 Do not pad every node with coding+tool_calling. Runtime already injects workspace retrieve and the previous node's artifact.
 The graph MUST be a single linear chain: entry walks next until null and covers every node (no branches, no unused nodes).
 Each work node must finish with few tool rounds: batch related shell into one command (`&&` / pipes / one remote ssh wrapping several checks). Do not include executable scripts.
+Optional node fields: sigma ("llm_cognition" or "tool_direct") and locus ("workspace" or "remote:<alias>"). Inspect/list/status that allowed tools can finish: capabilities ["shell.exec"] (or file.read / glob.search), sigma tool_direct, artifact a simple command without $(), redirects, or find -exec. A named host in the user text → locus remote:<alias> and artifact "ssh <alias> <simple>". Do not wrap those in coding LLM hops. Do not invent a hostname.
 
 Example (one hop — a single ops check):
 {"schema_version":"0.1.0","id":"ops-one","entry":"check","max_steps":8,"nodes":[{"id":"check","task_type":"ops-check","model_selector":{"capabilities":["tool_calling"]},"next":null}]}
@@ -206,6 +207,8 @@ mod tests {
         assert!(DAG_PLAN_SYSTEM_PROMPT.contains("one node per deliverable"));
         assert!(DAG_PLAN_SYSTEM_PROMPT.contains("host writes the user-facing conclusion"));
         assert!(DAG_PLAN_SYSTEM_PROMPT.contains("verifiable artifact"));
+        assert!(DAG_PLAN_SYSTEM_PROMPT.contains("tool_direct"));
+        assert!(DAG_PLAN_SYSTEM_PROMPT.contains("remote:<alias>"));
     }
 
     #[test]

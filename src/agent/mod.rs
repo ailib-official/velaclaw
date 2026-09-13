@@ -12,6 +12,8 @@
 //!   `tool_calls`; tool-only nodes call [`tool_batch::execute_tool_batch`]
 //!   (VL-APE-003). Ready-set waves run independent tool nodes in one batch
 //!   (VL-APE-004); typed fail freezes the completed prefix (no success splice).
+//!   Budget tests (VL-APE-005): chat_only one LLM; success hops add zero observe;
+//!   parlor at most one.
 //! - **Still dual:** approval backend *adapters* (stdin vs ApprovalHub) and CLI
 //!   fold/render — not a second policy or tool-loop body.
 //!

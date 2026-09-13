@@ -1670,7 +1670,9 @@ pub async fn run(
                                 } else {
                                     crate::agent::graph_scheduler::ensure_live_llm_native(
                                         config.agent.tool_dispatcher.as_str(),
-                                        provider.supports_native_tools(),
+                                        tool_dispatcher_ref
+                                            .map(|d| d.should_send_tool_specs())
+                                            .unwrap_or_else(|| provider.supports_native_tools()),
                                     )?;
                                     run_tool_call_loop(
                                     provider.as_ref(),
@@ -1958,7 +1960,9 @@ pub async fn run(
                             if config.agent.bounded_dag_live {
                                 crate::agent::graph_scheduler::ensure_live_llm_native(
                                     config.agent.tool_dispatcher.as_str(),
-                                    provider.supports_native_tools(),
+                                    tool_dispatcher_ref
+                                        .map(|d| d.should_send_tool_specs())
+                                        .unwrap_or_else(|| provider.supports_native_tools()),
                                 )?;
                             }
                             run_tool_call_loop(

@@ -154,16 +154,17 @@ pub fn tool_direct_body(results: &[ToolBatchResult]) -> String {
 }
 
 /// Explicit `xml` is the only live XML compat; auto must not silent-degrade.
+/// `native_on_wire` is the hop dispatcher sending native tool specs (not a second loop).
 #[must_use]
-pub fn live_llm_fail_closed(dispatcher_cfg: &str, supports_native: bool) -> bool {
+pub fn live_llm_fail_closed(dispatcher_cfg: &str, native_on_wire: bool) -> bool {
     if dispatcher_cfg.trim().eq_ignore_ascii_case("xml") {
         return false;
     }
-    !supports_native
+    !native_on_wire
 }
 
-pub fn ensure_live_llm_native(dispatcher_cfg: &str, supports_native: bool) -> Result<()> {
-    if live_llm_fail_closed(dispatcher_cfg, supports_native) {
+pub fn ensure_live_llm_native(dispatcher_cfg: &str, native_on_wire: bool) -> Result<()> {
+    if live_llm_fail_closed(dispatcher_cfg, native_on_wire) {
         bail!("{LIVE_NATIVE_TOOLS_REQUIRED}");
     }
     Ok(())

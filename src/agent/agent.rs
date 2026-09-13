@@ -1398,7 +1398,7 @@ impl Agent {
         }
         crate::agent::graph_scheduler::ensure_live_llm_native(
             self.config.tool_dispatcher.as_str(),
-            self.provider.supports_native_tools(),
+            self.tool_dispatcher.should_send_tool_specs(),
         )?;
         self.invoke_tool_loop_resolved_with(effective_model, true)
             .await

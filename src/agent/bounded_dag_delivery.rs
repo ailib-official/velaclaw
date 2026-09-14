@@ -142,9 +142,19 @@ pub fn parlor_fallback(user_task: &str, internodal: &str) -> String {
     }
     let visible = out.trim().to_string();
     if visible.is_empty() || looks_like_internodal_envelope(&visible) {
-        "任务已完成部分核查。请根据会话中的步骤记录确认下一步；详细信封未向操作者展示。".into()
+        empty_hop_stop_reason(user_task)
     } else {
         visible
+    }
+}
+
+/// Short operator stop when strip/parlor left no report (I12 / I13). Never points at hidden UI.
+#[must_use]
+pub fn empty_hop_stop_reason(user_task: &str) -> String {
+    if crate::agent::bounded_dag_live::user_prefers_cjk(user_task) {
+        "本跳没有可展示的结论：助手正文为空，且没有可写入报告的工具摘要。".into()
+    } else {
+        "This hop produced no operator-visible conclusion (empty assistant text and no tool evidence).".into()
     }
 }
 
@@ -530,33 +540,42 @@ pub async fn host_delivery(
         stripped_notice.as_str()
     };
     let stripped = strip_internodal_suffix(evidence);
-    let body = if looks_like_internodal_envelope(&stripped) || exhausted {
-        match delivery_chat(
-            provider,
-            model,
-            temperature,
-            user_task,
-            if stripped.trim().is_empty() {
-                prior_visible
-            } else {
-                &stripped
-            },
-            prior_visible,
-        )
-        .await
-        {
-            Ok(text)
-                if !text.trim().is_empty()
-                    && !looks_like_internodal_envelope(&text)
-                    && !velaclaw_agent_runtime::looks_like_tool_format_exhausted_notice(&text) =>
+    let needs_rewrite =
+        looks_like_internodal_envelope(&stripped) || exhausted || stripped.trim().is_empty();
+    let body = if needs_rewrite {
+        let chat_evidence = if stripped.trim().is_empty() {
+            prior_visible
+        } else {
+            stripped.as_str()
+        };
+        if chat_evidence.trim().is_empty() {
+            parlor_fallback(user_task, "")
+        } else {
+            match delivery_chat(
+                provider,
+                model,
+                temperature,
+                user_task,
+                chat_evidence,
+                prior_visible,
+            )
+            .await
             {
-                text
-            }
-            Ok(_) | Err(_) => {
-                if stripped.trim().is_empty() {
-                    parlor_fallback(user_task, prior_visible)
-                } else {
-                    parlor_fallback(user_task, &stripped)
+                Ok(text)
+                    if !text.trim().is_empty()
+                        && !looks_like_internodal_envelope(&text)
+                        && !velaclaw_agent_runtime::looks_like_tool_format_exhausted_notice(
+                            &text,
+                        ) =>
+                {
+                    text
+                }
+                Ok(_) | Err(_) => {
+                    if stripped.trim().is_empty() {
+                        parlor_fallback(user_task, prior_visible)
+                    } else {
+                        parlor_fallback(user_task, &stripped)
+                    }
                 }
             }
         }
@@ -742,6 +761,19 @@ mod tests {
         let out = parlor_fallback("请检查本地局域网有多少终端", SMART_TUBE);
         assert!(!out.contains("请检查本地局域网"));
         assert!(out.contains("5917"));
+    }
+
+    #[test]
+    fn parlor_fallback_empty_does_not_point_at_hidden_steps() {
+        let out = parlor_fallback("查看本地项目代码并给出报告", "");
+        assert!(!out.contains("步骤记录"));
+        assert!(out.contains("没有可展示的结论"), "{out}");
+        let from_tools = parlor_fallback(
+            "查看本地项目代码并给出报告",
+            "HANDOFF\nverdict: x\nfindings:\n- Cargo.toml at workspace root\npointers:\n- parlor\ngaps:\n- empty assistant\n",
+        );
+        assert!(from_tools.contains("Cargo.toml"), "{from_tools}");
+        assert!(!looks_like_internodal_envelope(&from_tools), "{from_tools}");
     }
 
     #[test]

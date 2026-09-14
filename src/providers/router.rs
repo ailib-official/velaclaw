@@ -300,6 +300,11 @@ impl Provider for RouterProvider {
                     attempts += 1;
                     cross += cross_delta;
                     prev_family = Some(provider_family(&prov_name).to_string());
+                    tracing::info!(
+                        provider = prov_name.as_str(),
+                        model = resolved.as_str(),
+                        "Router dispatching request"
+                    );
                     match self.providers[idx]
                         .1
                         .chat_with_history(messages, &resolved, temperature)

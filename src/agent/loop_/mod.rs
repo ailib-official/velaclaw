@@ -794,6 +794,8 @@ pub async fn run(
                                         node_count,
                                         user_task: &graph_task,
                                         retrieve_texts: &retrieve,
+                                        workspace_root: Some(config.workspace_dir.as_path()),
+                                        workspace_only: config.autonomy.workspace_only,
                                     },
                                     Some(work_sys.as_str()),
                                 );
@@ -834,6 +836,7 @@ pub async fn run(
                                         ))
                                     })
                                     .clone();
+                                let hop_start = history.len();
                                 let piece = match run_tool_call_loop(
                                     provider.as_ref(),
                                     &mut history,
@@ -870,6 +873,12 @@ pub async fn run(
                                 .await
                                 {
                                     Ok(piece) => {
+                                        let piece = crate::agent::graph_scheduler::hop_contract_body(
+                                            &piece,
+                                            &crate::agent::graph_scheduler::tool_evidence_from_chat(
+                                                history.get(hop_start..).unwrap_or(&[]),
+                                            ),
+                                        );
                                         let (notes, close, deny_class) = {
                                             let mut g = probe_cell
                                                 .lock()
@@ -1628,6 +1637,8 @@ pub async fn run(
                                         node_count,
                                         user_task: &graph_task,
                                         retrieve_texts: &retrieve,
+                                        workspace_root: Some(config.workspace_dir.as_path()),
+                                        workspace_only: config.autonomy.workspace_only,
                                     },
                                     Some(work_sys.as_str()),
                                 );
@@ -1694,6 +1705,7 @@ pub async fn run(
                                         config.agent.bounded_dag_live,
                                         text_tool_result_history,
                                     );
+                                let hop_start = history.len();
                                 let hop_result = if crate::agent::graph_scheduler::node_sigma(node)
                                     == crate::agent::graph_scheduler::NodeSigma::ToolDirect
                                 {
@@ -1773,6 +1785,12 @@ pub async fn run(
                                 let piece = match hop_result
                                 {
                                     Ok(piece) => {
+                                        let piece = crate::agent::graph_scheduler::hop_contract_body(
+                                            &piece,
+                                            &crate::agent::graph_scheduler::tool_evidence_from_chat(
+                                                history.get(hop_start..).unwrap_or(&[]),
+                                            ),
+                                        );
                                         let (notes, close, deny_class) = {
                                             let mut g = probe_cell
                                                 .lock()

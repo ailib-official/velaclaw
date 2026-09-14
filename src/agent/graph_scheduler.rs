@@ -8,7 +8,7 @@ use crate::agent::bounded_dag_delivery::{
 use crate::agent::dag_runner::DagManifest;
 use crate::agent::dag_runner::DagNode;
 use crate::agent::tool_batch::{ParsedToolCall, ToolBatchResult};
-use crate::providers::{ChatMessage, Provider};
+use crate::providers::{ChatMessage, ConversationMessage, Provider};
 use anyhow::{bail, Result};
 use std::collections::{HashMap, HashSet};
 use std::hash::BuildHasher;
@@ -35,6 +35,77 @@ pub fn hop_text_is_user_visible(body: &str) -> bool {
 #[must_use]
 pub fn skip_parlor_llm(node_count: usize, last_body: &str) -> bool {
     node_count <= 1 && hop_text_is_user_visible(last_body)
+}
+
+const TOOL_EVIDENCE_MAX: usize = 3_500;
+
+fn push_tool_chunk(chunks: &mut Vec<String>, role: &str, content: &str) {
+    let body = content.trim();
+    if body.is_empty() {
+        return;
+    }
+    if role == "tool" || body.starts_with("[Tool results]") {
+        chunks.push(body.to_string());
+    }
+}
+
+/// Tool stdout from this hop (role=tool / ToolResults), clipped for Memory + parlor.
+#[must_use]
+pub fn tool_evidence_from_conversation(history: &[ConversationMessage]) -> String {
+    let mut chunks = Vec::new();
+    for message in history {
+        match message {
+            ConversationMessage::ToolResults(rows) => {
+                for row in rows {
+                    push_tool_chunk(&mut chunks, "tool", &row.content);
+                }
+            }
+            ConversationMessage::Chat(chat) => {
+                push_tool_chunk(&mut chunks, chat.role.as_str(), &chat.content);
+            }
+            ConversationMessage::AssistantToolCalls { .. } => {}
+        }
+    }
+    clip_chars(&chunks.join("\n---\n"), TOOL_EVIDENCE_MAX)
+}
+
+/// Same evidence extractor for CLI live hops that keep `Vec<ChatMessage>`.
+#[must_use]
+pub fn tool_evidence_from_chat(history: &[ChatMessage]) -> String {
+    let mut chunks = Vec::new();
+    for chat in history {
+        push_tool_chunk(&mut chunks, chat.role.as_str(), &chat.content);
+    }
+    clip_chars(&chunks.join("\n---\n"), TOOL_EVIDENCE_MAX)
+}
+
+fn clip_chars(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    text.chars().take(max).collect()
+}
+
+/// Host internodal artifact when the model used tools but left no operator text (I13).
+#[must_use]
+pub fn hop_contract_body(assistant: &str, tool_evidence: &str) -> String {
+    if hop_text_is_user_visible(assistant) {
+        return assistant.to_string();
+    }
+    let evidence = tool_evidence.trim();
+    if evidence.is_empty() {
+        return assistant.to_string();
+    }
+    format!(
+        "HANDOFF\n\
+verdict: tools_ran_without_assistant_text\n\
+findings:\n\
+{evidence}\n\
+pointers:\n\
+- host parlor synthesizes the operator report from this-hop-tool\n\
+gaps:\n\
+- assistant visible text was empty\n"
+    )
 }
 
 /// Bounded ready-wave size (VL-APE-004). Not a new config key.
@@ -407,6 +478,21 @@ mod tests {
         );
         assert!(skip_parlor_llm(1, "done"));
         assert!(!skip_parlor_llm(3, "verified"));
+    }
+
+    #[test]
+    fn empty_or_internodal_last_hop_uses_parlor() {
+        assert_eq!(
+            after_successful_hop(0, 1, ""),
+            AfterSuccessfulHop::FinishParlor
+        );
+        let internodal = hop_contract_body("", "Cargo.toml\nREADME.md");
+        assert!(looks_like_internodal_envelope(&internodal));
+        assert_eq!(
+            after_successful_hop(0, 1, &internodal),
+            AfterSuccessfulHop::FinishParlor
+        );
+        assert!(hop_contract_body("Google 路由当前可用。", "ignored").contains("Google"));
     }
 
     #[test]

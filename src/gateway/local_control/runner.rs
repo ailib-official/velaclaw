@@ -190,7 +190,8 @@ fn seed_prior_messages(agent: &mut Agent, messages: &[ChatMessageInput]) -> Resu
 ///
 /// After the first persisted user turn, schedules a **background** title completion (does not
 /// block the chat `done` frame). Model preference: local (ollama / llamacpp /
-/// lmstudio) → `nvidia/nemotron-3-super-120b-a12b` → `nvidia/nemotron-mini-4b-instruct`.
+/// lmstudio) → `nvidia/nemotron-3-super-120b-a12b` → configured `fast` route.
+/// Does not include EOL `nemotron-mini-4b-instruct`.
 pub async fn persist_chat_turn(
     config: &Config,
     session_id: Option<&str>,
@@ -264,8 +265,6 @@ const TITLE_SYSTEM: &str = "You name chat sessions. Reply with ONLY a concise ti
 
 /// Primary NVIDIA Nemotron for background title tasks (free tier, strong instruction following).
 const TITLE_NEMOTRON_PRIMARY: &str = "nvidia/nemotron-3-super-120b-a12b";
-/// Last-resort smallest Nemotron when primary is unavailable.
-const TITLE_NEMOTRON_FALLBACK: &str = "nvidia/nemotron-mini-4b-instruct";
 
 fn is_local_title_provider(provider: &str) -> bool {
     matches!(
@@ -329,8 +328,10 @@ pub(crate) fn title_refine_model_candidates(config: &Config) -> Vec<String> {
     if !out.iter().any(|m| m == TITLE_NEMOTRON_PRIMARY) {
         out.push(TITLE_NEMOTRON_PRIMARY.to_string());
     }
-    if !out.iter().any(|m| m == TITLE_NEMOTRON_FALLBACK) {
-        out.push(TITLE_NEMOTRON_FALLBACK.to_string());
+    if let Some(fast) = crate::orchestration::fast_route_logical_id(&config.model_routes) {
+        if !out.iter().any(|m| m.eq_ignore_ascii_case(&fast)) {
+            out.push(fast);
+        }
     }
     out
 }
@@ -362,6 +363,9 @@ async fn refine_session_title_background(
     let candidates = title_refine_model_candidates(&config);
 
     for logical in candidates {
+        if crate::orchestration::is_tombstoned(&session_id, &logical) {
+            continue;
+        }
         let mut effective = config.clone();
         effective.default_model = Some(logical.clone());
         effective.default_provider = Some(provider_id_from_logical(&logical).to_string());
@@ -414,6 +418,14 @@ async fn refine_session_title_background(
                     error = %format!("{e:#}"),
                     "title refine: candidate failed"
                 );
+                let class = crate::providers::hint_peer::classify_hop_error(&e.to_string());
+                if matches!(
+                    class,
+                    crate::providers::hint_peer::HopFailClass::Unavailable
+                        | crate::providers::hint_peer::HopFailClass::Quota
+                ) {
+                    crate::orchestration::tombstone_executed(&session_id, &logical, class);
+                }
             }
         }
     }
@@ -729,13 +741,13 @@ metadata:
     }
 
     #[test]
-    fn title_refine_candidates_prefer_nvidia_super_then_mini() {
+    fn title_refine_candidates_prefer_nvidia_super() {
         let mut cfg = Config::default();
         cfg.default_model = Some("deepseek/deepseek-v4-flash".into());
         cfg.default_provider = Some("deepseek".into());
         let c = title_refine_model_candidates(&cfg);
         assert_eq!(c.first().map(String::as_str), Some(TITLE_NEMOTRON_PRIMARY));
-        assert_eq!(c.last().map(String::as_str), Some(TITLE_NEMOTRON_FALLBACK));
+        assert!(!c.iter().any(|m| m.contains("nemotron-mini-4b")), "{c:?}");
     }
 
     #[test]
@@ -746,7 +758,20 @@ metadata:
         let c = title_refine_model_candidates(&cfg);
         assert_eq!(c.first().map(String::as_str), Some("ollama/llama3.2"));
         assert!(c.iter().any(|m| m == TITLE_NEMOTRON_PRIMARY));
-        assert_eq!(c.last().map(String::as_str), Some(TITLE_NEMOTRON_FALLBACK));
+        assert!(!c.iter().any(|m| m.contains("nemotron-mini-4b")), "{c:?}");
+    }
+
+    #[test]
+    fn title_refine_candidates_include_fast_route() {
+        let mut cfg = Config::default();
+        cfg.model_routes.push(crate::config::ModelRouteConfig {
+            hint: "fast".into(),
+            provider: "groq".into(),
+            model: "openai/gpt-oss-20b".into(),
+            ..crate::config::ModelRouteConfig::default()
+        });
+        let c = title_refine_model_candidates(&cfg);
+        assert!(c.iter().any(|m| m == "groq/openai/gpt-oss-20b"), "{c:?}");
     }
 
     #[test]

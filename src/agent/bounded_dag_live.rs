@@ -429,6 +429,7 @@ pub async fn live_first_hop(
     tracing::info!(
         target: "bounded_dag_live",
         kind = hop_kind(&hop),
+        planner_model = planner_model,
         plan = hop.is_plan(),
         nodes = match &hop {
             LiveFirstHop::Plan(plan) => plan.order.len(),

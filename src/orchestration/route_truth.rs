@@ -87,7 +87,10 @@ pub fn fast_route_logical_id(routes: &[ModelRouteConfig]) -> Option<String> {
         if p.is_empty() || m.is_empty() {
             None
         } else {
-            Some(format!("{p}/{m}"))
+            let family = crate::providers::hint_peer::provider_family(p);
+            Some(crate::protocol_registry::compose_logical_model_id(
+                family, m,
+            ))
         }
     })
 }
@@ -215,6 +218,16 @@ mod tests {
         ];
         assert_eq!(
             fast_route_logical_id(&routes).as_deref(),
+            Some("groq/openai/gpt-oss-20b")
+        );
+        let doubled = vec![ModelRouteConfig {
+            hint: "fast".into(),
+            provider: "groq/openai/gpt-oss-20b".into(),
+            model: "openai/gpt-oss-20b".into(),
+            ..ModelRouteConfig::default()
+        }];
+        assert_eq!(
+            fast_route_logical_id(&doubled).as_deref(),
             Some("groq/openai/gpt-oss-20b")
         );
         assert_eq!(

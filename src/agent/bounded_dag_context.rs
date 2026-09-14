@@ -138,6 +138,8 @@ pub struct NodeWorkPacket<'a> {
     pub node_count: usize,
     pub user_task: &'a str,
     pub retrieve_texts: &'a [String],
+    pub workspace_root: Option<&'a Path>,
+    pub workspace_only: bool,
 }
 
 /// User-role retrieve blobs for this node (workspace / memory / prior artifacts).
@@ -343,6 +345,13 @@ pub fn reset_chat_scope(
     let task = packet.user_task.trim();
     if !task.is_empty() {
         history.push(ChatMessage::user(format!("USER TASK\n{task}")));
+    }
+    if let Some(root) = packet.workspace_root {
+        history.push(ChatMessage::user(format!(
+            "LOCUS\nworkspace_root={}\nworkspace_only={}\nTool cwd is workspace_root. Paths outside it are out of this node's locus unless the node is remote(alias).",
+            root.display(),
+            packet.workspace_only
+        )));
     }
     for text in packet.retrieve_texts {
         history.push(ChatMessage::user(text.clone()));
@@ -617,6 +626,8 @@ mod tests {
                 node_count: 3,
                 user_task: "fix the flaky test",
                 retrieve_texts: &[],
+                workspace_root: None,
+                workspace_only: false,
             },
             None,
         );
@@ -627,6 +638,33 @@ mod tests {
         assert!(joined.contains("next_node_id: patch"));
         assert!(!joined.contains("Approve Build"));
         assert!(!joined.contains("同意"));
+    }
+
+    #[test]
+    fn reset_chat_scope_injects_workspace_locus() {
+        let dag = parse_dag_json(CODE_FIX_TEMPLATE_JSON).unwrap();
+        let locate = dag.nodes.iter().find(|n| n.id == "locate").unwrap();
+        let root = PathBuf::from("/tmp/velaclaw_workspace_locus");
+        let mut history = vec![ChatMessage::system("product system")];
+        reset_chat_scope(
+            &mut history,
+            &NodeWorkPacket {
+                dag_id: "code-fix-template",
+                node: locate,
+                index: 1,
+                node_count: 3,
+                user_task: "generic task",
+                retrieve_texts: &[],
+                workspace_root: Some(root.as_path()),
+                workspace_only: true,
+            },
+            None,
+        );
+        let joined: String = history.iter().map(|m| m.content.as_str()).collect();
+        assert!(joined.contains("LOCUS"));
+        assert!(joined.contains("/tmp/velaclaw_workspace_locus"));
+        assert!(joined.contains("workspace_only=true"));
+        assert!(joined.contains("remote(alias)"));
     }
 
     #[test]
@@ -643,6 +681,8 @@ mod tests {
                 node_count: 3,
                 user_task: "generic task",
                 retrieve_texts: &[],
+                workspace_root: None,
+                workspace_only: false,
             },
             Some("slim P0+P1"),
         );

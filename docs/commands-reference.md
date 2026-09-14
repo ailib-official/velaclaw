@@ -58,7 +58,7 @@ Last verified: **September 12, 2026**.
 - `velaclaw agent --peripheral <board:path>`
 - `velaclaw agent --no-color`
 - `velaclaw agent --no-fold`
-- `velaclaw agent --plan -m "Propose a change"` — Plan phase: mutating tools are blocked (default is Build). With `[agent].bounded_dag_live = true` and empty `bounded_dag_path`, Plan runs a tool-free planner (`fast` route when configured, else session default) then prints the linear DAG; omit `--plan` (Build) to run each work node through the existing tool loop (CLI and Web share `graph_scheduler`; successful hops skip observe; parlor ≤1). Short Build approvals reuse the session DAG; other Build text replans. Same `host_phase` contract as Web chat.
+- `velaclaw agent --plan -m "Propose a change"` — Plan phase: mutating tools are blocked (default is Build). With `[agent].bounded_dag_live = true` and empty `bounded_dag_path`, Plan runs a tool-free planner (`fast` route when configured, else session default) then prints the linear DAG; omit `--plan` (Build) to run each work node through the existing tool loop (CLI and Web share `graph_scheduler`; successful hops skip observe; parlor ≤1). Empty assistant text after tools is stored as an internodal hop artifact so parlor can write the operator report. Short Build approvals reuse the session DAG; other Build text replans. Same `host_phase` contract as Web chat.
 - `velaclaw agent --session-id <id> -m "Continue"` — load/save `workspace/.velaclaw/chat_sessions`
 - `velaclaw undo` — restore tracked files to HEAD if workspace already has `.git`
 

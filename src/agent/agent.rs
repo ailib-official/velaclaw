@@ -1208,6 +1208,8 @@ impl Agent {
                         node_count,
                         user_task: &graph_task,
                         retrieve_texts: &retrieve,
+                        workspace_root: Some(self.workspace_dir.as_path()),
+                        workspace_only: self.security.read().workspace_only,
                     },
                     Some(work_sys.as_str()),
                 );
@@ -1574,8 +1576,16 @@ impl Agent {
             self.config.tool_dispatcher.as_str(),
             self.tool_dispatcher.should_send_tool_specs(),
         )?;
-        self.invoke_tool_loop_resolved_with(effective_model, true)
-            .await
+        let hop_start = self.history.len();
+        let text = self
+            .invoke_tool_loop_resolved_with(effective_model, true)
+            .await?;
+        let evidence = crate::agent::graph_scheduler::tool_evidence_from_conversation(
+            self.history.get(hop_start..).unwrap_or(&[]),
+        );
+        Ok(crate::agent::graph_scheduler::hop_contract_body(
+            &text, &evidence,
+        ))
     }
 
     #[cfg(feature = "ai-protocol")]

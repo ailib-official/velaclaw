@@ -37,6 +37,13 @@ fn autosave_memory_key(prefix: &str) -> String {
     format!("{prefix}_{}", Uuid::new_v4())
 }
 
+#[cfg(feature = "ai-protocol")]
+fn live_planner_model(config: &Config, session_model: &str, picker: Option<&str>) -> String {
+    let fast = crate::orchestration::fast_route_logical_id(&config.model_routes);
+    crate::agent::capability_route::cheap_planner_model(session_model, fast.as_deref(), picker)
+        .to_string()
+}
+
 fn parse_tool_calls(response: &str) -> (String, Vec<ParsedToolCall>) {
     let (text, calls) = loop_parse::parse_tool_calls(response);
     (text, calls.into_iter().map(to_local_call).collect())
@@ -597,15 +604,29 @@ pub async fn run(
 
         #[cfg(feature = "ai-protocol")]
         let hop = if config.agent.bounded_dag_live {
+            let policy = security.snapshot();
+            let extra =
+                crate::agent::capability_contract::host_aliases_from_deploy(&config.deploy.servers);
+            let planner = live_planner_model(
+                &config,
+                &model_name,
+                if cli_explicit_flags {
+                    Some(model_name.as_str())
+                } else {
+                    None
+                },
+            );
             crate::agent::bounded_dag_live::live_first_hop(
                 &config.agent,
                 mem.as_ref(),
                 session_id.as_str(),
                 provider.as_ref(),
-                &model_name,
+                planner.as_str(),
                 &msg,
                 &history,
                 temperature,
+                &policy,
+                &extra,
                 host_phase,
             )
             .await?
@@ -1385,15 +1406,30 @@ pub async fn run(
 
             #[cfg(feature = "ai-protocol")]
             let hop = if config.agent.bounded_dag_live {
+                let policy = security.snapshot();
+                let extra = crate::agent::capability_contract::host_aliases_from_deploy(
+                    &config.deploy.servers,
+                );
+                let planner = live_planner_model(
+                    &config,
+                    &session_model,
+                    if session_explicit {
+                        Some(session_model.as_str())
+                    } else {
+                        None
+                    },
+                );
                 crate::agent::bounded_dag_live::live_first_hop(
                     &config.agent,
                     mem.as_ref(),
                     session_id.as_str(),
                     provider.as_ref(),
-                    &session_model,
+                    planner.as_str(),
                     &user_input,
                     &history,
                     temperature,
+                    &policy,
+                    &extra,
                     host_phase,
                 )
                 .await?

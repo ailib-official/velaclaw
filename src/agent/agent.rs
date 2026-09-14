@@ -42,6 +42,7 @@ pub struct Agent {
     available_hints: Vec<String>,
     peer_logical_ids: Vec<String>,
     model_routes: Vec<crate::config::ModelRouteConfig>,
+    host_aliases: Vec<String>,
     security: PolicyHandle,
     gateway_approval: Option<(ApprovalManager, Arc<ApprovalHub>)>,
     /// Shared attach slot for `request_human_input` (same Arc as the tool).
@@ -94,6 +95,7 @@ pub struct AgentBuilder {
     available_hints: Option<Vec<String>>,
     peer_logical_ids: Option<Vec<String>>,
     model_routes: Option<Vec<crate::config::ModelRouteConfig>>,
+    host_aliases: Option<Vec<String>>,
     security: Option<PolicyHandle>,
     human_input_attach: Option<HumanInputAttach>,
     #[cfg(feature = "ai-protocol")]
@@ -127,6 +129,7 @@ impl AgentBuilder {
             available_hints: None,
             peer_logical_ids: None,
             model_routes: None,
+            host_aliases: None,
             security: None,
             human_input_attach: None,
             #[cfg(feature = "ai-protocol")]
@@ -244,6 +247,11 @@ impl AgentBuilder {
         self
     }
 
+    pub fn host_aliases(mut self, host_aliases: Vec<String>) -> Self {
+        self.host_aliases = Some(host_aliases);
+        self
+    }
+
     pub fn security(mut self, security: PolicyHandle) -> Self {
         self.security = Some(security);
         self
@@ -324,6 +332,7 @@ impl AgentBuilder {
             available_hints: self.available_hints.unwrap_or_default(),
             peer_logical_ids: self.peer_logical_ids.unwrap_or_default(),
             model_routes: self.model_routes.unwrap_or_default(),
+            host_aliases: self.host_aliases.unwrap_or_default(),
             security: self
                 .security
                 .ok_or_else(|| anyhow::anyhow!("security is required"))?,
@@ -556,6 +565,18 @@ impl Agent {
             .available_hints(available_hints)
             .peer_logical_ids(crate::agent::loop_::logical_ids_from_config(config))
             .model_routes(config.model_routes.clone())
+            .host_aliases({
+                #[cfg(feature = "ai-protocol")]
+                {
+                    crate::agent::capability_contract::host_aliases_from_deploy(
+                        &config.deploy.servers,
+                    )
+                }
+                #[cfg(not(feature = "ai-protocol"))]
+                {
+                    Vec::new()
+                }
+            })
             .identity_config(config.identity.clone())
             .skills(crate::skills::load_skills_with_config(
                 &config.workspace_dir,
@@ -904,6 +925,8 @@ impl Agent {
                 user_message,
                 &hop_history,
                 self.temperature,
+                &self.security.snapshot(),
+                self.host_aliases.as_slice(),
                 self.host_phase,
             )
             .await?
@@ -1497,14 +1520,26 @@ impl Agent {
     ) -> Result<crate::agent::bounded_dag_live::PlannedLiveDag> {
         use crate::agent::bounded_dag_live::prepare_session_live_dag;
 
+        let planner_model = {
+            let fast = crate::orchestration::fast_route_logical_id(&self.model_routes);
+            crate::agent::capability_route::cheap_planner_model(
+                self.model_name.as_str(),
+                fast.as_deref(),
+                self.explicit_model.as_deref(),
+            )
+            .to_string()
+        };
+        let policy = self.security.snapshot();
         let planned = prepare_session_live_dag(
             &self.config,
             self.memory.as_ref(),
             self.session_id.as_str(),
             self.provider.as_ref(),
-            &self.model_name,
+            planner_model.as_str(),
             user_message,
             self.temperature,
+            &policy,
+            self.host_aliases.as_slice(),
             self.host_phase,
         )
         .await?;

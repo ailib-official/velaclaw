@@ -278,15 +278,18 @@ pub fn one_node_live_dag(user_task: &str) -> PlannedLiveDag {
     }
 }
 
-fn admit_planned_dag(plan: &mut PlannedLiveDag, user_task: &str) -> Result<()> {
-    admit_capability_contract(&mut plan.dag, user_task, &SecurityPolicy::default(), &[])
+fn admit_planned_dag(
+    plan: &mut PlannedLiveDag,
+    user_task: &str,
+    policy: &SecurityPolicy,
+    extra_aliases: &[String],
+) -> Result<()> {
+    admit_capability_contract(&mut plan.dag, user_task, policy, extra_aliases)
 }
 
 fn plan_rejected_chat(err: &anyhow::Error) -> LiveFirstHop {
     LiveFirstHop::ChatOnly {
-        reply: format!(
-            "Plan rejected before execute: {err}. Use a simple allowed command (no substitution, redirect, or find -exec), or rephrase the task."
-        ),
+        reply: format!("Plan rejected before execute: {err}."),
     }
 }
 
@@ -333,23 +336,31 @@ async fn refine_one_node_plan(
     }
 }
 
-fn admit_live_first_hop(hop: LiveFirstHop, user_task: &str) -> LiveFirstHop {
+fn admit_live_first_hop(
+    hop: LiveFirstHop,
+    user_task: &str,
+    policy: &SecurityPolicy,
+    extra_aliases: &[String],
+) -> LiveFirstHop {
     match hop {
-        LiveFirstHop::Plan(mut plan) => match admit_planned_dag(&mut plan, user_task) {
-            Ok(()) => LiveFirstHop::Plan(plan),
-            Err(err) => {
-                tracing::info!(
-                    target: "bounded_dag_live",
-                    error = %err,
-                    "capability contract rejected plan"
-                );
-                plan_rejected_chat(&err)
+        LiveFirstHop::Plan(mut plan) => {
+            match admit_planned_dag(&mut plan, user_task, policy, extra_aliases) {
+                Ok(()) => LiveFirstHop::Plan(plan),
+                Err(err) => {
+                    tracing::info!(
+                        target: "bounded_dag_live",
+                        error = %err,
+                        "capability contract rejected plan"
+                    );
+                    plan_rejected_chat(&err)
+                }
             }
-        },
+        }
         other => other,
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn live_first_hop(
     agent: &crate::config::AgentConfig,
     mem: &dyn Memory,
@@ -359,6 +370,8 @@ pub async fn live_first_hop(
     user_task: &str,
     history: &[ChatMessage],
     temperature: f64,
+    policy: &SecurityPolicy,
+    extra_aliases: &[String],
     host_phase: HostPhase,
 ) -> Result<LiveFirstHop> {
     if !agent.bounded_dag_live {
@@ -380,6 +393,8 @@ pub async fn live_first_hop(
             planner_model,
             user_task,
             temperature,
+            policy,
+            extra_aliases,
             host_phase,
         )
         .await?;
@@ -403,7 +418,7 @@ pub async fn live_first_hop(
             )
         }
     };
-    let hop = admit_live_first_hop(hop, user_task);
+    let hop = admit_live_first_hop(hop, user_task, policy, extra_aliases);
     if let LiveFirstHop::Plan(plan) = &hop {
         let json = planned_store_json(plan, &fallback);
         let _ = store_planned_json(mem, session_id, &json).await;
@@ -1171,6 +1186,7 @@ pub fn restore_chat_history_after_planner(
 ///
 /// `use_cache`: reuse `dag_plan:<session>` when already loaded for a repair.
 /// New tasks pass false after `clear_session_dag_state`.
+#[allow(clippy::too_many_arguments)]
 pub async fn obtain_planned_live_dag_with_provider(
     agent: &crate::config::AgentConfig,
     mem: &dyn Memory,
@@ -1179,6 +1195,8 @@ pub async fn obtain_planned_live_dag_with_provider(
     planner_model: &str,
     user_task: &str,
     temperature: f64,
+    policy: &SecurityPolicy,
+    extra_aliases: &[String],
     use_cache: bool,
 ) -> Result<PlannedLiveDag> {
     if use_cache {
@@ -1195,13 +1213,13 @@ pub async fn obtain_planned_live_dag_with_provider(
             resume_from: 0,
             graph_task_override: None,
         };
-        admit_planned_dag(&mut planned, user_task)?;
+        admit_planned_dag(&mut planned, user_task, policy, extra_aliases)?;
         return Ok(planned);
     }
     let fallback = fallback_template_json(agent)?;
     let mut planned =
         run_live_planner_chat(provider, planner_model, user_task, temperature, &fallback).await?;
-    admit_planned_dag(&mut planned, user_task)?;
+    admit_planned_dag(&mut planned, user_task, policy, extra_aliases)?;
     if planned.used_fallback {
         tracing::info!(
             target: "bounded_dag_live",
@@ -1332,6 +1350,7 @@ pub fn splice_remaining_plan(
 }
 
 /// New task → full plan. Failed node + new prompt → replan remaining from that node.
+#[allow(clippy::too_many_arguments)]
 pub async fn prepare_session_live_dag(
     agent: &crate::config::AgentConfig,
     mem: &dyn Memory,
@@ -1340,6 +1359,8 @@ pub async fn prepare_session_live_dag(
     planner_model: &str,
     user_task: &str,
     temperature: f64,
+    policy: &SecurityPolicy,
+    extra_aliases: &[String],
     host_phase: HostPhase,
 ) -> Result<PlannedLiveDag> {
     if host_phase == HostPhase::Plan {
@@ -1352,6 +1373,8 @@ pub async fn prepare_session_live_dag(
             planner_model,
             user_task,
             temperature,
+            policy,
+            extra_aliases,
             false,
         )
         .await;
@@ -1380,7 +1403,7 @@ pub async fn prepare_session_live_dag(
                 &fallback,
             )
             .await?;
-            admit_planned_dag(&mut remaining, &original)?;
+            admit_planned_dag(&mut remaining, &original, policy, extra_aliases)?;
             if remaining.used_fallback {
                 stored.resume_from = fail.index.min(stored.order.len());
                 stored.graph_task_override = Some(override_task);
@@ -1411,6 +1434,8 @@ pub async fn prepare_session_live_dag(
         planner_model,
         user_task,
         temperature,
+        policy,
+        extra_aliases,
         false,
     )
     .await
@@ -1847,6 +1872,8 @@ mod tests {
             "check piubt git then sync velaclaw",
             &[],
             0.0,
+            &SecurityPolicy::default(),
+            &[],
             HostPhase::Build,
         )
         .await
@@ -1878,6 +1905,8 @@ mod tests {
             "fix the compiler error",
             &[],
             0.0,
+            &SecurityPolicy::default(),
+            &[],
             HostPhase::Build,
         )
         .await
@@ -1906,6 +1935,8 @@ mod tests {
             "hello",
             &[],
             0.0,
+            &SecurityPolicy::default(),
+            &[],
             HostPhase::Build,
         )
         .await

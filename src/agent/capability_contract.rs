@@ -1,61 +1,10 @@
-//! Host capability contract for planner nodes (VL-APE-011 / I11).
-//! 规划期 Σ + locus；工具形直调；入闸不安全的 I 不得进入 G。
+//! Host capability contract for planner nodes (VL-APE-011 / I11, VL-APE-018).
+//! 规划器填 DAG；入闸只验结构合同。不按用户原文语种/关键词分流。
 
 use super::dag_runner::{DagManifest, DagNode};
-use super::graph_scheduler::{node_sigma, NodeSigma};
+use super::graph_scheduler::{direct_tool_call, node_sigma, NodeSigma};
 use crate::security::SecurityPolicy;
 use anyhow::{bail, Result};
-
-const STOP_HOST_WORDS: &[&str] = &[
-    "the",
-    "this",
-    "that",
-    "my",
-    "our",
-    "a",
-    "an",
-    "local",
-    "workspace",
-    "host",
-    "server",
-    "machine",
-    "node",
-    "box",
-    "git",
-    "ssh",
-    "ls",
-    "disk",
-    "file",
-    "files",
-    "repo",
-    "origin",
-];
-
-/// True when the user asked for inspect/list/status that allowed tools can finish.
-#[must_use]
-pub fn user_task_is_tool_shaped(user_task: &str) -> bool {
-    let t = user_task.to_ascii_lowercase();
-    if cognition_override(&t) {
-        return false;
-    }
-    t.contains("list ")
-        || t.contains("inspect")
-        || t.contains("status")
-        || t.contains("uptime")
-        || t.contains("what files")
-        || t.contains("ls ")
-        || t.contains("directory")
-        || t.contains("which services")
-}
-
-fn cognition_override(t: &str) -> bool {
-    t.contains("patch")
-        || t.contains("fix the")
-        || t.contains("implement")
-        || t.contains("refactor")
-        || t.contains("compiler error")
-        || t.contains("write a report")
-}
 
 /// `deploy.servers` `id` and `host` as extra aliases (no product-default hostname).
 #[must_use]
@@ -75,7 +24,7 @@ pub fn host_aliases_from_deploy(servers: &[crate::config::DeploymentTargetConfig
     out
 }
 
-/// Named remote from user text or configured aliases (never a product-default hostname).
+/// Configured remote alias if it appears as a token in `user_task` (not NLP).
 #[must_use]
 pub fn remote_alias_from_user<'a>(
     user_task: &'a str,
@@ -94,93 +43,6 @@ pub fn remote_alias_from_user<'a>(
             return Some(alias.trim());
         }
     }
-    if let Some(tok) = locative_adjacent_host(user_task) {
-        return Some(tok);
-    }
-    if let Some(idx) = user_task.find('@') {
-        if let Some(tok) = first_host_token(user_task[idx + 1..].trim_start()) {
-            if is_named_host_token(tok) {
-                return Some(tok);
-            }
-        }
-    }
-    for marker in [" on ", " at ", " via "] {
-        if let Some(idx) = lower.find(marker) {
-            let after = user_task[idx + marker.len()..].trim_start();
-            if let Some(tok) = first_host_token(after) {
-                if is_named_host_token(tok) {
-                    return Some(tok);
-                }
-            }
-        }
-    }
-    None
-}
-
-fn first_host_token(s: &str) -> Option<&str> {
-    let tok = s
-        .split(|c: char| c.is_whitespace() || c == ',' || c == ';' || c == ':')
-        .next()?
-        .trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '-' && c != '.');
-    if tok.is_empty() {
-        return None;
-    }
-    if !tok
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
-    {
-        return None;
-    }
-    Some(tok)
-}
-
-fn is_named_host_token(tok: &str) -> bool {
-    let lower = tok.to_ascii_lowercase();
-    if STOP_HOST_WORDS.contains(&lower.as_str()) {
-        return false;
-    }
-    let mut chars = tok.chars();
-    match chars.next() {
-        Some(c) if c.is_ascii_alphabetic() => {}
-        _ => return false,
-    }
-    tok.len() >= 2
-        && tok
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
-}
-
-/// ASCII host immediately before CJK 上 or after CJK 在 (script-agnostic locative).
-fn locative_adjacent_host(s: &str) -> Option<&str> {
-    let chars: Vec<(usize, char)> = s.char_indices().collect();
-    let mut i = 0;
-    while i < chars.len() {
-        let (byte_start, ch) = chars[i];
-        if ch.is_ascii_alphabetic() {
-            let mut j = i + 1;
-            while j < chars.len() {
-                let c = chars[j].1;
-                if c.is_ascii_alphanumeric() || c == '-' || c == '.' {
-                    j += 1;
-                } else {
-                    break;
-                }
-            }
-            let byte_end = if j < chars.len() { chars[j].0 } else { s.len() };
-            let tok = &s[byte_start..byte_end];
-            if is_named_host_token(tok) {
-                if j < chars.len() && chars[j].1 == '上' {
-                    return Some(tok);
-                }
-                if i > 0 && chars[i - 1].1 == '在' {
-                    return Some(tok);
-                }
-            }
-            i = j;
-            continue;
-        }
-        i += 1;
-    }
     None
 }
 
@@ -197,40 +59,57 @@ fn artifact_command(node: &DagNode) -> Option<String> {
     Some(raw.to_string())
 }
 
-/// Rewrite tool-shaped plans to ToolDirect I; reject unsafe constructs before E.
+fn locus_remote_alias(node: &DagNode) -> Option<&str> {
+    node.locus
+        .as_deref()
+        .map(str::trim)
+        .and_then(|l| l.strip_prefix("remote:"))
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+}
+
+fn ssh_alias<'a>(node: &'a DagNode, configured: Option<&'a str>) -> Option<&'a str> {
+    locus_remote_alias(node).or(configured)
+}
+
+/// Admit: verify DAG fields; never rewrite the whole graph from user-language heuristics.
 pub fn admit_capability_contract(
     dag: &mut DagManifest,
     user_task: &str,
     policy: &SecurityPolicy,
     extra_aliases: &[String],
 ) -> Result<()> {
-    let tool_shaped = user_task_is_tool_shaped(user_task);
-    let remote = remote_alias_from_user(user_task, extra_aliases).map(str::to_string);
+    let configured = remote_alias_from_user(user_task, extra_aliases).map(str::to_string);
     for node in &mut dag.nodes {
-        if tool_shaped {
-            rewrite_tool_direct_node(node, remote.as_deref());
-        } else {
-            fill_defaults(node, remote.as_deref());
-            if node_sigma(node) == NodeSigma::ToolDirect && artifact_command(node).is_none() {
-                apply_admit_safe_i(node, remote.as_deref());
-            }
-        }
+        fill_defaults(node);
         if node_sigma(node) == NodeSigma::ToolDirect {
-            let Some(cmd) = artifact_command(node) else {
-                bail!(
-                    "tool_direct node `{}` missing admit-safe I (artifact)",
-                    node.id
-                );
-            };
-            if !policy.passes_shell_safety_gates(&cmd) {
-                bail!(
-                    "plan rejected: node `{}` I matches unsafe_construct (substitution, redirect, or find -exec)",
-                    node.id
-                );
-            }
+            normalize_tool_direct_invoke(node, configured.as_deref())?;
         }
+        gate_tool_direct(node, policy)?;
     }
-    admit_graph_shape(dag, remote.as_deref())?;
+    admit_graph_shape(dag, configured.as_deref(), policy)?;
+    Ok(())
+}
+
+fn gate_tool_direct(node: &DagNode, policy: &SecurityPolicy) -> Result<()> {
+    if node_sigma(node) != NodeSigma::ToolDirect {
+        return Ok(());
+    }
+    let Some(cmd) = artifact_command(node) else {
+        bail!(
+            "tool_direct node `{}` missing admit-safe I (artifact)",
+            node.id
+        );
+    };
+    if !policy.passes_shell_safety_gates(&cmd) {
+        bail!(
+            "plan rejected: node `{}` I matches unsafe_construct (substitution, redirect, or find -exec)",
+            node.id
+        );
+    }
+    if let Err(err) = direct_tool_call(node) {
+        bail!("plan rejected: {err}");
+    }
     Ok(())
 }
 
@@ -239,7 +118,11 @@ fn node_declares_readonly_sigma(node: &DagNode) -> bool {
 }
 
 /// I19: all-LLM graphs that declare readonly evidence layers must get ToolDirect I.
-fn admit_graph_shape(dag: &mut DagManifest, remote: Option<&str>) -> Result<()> {
+fn admit_graph_shape(
+    dag: &mut DagManifest,
+    configured: Option<&str>,
+    policy: &SecurityPolicy,
+) -> Result<()> {
     if dag.nodes.is_empty() {
         return Ok(());
     }
@@ -247,34 +130,35 @@ fn admit_graph_shape(dag: &mut DagManifest, remote: Option<&str>) -> Result<()> 
         .nodes
         .iter()
         .all(|n| node_sigma(n) == NodeSigma::LlmWork);
-    if !all_llm {
-        return Ok(());
-    }
-    let readonly: Vec<String> = dag
-        .nodes
-        .iter()
-        .filter(|n| node_declares_readonly_sigma(n))
-        .map(|n| n.id.clone())
-        .collect();
-    if readonly.is_empty() {
-        return Ok(());
-    }
-    for node in &mut dag.nodes {
-        if readonly.iter().any(|id| id == &node.id) {
-            rewrite_tool_direct_node(node, remote);
+    if all_llm {
+        let readonly: Vec<String> = dag
+            .nodes
+            .iter()
+            .filter(|n| node_declares_readonly_sigma(n))
+            .map(|n| n.id.clone())
+            .collect();
+        if !readonly.is_empty() {
+            for node in &mut dag.nodes {
+                if readonly.iter().any(|id| id == &node.id) {
+                    normalize_tool_direct_invoke(node, configured)?;
+                }
+            }
+            if dag
+                .nodes
+                .iter()
+                .all(|n| node_sigma(n) == NodeSigma::LlmWork)
+            {
+                bail!("plan rejected: readonly evidence-layer nodes cannot all be LLM hops");
+            }
         }
     }
-    if dag
-        .nodes
-        .iter()
-        .all(|n| node_sigma(n) == NodeSigma::LlmWork)
-    {
-        bail!("plan rejected: readonly evidence-layer nodes cannot all be LLM hops");
+    for node in &dag.nodes {
+        gate_tool_direct(node, policy)?;
     }
     Ok(())
 }
 
-fn fill_defaults(node: &mut DagNode, remote: Option<&str>) {
+fn fill_defaults(node: &mut DagNode) {
     if node.sigma.is_none() {
         node.sigma = Some(
             if node_sigma(node) == NodeSigma::ToolDirect {
@@ -286,36 +170,49 @@ fn fill_defaults(node: &mut DagNode, remote: Option<&str>) {
         );
     }
     if node.locus.is_none() {
-        node.locus = Some(match remote {
-            Some(alias) => format!("remote:{alias}"),
-            None => "workspace".into(),
-        });
+        node.locus = Some("workspace".into());
     }
 }
 
-fn rewrite_tool_direct_node(node: &mut DagNode, remote: Option<&str>) {
-    node.model_selector.capabilities = vec!["shell.exec".into()];
+/// Make ToolDirect invocable without replacing a planner-supplied I.
+fn normalize_tool_direct_invoke(node: &mut DagNode, configured: Option<&str>) -> Result<()> {
     node.sigma = Some("tool_direct".into());
-    apply_admit_safe_i(node, remote);
+    if direct_tool_call(node).is_err() {
+        node.model_selector.capabilities = vec!["shell.exec".into()];
+        node.task_type = "shell.exec".into();
+    }
+    let alias = ssh_alias(node, configured).map(str::to_string);
+    if artifact_command(node).is_none() {
+        let layers = crate::agent::artifact_contract::required_evidence_layers(node);
+        if layers.contains(&crate::agent::artifact_contract::EvidenceLayer::ProtocolDist) {
+            bail!(
+                "tool_direct node `{}` missing admit-safe I (artifact)",
+                node.id
+            );
+        }
+        apply_admit_safe_i(node, alias.as_deref());
+    } else if node.locus.is_none() {
+        node.locus = Some(match alias {
+            Some(a) => format!("remote:{a}"),
+            None => "workspace".into(),
+        });
+    }
+    Ok(())
 }
 
 fn apply_admit_safe_i(node: &mut DagNode, remote: Option<&str>) {
-    let simple = simple_status_command("");
+    let simple = "ls";
     let cmd = match remote {
         Some(alias) if !simple.trim_start().to_ascii_lowercase().starts_with("ssh ") => {
             format!("ssh {alias} {simple}")
         }
-        _ => simple,
+        _ => simple.to_string(),
     };
     node.artifact = Some(cmd);
     node.locus = Some(match remote {
         Some(alias) => format!("remote:{alias}"),
         None => "workspace".into(),
     });
-}
-
-fn simple_status_command(_user_task: &str) -> String {
-    "ls".into()
 }
 
 #[cfg(test)]
@@ -339,40 +236,41 @@ mod tests {
     }
 
     #[test]
-    fn tool_shaped_plan_is_tool_direct() {
+    fn user_keywords_do_not_force_tool_direct() {
         let mut dag = parse_dag_json(&coding_node_json("echo hi")).unwrap();
         admit_capability_contract(&mut dag, "list files in the workspace", &policy(), &[]).unwrap();
         let n = &dag.nodes[0];
-        assert_eq!(node_sigma(n), NodeSigma::ToolDirect);
-        assert_eq!(n.sigma.as_deref(), Some("tool_direct"));
-        assert_eq!(n.locus.as_deref(), Some("workspace"));
-        assert!(!artifact_command(n).unwrap().contains("$("));
+        assert_eq!(node_sigma(n), NodeSigma::LlmWork);
+        assert_eq!(n.sigma.as_deref(), Some("llm_cognition"));
+        assert_eq!(artifact_command(n).as_deref(), Some("echo hi"));
     }
 
     #[test]
-    fn remote_locus_prefixes_ssh_alias() {
+    fn english_on_host_without_alias_does_not_invent_remote() {
         let mut dag = parse_dag_json(&coding_node_json("ls")).unwrap();
         admit_capability_contract(&mut dag, "list services on lab-host", &policy(), &[]).unwrap();
         let n = &dag.nodes[0];
-        assert_eq!(n.locus.as_deref(), Some("remote:lab-host"));
-        let cmd = artifact_command(n).unwrap();
-        assert!(cmd.starts_with("ssh lab-host "), "{cmd}");
-        assert!(!cmd.contains("$("));
-        assert!(!cmd.contains('>'));
-        assert_eq!(node_sigma(n), NodeSigma::ToolDirect);
+        assert_eq!(node_sigma(n), NodeSigma::LlmWork);
+        assert_eq!(n.locus.as_deref(), Some("workspace"));
+        assert_eq!(artifact_command(n).as_deref(), Some("ls"));
     }
 
     #[test]
-    fn extra_alias_without_on_token_sets_remote_locus() {
-        let mut dag = parse_dag_json(&coding_node_json("ls")).unwrap();
+    fn extra_alias_token_sets_remote_locus_on_empty_tool_direct() {
+        let mut dag = parse_dag_json(&empty_tool_direct_json()).unwrap();
         admit_capability_contract(
             &mut dag,
-            "list files on lab-host please",
+            "please check lab-host whenever convenient",
             &policy(),
             &["lab-host".into()],
         )
         .unwrap();
         assert_eq!(dag.nodes[0].locus.as_deref(), Some("remote:lab-host"));
+        assert_eq!(
+            artifact_command(&dag.nodes[0]).as_deref(),
+            Some("ssh lab-host ls")
+        );
+        direct_tool_call(&dag.nodes[0]).unwrap();
     }
 
     #[test]
@@ -412,47 +310,24 @@ mod tests {
     }
 
     #[test]
-    fn empty_tool_direct_i_fills_locative_ssh() {
-        let mut dag = parse_dag_json(&empty_tool_direct_json()).unwrap();
-        admit_capability_contract(
-            &mut dag,
-            "inspect disk lab-host上 and continue",
-            &policy(),
-            &[],
-        )
-        .unwrap();
-        let n = &dag.nodes[0];
-        assert_eq!(n.locus.as_deref(), Some("remote:lab-host"));
-        assert_eq!(artifact_command(n).as_deref(), Some("ssh lab-host ls"));
-    }
-
-    #[test]
     fn empty_tool_direct_i_fills_workspace_ls() {
         let mut dag = parse_dag_json(&empty_tool_direct_json()).unwrap();
-        admit_capability_contract(
-            &mut dag,
-            "summarize the architecture in prose",
-            &policy(),
-            &[],
-        )
-        .unwrap();
+        admit_capability_contract(&mut dag, "any natural language task text", &policy(), &[])
+            .unwrap();
         let n = &dag.nodes[0];
         assert_eq!(n.locus.as_deref(), Some("workspace"));
         assert_eq!(artifact_command(n).as_deref(), Some("ls"));
+        direct_tool_call(n).unwrap();
     }
 
     #[test]
-    fn locative_host_is_token_before_place_particle() {
+    fn unconfigured_host_token_is_not_parsed_from_user_text() {
+        assert_eq!(remote_alias_from_user("lab-host上git", &[]), None);
+        assert_eq!(remote_alias_from_user("check 在lab-host please", &[]), None);
+        assert_eq!(remote_alias_from_user("inspect @lab-host now", &[]), None);
+        let aliases = ["lab-host".to_string()];
         assert_eq!(
-            remote_alias_from_user("lab-host上git", &[]),
-            Some("lab-host")
-        );
-        assert_eq!(
-            remote_alias_from_user("check 在lab-host please", &[]),
-            Some("lab-host")
-        );
-        assert_eq!(
-            remote_alias_from_user("inspect @lab-host now", &[]),
+            remote_alias_from_user("inspect lab-host now", &aliases),
             Some("lab-host")
         );
     }
@@ -467,10 +342,11 @@ mod tests {
             ssh_key: None,
             labels: vec![],
         }]);
-        let mut dag = parse_dag_json(&coding_node_json("ls")).unwrap();
+        let mut dag = parse_dag_json(&empty_tool_direct_json()).unwrap();
         admit_capability_contract(&mut dag, "list files lab-host please", &policy(), &aliases)
             .unwrap();
         assert_eq!(dag.nodes[0].locus.as_deref(), Some("remote:lab-host"));
+        direct_tool_call(&dag.nodes[0]).unwrap();
     }
 
     #[test]
@@ -486,6 +362,25 @@ mod tests {
                 .any(|n| node_sigma(n) == NodeSigma::ToolDirect),
             "readonly graph must not stay all-LLM"
         );
+        assert_eq!(
+            artifact_command(&dag.nodes[0]).as_deref(),
+            Some("provider-manifest")
+        );
+        direct_tool_call(&dag.nodes[0]).unwrap();
+    }
+
+    #[test]
+    fn tool_direct_keeps_planner_i_and_closes_invoke() {
+        let mut dag = parse_dag_json(
+            r#"{"schema_version":"0.1.0","id":"g","entry":"n1","max_steps":2,"nodes":[{"id":"n1","task_type":"ops","model_selector":{"capabilities":["coding"]},"sigma":"tool_direct","artifact":"pwd","next":null}]}"#,
+        )
+        .unwrap();
+        admit_capability_contract(&mut dag, "arbitrary user text", &policy(), &[]).unwrap();
+        let n = &dag.nodes[0];
+        assert_eq!(node_sigma(n), NodeSigma::ToolDirect);
+        assert_eq!(artifact_command(n).as_deref(), Some("pwd"));
+        let call = direct_tool_call(n).unwrap();
+        assert_eq!(call.name, "shell");
     }
 
     #[test]
@@ -498,14 +393,34 @@ mod tests {
         let n = &dag.nodes[0];
         assert_eq!(node_sigma(n), NodeSigma::ToolDirect);
         assert_eq!(n.sigma.as_deref(), Some("tool_direct"));
-        assert!(artifact_command(n).is_some());
+        assert_eq!(artifact_command(n).as_deref(), Some("manifest"));
+        direct_tool_call(n).unwrap();
     }
 
     #[test]
-    fn remote_locus_ssh_prefix_unchanged() {
-        let mut dag = parse_dag_json(&coding_node_json("ls")).unwrap();
-        admit_capability_contract(&mut dag, "list services on lab-host", &policy(), &[]).unwrap();
+    fn remote_locus_ssh_prefix_from_configured_alias() {
+        let mut dag = parse_dag_json(&empty_tool_direct_json()).unwrap();
+        admit_capability_contract(
+            &mut dag,
+            "list services on lab-host",
+            &policy(),
+            &["lab-host".into()],
+        )
+        .unwrap();
         let cmd = artifact_command(&dag.nodes[0]).unwrap();
         assert!(cmd.starts_with("ssh lab-host "), "{cmd}");
+        direct_tool_call(&dag.nodes[0]).unwrap();
+    }
+
+    #[test]
+    fn empty_tool_direct_protocol_layer_does_not_invent_ls() {
+        let mut dag = parse_dag_json(
+            r#"{"schema_version":"0.1.0","id":"t","entry":"read-manifest","max_steps":2,"nodes":[{"id":"read-manifest","task_type":"ops","model_selector":{"capabilities":["shell.exec"]},"sigma":"tool_direct","next":null}]}"#,
+        )
+        .unwrap();
+        let err = admit_capability_contract(&mut dag, "any user text", &policy(), &[])
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("missing admit-safe I"), "{err}");
     }
 }

@@ -1193,6 +1193,11 @@ impl Agent {
                     self.session_id.as_str(),
                     dag_id.as_str(),
                 );
+                let _ = crate::agent::bounded_dag_context::persist_admitted_dag(
+                    &self.workspace_dir,
+                    self.session_id.as_str(),
+                    &planned.dag,
+                );
                 let scratch = crate::agent::bounded_dag_context::graph_scratch_rel(
                     self.session_id.as_str(),
                     dag_id.as_str(),

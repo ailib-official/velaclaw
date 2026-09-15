@@ -143,7 +143,7 @@ If a rollout regresses behavior:
 ## Related Docs
 
 - [one-click-bootstrap.md](one-click-bootstrap.md)
-- [troubleshooting.md](troubleshooting.md)
+- [troubleshooting.md](troubleshooting.md) — PATH / stale binary (VL-OPS-001) and trial fingerprint install (VL-OPS-002, `scripts/trial-redeploy.sh`)
 - [config-reference.md](config-reference.md)
 - [commands-reference.md](commands-reference.md)
 - [policy-approval-reference.md](policy-approval-reference.md)

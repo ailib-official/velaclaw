@@ -88,7 +88,7 @@ pub(crate) fn append_text_tool_prompt(
 ///
 /// `config` (CLI) or `host_decide` (Web) enable opt-in `host_decide_failover`.
 /// Channel surfaces pass neither — notices still apply; Decide failover does not.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) struct SoftFailLoopCtx<'a> {
     pub session_key: &'a str,
     pub config: Option<&'a Config>,
@@ -104,6 +104,9 @@ pub(crate) struct SoftFailLoopCtx<'a> {
     pub session_model: Option<&'a str>,
     /// Shared per-node probe governor (DAG hops). None → local to this loop call.
     pub probe: Option<&'a std::sync::Mutex<crate::agent::probe_dedup::HopProbeGovernor>>,
+    /// Per-hop tool gist (VL-APE-016 / I18).
+    pub hop_tool_accum:
+        Option<std::sync::Arc<std::sync::Mutex<crate::agent::graph_scheduler::HopToolAccumulator>>>,
 }
 
 #[cfg(feature = "ai-protocol")]
@@ -115,7 +118,7 @@ impl SoftFailLoopCtx<'_> {
 }
 
 fn with_probe<R>(
-    soft_fail: Option<SoftFailLoopCtx<'_>>,
+    soft_fail: Option<&SoftFailLoopCtx<'_>>,
     local: &mut crate::agent::probe_dedup::HopProbeGovernor,
     f: impl FnOnce(&mut crate::agent::probe_dedup::HopProbeGovernor) -> R,
 ) -> R {
@@ -505,8 +508,8 @@ pub(crate) async fn run_tool_call_loop(
             if let Some(peer) = select_peer_continue_model(
                 &active_model,
                 &peers,
-                soft_fail.map(|c| c.model_routes).unwrap_or(&[]),
-                soft_fail.and_then(|c| c.session_model),
+                soft_fail.as_ref().map(|c| c.model_routes).unwrap_or(&[]),
+                soft_fail.as_ref().and_then(|c| c.session_model),
             ) {
                 peer_continue_used = true;
                 tracing::info!(
@@ -625,7 +628,9 @@ pub(crate) async fn run_tool_call_loop(
             if is_shell {
                 let fp =
                     crate::agent::probe_dedup::tool_probe_fingerprint(&call.name, &call.arguments);
-                let decision = with_probe(soft_fail, &mut local_probe, |g| g.decide_shell(&fp));
+                let decision = with_probe(soft_fail.as_ref(), &mut local_probe, |g| {
+                    g.decide_shell(&fp)
+                });
                 match decision {
                     crate::agent::probe_dedup::ProbeShellDecision::Cap => {
                         skip_outputs[i] =
@@ -676,23 +681,33 @@ pub(crate) async fn run_tool_call_loop(
             } else {
                 let fp =
                     crate::agent::probe_dedup::tool_probe_fingerprint(&call.name, &call.arguments);
-                with_probe(soft_fail, &mut local_probe, |g| {
+                with_probe(soft_fail.as_ref(), &mut local_probe, |g| {
                     g.retract_unexecuted(&fp);
                 });
             }
         }
         if counted_round {
-            with_probe(soft_fail, &mut local_probe, |g| {
+            with_probe(soft_fail.as_ref(), &mut local_probe, |g| {
                 g.record_executed_round();
             });
         }
         for out in &batch_outputs {
-            with_probe(soft_fail, &mut local_probe, |g| {
+            with_probe(soft_fail.as_ref(), &mut local_probe, |g| {
                 g.note_shell_output(out);
             });
         }
-        let hop_close = with_probe(soft_fail, &mut local_probe, |g| g.hop_close());
+        let hop_close = with_probe(soft_fail.as_ref(), &mut local_probe, |g| g.hop_close());
         let individual_results = batch_outputs;
+
+        if let Some(ctx) = soft_fail.as_ref() {
+            if let Some(acc) = &ctx.hop_tool_accum {
+                if let Ok(mut guard) = acc.lock() {
+                    for out in &individual_results {
+                        guard.push_tool_output(out);
+                    }
+                }
+            }
+        }
 
         for (call, result) in tool_calls.iter().zip(individual_results.iter()) {
             let _ = writeln!(

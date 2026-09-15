@@ -527,6 +527,7 @@ pub async fn host_delivery(
     user_task: &str,
     last_node_body: &str,
     prior_visible: &str,
+    graph_artifacts: &str,
 ) -> Result<String> {
     let exhausted = velaclaw_agent_runtime::looks_like_tool_format_exhausted_notice(last_node_body);
     let stripped_notice = if exhausted {
@@ -558,6 +559,7 @@ pub async fn host_delivery(
                 user_task,
                 chat_evidence,
                 prior_visible,
+                graph_artifacts,
             )
             .await
             {
@@ -590,16 +592,17 @@ pub async fn host_delivery(
     Ok(visible)
 }
 
-async fn delivery_chat(
-    provider: &dyn Provider,
-    model: &str,
-    temperature: f64,
+/// User message body for parlor delivery (VL-APE-016 / I17).
+#[must_use]
+pub(crate) fn delivery_user_content(
     user_task: &str,
     internodal: &str,
     prior_visible: &str,
-) -> Result<String> {
+    graph_artifacts: &str,
+) -> String {
     let clip: String = internodal.chars().take(6_000).collect();
     let prior: String = prior_visible.chars().take(4_000).collect();
+    let graph: String = graph_artifacts.chars().take(12_000).collect();
     let mut user = format!("USER TASK\n{user_task}\n\n");
     if !prior.trim().is_empty() {
         user.push_str(
@@ -608,8 +611,26 @@ async fn delivery_chat(
         user.push_str(&prior);
         user.push_str("\n\n");
     }
-    user.push_str("NODE ARTIFACT\n");
+    if !graph.trim().is_empty() {
+        user.push_str("GRAPH ARTIFACTS (topology order; use as primary evidence)\n");
+        user.push_str(&graph);
+        user.push_str("\n\n");
+    }
+    user.push_str("LAST NODE ARTIFACT\n");
     user.push_str(&clip);
+    user
+}
+
+async fn delivery_chat(
+    provider: &dyn Provider,
+    model: &str,
+    temperature: f64,
+    user_task: &str,
+    internodal: &str,
+    prior_visible: &str,
+    graph_artifacts: &str,
+) -> Result<String> {
+    let user = delivery_user_content(user_task, internodal, prior_visible, graph_artifacts);
     let messages = [
         ChatMessage::system(DELIVERY_SYSTEM_PROMPT),
         ChatMessage::user(user),
@@ -645,6 +666,17 @@ mod tests {
         assert!(DELIVERY_SYSTEM_PROMPT.contains("prior-graph-artifact"));
         assert!(DELIVERY_SYSTEM_PROMPT.contains("live host/service health"));
         assert!(DELIVERY_SYSTEM_PROMPT.contains("other-session memory"));
+    }
+
+    #[test]
+    fn parlor_delivery_includes_graph_artifacts() {
+        let graph = "[dag_artifact node=locate]\nfound providers/\n\n[dag_artifact node=verify]\nHTTP 200\n\n";
+        let user = delivery_user_content("audit providers", "last hop gist", "", graph);
+        assert!(user.contains("GRAPH ARTIFACTS"));
+        assert!(user.contains("node=locate"));
+        assert!(user.contains("node=verify"));
+        assert!(user.contains("LAST NODE ARTIFACT"));
+        assert!(user.contains("last hop gist"));
     }
 
     #[test]

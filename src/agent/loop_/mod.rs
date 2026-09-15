@@ -836,6 +836,9 @@ pub async fn run(
                                         ))
                                     })
                                     .clone();
+                                let hop_accum = Arc::new(Mutex::new(
+                                    crate::agent::graph_scheduler::HopToolAccumulator::new(),
+                                ));
                                 let hop_start = history.len();
                                 let piece = match run_tool_call_loop(
                                     provider.as_ref(),
@@ -867,18 +870,31 @@ pub async fn run(
                                         model_routes: &config.model_routes,
                                         session_model: Some(model_name.as_str()),
                                         probe: Some(probe_cell.as_ref()),
+                                        hop_tool_accum: Some(Arc::clone(&hop_accum)),
                                     }),
                                     Some(&cli_gate_extras),
                                 )
                                 .await
                                 {
                                     Ok(piece) => {
-                                        let piece = crate::agent::graph_scheduler::hop_contract_body(
-                                            &piece,
-                                            &crate::agent::graph_scheduler::tool_evidence_from_chat(
+                                        let evidence = hop_accum
+                                            .lock()
+                                            .map(|a| a.as_evidence())
+                                            .unwrap_or_default();
+                                        let fallback =
+                                            crate::agent::graph_scheduler::tool_evidence_from_chat(
                                                 history.get(hop_start..).unwrap_or(&[]),
-                                            ),
-                                        );
+                                            );
+                                        let tool_evidence = if evidence.trim().is_empty() {
+                                            fallback
+                                        } else {
+                                            evidence
+                                        };
+                                        let piece =
+                                            crate::agent::graph_scheduler::hop_contract_body(
+                                                &piece,
+                                                &tool_evidence,
+                                            );
                                         let (notes, close, deny_class) = {
                                             let mut g = probe_cell
                                                 .lock()
@@ -1008,6 +1024,31 @@ pub async fn run(
                                     }
                                     }
                                 };
+                                let hop_verdict =
+                                    crate::agent::artifact_contract::hop_artifact_contract(
+                                        node, &piece,
+                                    );
+                                if hop_verdict
+                                    != crate::agent::artifact_contract::HopArtifactVerdict::Ok
+                                {
+                                    security.set_graph_scratch_rel(None);
+                                    let stop =
+                                        crate::agent::artifact_contract::hop_contract_stop_reason(
+                                            &msg,
+                                            hop_verdict,
+                                        );
+                                    crate::agent::bounded_dag_delivery::print_operator_note(
+                                        &mut operator_prefix,
+                                        &stop,
+                                        None,
+                                    );
+                                    return Ok(
+                                        crate::agent::bounded_dag_delivery::session_assistant_body(
+                                            &msg,
+                                            &operator_prefix,
+                                        ),
+                                    );
+                                }
                                 let _ = crate::agent::bounded_dag_context::store_node_artifact(
                                     mem.as_ref(),
                                     session_id.as_str(),
@@ -1059,16 +1100,49 @@ pub async fn run(
                                             .map(|m| m.content.as_str()),
                                     ),
                                 );
-                            crate::agent::graph_scheduler::finish_live_graph(
-                                provider.as_ref(),
-                                &model_name,
-                                temperature,
-                                &graph_task,
-                                &raw,
-                                &prior,
-                                node_count,
-                            )
-                            .await?
+                            {
+                                let artifacts =
+                                    crate::agent::bounded_dag_context::collect_graph_artifacts_for_parlor(
+                                        mem.as_ref(),
+                                        session_id.as_str(),
+                                        order,
+                                    )
+                                    .await;
+                                let verdict =
+                                    crate::agent::artifact_contract::graph_artifact_contract(
+                                        &planned.dag.nodes,
+                                        &artifacts,
+                                    );
+                                if verdict
+                                    != crate::agent::artifact_contract::GraphArtifactVerdict::Ok
+                                {
+                                    let stop =
+                                        crate::agent::artifact_contract::graph_contract_stop_reason(
+                                            &graph_task,
+                                            verdict,
+                                        );
+                                    return Ok(
+                                        crate::agent::bounded_dag_delivery::session_assistant_body(
+                                            &msg, &stop,
+                                        ),
+                                    );
+                                }
+                                let graph_block =
+                                    crate::agent::bounded_dag_context::format_graph_artifacts_block(
+                                        &artifacts,
+                                    );
+                                crate::agent::graph_scheduler::finish_live_graph(
+                                    provider.as_ref(),
+                                    &model_name,
+                                    temperature,
+                                    &graph_task,
+                                    &raw,
+                                    &prior,
+                                    &graph_block,
+                                    node_count,
+                                )
+                                .await?
+                            }
                         }
                     }
                     crate::agent::bounded_dag_live::LiveFirstHop::ChatOnly { reply } => {
@@ -1121,6 +1195,7 @@ pub async fn run(
                                 model_routes: &config.model_routes,
                                 session_model: Some(turn_model.as_str()),
                                 probe: None,
+                                hop_tool_accum: None,
                             }),
                             Some(&cli_gate_extras),
                         )
@@ -1160,6 +1235,7 @@ pub async fn run(
                         model_routes: &config.model_routes,
                         session_model: Some(turn_model.as_str()),
                         probe: None,
+                        hop_tool_accum: None,
                     }),
                     Some(&cli_gate_extras),
                 )
@@ -1705,6 +1781,9 @@ pub async fn run(
                                         config.agent.bounded_dag_live,
                                         text_tool_result_history,
                                     );
+                                let hop_accum = Arc::new(Mutex::new(
+                                    crate::agent::graph_scheduler::HopToolAccumulator::new(),
+                                ));
                                 let hop_start = history.len();
                                 let hop_result = if crate::agent::graph_scheduler::node_sigma(node)
                                     == crate::agent::graph_scheduler::NodeSigma::ToolDirect
@@ -1777,6 +1856,7 @@ pub async fn run(
                                         model_routes: &config.model_routes,
                                         session_model: Some(session_model.as_str()),
                                         probe: Some(probe_cell.as_ref()),
+                                        hop_tool_accum: Some(Arc::clone(&hop_accum)),
                                     }),
                                     Some(&cli_gate_extras),
                                 )
@@ -1785,11 +1865,21 @@ pub async fn run(
                                 let piece = match hop_result
                                 {
                                     Ok(piece) => {
+                                        let evidence = hop_accum
+                                            .lock()
+                                            .map(|a| a.as_evidence())
+                                            .unwrap_or_default();
+                                        let fallback = crate::agent::graph_scheduler::tool_evidence_from_chat(
+                                            history.get(hop_start..).unwrap_or(&[]),
+                                        );
+                                        let tool_evidence = if evidence.trim().is_empty() {
+                                            fallback
+                                        } else {
+                                            evidence
+                                        };
                                         let piece = crate::agent::graph_scheduler::hop_contract_body(
                                             &piece,
-                                            &crate::agent::graph_scheduler::tool_evidence_from_chat(
-                                                history.get(hop_start..).unwrap_or(&[]),
-                                            ),
+                                            &tool_evidence,
                                         );
                                         let (notes, close, deny_class) = {
                                             let mut g = probe_cell
@@ -1941,6 +2031,30 @@ pub async fn run(
                                         }
                                     }
                                 };
+                                let hop_verdict =
+                                    crate::agent::artifact_contract::hop_artifact_contract(
+                                        node, &piece,
+                                    );
+                                if hop_verdict
+                                    != crate::agent::artifact_contract::HopArtifactVerdict::Ok
+                                {
+                                    security.set_graph_scratch_rel(None);
+                                    let stop =
+                                        crate::agent::artifact_contract::hop_contract_stop_reason(
+                                            &user_input, hop_verdict,
+                                        );
+                                    crate::agent::bounded_dag_delivery::print_operator_note(
+                                        &mut operator_prefix,
+                                        &stop,
+                                        Some(&fold_cache),
+                                    );
+                                    return Ok(
+                                        crate::agent::bounded_dag_delivery::session_assistant_body(
+                                            &user_input,
+                                            &operator_prefix,
+                                        ),
+                                    );
+                                }
                                 let _ = crate::agent::bounded_dag_context::store_node_artifact(
                                     mem.as_ref(),
                                     session_id.as_str(),
@@ -2012,16 +2126,48 @@ pub async fn run(
                                         .map(|m| m.content.as_str()),
                                 ),
                             );
-                            Ok(crate::agent::graph_scheduler::finish_live_graph(
+                            {
+                                let artifacts =
+                                    crate::agent::bounded_dag_context::collect_graph_artifacts_for_parlor(
+                                        mem.as_ref(),
+                                        session_id.as_str(),
+                                        order,
+                                    )
+                                    .await;
+                                let verdict = crate::agent::artifact_contract::graph_artifact_contract(
+                                    &dag.nodes,
+                                    &artifacts,
+                                );
+                                if verdict
+                                    != crate::agent::artifact_contract::GraphArtifactVerdict::Ok
+                                {
+                                    let stop = crate::agent::artifact_contract::graph_contract_stop_reason(
+                                        &graph_task,
+                                        verdict,
+                                    );
+                                    return Ok(
+                                        crate::agent::bounded_dag_delivery::session_assistant_body(
+                                            &user_input,
+                                            &stop,
+                                        ),
+                                    );
+                                }
+                                let graph_block =
+                                    crate::agent::bounded_dag_context::format_graph_artifacts_block(
+                                        &artifacts,
+                                    );
+                                Ok(crate::agent::graph_scheduler::finish_live_graph(
                                     provider.as_ref(),
                                     &session_model,
                                     temperature,
                                     &graph_task,
                                     &raw,
                                     &prior,
+                                    &graph_block,
                                     node_count,
                                 )
                                 .await?)
+                            }
                         }
                             crate::agent::bounded_dag_live::LiveFirstHop::ChatOnly { reply } => {
                                 let reply = crate::agent::bounded_dag_delivery::session_assistant_body(
@@ -2086,6 +2232,7 @@ pub async fn run(
                                     model_routes: &config.model_routes,
                                     session_model: Some(session_model.as_str()),
                                     probe: None,
+                                    hop_tool_accum: None,
                                 }),
                                 Some(&cli_gate_extras),
                             )
@@ -2127,6 +2274,7 @@ pub async fn run(
                             model_routes: &config.model_routes,
                             session_model: Some(session_model.as_str()),
                             probe: None,
+                            hop_tool_accum: None,
                         }),
                         Some(&cli_gate_extras),
                     )

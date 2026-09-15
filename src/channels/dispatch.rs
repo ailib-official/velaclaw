@@ -464,6 +464,7 @@ pub(crate) async fn process_channel_message(
                     model_routes: ctx.model_routes.as_slice(),
                     session_model: Some(ctx.model.as_str()),
                     probe: None,
+                    hop_tool_accum: None,
                 }),
             None,
             ),

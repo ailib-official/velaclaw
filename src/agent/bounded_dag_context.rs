@@ -293,6 +293,33 @@ pub fn ensure_graph_scratch(
     Ok(dir)
 }
 
+/// Write admit-after DAG fields for diagnosis (VL-APE-018 / E15).
+pub fn persist_admitted_dag(
+    workspace: &Path,
+    session_id: &str,
+    dag: &crate::agent::dag_runner::DagManifest,
+) -> std::io::Result<()> {
+    let dir = ensure_graph_scratch(workspace, session_id, &dag.id)?;
+    let nodes: Vec<serde_json::Value> = dag
+        .nodes
+        .iter()
+        .map(|n| {
+            serde_json::json!({
+                "id": n.id,
+                "task_type": n.task_type,
+                "sigma": n.sigma,
+                "locus": n.locus,
+                "capabilities": n.model_selector.capabilities,
+                "artifact": n.artifact,
+            })
+        })
+        .collect();
+    let body = serde_json::json!({ "id": dag.id, "nodes": nodes });
+    let bytes = serde_json::to_vec_pretty(&body)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    std::fs::write(dir.join("admit.json"), bytes)
+}
+
 #[must_use]
 pub fn cached_fail_block(fail: &crate::agent::bounded_dag_live::DagFailCursor) -> String {
     format!(
@@ -795,6 +822,23 @@ mod tests {
             text.contains("context-only") || text.contains("context for gaps"),
             "{text}"
         );
+    }
+
+    #[test]
+    fn persist_admitted_dag_writes_admit_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dag = parse_dag_json(
+            r#"{"schema_version":"0.1.0","id":"g1","entry":"n1","max_steps":2,"nodes":[{"id":"n1","task_type":"shell.exec","model_selector":{"capabilities":["shell.exec"]},"artifact":"pwd","next":null}]}"#,
+        )
+        .unwrap();
+        persist_admitted_dag(tmp.path(), "sess-p", &dag).unwrap();
+        let path = tmp
+            .path()
+            .join(graph_scratch_rel("sess-p", "g1"))
+            .join("admit.json");
+        let body = std::fs::read_to_string(path).unwrap();
+        assert!(body.contains("\"pwd\""), "{body}");
+        assert!(body.contains("shell.exec"), "{body}");
     }
 
     #[test]

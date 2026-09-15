@@ -736,6 +736,9 @@ pub fn decide_work_node_fail(
     if !auto_enabled || auto_used {
         return WorkNodeFailDecision::Stop;
     }
+    if looks_like_admit_contract_fail(err) {
+        return WorkNodeFailDecision::Stop;
+    }
     match crate::providers::hint_peer::classify_hop_error(err) {
         crate::providers::hint_peer::HopFailClass::Unavailable
         | crate::providers::hint_peer::HopFailClass::Quota => WorkNodeFailDecision::RetrySame {
@@ -747,6 +750,14 @@ pub fn decide_work_node_fail(
         },
         crate::providers::hint_peer::HopFailClass::Transport => WorkNodeFailDecision::Stop,
     }
+}
+
+fn looks_like_admit_contract_fail(err: &str) -> bool {
+    let lower = err.to_lowercase();
+    lower.contains("missing invoke contract")
+        || lower.contains("missing admit-safe")
+        || lower.contains("missing i contract")
+        || lower.contains("plan rejected")
 }
 
 /// Persist the original user task for work-node USER TASK slots.
@@ -2201,6 +2212,10 @@ mod tests {
         );
         assert_eq!(
             decide_work_node_fail(true, true, "HTTP 410 Gone"),
+            WorkNodeFailDecision::Stop
+        );
+        assert_eq!(
+            decide_work_node_fail(true, false, "tool-only node node1 missing invoke contract"),
             WorkNodeFailDecision::Stop
         );
     }

@@ -181,6 +181,23 @@ Prefer a single install location early on `PATH` (common: `$HOME/bin`). Compare
 `this_process` vs `first_on_PATH` in the maintenance guide. Do not `sudo` remove
 binaries unless you understand ownership — reinstall or adjust `PATH` order.
 
+### Trial daemon built but not installed (VL-OPS-002)
+
+Symptoms:
+
+- Code on `main` / a PR is fixed, but the local trial daemon still shows the old hop/parlor behavior
+- `strings ~/.local/bin/velaclaw` lacks `VL-OPS-002-build-fingerprint`
+
+Fix: rebuild **and** install from the **same** worktree `target/release` (never a `/tmp/cursor-sandbox-cache` cargo target):
+
+```bash
+cargo build --release --features ai-protocol
+./scripts/trial-redeploy.sh
+velaclaw doctor maintenance   # shows build_fingerprint
+```
+
+`trial-redeploy.sh` exits 1 if the release ELF is missing the fingerprint or lives under the sandbox cache.
+
 ### Bounded DAG live vs Plan (VL-NA-011/012)
 
 Symptoms:

@@ -10,10 +10,15 @@ const FOOTER_FULL_GUIDE: &str =
 const FOOTER_PATH_HINT: &str =
     "PATH binary: `velaclaw doctor maintenance` shows which install is first on PATH (VL-OPS-001).";
 
+/// Canary string for `strings` / trial install gates (VL-OPS-002). Bump when the
+/// install fingerprint contract itself changes; not a git SHA.
+pub const BUILD_FINGERPRINT: &str = "VL-OPS-002-build-fingerprint";
+
 /// Observe-only report of which `velaclaw` binary is running / on PATH.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PathBinaryReport {
     pub package_version: String,
+    pub build_fingerprint: String,
     pub running_exe: Option<PathBuf>,
     pub first_on_path: Option<PathBuf>,
     pub known_installs: Vec<PathBuf>,
@@ -113,6 +118,7 @@ pub fn diagnose_path_binaries() -> PathBinaryReport {
     );
     PathBinaryReport {
         package_version: env!("CARGO_PKG_VERSION").to_string(),
+        build_fingerprint: BUILD_FINGERPRINT.to_string(),
         running_exe,
         first_on_path,
         known_installs,
@@ -121,8 +127,9 @@ pub fn diagnose_path_binaries() -> PathBinaryReport {
 }
 
 fn print_path_binary_section(report: &PathBinaryReport) {
-    println!("Install / PATH (VL-OPS-001; observe-only — does not rewrite PATH):");
+    println!("Install / PATH (VL-OPS-001 / VL-OPS-002; observe-only — does not rewrite PATH):");
     println!("  package_version:  {}", report.package_version);
+    println!("  build_fingerprint: {}", report.build_fingerprint);
     match &report.running_exe {
         Some(p) => println!("  this_process:     {}", p.display()),
         None => println!("  this_process:     (could not resolve current_exe)"),
@@ -243,5 +250,12 @@ mod tests {
             found.iter().any(|p| p.ends_with("bin/velaclaw")),
             "expected home bin, got {found:?}"
         );
+    }
+
+    #[test]
+    fn doctor_reports_build_fingerprint() {
+        let report = diagnose_path_binaries();
+        assert_eq!(report.build_fingerprint, BUILD_FINGERPRINT);
+        assert!(BUILD_FINGERPRINT.contains("VL-OPS-002"));
     }
 }

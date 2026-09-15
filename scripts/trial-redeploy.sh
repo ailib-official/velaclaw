@@ -9,6 +9,7 @@ SRC="${VELACLAW_RELEASE_BIN:-$ROOT/target/release/velaclaw}"
 
 if [[ ! -x "$SRC" ]]; then
   echo "error: missing $SRC — build in this worktree:" >&2
+  echo "  (cd ui-chat && npm ci && npm run build)  # required; else /chat is the embed stub" >&2
   echo "  cargo build --release --features ai-protocol" >&2
   exit 1
 fi
@@ -21,12 +22,7 @@ case "$SRC" in
     ;;
 esac
 
-if ! command -v strings >/dev/null 2>&1; then
-  echo "error: strings(1) is required to verify the build fingerprint" >&2
-  exit 1
-fi
-
-if ! strings "$SRC" | grep -q -- "$FINGERPRINT"; then
+if ! grep -a -F -q -- "$FINGERPRINT" "$SRC"; then
   echo "error: $SRC does not contain fingerprint $FINGERPRINT" >&2
   echo "  (stale target, wrong worktree, or non-release build)" >&2
   exit 1

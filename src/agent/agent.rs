@@ -1061,6 +1061,19 @@ impl Agent {
                 if run_ids.is_empty() {
                     break;
                 }
+                if let Some(first) = planned.dag.nodes.iter().find(|n| n.id == run_ids[0]) {
+                    let _ = crate::agent::bounded_dag_context::persist_hop_begin(
+                        &self.workspace_dir,
+                        self.session_id.as_str(),
+                        planned.dag.id.as_str(),
+                        first,
+                    );
+                    tracing::info!(
+                        node_id = first.id.as_str(),
+                        sigma = ?crate::agent::graph_scheduler::node_sigma(first),
+                        "work hop start"
+                    );
+                }
                 if run_ids.len() > 1 {
                     let index = planned
                         .order

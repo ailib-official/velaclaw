@@ -280,7 +280,9 @@ async fn handle_ws_socket(socket: WebSocket, state: AppState) {
                         }
                         let frame = progress_frame(progress);
                         if send_frame(sink.clone(), &frame).await.is_err() {
-                            cancel.cancel();
+                            tracing::warn!(
+                                "progress frame send failed; keeping in-flight turn"
+                            );
                         }
                     }
                 }

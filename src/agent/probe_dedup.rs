@@ -10,6 +10,8 @@ pub const REPEAT_PROBE_NOTICE: &str = "Host skipped a repeat probe (same fingerp
 pub const SHELL_ROUND_CAP_NOTICE: &str = "Host capped this hop at four executed shell rounds. Finish this node's internodal envelope from current INPUTS; do not start script_v2/v3.";
 
 pub const MAX_SHELL_ROUNDS_PER_HOP: u32 = 4;
+pub const MAX_OFF_GOAL_LISTING_ROUNDS: u32 = 2;
+pub const OFF_GOAL_NOTICE: &str = "Host stopped this hop: shell output stayed on workspace listing and did not advance the declared evidence layer.";
 
 /// Probe skip/cap state for one DAG node (survives peer_continue and same-node re-entry).
 #[derive(Debug, Default, Clone)]
@@ -19,6 +21,7 @@ pub struct HopProbeGovernor {
     policy_denies: HashMap<&'static str, u32>,
     hop_close: HopClose,
     last_policy_class: Option<&'static str>,
+    off_goal_rounds: u32,
     pub notices: Vec<String>,
 }
 
@@ -72,20 +75,32 @@ impl HopProbeGovernor {
         std::mem::take(&mut self.notices)
     }
 
-    /// Classify a shell tool result: policy-deny tally and hop close.
+    /// Classify a shell tool result: policy-deny tally, off-goal listing, and hop close.
     pub fn note_shell_output(&mut self, output: &str) {
         if output.contains(SHELL_ROUND_CAP_NOTICE) {
             self.hop_close = HopClose::Cap;
             return;
         }
-        let Some(class) = policy_deny_class(output) else {
+        if let Some(class) = policy_deny_class(output) {
+            self.last_policy_class = Some(class);
+            let n = self.policy_denies.entry(class).or_insert(0);
+            *n = n.saturating_add(1);
+            let proposed = crate::agent::hop_stop::hop_close_after_policy_tally(class, *n);
+            self.hop_close = crate::agent::hop_stop::merge_hop_close(self.hop_close, proposed);
             return;
-        };
-        self.last_policy_class = Some(class);
-        let n = self.policy_denies.entry(class).or_insert(0);
-        *n = n.saturating_add(1);
-        let proposed = crate::agent::hop_stop::hop_close_after_policy_tally(class, *n);
-        self.hop_close = crate::agent::hop_stop::merge_hop_close(self.hop_close, proposed);
+        }
+        if crate::agent::artifact_contract::is_off_goal_listing(output) {
+            self.off_goal_rounds = self.off_goal_rounds.saturating_add(1);
+            if self.off_goal_rounds >= MAX_OFF_GOAL_LISTING_ROUNDS {
+                self.hop_close =
+                    crate::agent::hop_stop::merge_hop_close(self.hop_close, HopClose::OffGoal);
+                self.notices.push(OFF_GOAL_NOTICE.to_string());
+            }
+            return;
+        }
+        if crate::agent::artifact_contract::advances_declared_evidence(output) {
+            self.off_goal_rounds = 0;
+        }
     }
 
     #[must_use]
@@ -103,7 +118,9 @@ impl HopProbeGovernor {
 #[must_use]
 pub fn is_governor_chrome(text: &str) -> bool {
     let t = text.trim();
-    t.contains(SHELL_ROUND_CAP_NOTICE) || t.contains(REPEAT_PROBE_NOTICE)
+    t.contains(SHELL_ROUND_CAP_NOTICE)
+        || t.contains(REPEAT_PROBE_NOTICE)
+        || t.contains(OFF_GOAL_NOTICE)
 }
 
 /// Notices that may be appended to the operator-visible prefix (VL-NA-045).
@@ -420,6 +437,19 @@ mod tests {
         let mut g3 = HopProbeGovernor::new();
         g3.note_shell_output("Denied by user.");
         assert_eq!(g3.hop_close(), HopClose::None);
+    }
+
+    #[test]
+    fn off_goal_shell_closes_hop() {
+        let mut g = HopProbeGovernor::new();
+        g.note_shell_output("pwd\n./src\n./docs");
+        assert_eq!(g.hop_close(), HopClose::None);
+        g.note_shell_output("ls -la\ntotal 12");
+        assert_eq!(g.hop_close(), HopClose::OffGoal);
+        assert_eq!(
+            crate::agent::hop_stop::after_hop_close(g.hop_close()),
+            crate::agent::hop_stop::AfterHopClose::FailCursorStop
+        );
     }
 
     #[test]

@@ -691,6 +691,35 @@ pub fn policy_deny_fail_cursor(node_id: &str, index: usize, dag_id: &str) -> Dag
     }
 }
 
+#[must_use]
+pub fn off_goal_fail_cursor(node_id: &str, index: usize, dag_id: &str) -> DagFailCursor {
+    DagFailCursor {
+        node_id: node_id.to_string(),
+        index,
+        err: crate::agent::hop_stop::hop_close_stop_reason(
+            crate::agent::hop_stop::HopClose::OffGoal,
+            None,
+        )
+        .into(),
+        dag_id: dag_id.to_string(),
+        auto_replan_count: 0,
+        fail_class: crate::agent::hop_stop::FAIL_CLASS_OFF_GOAL.into(),
+    }
+}
+
+#[must_use]
+pub fn hop_close_fail_cursor(
+    close: crate::agent::hop_stop::HopClose,
+    node_id: &str,
+    index: usize,
+    dag_id: &str,
+) -> DagFailCursor {
+    match close {
+        crate::agent::hop_stop::HopClose::OffGoal => off_goal_fail_cursor(node_id, index, dag_id),
+        _ => policy_deny_fail_cursor(node_id, index, dag_id),
+    }
+}
+
 /// Same-turn retry vs stop (VL-NA-024). Dist default off via config.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkNodeFailDecision {

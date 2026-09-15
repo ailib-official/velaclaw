@@ -106,6 +106,27 @@ pub fn is_workspace_only_listing(text: &str) -> bool {
     has_listing && !hop_text_is_user_visible(t)
 }
 
+/// Workspace listing without protocol/upstream signals (I20).
+#[must_use]
+pub fn is_off_goal_listing(text: &str) -> bool {
+    let t = text.trim();
+    if t.is_empty() || advances_declared_evidence(t) {
+        return false;
+    }
+    let lower = t.to_ascii_lowercase();
+    lower.contains("pwd")
+        || lower.contains(" ls")
+        || lower.starts_with("ls ")
+        || lower.contains("find ")
+        || lower.contains("total ")
+}
+
+/// True when text shows protocol-dist or upstream-live evidence (generic layers).
+#[must_use]
+pub fn advances_declared_evidence(text: &str) -> bool {
+    signals_protocol_dist(text) || signals_upstream_live(text)
+}
+
 /// Per-hop gate after [`hop_contract_body`].
 #[must_use]
 pub fn hop_artifact_contract(node: &DagNode, artifact: &str) -> HopArtifactVerdict {

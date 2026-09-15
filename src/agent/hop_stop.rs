@@ -10,6 +10,8 @@ pub enum HopClose {
     Cap,
     /// Same *terminal* policy class denied twice; store fail cursor, do not start later hops.
     PolicyDeny,
+    /// Shell rounds stayed on workspace listing and did not advance declared evidence layers.
+    OffGoal,
 }
 
 /// DAG follow-up for [`HopClose`] (VL-NA-045 / VL-APE-001).
@@ -26,7 +28,7 @@ pub enum AfterHopClose {
 pub fn after_hop_close(close: HopClose) -> AfterHopClose {
     match close {
         HopClose::None | HopClose::Cap => AfterHopClose::NextRemainingSkipObserve,
-        HopClose::PolicyDeny => AfterHopClose::FailCursorStop,
+        HopClose::PolicyDeny | HopClose::OffGoal => AfterHopClose::FailCursorStop,
     }
 }
 
@@ -57,9 +59,21 @@ pub fn policy_deny_stop_reason(class: Option<&str>) -> &'static str {
     }
 }
 
+/// Operator-visible reason for a fail-cursor hop stop (VL-APE-017 / I20).
+#[must_use]
+pub fn hop_close_stop_reason(close: HopClose, policy_class: Option<&str>) -> &'static str {
+    match close {
+        HopClose::OffGoal => {
+            "shell rounds stayed on workspace listing and did not advance the declared evidence layer."
+        }
+        _ => policy_deny_stop_reason(policy_class),
+    }
+}
+
 /// Stable fail_class values for [`crate::agent::bounded_dag_live::DagFailCursor`].
 pub const FAIL_CLASS_CANCELLED: &str = "cancelled";
 pub const FAIL_CLASS_POLICY_DENY: &str = "policy_deny";
+pub const FAIL_CLASS_OFF_GOAL: &str = "off_goal";
 
 /// Resume the stored remaining chain without a repair-planner chat.
 #[must_use]
@@ -115,11 +129,12 @@ pub fn policy_deny_is_recoverable(class: &str) -> bool {
     matches!(class, "allowlist" | "wait")
 }
 
-/// Merge hop-close outcomes; PolicyDeny wins over Cap.
+/// Merge hop-close outcomes; PolicyDeny wins, then OffGoal, then Cap.
 #[must_use]
 pub fn merge_hop_close(current: HopClose, proposed: HopClose) -> HopClose {
     match (current, proposed) {
         (HopClose::PolicyDeny, _) | (_, HopClose::PolicyDeny) => HopClose::PolicyDeny,
+        (HopClose::OffGoal, _) | (_, HopClose::OffGoal) => HopClose::OffGoal,
         (HopClose::Cap, _) | (_, HopClose::Cap) => HopClose::Cap,
         _ => HopClose::None,
     }
@@ -206,6 +221,14 @@ mod tests {
         assert_eq!(
             after_hop_close(HopClose::PolicyDeny),
             AfterHopClose::FailCursorStop
+        );
+        assert_eq!(
+            after_hop_close(HopClose::OffGoal),
+            AfterHopClose::FailCursorStop
+        );
+        assert_eq!(
+            merge_hop_close(HopClose::Cap, HopClose::OffGoal),
+            HopClose::OffGoal
         );
         assert_eq!(
             after_hop_close(HopClose::None),

@@ -1278,15 +1278,17 @@ impl Agent {
                                 let _ = crate::agent::bounded_dag_live::store_dag_fail(
                                     self.memory.as_ref(),
                                     self.session_id.as_str(),
-                                    &crate::agent::bounded_dag_live::policy_deny_fail_cursor(
-                                        &node.id, index, &dag_id,
+                                    &crate::agent::bounded_dag_live::hop_close_fail_cursor(
+                                        close, &node.id, index, &dag_id,
                                     ),
                                 )
                                 .await;
                                 let stop = format_work_node_stop(
                                     user_message,
                                     &node.id,
-                                    crate::agent::hop_stop::policy_deny_stop_reason(deny_class),
+                                    crate::agent::hop_stop::hop_close_stop_reason(
+                                        close, deny_class,
+                                    ),
                                     index + 1,
                                     node_count,
                                 );

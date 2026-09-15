@@ -757,6 +757,17 @@ pub async fn run(
                                     session_id.as_str(),
                                     dag,
                                 );
+                                let _ = crate::agent::bounded_dag_context::persist_hop_begin(
+                                    &config.workspace_dir,
+                                    session_id.as_str(),
+                                    dag.id.as_str(),
+                                    node,
+                                );
+                                tracing::info!(
+                                    node_id = node.id.as_str(),
+                                    sigma = ?crate::agent::graph_scheduler::node_sigma(node),
+                                    "work hop start"
+                                );
                                 security.set_graph_scratch_rel(Some(
                                     crate::agent::bounded_dag_context::graph_scratch_rel(
                                         session_id.as_str(),
@@ -1682,6 +1693,17 @@ pub async fn run(
                                     &config.workspace_dir,
                                     session_id.as_str(),
                                     dag,
+                                );
+                                let _ = crate::agent::bounded_dag_context::persist_hop_begin(
+                                    &config.workspace_dir,
+                                    session_id.as_str(),
+                                    dag.id.as_str(),
+                                    node,
+                                );
+                                tracing::info!(
+                                    node_id = node.id.as_str(),
+                                    sigma = ?crate::agent::graph_scheduler::node_sigma(node),
+                                    "work hop start"
                                 );
                                 security.set_graph_scratch_rel(Some(
                                     crate::agent::bounded_dag_context::graph_scratch_rel(

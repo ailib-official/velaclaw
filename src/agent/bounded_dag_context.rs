@@ -320,6 +320,29 @@ pub fn persist_admitted_dag(
     std::fs::write(dir.join("admit.json"), bytes)
 }
 
+/// Record that a hop actually started (W2): node id, sigma, invoke if any.
+pub fn persist_hop_begin(
+    workspace: &Path,
+    session_id: &str,
+    dag_id: &str,
+    node: &DagNode,
+) -> std::io::Result<()> {
+    let dir = ensure_graph_scratch(workspace, session_id, dag_id)?;
+    let sigma = match super::graph_scheduler::node_sigma(node) {
+        super::graph_scheduler::NodeSigma::ToolDirect => "tool_direct",
+        super::graph_scheduler::NodeSigma::LlmWork => "llm_cognition",
+    };
+    let body = serde_json::json!({
+        "node_id": node.id,
+        "sigma": sigma,
+        "task_type": node.task_type,
+        "artifact": node.artifact,
+    });
+    let bytes = serde_json::to_vec_pretty(&body)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    std::fs::write(dir.join("hop_begin.json"), bytes)
+}
+
 #[must_use]
 pub fn cached_fail_block(fail: &crate::agent::bounded_dag_live::DagFailCursor) -> String {
     format!(

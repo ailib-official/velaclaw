@@ -191,10 +191,13 @@ Symptoms:
 Fix: rebuild **and** install from the **same** worktree `target/release` (never a `/tmp/cursor-sandbox-cache` cargo target):
 
 ```bash
+(cd ui-chat && npm ci && npm run build)
 cargo build --release --features ai-protocol
 ./scripts/trial-redeploy.sh
 velaclaw doctor maintenance   # shows build_fingerprint
 ```
+
+Skipping `ui-chat` embed leaves `/chat` on the stub page. `trial-redeploy.sh` checks the fingerprint with `grep -a -F` (not `strings | grep -q`, which false-fails under `pipefail`).
 
 `trial-redeploy.sh` exits 1 if the release ELF is missing the fingerprint or lives under the sandbox cache.
 

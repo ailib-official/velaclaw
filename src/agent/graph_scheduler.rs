@@ -202,18 +202,28 @@ pub fn predecessor_map(dag: &DagManifest) -> HashMap<&str, Vec<&str>> {
     preds
 }
 
-/// Next ids to run: full tool-direct wave, else the first ready node.
+/// Next ids to run: all ready ToolDirect as one wave; else one node.
+/// Mixed ready sets must not start with empty-I LLM while a ToolDirect is ready.
 #[must_use]
 pub fn pick_run_ids<S: BuildHasher>(
     dag: &DagManifest,
     completed: &HashSet<String, S>,
 ) -> Vec<String> {
     let ready = ready_set(dag, completed, MAX_READY_WAVE);
-    if ready.len() > 1 && wave_is_tool_direct(dag, &ready) {
-        ready
-    } else {
-        ready.into_iter().take(1).collect()
+    let tool: Vec<String> = ready
+        .iter()
+        .filter(|id| {
+            dag.nodes
+                .iter()
+                .find(|n| n.id == **id)
+                .is_some_and(|n| node_sigma(n) == NodeSigma::ToolDirect)
+        })
+        .cloned()
+        .collect();
+    if !tool.is_empty() {
+        return tool;
     }
+    ready.into_iter().take(1).collect()
 }
 
 /// True when every id in `wave` is a tool-only Σ (safe to one `execute_tool_batch`).
@@ -694,6 +704,19 @@ mod tests {
         assert!(typed_fail_allows_a_replan(true, false));
         assert!(!typed_fail_allows_a_replan(true, true));
         assert!(!typed_fail_allows_a_replan(false, false));
+    }
+
+    #[test]
+    fn mixed_ready_prefers_tool_direct_over_empty_llm() {
+        let dag = crate::agent::dag_runner::parse_dag_json(
+            r#"{"schema_version":"0.1.0","id":"mix","entry":"think","max_steps":4,"nodes":[
+            {"id":"think","task_type":"tool_calling","sigma":"llm_cognition","model_selector":{"capabilities":["tool_calling"]},"next":null},
+            {"id":"exec","task_type":"shell.exec","sigma":"tool_direct","model_selector":{"capabilities":["shell.exec"]},"artifact":"ls","next":null}
+            ]}"#,
+        )
+        .unwrap();
+        let empty = HashSet::new();
+        assert_eq!(pick_run_ids(&dag, &empty), vec!["exec".to_string()]);
     }
 
     #[test]

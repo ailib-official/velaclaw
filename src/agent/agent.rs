@@ -71,6 +71,15 @@ pub struct Agent {
     /// Per-node shell probe governor for the current live DAG (VL-NA-040).
     hop_probes: HashMap<String, Arc<std::sync::Mutex<crate::agent::probe_dedup::HopProbeGovernor>>>,
     current_hop_probe: Option<Arc<std::sync::Mutex<crate::agent::probe_dedup::HopProbeGovernor>>>,
+    /// This-hop tool gist collector (VL-APE-016 / I18).
+    #[cfg(feature = "ai-protocol")]
+    hop_tool_accum:
+        Option<Arc<std::sync::Mutex<crate::agent::graph_scheduler::HopToolAccumulator>>>,
+    /// Active live DAG topology for parlor artifact load (VL-APE-016 / I17).
+    #[cfg(feature = "ai-protocol")]
+    live_graph_order: Option<Vec<String>>,
+    #[cfg(feature = "ai-protocol")]
+    live_graph_nodes: Option<Vec<crate::agent::dag_runner::DagNode>>,
 }
 
 pub struct AgentBuilder {
@@ -354,6 +363,12 @@ impl AgentBuilder {
             host_phase: crate::agent::host_phase::HostPhase::Build,
             hop_probes: HashMap::new(),
             current_hop_probe: None,
+            #[cfg(feature = "ai-protocol")]
+            hop_tool_accum: None,
+            #[cfg(feature = "ai-protocol")]
+            live_graph_order: None,
+            #[cfg(feature = "ai-protocol")]
+            live_graph_nodes: None,
         })
     }
 }
@@ -465,6 +480,9 @@ impl Agent {
         self.security.set_graph_scratch_rel(None);
         self.current_hop_probe = None;
         self.hop_probes.clear();
+        self.hop_tool_accum = None;
+        self.live_graph_order = None;
+        self.live_graph_nodes = None;
     }
 
     fn session_work_model(&self) -> &str {
@@ -980,6 +998,8 @@ impl Agent {
                 return Ok(planned.preview_with_contact(&self.model_name, &self.available_hints));
             }
             let dag_id = planned.dag.id.clone();
+            self.live_graph_order = Some(planned.order.clone());
+            self.live_graph_nodes = Some(planned.dag.nodes.clone());
             let node_count = planned.order.len();
             let outline = planned.brief_outline(user_message);
             let mut chat_hist: Vec<ChatMessage> = self
@@ -1494,6 +1514,28 @@ impl Agent {
         let prior = crate::agent::bounded_dag_delivery::collect_prior_exclusivity(
             std::iter::once(prefix).chain(hist),
         );
+        let graph_block = if let (Some(order), Some(nodes)) =
+            (&self.live_graph_order, &self.live_graph_nodes)
+        {
+            let artifacts = crate::agent::bounded_dag_context::collect_graph_artifacts_for_parlor(
+                self.memory.as_ref(),
+                self.session_id.as_str(),
+                order,
+            )
+            .await;
+            let verdict =
+                crate::agent::artifact_contract::graph_artifact_contract(nodes, &artifacts);
+            if verdict != crate::agent::artifact_contract::GraphArtifactVerdict::Ok {
+                let stop =
+                    crate::agent::artifact_contract::graph_contract_stop_reason(user_task, verdict);
+                return Ok(crate::agent::bounded_dag_delivery::session_assistant_body(
+                    user_task, &stop,
+                ));
+            }
+            crate::agent::bounded_dag_context::format_graph_artifacts_block(&artifacts)
+        } else {
+            String::new()
+        };
         crate::agent::graph_scheduler::finish_live_graph(
             self.provider.as_ref(),
             &self.model_name,
@@ -1501,6 +1543,7 @@ impl Agent {
             user_task,
             last_body,
             &prior,
+            &graph_block,
             node_count,
         )
         .await
@@ -1576,16 +1619,36 @@ impl Agent {
             self.config.tool_dispatcher.as_str(),
             self.tool_dispatcher.should_send_tool_specs(),
         )?;
+        let accum = Arc::new(std::sync::Mutex::new(
+            crate::agent::graph_scheduler::HopToolAccumulator::new(),
+        ));
+        self.hop_tool_accum = Some(Arc::clone(&accum));
         let hop_start = self.history.len();
         let text = self
             .invoke_tool_loop_resolved_with(effective_model, true)
             .await?;
-        let evidence = crate::agent::graph_scheduler::tool_evidence_from_conversation(
+        self.hop_tool_accum = None;
+        let evidence = accum.lock().map(|a| a.as_evidence()).unwrap_or_default();
+        let fallback = crate::agent::graph_scheduler::tool_evidence_from_conversation(
             self.history.get(hop_start..).unwrap_or(&[]),
         );
-        Ok(crate::agent::graph_scheduler::hop_contract_body(
-            &text, &evidence,
-        ))
+        let tool_evidence = if evidence.trim().is_empty() {
+            fallback
+        } else {
+            evidence
+        };
+        let body = crate::agent::graph_scheduler::hop_contract_body(&text, &tool_evidence);
+        match crate::agent::artifact_contract::hop_artifact_contract(node, &body) {
+            crate::agent::artifact_contract::HopArtifactVerdict::Ok => Ok(body),
+            crate::agent::artifact_contract::HopArtifactVerdict::Empty => {
+                anyhow::bail!("artifact_contract_empty: hop produced no storable artifact")
+            }
+            crate::agent::artifact_contract::HopArtifactVerdict::InsufficientEvidenceLayer => {
+                anyhow::bail!(
+                    "artifact_contract_insufficient: hop artifact did not satisfy declared evidence layers"
+                )
+            }
+        }
     }
 
     #[cfg(feature = "ai-protocol")]
@@ -1738,6 +1801,7 @@ impl Agent {
                 .as_deref()
                 .or(Some(self.model_name.as_str())),
             probe: self.current_hop_probe.as_ref().map(|c| c.as_ref()),
+            hop_tool_accum: self.hop_tool_accum.clone(),
         };
 
         let render_opts = self.cli_render.unwrap_or(RenderOpts {

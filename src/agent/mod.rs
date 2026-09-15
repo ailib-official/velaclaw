@@ -25,6 +25,8 @@
 //!   CLI fold/render.
 #[allow(clippy::module_inception)]
 pub mod agent;
+#[cfg(feature = "ai-protocol")]
+pub mod artifact_contract;
 pub mod assemble;
 #[cfg(feature = "ai-protocol")]
 pub mod bounded_dag;

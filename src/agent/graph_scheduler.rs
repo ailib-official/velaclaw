@@ -38,6 +38,33 @@ pub fn skip_parlor_llm(node_count: usize, last_body: &str) -> bool {
 }
 
 const TOOL_EVIDENCE_MAX: usize = 3_500;
+const GRAPH_ARTIFACTS_MAX: usize = 12_000;
+
+/// Per-hop tool output collector (VL-APE-016 / I18).
+#[derive(Debug, Default)]
+pub struct HopToolAccumulator {
+    chunks: Vec<String>,
+}
+
+impl HopToolAccumulator {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn push_tool_output(&mut self, content: &str) {
+        let body = content.trim();
+        if body.is_empty() {
+            return;
+        }
+        self.chunks.push(body.to_string());
+    }
+
+    #[must_use]
+    pub fn as_evidence(&self) -> String {
+        clip_chars(&self.chunks.join("\n---\n"), TOOL_EVIDENCE_MAX)
+    }
+}
 
 fn push_tool_chunk(chunks: &mut Vec<String>, role: &str, content: &str) {
     let body = content.trim();
@@ -438,6 +465,7 @@ pub async fn finish_live_graph(
     user_task: &str,
     last_body: &str,
     prior_visible: &str,
+    graph_artifacts: &str,
     node_count: usize,
 ) -> Result<String> {
     match after_successful_hop(0, node_count, last_body) {
@@ -445,6 +473,11 @@ pub async fn finish_live_graph(
             Ok(ensure_user_visible(user_task, last_body))
         }
         AfterSuccessfulHop::FinishParlor => {
+            tracing::info!(
+                parlor_rewrite = true,
+                graph_artifact_bytes = graph_artifacts.len(),
+                "host_delivery"
+            );
             host_delivery(
                 provider,
                 model,
@@ -452,6 +485,7 @@ pub async fn finish_live_graph(
                 user_task,
                 last_body,
                 prior_visible,
+                graph_artifacts,
             )
             .await
         }
@@ -461,6 +495,17 @@ pub async fn finish_live_graph(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hop_tool_accumulator_survives_history_rebuild() {
+        let mut acc = HopToolAccumulator::new();
+        acc.push_tool_output("shell: ls -la\nfile_a.txt");
+        // History may be rebuilt between tool rounds; accumulator is out-of-band.
+        let evidence = acc.as_evidence();
+        assert!(evidence.contains("file_a.txt"));
+        acc.push_tool_output("shell: cat manifest.yaml");
+        assert!(acc.as_evidence().contains("manifest.yaml"));
+    }
 
     #[test]
     fn successful_mid_hop_walks_remaining() {
@@ -701,7 +746,7 @@ mod tests {
         let p = CountChat {
             n: std::sync::atomic::AtomicUsize::new(0),
         };
-        let _ = finish_live_graph(&p, "m", 0.0, "task", ENVELOPE, "", 3)
+        let _ = finish_live_graph(&p, "m", 0.0, "task", ENVELOPE, "", "", 3)
             .await
             .unwrap();
         let envelope_calls = p.n.load(std::sync::atomic::Ordering::SeqCst);
@@ -716,7 +761,7 @@ mod tests {
         let vis = CountChat {
             n: std::sync::atomic::AtomicUsize::new(0),
         };
-        let _ = finish_live_graph(&vis, "m", 0.0, "task", "verified", "", 3)
+        let _ = finish_live_graph(&vis, "m", 0.0, "task", "verified", "", "", 3)
             .await
             .unwrap();
         assert_eq!(
@@ -727,7 +772,7 @@ mod tests {
         let p0 = CountChat {
             n: std::sync::atomic::AtomicUsize::new(0),
         };
-        let _ = finish_live_graph(&p0, "m", 0.0, "task", "Google 路由当前可用。", "", 1)
+        let _ = finish_live_graph(&p0, "m", 0.0, "task", "Google 路由当前可用。", "", "", 1)
             .await
             .unwrap();
         assert_eq!(p0.n.load(std::sync::atomic::Ordering::SeqCst), 0);

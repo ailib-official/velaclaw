@@ -121,6 +121,47 @@ pub async fn load_node_artifact(
     Ok(mem.get(&key).await?.map(|e| e.content))
 }
 
+/// All `dag_art` bodies for this graph in planner order (VL-APE-016 / I17).
+pub async fn collect_graph_artifacts_for_parlor(
+    mem: &dyn Memory,
+    session_id: &str,
+    order: &[String],
+) -> Vec<(String, String)> {
+    let mut out = Vec::with_capacity(order.len());
+    for node_id in order {
+        let body = load_node_artifact(mem, session_id, node_id)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        out.push((node_id.clone(), body));
+    }
+    out
+}
+
+/// Format graph artifacts for parlor LLM input (bounded).
+#[must_use]
+pub fn format_graph_artifacts_block(artifacts: &[(String, String)]) -> String {
+    use std::fmt::Write;
+    const MAX: usize = 12_000;
+    let mut out = String::new();
+    for (node_id, body) in artifacts {
+        let trimmed = body.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let _ = write!(out, "[dag_artifact node={node_id}]\n{trimmed}\n\n");
+        if out.chars().count() >= MAX {
+            break;
+        }
+    }
+    if out.chars().count() > MAX {
+        out.chars().take(MAX).collect()
+    } else {
+        out
+    }
+}
+
 fn chunk_plain_text(chunk: &ai_lib_rust::context::MessageChunk) -> String {
     match &chunk.message.content {
         ai_lib_rust::types::message::MessageContent::Text(s) => s.clone(),

@@ -922,8 +922,8 @@ pub async fn run(
                                             let _ = crate::agent::bounded_dag_live::store_dag_fail(
                                                 mem.as_ref(),
                                                 session_id.as_str(),
-                                                &crate::agent::bounded_dag_live::policy_deny_fail_cursor(
-                                                    &node.id, index, dag.id.as_str(),
+                                                &crate::agent::bounded_dag_live::hop_close_fail_cursor(
+                                                    close, &node.id, index, dag.id.as_str(),
                                                 ),
                                             )
                                             .await;
@@ -933,7 +933,8 @@ pub async fn run(
                                                 &crate::agent::bounded_dag_live::format_work_node_stop(
                                                     &msg,
                                                     &node.id,
-                                                    crate::agent::hop_stop::policy_deny_stop_reason(
+                                                    crate::agent::hop_stop::hop_close_stop_reason(
+                                                        close,
                                                         deny_class,
                                                     ),
                                                     index + 1,
@@ -1908,8 +1909,8 @@ pub async fn run(
                                             let _ = crate::agent::bounded_dag_live::store_dag_fail(
                                                 mem.as_ref(),
                                                 session_id.as_str(),
-                                                &crate::agent::bounded_dag_live::policy_deny_fail_cursor(
-                                                    &node.id, index, dag.id.as_str(),
+                                                &crate::agent::bounded_dag_live::hop_close_fail_cursor(
+                                                    close, &node.id, index, dag.id.as_str(),
                                                 ),
                                             )
                                             .await;
@@ -1919,7 +1920,8 @@ pub async fn run(
                                                 &crate::agent::bounded_dag_live::format_work_node_stop(
                                                     &user_input,
                                                     &node.id,
-                                                    crate::agent::hop_stop::policy_deny_stop_reason(
+                                                    crate::agent::hop_stop::hop_close_stop_reason(
+                                                        close,
                                                         deny_class,
                                                     ),
                                                     index + 1,

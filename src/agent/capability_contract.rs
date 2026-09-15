@@ -230,6 +230,47 @@ pub fn admit_capability_contract(
             }
         }
     }
+    admit_graph_shape(dag, remote.as_deref())?;
+    Ok(())
+}
+
+fn node_declares_readonly_sigma(node: &DagNode) -> bool {
+    !crate::agent::artifact_contract::required_evidence_layers(node).is_empty()
+}
+
+/// I19: all-LLM graphs that declare readonly evidence layers must get ToolDirect I.
+fn admit_graph_shape(dag: &mut DagManifest, remote: Option<&str>) -> Result<()> {
+    if dag.nodes.is_empty() {
+        return Ok(());
+    }
+    let all_llm = dag
+        .nodes
+        .iter()
+        .all(|n| node_sigma(n) == NodeSigma::LlmWork);
+    if !all_llm {
+        return Ok(());
+    }
+    let readonly: Vec<String> = dag
+        .nodes
+        .iter()
+        .filter(|n| node_declares_readonly_sigma(n))
+        .map(|n| n.id.clone())
+        .collect();
+    if readonly.is_empty() {
+        return Ok(());
+    }
+    for node in &mut dag.nodes {
+        if readonly.iter().any(|id| id == &node.id) {
+            rewrite_tool_direct_node(node, remote);
+        }
+    }
+    if dag
+        .nodes
+        .iter()
+        .all(|n| node_sigma(n) == NodeSigma::LlmWork)
+    {
+        bail!("plan rejected: readonly evidence-layer nodes cannot all be LLM hops");
+    }
     Ok(())
 }
 
@@ -430,5 +471,41 @@ mod tests {
         admit_capability_contract(&mut dag, "list files lab-host please", &policy(), &aliases)
             .unwrap();
         assert_eq!(dag.nodes[0].locus.as_deref(), Some("remote:lab-host"));
+    }
+
+    #[test]
+    fn admit_rejects_all_llm_readonly_sigma() {
+        let mut dag = parse_dag_json(
+            r#"{"schema_version":"0.1.0","id":"g","entry":"a","max_steps":4,"nodes":[{"id":"a","task_type":"ops","model_selector":{"capabilities":["tools"]},"artifact":"provider-manifest","next":"b"},{"id":"b","task_type":"ops","model_selector":{"capabilities":["tools"]},"artifact":"catalog","next":null}]}"#,
+        )
+        .unwrap();
+        admit_capability_contract(&mut dag, "audit provider manifests", &policy(), &[]).unwrap();
+        assert!(
+            dag.nodes
+                .iter()
+                .any(|n| node_sigma(n) == NodeSigma::ToolDirect),
+            "readonly graph must not stay all-LLM"
+        );
+    }
+
+    #[test]
+    fn tool_direct_read_manifest_shape() {
+        let mut dag = parse_dag_json(
+            r#"{"schema_version":"0.1.0","id":"g","entry":"read","max_steps":2,"nodes":[{"id":"read","task_type":"ops","model_selector":{"capabilities":["tools"]},"artifact":"manifest","next":null}]}"#,
+        )
+        .unwrap();
+        admit_capability_contract(&mut dag, "summarize this code patch", &policy(), &[]).unwrap();
+        let n = &dag.nodes[0];
+        assert_eq!(node_sigma(n), NodeSigma::ToolDirect);
+        assert_eq!(n.sigma.as_deref(), Some("tool_direct"));
+        assert!(artifact_command(n).is_some());
+    }
+
+    #[test]
+    fn remote_locus_ssh_prefix_unchanged() {
+        let mut dag = parse_dag_json(&coding_node_json("ls")).unwrap();
+        admit_capability_contract(&mut dag, "list services on lab-host", &policy(), &[]).unwrap();
+        let cmd = artifact_command(&dag.nodes[0]).unwrap();
+        assert!(cmd.starts_with("ssh lab-host "), "{cmd}");
     }
 }

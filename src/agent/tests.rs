@@ -1537,12 +1537,9 @@ async fn bounded_dag_follow_up_first_hop_sees_prior_report() {
 
 #[cfg(feature = "ai-protocol")]
 #[tokio::test]
-async fn bounded_dag_single_work_refines_then_runs_nodes() {
-    let json = r#"{"schema_version":"0.1.0","id":"paper-slides","entry":"read","max_steps":8,"nodes":[{"id":"read","task_type":"summarize","model_selector":{"capabilities":["document_understanding"]},"next":"slides"},{"id":"slides","task_type":"write","model_selector":{"capabilities":["speed"]},"next":null}]}"#;
+async fn bounded_dag_single_work_runs_one_tool_loop() {
     let provider = ScriptedProvider::new(vec![
         text_response(r#"{"path":"single_work"}"#),
-        text_response(json),
-        text_response("checked"),
         text_response("synced"),
     ]);
     let calls = provider.call_counter();
@@ -1562,8 +1559,8 @@ async fn bounded_dag_single_work_refines_then_runs_nodes() {
         .unwrap();
     assert_eq!(
         calls.load(Ordering::SeqCst),
-        4,
-        "single_work + split refine + two work hops; no mid-hop observe"
+        2,
+        "single_work + one native tool loop; no split-refine"
     );
     assert!(out.contains("synced"), "{out}");
 }

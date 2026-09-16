@@ -1675,8 +1675,8 @@ async fn bounded_dag_writeback_and_node_contact() {
     );
     assert_eq!(
         used[3],
-        session.to_string(),
-        "verify uses session default; got {used:?}"
+        "hint:fast".to_string(),
+        "verify uses speed hint; got {used:?}"
     );
 }
 
@@ -1721,7 +1721,7 @@ async fn bounded_dag_session_picker_runs_work_hops() {
     assert_eq!(
         used[1],
         "nvidia/nemotron-3-ultra-550b-a55b".to_string(),
-        "work hops must use the session picker; got {used:?}"
+        "coding hops must use the session picker; got {used:?}"
     );
     assert_eq!(
         used[2],
@@ -1730,7 +1730,7 @@ async fn bounded_dag_session_picker_runs_work_hops() {
     );
     assert_eq!(
         used[3],
-        "nvidia/nemotron-3-ultra-550b-a55b".to_string(),
-        "got {used:?}"
+        "hint:fast".to_string(),
+        "verify uses speed hint; got {used:?}"
     );
 }

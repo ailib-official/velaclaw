@@ -1136,7 +1136,9 @@ impl PlannedLiveDag {
         if default_model.is_empty() && available_hints.is_empty() {
             return out;
         }
-        out.push_str("\nContact (session picker on work hops; capability peer only after fail):\n");
+        out.push_str(
+            "\nContact (session default on cognition hops; speed/tools/document use hints):\n",
+        );
         let by_id: std::collections::HashMap<&str, _> =
             self.dag.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
         for id in &self.order {
@@ -1794,9 +1796,12 @@ mod tests {
             "nvidia/nemotron-3-ultra-550b-a55b",
             &["document".into(), "fast".into()],
         );
-        assert!(text.contains("nvidia/nemotron-3-ultra-550b-a55b"), "{text}");
-        assert!(!text.contains("hint:document"), "{text}");
-        assert!(!text.contains("hint:fast"), "{text}");
+        assert!(text.contains("hint:document"), "{text}");
+        assert!(text.contains("hint:fast"), "{text}");
+        assert!(
+            !text.contains("nvidia/nemotron-3-ultra-550b-a55b"),
+            "paper-slides nodes are cheap-hint caps; got {text}"
+        );
     }
 
     struct TwoShotPlanner {

@@ -946,6 +946,8 @@ mod tests {
         policy.allowed_commands = vec!["echo".into()];
         let security = PolicyHandle::new(policy);
         let hub = Arc::new(ApprovalHub::new());
+        let mut sub = hub.subscribe();
+        let hub_respond = Arc::clone(&hub);
         let gate = ApprovalGate::new(&mgr, "web", Some(security)).with_hub(Arc::clone(&hub));
 
         let foreign = ParsedToolCall {
@@ -953,17 +955,23 @@ mod tests {
             arguments: serde_json::json!({"command": "apt remove -y samba"}),
             tool_call_id: None,
         };
+        let respond = tokio::spawn(async move {
+            let ev = sub.recv().await.expect("apt allowlist miss must Ask");
+            assert_eq!(ev.tool_name, "shell");
+            assert!(hub_respond.respond(&ev.id, false, false, false));
+        });
         match gate.decide_async(&foreign).await {
             GateDecision::Denied { message } => {
                 assert!(
-                    message.contains("not in allowed_commands"),
-                    "expected hard allowlist deny, got {message}"
+                    message.contains("not in allowed_commands") || message.contains("[once_denied]"),
+                    "echo Always must not cover apt; got {message}"
                 );
             }
             other @ GateDecision::Proceed { .. } => {
                 panic!("expected Denied for non-allowlisted apt, got {other:?}")
             }
         }
+        respond.await.expect("respond join");
 
         let mut policy2 = SecurityPolicy::default();
         policy2.autonomy = AutonomyLevel::Supervised;
@@ -1096,7 +1104,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn non_allowlisted_shell_denied_without_hub_prompt() {
+    async fn non_allowlisted_shell_asks_hub() {
         use super::gate::ApprovalGate;
         use super::hub::ApprovalHub;
         use crate::agent::dispatcher::ParsedToolCall;
@@ -1117,6 +1125,7 @@ mod tests {
         let security = PolicyHandle::new(policy);
         let hub = Arc::new(ApprovalHub::new());
         let mut sub = hub.subscribe();
+        let hub_respond = Arc::clone(&hub);
         let gate = ApprovalGate::new(&mgr, "web", Some(security)).with_hub(hub);
 
         let call = ParsedToolCall {
@@ -1125,18 +1134,25 @@ mod tests {
             tool_call_id: None,
         };
 
-        let decision = gate.decide_async(&call).await;
-        assert!(
-            tokio::time::timeout(Duration::from_millis(100), sub.recv())
+        let respond = tokio::spawn(async move {
+            let ev = tokio::time::timeout(Duration::from_secs(2), sub.recv())
                 .await
-                .is_err(),
-            "non-allowlisted shell must not open ApprovalHub"
-        );
+                .expect("allowlist miss must Ask via ApprovalHub")
+                .expect("hub event");
+            assert_eq!(ev.tool_name, "shell");
+            assert!(hub_respond.respond(&ev.id, false, false, false));
+        });
+
+        let decision = gate.decide_async(&call).await;
+        respond.await.expect("respond join");
         match decision {
             GateDecision::Denied { message } => {
-                assert!(message.contains("not in allowed_commands"));
+                assert!(
+                    message.contains("not in allowed_commands") || message.contains("[once_denied]"),
+                    "{message}"
+                );
             }
-            other @ GateDecision::Proceed { .. } => panic!("expected hard deny, got {other:?}"),
+            other @ GateDecision::Proceed { .. } => panic!("expected deny after No, got {other:?}"),
         }
     }
 }

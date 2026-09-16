@@ -2116,7 +2116,8 @@ mod tests {
             .validate_command_execution("set -e; whoami; true", false)
             .unwrap_err();
         assert!(err.contains("not in allowed_commands"), "{err}");
-        assert!(!err.contains("[needs_approval]"), "{err}");
+        assert!(err.contains("[needs_approval]"), "{err}");
+        assert!(!err.contains("[once_denied]"), "{err}");
     }
 
     #[test]

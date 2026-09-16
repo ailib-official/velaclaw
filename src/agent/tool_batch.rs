@@ -829,7 +829,11 @@ mod tests {
         let body =
             std::fs::read_to_string(tmp.path().join(".velaclaw/tool_receipts.jsonl")).unwrap();
         assert!(body.contains("\"decision\":\"deny\""), "{body}");
-        assert!(body.contains("\"deny_class\":\"allowlist\""), "{body}");
+        assert!(
+            body.contains("\"deny_class\":\"once_denied\"")
+                || body.contains("\"deny_class\":\"allowlist\""),
+            "{body}"
+        );
     }
 
     #[test]

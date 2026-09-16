@@ -963,7 +963,8 @@ mod tests {
         match gate.decide_async(&foreign).await {
             GateDecision::Denied { message } => {
                 assert!(
-                    message.contains("not in allowed_commands") || message.contains("[once_denied]"),
+                    message.contains("not in allowed_commands")
+                        || message.contains("[once_denied]"),
                     "echo Always must not cover apt; got {message}"
                 );
             }
@@ -1148,7 +1149,8 @@ mod tests {
         match decision {
             GateDecision::Denied { message } => {
                 assert!(
-                    message.contains("not in allowed_commands") || message.contains("[once_denied]"),
+                    message.contains("not in allowed_commands")
+                        || message.contains("[once_denied]"),
                     "{message}"
                 );
             }

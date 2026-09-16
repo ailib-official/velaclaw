@@ -381,32 +381,25 @@ mod tests {
     }
 
     #[test]
-    fn two_allowlist_denies_do_not_fail_the_dag() {
+    fn first_allowlist_deny_fails_closed() {
         let mut g = HopProbeGovernor::new();
-        g.note_shell_output("Command not allowed by security policy (not in allowed_commands).");
-        assert_eq!(g.hop_close(), HopClose::None);
         g.note_shell_output(
             "[policy_deny] Command not allowed by security policy (not in allowed_commands).",
         );
-        assert_eq!(g.hop_close(), HopClose::None);
+        assert_eq!(g.hop_close(), HopClose::PolicyDeny);
         assert_eq!(
             crate::agent::hop_stop::after_hop_close(g.hop_close()),
-            crate::agent::hop_stop::AfterHopClose::NextRemainingSkipObserve
+            crate::agent::hop_stop::AfterHopClose::FailCursorStop
         );
     }
 
     #[test]
-    fn four_allowlist_denies_cap_hop_and_keep_remaining() {
+    fn needs_approval_does_not_close_the_hop() {
         let mut g = HopProbeGovernor::new();
-        let msg = "[policy_deny] Command not allowed by security policy (not in allowed_commands).";
-        for _ in 0..crate::agent::hop_stop::MAX_RECOVERABLE_POLICY_DENIES_BEFORE_CAP {
-            g.note_shell_output(msg);
-        }
-        assert_eq!(g.hop_close(), HopClose::Cap);
-        assert_eq!(
-            crate::agent::hop_stop::after_hop_close(g.hop_close()),
-            crate::agent::hop_stop::AfterHopClose::NextRemainingSkipObserve
+        g.note_shell_output(
+            "[needs_approval] Command not allowed by security policy (not in allowed_commands).",
         );
+        assert_eq!(g.hop_close(), HopClose::None);
     }
 
     #[test]
@@ -419,11 +412,11 @@ mod tests {
     }
 
     #[test]
-    fn unlike_policy_denies_do_not_close() {
+    fn unlike_policy_denies_allowlist_closes_on_first() {
         let mut g = HopProbeGovernor::new();
         g.note_shell_output("unsafe shell construct (injection, redirect, or dangerous args).");
         g.note_shell_output("Command not allowed by security policy (not in allowed_commands).");
-        assert_eq!(g.hop_close(), HopClose::None);
+        assert_eq!(g.hop_close(), HopClose::PolicyDeny);
     }
 
     #[test]

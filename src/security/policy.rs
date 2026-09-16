@@ -1006,7 +1006,8 @@ impl SecurityPolicy {
             ));
         }
 
-        // Hard allowlist: human approval cannot widen allowed_commands (VL-SEC-009 / H).
+        // Allowlist miss: Ask (VL-APE-021 / R12). Once/Always grants this session
+        // invocation only — it does not persist into allowed_commands (VL-SEC-009).
         if !self.segments_are_allowlisted(command) {
             let rejected = self.allowlist_rejected_basenames(command);
             let headline = if rejected.is_empty() {
@@ -1017,7 +1018,10 @@ impl SecurityPolicy {
                     rejected.join(", ")
                 )
             };
-            return Err(self.format_command_policy_error(&headline, command, false));
+            if !approved {
+                return Err(self.format_command_policy_error(&headline, command, true));
+            }
+            // Session Once/Always grants this invocation; config allowlist is unchanged.
         }
 
         // Secret material: argv tokens, workspace bash/sh bodies (after admission).
@@ -1891,38 +1895,39 @@ mod tests {
     }
 
     #[test]
-    fn validate_command_allowlist_not_bypassed_when_human_approved() {
+    fn validate_command_unsafe_construct_not_bypassed_when_human_approved() {
         let p = default_policy();
-        let denied = p.validate_command_execution("python3 -c 'print(1)'", false);
-        assert!(denied.is_err());
-        let still_denied = p.validate_command_execution("python3 -c 'print(1)'", true);
+        let still_denied = p.validate_command_execution("ls & python3 -c 'print(1)'", true);
         assert!(still_denied.is_err());
-        assert!(still_denied
-            .unwrap_err()
-            .contains("not in allowed_commands"));
+        assert!(
+            still_denied.unwrap_err().contains("unsafe shell construct"),
+            "safety gates stay closed even after Once"
+        );
     }
 
     #[test]
-    fn allowlist_deny_mentions_ops_readonly_and_sec009() {
+    fn allowlist_miss_asks_then_session_grant_does_not_widen_config() {
         let p = default_policy();
-        let err = p
+        let asked = p
             .validate_command_execution("df -h", false)
-            .expect_err("df should be denied by default allowlist");
-        assert!(err.contains("ops-readonly"));
-        assert!(err.contains("VL-SEC-009"));
-        assert!(err.contains("allowed_commands"));
-        assert!(err.contains("df"), "{err}");
-        assert!(err.contains("policy_patch") || err.contains("config.toml"));
+            .expect_err("df should Ask, not silent deny");
+        assert!(asked.contains("[needs_approval]"), "{asked}");
+        assert!(asked.contains("allowed_commands"), "{asked}");
+        assert!(asked.contains("df"), "{asked}");
+        let granted = p.validate_command_execution("df -h", true);
+        assert!(granted.is_ok(), "{granted:?}");
+        assert!(!p.is_command_allowed("df -h"));
+        assert!(!p.allowed_commands.iter().any(|c| c == "df"));
     }
 
     #[test]
-    fn allowlist_deny_names_rejected_executables() {
+    fn allowlist_ask_names_rejected_executables() {
         let p = default_policy();
         let err = p
             .validate_command_execution("pwd && id -un && ls", false)
             .expect_err("id is not allowlisted");
+        assert!(err.contains("[needs_approval]"), "{err}");
         assert!(err.contains("not in allowed_commands): id"), "{err}");
-        assert!(err.contains("retry without [id]"), "{err}");
     }
 
     #[test]

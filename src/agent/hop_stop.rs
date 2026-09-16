@@ -51,7 +51,9 @@ pub fn policy_deny_stop_reason(class: Option<&str>) -> &'static str {
         Some("unsafe_construct") => {
             "repeated unsafe shell constructs (substitution, write-redirect, or blocked git flags)."
         }
-        Some("allowlist") => "repeated commands not in the allowlist.",
+        Some("allowlist") => {
+            "a command was not on the allowlist (Ask declined, or the hop continued without approval)."
+        }
         Some("malformed") => "malformed tool invocation.",
         Some("once_denied") => "a credential or privilege request was denied.",
         Some("wait") => "repeated wait-only commands.",
@@ -117,16 +119,16 @@ pub fn policy_deny_class(output: &str) -> Option<&'static str> {
 /// Classes that close the hop on the first deny (not two unlike buckets).
 #[must_use]
 pub fn policy_deny_closes_on_first(class: &str) -> bool {
-    matches!(class, "malformed" | "once_denied")
+    matches!(class, "malformed" | "once_denied" | "allowlist")
 }
 
-/// Allowlist / wait-only misses are recoverable (drop the named binary; do not fail the DAG).
+/// Wait-only misses are recoverable (drop the named binary; do not fail the DAG).
 /// Cap the hop after this many so a deny loop cannot run forever.
 pub const MAX_RECOVERABLE_POLICY_DENIES_BEFORE_CAP: u32 = 4;
 
 #[must_use]
 pub fn policy_deny_is_recoverable(class: &str) -> bool {
-    matches!(class, "allowlist" | "wait")
+    matches!(class, "wait")
 }
 
 /// Merge hop-close outcomes; PolicyDeny wins, then OffGoal, then Cap.
@@ -190,13 +192,16 @@ mod tests {
         );
         assert!(policy_deny_closes_on_first("malformed"));
         assert!(policy_deny_closes_on_first("once_denied"));
-        assert!(!policy_deny_closes_on_first("allowlist"));
+        assert!(policy_deny_closes_on_first("allowlist"));
         assert_eq!(policy_deny_class("Denied by user."), None);
-        assert_eq!(hop_close_after_policy_tally("allowlist", 2), HopClose::None);
+        assert_eq!(
+            hop_close_after_policy_tally("allowlist", 1),
+            HopClose::PolicyDeny
+        );
         assert_eq!(hop_close_after_policy_tally("wait", 2), HopClose::None);
         assert_eq!(
             hop_close_after_policy_tally("allowlist", MAX_RECOVERABLE_POLICY_DENIES_BEFORE_CAP),
-            HopClose::Cap
+            HopClose::PolicyDeny
         );
         assert_eq!(
             hop_close_after_policy_tally("wait", MAX_RECOVERABLE_POLICY_DENIES_BEFORE_CAP),

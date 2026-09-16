@@ -130,7 +130,7 @@ autonomy:
     - curl
 ```
 
-**VL-SEC-009 (scheme H):** `allowed_commands` is a hard gate — interactive Yes/Always cannot add executables. Non-allowlisted shell commands are denied without a risk prompt. Shell-policy Always only skips **risk** re-prompts for remembered basenames that are already allowlisted.
+**VL-APE-021 / VL-SEC-009:** missing allowlist entries Ask via `[needs_approval]` (Once/Always this session). They do **not** persist into `allowed_commands`. Safety gates (injection, redirects, wait-only) remain hard-denied even after Once. Shell-policy Always still skips **risk** re-prompts for remembered basenames.
 
 ### Ops-readonly profile {#ops-readonly-profile}
 
@@ -140,7 +140,7 @@ VelaClaw does **not** enable ops diagnostics (`df` / `du` / `free` / `uname` / �
 - Fresh onboard also seeds [`agent-policy.yaml`](../examples/profiles/agent-policy.self-adjust.yaml) so `policy_patch` may extend `autonomy.allowed_commands` when L2 self_adjust allows it.
 - Existing `config.toml` / `daemon.env` are never silently rewritten.
 
-Deny messages (CLI shell tool + Web tool result) share the same next-step semantics: edit `[autonomy].allowed_commands`, merge ops-readonly, or use `policy_patch` when seeded — approval cannot widen the allowlist.
+Allowlist misses Ask first. Persist new binaries by editing `[autonomy].allowed_commands`, merging ops-readonly, or using `policy_patch` when seeded — Once/Always does not rewrite config.
 
 ## `policy_patch` tool
 

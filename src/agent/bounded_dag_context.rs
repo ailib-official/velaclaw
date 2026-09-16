@@ -503,10 +503,10 @@ pub fn contact_for_node(
     }
 }
 
-/// Live work hop: Route(C, Context) (VL-APE-002).
+/// Live work hop: Route(C, Context) (VL-APE-002 / VL-APE-022).
 ///
-/// Tier 1: session picker for work-cognition nodes. Tier 2: capability hints
-/// when there is no picker or the node is non-session-only. Tier 3:
+/// Tier 1: session picker for empty-cap / work-cognition nodes. Tier 2:
+/// capability hints for speed/tools/document (and embed). Tier 3:
 /// [`force_default`] after typed provider fail — never first-hop caps→hint:code.
 pub fn contact_for_live_node(
     node: &DagNode,
@@ -599,6 +599,64 @@ mod tests {
         );
         assert_eq!(retried.reason, "fail_strategy:default_model");
         assert_eq!(retried.model, "nvidia/nemotron-3-ultra-550b-a55b");
+    }
+
+    #[test]
+    fn contact_for_live_node_uses_capability_hint() {
+        let dag = parse_dag_json(CODE_FIX_TEMPLATE_JSON).unwrap();
+        let verify = dag.nodes.iter().find(|n| n.id == "verify").unwrap();
+        let c = contact_for_live_node(
+            verify,
+            "nvidia/nemotron-3-ultra-550b-a55b",
+            &["code".into(), "fast".into()],
+            false,
+        );
+        assert_eq!(c.model, "hint:fast", "{}", c.reason);
+        assert!(
+            c.reason.contains("speed") || c.reason.contains("hint"),
+            "{}",
+            c.reason
+        );
+        let json = r#"{
+          "schema_version": "0.1.0",
+          "id": "t",
+          "entry": "n",
+          "max_steps": 8,
+          "nodes": [
+            {"id":"n","task_type":"work","model_selector":{"capabilities":["tools"]},"next":null}
+          ]
+        }"#;
+        let tools_dag = parse_dag_json(json).unwrap();
+        let tools = contact_for_live_node(
+            &tools_dag.nodes[0],
+            "nvidia/nemotron-3-ultra-550b-a55b",
+            &["fast".into(), "code".into(), "tools".into()],
+            false,
+        );
+        assert_eq!(tools.model, "hint:tools", "{}", tools.reason);
+        assert_ne!(tools.reason, "explicit_user_pick");
+        let empty_node = crate::agent::dag_runner::DagNode {
+            id: "n".into(),
+            task_type: "work".into(),
+            model_selector: crate::agent::dag_runner::ModelSelector {
+                capabilities: vec![],
+            },
+            context_requirements: crate::agent::dag_runner::ContextRequirements::default(),
+            max_steps: None,
+            next: None,
+            fork: vec![],
+            artifact: None,
+            sigma: None,
+            locus: None,
+        };
+        let empty_c = contact_for_live_node(
+            &empty_node,
+            "nvidia/nemotron-3-ultra-550b-a55b",
+            &["fast".into()],
+            false,
+        );
+        assert_eq!(empty_c.model, "nvidia/nemotron-3-ultra-550b-a55b");
+        assert_eq!(empty_c.reason, "explicit_user_pick");
     }
 
     #[test]

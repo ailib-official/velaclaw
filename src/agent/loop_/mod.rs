@@ -1044,10 +1044,15 @@ pub async fn run(
                                     }
                                     }
                                 };
-                                let hop_verdict =
+                                let hop_verdict = {
+                                    let evidence = hop_accum
+                                        .lock()
+                                        .map(|a| a.as_evidence())
+                                        .unwrap_or_default();
                                     crate::agent::artifact_contract::hop_artifact_contract(
-                                        node, &piece,
-                                    );
+                                        node, &piece, &evidence,
+                                    )
+                                };
                                 if hop_verdict
                                     != crate::agent::artifact_contract::HopArtifactVerdict::Ok
                                 {
@@ -2071,10 +2076,15 @@ pub async fn run(
                                         }
                                     }
                                 };
-                                let hop_verdict =
+                                let hop_verdict = {
+                                    let evidence = hop_accum
+                                        .lock()
+                                        .map(|a| a.as_evidence())
+                                        .unwrap_or_default();
                                     crate::agent::artifact_contract::hop_artifact_contract(
-                                        node, &piece,
-                                    );
+                                        node, &piece, &evidence,
+                                    )
+                                };
                                 if hop_verdict
                                     != crate::agent::artifact_contract::HopArtifactVerdict::Ok
                                 {

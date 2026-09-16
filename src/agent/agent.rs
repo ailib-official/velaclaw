@@ -1660,7 +1660,7 @@ impl Agent {
             evidence
         };
         let body = crate::agent::graph_scheduler::hop_contract_body(&text, &tool_evidence);
-        match crate::agent::artifact_contract::hop_artifact_contract(node, &body) {
+        match crate::agent::artifact_contract::hop_artifact_contract(node, &body, &tool_evidence) {
             crate::agent::artifact_contract::HopArtifactVerdict::Ok => Ok(body),
             crate::agent::artifact_contract::HopArtifactVerdict::Empty => {
                 anyhow::bail!("artifact_contract_empty: hop produced no storable artifact")

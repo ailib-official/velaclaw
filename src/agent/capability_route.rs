@@ -17,13 +17,28 @@ pub fn is_non_session_capability(cap: &str) -> bool {
         || t.contains("vision_embed")
 }
 
+/// Cheap Route hints (speed/tools/document): do not pin the session picker (VL-APE-022).
+#[must_use]
+pub fn is_cheap_capability_route(cap: &str) -> bool {
+    let raw = cap.trim().to_ascii_lowercase();
+    if raw == "tools" || raw == "fast" || raw == "document" || raw == "speed" {
+        return true;
+    }
+    let tag = crate::agent::intent_route::hint_to_tag(cap)
+        .unwrap_or(cap.trim())
+        .to_ascii_lowercase();
+    matches!(tag.as_str(), "speed" | "document_understanding")
+}
+
 /// True when this node should run on the session picker (tier 1).
 #[must_use]
 pub fn is_work_cognition_node(capabilities: &[String]) -> bool {
     if capabilities.is_empty() {
         return true;
     }
-    capabilities.iter().any(|c| !is_non_session_capability(c))
+    capabilities
+        .iter()
+        .any(|c| !is_non_session_capability(c) && !is_cheap_capability_route(c))
 }
 
 /// Planner/judge cheap default: `fast` route if set, else session default; never picker.
@@ -76,8 +91,12 @@ mod tests {
     #[test]
     fn coding_caps_are_work_cognition() {
         assert!(is_work_cognition_node(&["coding".into()]));
+        assert!(is_work_cognition_node(&["tool_calling".into()]));
         assert!(!is_work_cognition_node(&["embed".into()]));
+        assert!(!is_work_cognition_node(&["speed".into()]));
+        assert!(!is_work_cognition_node(&["tools".into()]));
         assert!(is_work_cognition_node(&["embed".into(), "coding".into()]));
+        assert!(is_work_cognition_node(&[]));
     }
 
     #[test]

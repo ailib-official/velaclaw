@@ -127,14 +127,30 @@ pub fn advances_declared_evidence(text: &str) -> bool {
     signals_protocol_dist(text) || signals_upstream_live(text)
 }
 
-/// Per-hop gate after [`hop_contract_body`].
+/// Per-hop gate after [`hop_contract_body`]. `tool_evidence` is the accumulator;
+/// visible assistant prose does not waive listing-only tools (VL-APE-022 / I16).
 #[must_use]
-pub fn hop_artifact_contract(node: &DagNode, artifact: &str) -> HopArtifactVerdict {
+pub fn hop_artifact_contract(
+    node: &DagNode,
+    artifact: &str,
+    tool_evidence: &str,
+) -> HopArtifactVerdict {
     if artifact.trim().is_empty() {
         return HopArtifactVerdict::Empty;
     }
+    if !tool_evidence.trim().is_empty()
+        && is_off_goal_listing(tool_evidence)
+        && !advances_declared_evidence(tool_evidence)
+    {
+        return HopArtifactVerdict::InsufficientEvidenceLayer;
+    }
+    let probe = if tool_evidence.trim().is_empty() {
+        artifact
+    } else {
+        tool_evidence
+    };
     for layer in required_evidence_layers(node) {
-        if !artifact_signals_layer(artifact, layer) {
+        if !artifact_signals_layer(probe, layer) {
             return HopArtifactVerdict::InsufficientEvidenceLayer;
         }
     }
@@ -156,7 +172,7 @@ pub fn graph_artifact_contract(
             .find(|(id, _)| id == &node.id)
             .map(|(_, b)| b.as_str())
             .unwrap_or("");
-        match hop_artifact_contract(node, body) {
+        match hop_artifact_contract(node, body, "") {
             HopArtifactVerdict::Ok => {}
             HopArtifactVerdict::Empty => {
                 if required_evidence_layers(node).is_empty() {
@@ -244,7 +260,7 @@ mod tests {
     #[test]
     fn artifact_contract_empty_hop_fails() {
         let n = node("locate", None, None);
-        assert_eq!(hop_artifact_contract(&n, ""), HopArtifactVerdict::Empty);
+        assert_eq!(hop_artifact_contract(&n, "", ""), HopArtifactVerdict::Empty);
     }
 
     #[test]
@@ -253,7 +269,7 @@ mod tests {
         assert!(required_evidence_layers(&n).contains(&EvidenceLayer::ProtocolDist));
         let listing = "pwd\n./src\n./docs";
         assert_eq!(
-            hop_artifact_contract(&n, listing),
+            hop_artifact_contract(&n, listing, ""),
             HopArtifactVerdict::InsufficientEvidenceLayer
         );
     }
@@ -262,7 +278,24 @@ mod tests {
     fn yaml_body_satisfies_protocol_layer() {
         let n = node("read-manifest", Some("manifest"), None);
         let body = "providers/nvidia.yaml\nschema_version: 1";
-        assert_eq!(hop_artifact_contract(&n, body), HopArtifactVerdict::Ok);
+        assert_eq!(hop_artifact_contract(&n, body, ""), HopArtifactVerdict::Ok);
+    }
+
+    #[test]
+    fn listing_accumulator_plus_prose_is_not_ok() {
+        let n = node("locate", None, None);
+        let prose = "The repository layout is complete and the task is done.";
+        let listing = "pwd\n./src\n./docs\ntotal 12";
+        assert!(hop_text_is_user_visible(prose));
+        assert_eq!(
+            hop_artifact_contract(&n, prose, listing),
+            HopArtifactVerdict::InsufficientEvidenceLayer
+        );
+        let n2 = node("read-manifest", Some("provider-manifest"), None);
+        assert_eq!(
+            hop_artifact_contract(&n2, prose, listing),
+            HopArtifactVerdict::InsufficientEvidenceLayer
+        );
     }
 
     #[test]

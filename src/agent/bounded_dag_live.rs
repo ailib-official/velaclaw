@@ -1,10 +1,11 @@
-//! Live bounded DAG: first hop is chat_only or a linear graph; work is DAG nodes.
+//! Live bounded DAG: first hop is chat_only, single_work, or a linear graph.
 //!
 //! When `[agent].bounded_dag_live` is on and `bounded_dag_path` is empty, the
-//! first hop emits in-band `chat_only` or a 1–8 node linear DAG. There is no
-//! parallel `single_work` tool loop: that label (and invalid JSON) becomes a
-//! synthetic 1-node graph, then one split-refine chat before tools. Plan phase,
-//! fail cursor, and operator-fixed graphs skip refine. Dist default remains off.
+//! first hop emits in-band `chat_only`, `single_work`, or a 1–8 node DAG.
+//! `single_work` (and invalid / empty `chat_only`) is one native tool loop.
+//! A 1-node non-ToolDirect graph collapses to that same loop; 2+ nodes or a
+//! 1-node ToolDirect stay Plan. There is no 1-node split-refine hop.
+//! Dist default remains off.
 //!
 //! Turn contract (VL-CTX-001 / VL-NA-019 / VL-NA-030): append the user message,
 //! run `prepare_turn_history` on the session (skip only HostPhase::Plan preview),
@@ -12,13 +13,14 @@
 //! `reset_chat_scope` (intra-graph). Session follow-ups do not replace the
 //! stored graph task.
 //!
-//! 有界 DAG live：首跳仅 chat_only 或线性图；1 节点开工具前再拆一次。
+//! 有界 DAG live：首跳 chat_only / single_work / 线性图；1 节点非 ToolDirect 塌缩。
 
 use super::bounded_dag::{format_preview, linear_node_ids, load_bounded_dag, schedule_node_ids};
 use super::bounded_dag_context::contact_for_live_node;
 use super::candidate_dag::validate_candidate_dag_json;
 use super::capability_contract::admit_capability_contract;
 use super::dag_runner::{parse_dag_json, DagManifest, CODE_FIX_TEMPLATE_JSON};
+use super::graph_scheduler::{node_sigma, NodeSigma};
 use super::host_phase::HostPhase;
 use crate::memory::{Memory, MemoryCategory};
 use crate::orchestration::dag_emit::{
@@ -63,8 +65,9 @@ pub const LIVE_FIRST_HOP_PREAMBLE: &str = "\
 Start this VelaClaw turn now. Reply with ONLY one JSON object, no markdown.\n\
 Prior user/assistant messages are this same session. Continue that work (same hosts, paths, and findings). Do not claim you forgot earlier turns. Do not ask what to do if the session already did it.\n\
 Greeting, thanks, or general knowledge (no repo/host/files): {\"path\":\"chat_only\",\"reply\":\"<full user-visible reply>\"}\n\
-Any turn that needs tools: a linear DAG JSON object using the planner rules below (schema_version 0.1.0, 1 to 8 nodes). That object is the plan — do not send a mode label without the graph.\n\
-Never use chat_only when the user asks to inspect a local repo, workspace, or host. Do not use path single_work.\n";
+One atomic tool turn in the user environment: {\"path\":\"single_work\"}\n\
+Independently verifiable deliverables: a linear DAG JSON object using the planner rules below (schema_version 0.1.0, 2 to 8 nodes). A 1-node graph that is not tool_direct is treated as single_work.\n\
+Never use chat_only when the user asks to inspect a local repo, workspace, or host.\n";
 
 #[must_use]
 pub fn live_first_hop_system_prompt() -> String {
@@ -131,15 +134,6 @@ pub fn merge_graph_user_task(previous: Option<&str>, current: &str) -> String {
     format!("{head}{follow}")
 }
 
-pub fn split_one_node_system_prompt() -> String {
-    format!(
-        "You already chose a 1-node work graph. Reply with ONLY a linear DAG JSON object using the planner rules below, no markdown.\n\
-If USER TASK has more than one independently verifiable deliverable, emit 2 to 8 nodes, one per deliverable.\n\
-If the task is one atomic result, a 1-node graph is allowed.\n\
-Do not use path or mode labels. Do not use chat_only.\n\n{DAG_PLAN_SYSTEM_PROMPT}"
-    )
-}
-
 pub const TURN_OBSERVE_SYSTEM_PROMPT: &str = "\
 You judge whether the last assistant work advanced the USER TASK. Reply with ONLY one JSON object.\n\
 {\"verdict\":\"continue\"} — on track; remaining DAG nodes must run when remaining_nodes > 0.\n\
@@ -168,7 +162,7 @@ impl LiveFirstHop {
 }
 
 /// Parse first-hop JSON. Invalid / empty chat_only / `single_work` →
-/// [`LiveFirstHop::SingleWork`] (host maps that to a 1-node DAG, not a second tool loop).
+/// [`LiveFirstHop::SingleWork`] (one native tool loop).
 #[must_use]
 pub fn parse_live_first_hop(text: &str, fallback_json: &str) -> LiveFirstHop {
     let Some(obj) = extract_json_object(text) else {
@@ -297,42 +291,32 @@ fn hop_kind(hop: &LiveFirstHop) -> &'static str {
     match hop {
         LiveFirstHop::ChatOnly { .. } => "chat_only",
         LiveFirstHop::SingleWork => "single_work",
-        LiveFirstHop::Plan(plan) if plan.source == "split_refine" => "refined",
         LiveFirstHop::Plan(plan) if plan.order.len() == 1 => "one_node",
         LiveFirstHop::Plan(_) => "dag",
     }
 }
 
-/// One extra structured hop when the first graph has a single work node.
-async fn refine_one_node_plan(
-    provider: &dyn Provider,
-    planner_model: &str,
-    temperature: f64,
-    user_task: &str,
-    seed: PlannedLiveDag,
-) -> Result<PlannedLiveDag> {
-    let json = planned_store_json(&seed, CODE_FIX_TEMPLATE_JSON);
-    let user = format!("USER TASK:\n{user_task}\n\nCurrent 1-node graph:\n{json}\n");
-    let text = structured_json_chat(
-        provider,
-        planner_model,
-        temperature,
-        &split_one_node_system_prompt(),
-        &user,
-    )
-    .await?;
-    match parse_live_first_hop(&text, CODE_FIX_TEMPLATE_JSON) {
-        LiveFirstHop::Plan(mut plan)
-            if !plan.used_fallback && (1..=8).contains(&plan.order.len()) =>
-        {
-            if plan.order.len() >= 2 {
-                plan.source = "split_refine";
-                Ok(plan)
-            } else {
-                Ok(seed)
-            }
-        }
-        _ => Ok(seed),
+fn plan_is_one_node_tool_direct(plan: &PlannedLiveDag) -> bool {
+    let Some(id) = plan.order.first() else {
+        return false;
+    };
+    if plan.order.len() != 1 {
+        return false;
+    }
+    plan.dag
+        .nodes
+        .iter()
+        .find(|n| n.id == *id)
+        .is_some_and(|n| node_sigma(n) == NodeSigma::ToolDirect)
+}
+
+/// 1-node LlmWork (or unlabeled) graphs are one tool loop, not a DAG schedule.
+fn collapse_trivial_plan(hop: LiveFirstHop) -> LiveFirstHop {
+    match hop {
+        LiveFirstHop::Plan(plan) if plan.order.len() >= 2 => LiveFirstHop::Plan(plan),
+        LiveFirstHop::Plan(plan) if plan_is_one_node_tool_direct(&plan) => LiveFirstHop::Plan(plan),
+        LiveFirstHop::Plan(_) => LiveFirstHop::SingleWork,
+        other => other,
     }
 }
 
@@ -404,20 +388,7 @@ pub async fn live_first_hop(
     let hop_messages = first_hop_chat_messages(&live_first_hop_system_prompt(), history, user_task);
     let text =
         structured_json_chat_messages(provider, planner_model, temperature, &hop_messages).await?;
-    let hop = parse_live_first_hop(&text, &fallback);
-    let hop = match hop {
-        LiveFirstHop::ChatOnly { reply } => LiveFirstHop::ChatOnly { reply },
-        LiveFirstHop::Plan(plan) if plan.order.len() >= 2 => LiveFirstHop::Plan(plan),
-        LiveFirstHop::Plan(plan) => LiveFirstHop::Plan(
-            refine_one_node_plan(provider, planner_model, temperature, user_task, plan).await?,
-        ),
-        LiveFirstHop::SingleWork => {
-            let seed = one_node_live_dag(user_task);
-            LiveFirstHop::Plan(
-                refine_one_node_plan(provider, planner_model, temperature, user_task, seed).await?,
-            )
-        }
-    };
+    let hop = collapse_trivial_plan(parse_live_first_hop(&text, &fallback));
     let hop = admit_live_first_hop(hop, user_task, policy, extra_aliases);
     if let LiveFirstHop::Plan(plan) = &hop {
         let json = planned_store_json(plan, &fallback);
@@ -1884,24 +1855,22 @@ mod tests {
     }
 
     #[test]
-    fn first_hop_and_split_prompts_use_canonical_dag_plan() {
+    fn first_hop_prompt_allows_single_work() {
         let first = live_first_hop_system_prompt();
-        let split = split_one_node_system_prompt();
         assert!(first.contains("chat_only"));
+        assert!(first.contains("single_work"));
+        assert!(!first.contains("Do not use path single_work"));
         assert!(first.contains("one node per deliverable"));
-        assert!(split.contains("one node per deliverable"));
-        assert!(split.contains("independently verifiable deliverable"));
         assert!(first.contains(DAG_PLAN_SYSTEM_PROMPT));
-        assert!(split.contains(DAG_PLAN_SYSTEM_PROMPT));
         assert!(!TURN_OBSERVE_SYSTEM_PROMPT.contains("even when remaining_nodes is 0"));
     }
 
     #[tokio::test]
-    async fn live_first_hop_refines_single_work_into_multi_node() {
+    async fn live_first_hop_single_work_stays_single_work() {
         let provider = TwoShotPlanner {
             responses: std::sync::Mutex::new(vec![
                 r#"{"path":"single_work"}"#.into(),
-                PAPER_JSON.into(),
+                "MUST_NOT_REFINE".into(),
             ]),
         };
         let hop = live_first_hop(
@@ -1919,14 +1888,69 @@ mod tests {
         )
         .await
         .unwrap();
+        assert!(matches!(hop, LiveFirstHop::SingleWork));
+        assert_eq!(provider.responses.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn live_first_hop_one_node_llm_collapses_to_single_work() {
+        let seed = one_node_live_dag("inspect the workspace");
+        let json = planned_store_json(&seed, CODE_FIX_TEMPLATE_JSON);
+        let provider = TwoShotPlanner {
+            responses: std::sync::Mutex::new(vec![json, "MUST_NOT_REFINE".into()]),
+        };
+        let hop = live_first_hop(
+            &live_agent_cfg(),
+            &live_mem(),
+            "sess",
+            &provider,
+            "m",
+            "inspect the workspace",
+            &[],
+            0.0,
+            &SecurityPolicy::default(),
+            &[],
+            HostPhase::Build,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(hop, LiveFirstHop::SingleWork));
+        assert_eq!(provider.responses.lock().unwrap().len(), 1);
+    }
+
+    const ONE_NODE_TOOL_DIRECT_JSON: &str = r#"{"schema_version":"0.1.0","id":"g","entry":"n1","max_steps":2,"nodes":[{"id":"n1","task_type":"ops","model_selector":{"capabilities":["coding"]},"sigma":"tool_direct","artifact":"pwd","next":null}]}"#;
+
+    #[tokio::test]
+    async fn live_first_hop_one_node_tool_direct_stays_plan() {
+        let provider = TwoShotPlanner {
+            responses: std::sync::Mutex::new(vec![
+                ONE_NODE_TOOL_DIRECT_JSON.into(),
+                "MUST_NOT_REFINE".into(),
+            ]),
+        };
+        let hop = live_first_hop(
+            &live_agent_cfg(),
+            &live_mem(),
+            "sess",
+            &provider,
+            "m",
+            "pwd",
+            &[],
+            0.0,
+            &SecurityPolicy::default(),
+            &[],
+            HostPhase::Build,
+        )
+        .await
+        .unwrap();
         match hop {
             LiveFirstHop::Plan(plan) => {
-                assert_eq!(plan.order, vec!["read", "slides"]);
-                assert_eq!(plan.source, "split_refine");
+                assert_eq!(plan.order, vec!["n1"]);
+                assert!(plan_is_one_node_tool_direct(&plan));
             }
-            other => panic!("expected refined plan, got {other:?}"),
+            other => panic!("expected 1-node ToolDirect plan, got {other:?}"),
         }
-        assert!(provider.responses.lock().unwrap().is_empty());
+        assert_eq!(provider.responses.lock().unwrap().len(), 1);
     }
 
     #[tokio::test]

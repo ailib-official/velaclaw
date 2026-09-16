@@ -774,14 +774,17 @@ pub async fn run(
                                         dag.id.as_str(),
                                     ),
                                 ));
-                                if let Some(listing) =
-                                    crate::agent::bounded_dag_context::scratch_retrieve_text(
-                                        &config.workspace_dir,
-                                        session_id.as_str(),
-                                        dag.id.as_str(),
-                                    )
+                                if crate::agent::bounded_dag_context::work_hop_injects_scratch_listing()
                                 {
-                                    retrieve.push(listing);
+                                    if let Some(listing) =
+                                        crate::agent::bounded_dag_context::scratch_retrieve_text(
+                                            &config.workspace_dir,
+                                            session_id.as_str(),
+                                            dag.id.as_str(),
+                                        )
+                                    {
+                                        retrieve.push(listing);
+                                    }
                                 }
                                 if let Ok(Some(fail)) =
                                     crate::agent::bounded_dag_live::load_dag_fail(
@@ -1711,14 +1714,17 @@ pub async fn run(
                                         dag.id.as_str(),
                                     ),
                                 ));
-                                if let Some(listing) =
-                                    crate::agent::bounded_dag_context::scratch_retrieve_text(
-                                        &config.workspace_dir,
-                                        session_id.as_str(),
-                                        dag.id.as_str(),
-                                    )
+                                if crate::agent::bounded_dag_context::work_hop_injects_scratch_listing()
                                 {
-                                    retrieve.push(listing);
+                                    if let Some(listing) =
+                                        crate::agent::bounded_dag_context::scratch_retrieve_text(
+                                            &config.workspace_dir,
+                                            session_id.as_str(),
+                                            dag.id.as_str(),
+                                        )
+                                    {
+                                        retrieve.push(listing);
+                                    }
                                 }
                                 if let Ok(Some(fail)) =
                                     crate::agent::bounded_dag_live::load_dag_fail(

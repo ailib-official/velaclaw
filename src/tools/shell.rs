@@ -1068,7 +1068,7 @@ mod tests {
         let tool = ShellTool::with_isolation(security, test_runtime(), recorder.clone(), None);
         let result = tool
             .execute(
-                json!({"command": "python3 -c 'print(1)'"}),
+                json!({"command": "ls & python3 -c 'print(1)'"}),
                 &ToolExecutionContext::with_shell_human_approved(true),
             )
             .await
@@ -1174,7 +1174,7 @@ mod tests {
         let denied = tool
             .execute(
                 json!({"command": "python3 -c 'print(1)'"}),
-                &ToolExecutionContext::with_shell_human_approved(true),
+                &ToolExecutionContext::default(),
             )
             .await
             .unwrap();

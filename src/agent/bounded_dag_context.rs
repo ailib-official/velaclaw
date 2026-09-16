@@ -353,7 +353,15 @@ pub fn cached_fail_block(fail: &crate::agent::bounded_dag_live::DagFailCursor) -
     )
 }
 
+/// Work hops must not inject scratch directory listings as task retrieve (VL-APE-021 / R11).
+/// Scratch remains internodal/diagnostic via [`scratch_retrieve_text`].
+#[must_use]
+pub fn work_hop_injects_scratch_listing() -> bool {
+    false
+}
+
 /// INPUTS listing: this-graph scratch + same-session prior runs. Never lists other sessions.
+/// Not a task-world retrieve for live work hops ([`work_hop_injects_scratch_listing`]).
 #[must_use]
 pub fn scratch_retrieve_text(workspace: &Path, session_id: &str, dag_id: &str) -> Option<String> {
     let current = graph_scratch_rel(session_id, dag_id);
@@ -822,6 +830,27 @@ mod tests {
         let mid = node_retrieve_texts(mem.as_ref(), tmp.path(), "sess", b, &["a".into()]).await;
         assert!(mid.iter().any(|t| t.contains("ALPHA_ONLY")));
         assert!(!mid.iter().any(|t| t.contains("BETA_ONLY")));
+    }
+
+    #[test]
+    fn scratch_not_injected_as_task_retrieve() {
+        assert!(
+            !work_hop_injects_scratch_listing(),
+            "work hops must not inject scratch listings as USER retrieve"
+        );
+        let tmp = tempfile::tempdir().unwrap();
+        let listing = scratch_retrieve_text(tmp.path(), "sess", "run1");
+        assert!(listing.is_some());
+        let mut retrieve = Vec::<String>::new();
+        if work_hop_injects_scratch_listing() {
+            if let Some(text) = listing {
+                retrieve.push(text);
+            }
+        }
+        assert!(
+            retrieve.iter().all(|t| !t.contains("this-graph-artifact")),
+            "{retrieve:?}"
+        );
     }
 
     #[test]

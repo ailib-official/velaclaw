@@ -487,10 +487,10 @@ Notes:
 
 Notes:
 
-- **Recommended default for new installs**: keep `level = "supervised"` and `workspace_only = true`. Use `full` only when operators accept broader shell/filesystem scope.
+- **Recommended default for new installs**: keep `level = "supervised"` and `workspace_only = true`. Use `full` only when operators accept broader shell/filesystem scope. `workspace_only` is a path locus, not a substitute for Ask on capability gaps; empty `always_ask` does not mean “never prompt on allowlist misses.”
 - **Two approval layers**: `[autonomy]` enforces path/command guardrails (`allowed_commands`, `forbidden_paths`, `workspace_only`); `ApprovalGate` gates medium/high-risk tool operations when `level = "supervised"`. A command can fail on guardrails even when `level = "full"`.
 - **Unified gate**: shell tools no longer accept model-supplied `approved`; human consent is injected only after CLI/Gateway/Channel approval. See [policy-approval-reference.md](policy-approval-reference.md).
-- **Shell allowlist (VL-SEC-009)**: commands not listed in `allowed_commands` are hard-denied; human Yes/Always cannot widen the allowlist. Shell-policy Always only skips risk re-prompts for remembered executable basenames that are already allowlisted—add new binaries via config / L2 / `policy_patch` on `autonomy.allowed_commands`.
+- **Shell allowlist (VL-APE-021 / VL-SEC-009)**: commands not listed in `allowed_commands` surface `[needs_approval]` (parlor/modal Ask). Once/Always grants **this session invocation** only and does **not** persist into `allowed_commands`. Safety gates (injection, redirects, wait-only) stay hard-denied even after Once. Persist new binaries via config / L2 / `policy_patch`.
 - `level = "full"` skips medium-risk approval gating for shell execution, while still enforcing configured guardrails.
 - Shell separator/operator parsing is quote-aware. Characters like `;` inside quoted arguments are treated as literals, not command separators.
 - Unquoted shell chaining/operators are still enforced by policy checks (`;`, `|`, `&&`, `||`, background chaining, and redirects).

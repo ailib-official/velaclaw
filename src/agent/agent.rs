@@ -1216,12 +1216,14 @@ impl Agent {
                     dag_id.as_str(),
                 );
                 self.security.set_graph_scratch_rel(Some(scratch));
-                if let Some(listing) = crate::agent::bounded_dag_context::scratch_retrieve_text(
-                    &self.workspace_dir,
-                    self.session_id.as_str(),
-                    dag_id.as_str(),
-                ) {
-                    retrieve.push(listing);
+                if crate::agent::bounded_dag_context::work_hop_injects_scratch_listing() {
+                    if let Some(listing) = crate::agent::bounded_dag_context::scratch_retrieve_text(
+                        &self.workspace_dir,
+                        self.session_id.as_str(),
+                        dag_id.as_str(),
+                    ) {
+                        retrieve.push(listing);
+                    }
                 }
                 if let Ok(Some(fail)) = crate::agent::bounded_dag_live::load_dag_fail(
                     self.memory.as_ref(),

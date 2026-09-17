@@ -289,6 +289,25 @@ pub fn node_sigma(node: &DagNode) -> NodeSigma {
     }
 }
 
+/// Operator-visible Ask when a live LLM hop has no command (R14 / A13).
+pub const EMPTY_I_ASK: &str = "This hop has empty I (no command). Approve an allowed command or permission; the host will not wait for a model to invent a shell script.";
+
+/// True when LlmWork has no artifact/command and must Ask instead of starting the tool loop.
+#[must_use]
+pub fn llm_work_missing_i(node: &DagNode) -> bool {
+    if node_sigma(node) != NodeSigma::LlmWork {
+        return false;
+    }
+    if crate::agent::capability_route::is_work_cognition_node(&node.model_selector.capabilities) {
+        return false;
+    }
+    node.artifact
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .is_none()
+}
+
 #[must_use]
 pub fn is_tool_only_node(node: &DagNode) -> bool {
     let caps = &node.model_selector.capabilities;
@@ -799,5 +818,28 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(p0.n.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn empty_i_live_hop_does_not_call_llm() {
+        let dag = crate::agent::dag_runner::parse_dag_json(
+            r#"{"schema_version":"0.1.0","id":"g","entry":"a","max_steps":2,"nodes":[{"id":"a","task_type":"ops","model_selector":{"capabilities":["tool_calling"]},"sigma":"llm_cognition","next":null}]}"#,
+        )
+        .unwrap();
+        assert!(llm_work_missing_i(&dag.nodes[0]));
+        assert!(EMPTY_I_ASK.contains("empty I"));
+        let with_i = crate::agent::dag_runner::parse_dag_json(
+            r#"{"schema_version":"0.1.0","id":"g","entry":"a","max_steps":2,"nodes":[{"id":"a","task_type":"ops","model_selector":{"capabilities":["shell.exec"]},"sigma":"tool_direct","artifact":"pwd","next":null}]}"#,
+        )
+        .unwrap();
+        assert!(!llm_work_missing_i(&with_i.nodes[0]));
+        let coding = crate::agent::dag_runner::parse_dag_json(
+            crate::agent::dag_runner::CODE_FIX_TEMPLATE_JSON,
+        )
+        .unwrap();
+        assert!(
+            !llm_work_missing_i(&coding.nodes[0]),
+            "coding hops may still start a tool loop"
+        );
     }
 }

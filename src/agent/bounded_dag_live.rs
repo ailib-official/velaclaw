@@ -729,6 +729,7 @@ fn looks_like_admit_contract_fail(err: &str) -> bool {
         || lower.contains("missing admit-safe")
         || lower.contains("missing i contract")
         || lower.contains("plan rejected")
+        || lower.contains("empty i")
 }
 
 /// Persist the original user task for work-node USER TASK slots.

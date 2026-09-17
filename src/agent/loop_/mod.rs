@@ -806,6 +806,26 @@ pub async fn run(
                                     reason = contact.reason.as_str(),
                                     "work hop start"
                                 );
+                                if crate::agent::graph_scheduler::llm_work_missing_i(node) {
+                                    crate::agent::bounded_dag_delivery::print_operator_note(
+                                        &mut operator_prefix,
+                                        &crate::agent::bounded_dag_live::format_work_node_stop(
+                                            &msg,
+                                            &node.id,
+                                            crate::agent::graph_scheduler::EMPTY_I_ASK,
+                                            index + 1,
+                                            node_count,
+                                        ),
+                                        None,
+                                    );
+                                    security.set_graph_scratch_rel(None);
+                                    return Ok(
+                                        crate::agent::bounded_dag_delivery::session_assistant_body(
+                                            &msg,
+                                            &operator_prefix,
+                                        ),
+                                    );
+                                }
                                 crate::agent::bounded_dag_context::reset_chat_scope(
                                     &mut history,
                                     &crate::agent::bounded_dag_context::NodeWorkPacket {
@@ -1752,6 +1772,26 @@ pub async fn run(
                                     reason = contact.reason.as_str(),
                                     "work hop start"
                                 );
+                                if crate::agent::graph_scheduler::llm_work_missing_i(node) {
+                                    crate::agent::bounded_dag_delivery::print_operator_note(
+                                        &mut operator_prefix,
+                                        &crate::agent::bounded_dag_live::format_work_node_stop(
+                                            &user_input,
+                                            &node.id,
+                                            crate::agent::graph_scheduler::EMPTY_I_ASK,
+                                            index + 1,
+                                            node_count,
+                                        ),
+                                        None,
+                                    );
+                                    security.set_graph_scratch_rel(None);
+                                    return Ok(
+                                        crate::agent::bounded_dag_delivery::session_assistant_body(
+                                            &user_input,
+                                            &operator_prefix,
+                                        ),
+                                    );
+                                }
                                 crate::agent::bounded_dag_context::reset_chat_scope(
                                     &mut history,
                                     &crate::agent::bounded_dag_context::NodeWorkPacket {

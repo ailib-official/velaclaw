@@ -403,12 +403,14 @@ mod tests {
     }
 
     #[test]
-    fn two_same_unsafe_denies_close_hop() {
+    fn unsafe_construct_closes_hop_on_first() {
         let mut g = HopProbeGovernor::new();
         g.note_shell_output("unsafe shell construct (injection, redirect, or dangerous args).");
-        assert_eq!(g.hop_close(), HopClose::None);
-        g.note_shell_output("unsafe shell construct (injection, redirect, or dangerous args).");
         assert_eq!(g.hop_close(), HopClose::PolicyDeny);
+        assert_eq!(
+            crate::agent::hop_stop::after_hop_close(g.hop_close()),
+            crate::agent::hop_stop::AfterHopClose::FailCursorStop
+        );
     }
 
     #[test]

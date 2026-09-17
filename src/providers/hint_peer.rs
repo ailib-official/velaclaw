@@ -97,6 +97,8 @@ fn looks_like_policy(lower: &str) -> bool {
         || lower.contains("[needs_approval]")
         || lower.contains("path not allowed by security policy")
         || lower.contains("not in allowed_commands")
+        || lower.contains("unsafe shell construct")
+        || lower.contains("unsafe_construct")
 }
 
 /// Account/catalog miss: HTTP 404 Function Not Found, model_not_found.
@@ -254,6 +256,10 @@ mod tests {
         );
         assert_eq!(
             classify_hop_error("Path not allowed by security policy: /tmp/x"),
+            HopFailClass::Policy
+        );
+        assert_eq!(
+            classify_hop_error("[policy_deny] unsafe shell construct: substitution"),
             HopFailClass::Policy
         );
         assert_eq!(

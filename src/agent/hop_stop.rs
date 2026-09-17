@@ -8,7 +8,8 @@ pub enum HopClose {
     None,
     /// Four executed shells; remaining DAG nodes may still run.
     Cap,
-    /// Same *terminal* policy class denied twice; store fail cursor, do not start later hops.
+    /// Hard policy class denied (first hit for malformed/allowlist/unsafe_construct;
+    /// twice for other terminal buckets); store fail cursor, do not start later hops.
     PolicyDeny,
     /// Shell rounds stayed on workspace listing and did not advance declared evidence layers.
     OffGoal,
@@ -49,7 +50,7 @@ impl AfterHopClose {
 pub fn policy_deny_stop_reason(class: Option<&str>) -> &'static str {
     match class {
         Some("unsafe_construct") => {
-            "repeated unsafe shell constructs (substitution, write-redirect, or blocked git flags)."
+            "unsafe shell construct (substitution, write-redirect, or blocked git flags)."
         }
         Some("allowlist") => {
             "a command was not on the allowlist (Ask declined, or the hop continued without approval)."
@@ -119,7 +120,10 @@ pub fn policy_deny_class(output: &str) -> Option<&'static str> {
 /// Classes that close the hop on the first deny (not two unlike buckets).
 #[must_use]
 pub fn policy_deny_closes_on_first(class: &str) -> bool {
-    matches!(class, "malformed" | "once_denied" | "allowlist")
+    matches!(
+        class,
+        "malformed" | "once_denied" | "allowlist" | "unsafe_construct"
+    )
 }
 
 /// Wait-only misses are recoverable (drop the named binary; do not fail the DAG).
@@ -215,6 +219,20 @@ mod tests {
             merge_hop_close(HopClose::Cap, HopClose::PolicyDeny),
             HopClose::PolicyDeny
         );
+    }
+
+    #[test]
+    fn unsafe_construct_closes_hop_on_first() {
+        assert!(policy_deny_closes_on_first("unsafe_construct"));
+        assert_eq!(
+            hop_close_after_policy_tally("unsafe_construct", 1),
+            HopClose::PolicyDeny
+        );
+        assert_eq!(
+            policy_deny_class("[policy_deny] unsafe shell construct: substitution"),
+            Some("unsafe_construct")
+        );
+        assert!(!policy_deny_stop_reason(Some("unsafe_construct")).contains("repeated"));
     }
 
     #[test]

@@ -301,11 +301,7 @@ pub fn llm_work_missing_i(node: &DagNode) -> bool {
     if crate::agent::capability_route::is_work_cognition_node(&node.model_selector.capabilities) {
         return false;
     }
-    node.artifact
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .is_none()
+    node.artifact.as_deref().is_none_or(|s| s.trim().is_empty())
 }
 
 #[must_use]

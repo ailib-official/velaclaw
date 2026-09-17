@@ -1537,10 +1537,10 @@ async fn bounded_dag_follow_up_first_hop_sees_prior_report() {
 
 #[cfg(feature = "ai-protocol")]
 #[tokio::test]
-async fn bounded_dag_single_work_runs_one_tool_loop() {
+async fn bounded_dag_single_work_asks_empty_i() {
     let provider = ScriptedProvider::new(vec![
         text_response(r#"{"path":"single_work"}"#),
-        text_response("synced"),
+        text_response("MUST_NOT_RUN_WORK_MODEL"),
     ]);
     let calls = provider.call_counter();
     let mut agent = build_agent_with_config(
@@ -1554,15 +1554,19 @@ async fn bounded_dag_single_work_runs_one_tool_loop() {
     );
     agent.set_host_phase(crate::agent::host_phase::HostPhase::Build);
     let out = agent
-        .turn("check piubt git then sync velaclaw")
+        .turn("check remote git then sync the workspace")
         .await
         .unwrap();
     assert_eq!(
         calls.load(Ordering::SeqCst),
-        2,
-        "single_work + one native tool loop; no split-refine"
+        1,
+        "single_work empty I must Ask; no work-model loop"
     );
-    assert!(out.contains("synced"), "{out}");
+    assert!(
+        out.contains("empty I") || out.contains("Approve an allowed command"),
+        "{out}"
+    );
+    assert!(!out.contains("MUST_NOT_RUN_WORK_MODEL"), "{out}");
 }
 
 #[cfg(feature = "ai-protocol")]

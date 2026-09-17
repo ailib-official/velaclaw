@@ -616,20 +616,23 @@ pub async fn run(
                     None
                 },
             );
-            crate::agent::bounded_dag_live::live_first_hop(
-                &config.agent,
-                mem.as_ref(),
-                session_id.as_str(),
-                provider.as_ref(),
-                planner.as_str(),
+            crate::agent::bounded_dag_live::execute_as_live_plan(
+                crate::agent::bounded_dag_live::live_first_hop(
+                    &config.agent,
+                    mem.as_ref(),
+                    session_id.as_str(),
+                    provider.as_ref(),
+                    planner.as_str(),
+                    &msg,
+                    &history,
+                    temperature,
+                    &policy,
+                    &extra,
+                    host_phase,
+                )
+                .await?,
                 &msg,
-                &history,
-                temperature,
-                &policy,
-                &extra,
-                host_phase,
             )
-            .await?
         } else {
             crate::agent::bounded_dag_live::LiveFirstHop::SingleWork
         };
@@ -1551,20 +1554,23 @@ pub async fn run(
                         None
                     },
                 );
-                crate::agent::bounded_dag_live::live_first_hop(
-                    &config.agent,
-                    mem.as_ref(),
-                    session_id.as_str(),
-                    provider.as_ref(),
-                    planner.as_str(),
+                crate::agent::bounded_dag_live::execute_as_live_plan(
+                    crate::agent::bounded_dag_live::live_first_hop(
+                        &config.agent,
+                        mem.as_ref(),
+                        session_id.as_str(),
+                        provider.as_ref(),
+                        planner.as_str(),
+                        &user_input,
+                        &history,
+                        temperature,
+                        &policy,
+                        &extra,
+                        host_phase,
+                    )
+                    .await?,
                     &user_input,
-                    &history,
-                    temperature,
-                    &policy,
-                    &extra,
-                    host_phase,
                 )
-                .await?
             } else {
                 crate::agent::bounded_dag_live::LiveFirstHop::SingleWork
             };

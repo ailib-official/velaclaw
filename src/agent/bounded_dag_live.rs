@@ -715,8 +715,8 @@ pub fn decide_work_node_fail(
         | crate::providers::hint_peer::HopFailClass::Quota => WorkNodeFailDecision::RetrySame {
             force_default: true,
         },
-        crate::providers::hint_peer::HopFailClass::Policy
-        | crate::providers::hint_peer::HopFailClass::Other => WorkNodeFailDecision::RetrySame {
+        crate::providers::hint_peer::HopFailClass::Policy => WorkNodeFailDecision::Stop,
+        crate::providers::hint_peer::HopFailClass::Other => WorkNodeFailDecision::RetrySame {
             force_default: false,
         },
         crate::providers::hint_peer::HopFailClass::Transport => WorkNodeFailDecision::Stop,
@@ -2247,6 +2247,24 @@ mod tests {
         assert_eq!(
             decide_work_node_fail(true, false, "tool-only node node1 missing invoke contract"),
             WorkNodeFailDecision::Stop
+        );
+        assert_eq!(
+            decide_work_node_fail(
+                true,
+                false,
+                "[policy_deny] unsafe shell construct: substitution"
+            ),
+            WorkNodeFailDecision::Stop
+        );
+        assert_ne!(
+            decide_work_node_fail(
+                true,
+                false,
+                "[policy_deny] unsafe shell construct: substitution"
+            ),
+            WorkNodeFailDecision::RetrySame {
+                force_default: false
+            }
         );
     }
 }

@@ -134,7 +134,7 @@ fn admit_graph_shape(
         let any_i = dag.nodes.iter().any(|n| artifact_command(n).is_some());
         if !any_i {
             let tool_shaped = dag.nodes.iter().all(|n| {
-                !crate::agent::capability_route::is_work_cognition_node(
+                crate::agent::capability_route::node_is_tool_invoke_without_cognition(
                     &n.model_selector.capabilities,
                 )
             });

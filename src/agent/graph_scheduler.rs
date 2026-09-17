@@ -301,6 +301,11 @@ pub fn llm_work_missing_i(node: &DagNode) -> bool {
     if crate::agent::capability_route::is_work_cognition_node(&node.model_selector.capabilities) {
         return false;
     }
+    if !crate::agent::capability_route::node_is_tool_invoke_without_cognition(
+        &node.model_selector.capabilities,
+    ) {
+        return false;
+    }
     node.artifact.as_deref().is_none_or(|s| s.trim().is_empty())
 }
 
@@ -836,6 +841,14 @@ mod tests {
         assert!(
             !llm_work_missing_i(&coding.nodes[0]),
             "coding hops may still start a tool loop"
+        );
+        let doc = crate::agent::dag_runner::parse_dag_json(
+            r#"{"schema_version":"0.1.0","id":"g","entry":"a","max_steps":2,"nodes":[{"id":"a","task_type":"summarize","model_selector":{"capabilities":["document_understanding"]},"sigma":"llm_cognition","next":null}]}"#,
+        )
+        .unwrap();
+        assert!(
+            !llm_work_missing_i(&doc.nodes[0]),
+            "document hops do not Ask for a shell I"
         );
     }
 }

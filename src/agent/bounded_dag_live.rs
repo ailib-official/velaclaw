@@ -715,11 +715,11 @@ pub fn decide_work_node_fail(
         | crate::providers::hint_peer::HopFailClass::Quota => WorkNodeFailDecision::RetrySame {
             force_default: true,
         },
-        crate::providers::hint_peer::HopFailClass::Policy => WorkNodeFailDecision::Stop,
+        crate::providers::hint_peer::HopFailClass::Policy
+        | crate::providers::hint_peer::HopFailClass::Transport => WorkNodeFailDecision::Stop,
         crate::providers::hint_peer::HopFailClass::Other => WorkNodeFailDecision::RetrySame {
             force_default: false,
         },
-        crate::providers::hint_peer::HopFailClass::Transport => WorkNodeFailDecision::Stop,
     }
 }
 

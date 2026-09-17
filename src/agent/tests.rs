@@ -1366,6 +1366,8 @@ async fn run_single_delegates_to_turn() {
 const LIVE_MODE_CHAT: &str = r#"{"path":"chat_only","reply":"Hi — ready."}"#;
 const LIVE_MODE_CHAT_EMPTY: &str =
     r#"{"path":"chat_only","reply":"I compared agent runtimes from memory."}"#;
+/// Three filled-I nodes so R7 keeps `plan_dag` (the empty L2 template collapses).
+const LIVE_FILLED_CODE_FIX_JSON: &str = r#"{"schema_version":"0.1.0","id":"code-fix-template","entry":"locate","max_steps":6,"nodes":[{"id":"locate","task_type":"code-fix","model_selector":{"capabilities":["coding","tool_calling"]},"artifact":"find the compiler error","next":"patch"},{"id":"patch","task_type":"code-fix","model_selector":{"capabilities":["coding","tool_calling"]},"artifact":"apply the fix","next":"verify"},{"id":"verify","task_type":"code-fix","model_selector":{"capabilities":["speed"]},"artifact":"recompile and confirm","next":null}]}"#;
 
 #[cfg(feature = "ai-protocol")]
 #[tokio::test]
@@ -1382,17 +1384,20 @@ async fn bounded_dag_plan_runs_planner_then_preview() {
     );
     agent.set_host_phase(crate::agent::host_phase::HostPhase::Plan);
     let out = agent.turn("fix the compiler error").await.unwrap();
-    assert!(out.contains("Planner output was not a valid"), "{out}");
-    assert!(out.contains("locate"), "{out}");
-    assert!(out.contains("patch"), "{out}");
-    assert!(out.contains("verify"), "{out}");
-    assert!(out.contains("Approve Build"), "{out}");
+    assert!(
+        out.contains("Approve Build"),
+        "invalid planner still offers Build, got {out}"
+    );
+    assert!(
+        out.contains("high-reasoning") || out.contains("1 node"),
+        "empty L2 template collapses to one cognition hop, got {out}"
+    );
 }
 
 #[cfg(feature = "ai-protocol")]
 #[tokio::test]
 async fn bounded_dag_plan_accepts_planner_json() {
-    let json = r#"{"schema_version":"0.1.0","id":"paper-slides","entry":"read","max_steps":8,"nodes":[{"id":"read","task_type":"summarize","model_selector":{"capabilities":["document_understanding"]},"next":"slides"},{"id":"slides","task_type":"write","model_selector":{"capabilities":["speed"]},"next":null}]}"#;
+    let json = r#"{"schema_version":"0.1.0","id":"paper-slides","entry":"read","max_steps":8,"nodes":[{"id":"read","task_type":"summarize","model_selector":{"capabilities":["document_understanding"]},"artifact":"read the paper","next":"slides"},{"id":"slides","task_type":"write","model_selector":{"capabilities":["speed"]},"artifact":"write intro slides","next":null}]}"#;
     let mut agent = build_agent_with_config(
         Box::new(ScriptedProvider::new(vec![text_response(json)])),
         vec![],
@@ -1417,7 +1422,7 @@ async fn bounded_dag_plan_accepts_planner_json() {
 #[tokio::test]
 async fn bounded_dag_plan_path_skips_planner() {
     let tmp = tempfile::NamedTempFile::new().unwrap();
-    std::fs::write(tmp.path(), crate::agent::dag_runner::CODE_FIX_TEMPLATE_JSON).unwrap();
+    std::fs::write(tmp.path(), LIVE_FILLED_CODE_FIX_JSON).unwrap();
     let mut agent = build_agent_with_config(
         Box::new(FailingProvider),
         vec![],
@@ -1438,7 +1443,7 @@ async fn bounded_dag_plan_path_skips_planner() {
 #[tokio::test]
 async fn bounded_dag_build_one_loop_per_node() {
     let provider = ScriptedProvider::new(vec![
-        text_response(crate::agent::dag_runner::CODE_FIX_TEMPLATE_JSON),
+        text_response(LIVE_FILLED_CODE_FIX_JSON),
         text_response("located"),
         text_response("patched"),
         text_response("verified"),
@@ -1602,7 +1607,7 @@ async fn bounded_dag_chat_only_does_not_observe_upgrade() {
 async fn bounded_dag_writeback_and_node_contact() {
     let (mem, _tmp) = make_sqlite_memory();
     let provider = ScriptedProvider::new(vec![
-        text_response(crate::agent::dag_runner::CODE_FIX_TEMPLATE_JSON),
+        text_response(LIVE_FILLED_CODE_FIX_JSON),
         text_response("LOCATE_UNIQUE_BODY"),
         text_response("PATCH_UNIQUE_BODY"),
         text_response("VERIFY_OK"),
@@ -1688,7 +1693,7 @@ async fn bounded_dag_writeback_and_node_contact() {
 #[tokio::test]
 async fn bounded_dag_session_picker_runs_work_hops() {
     let provider = ScriptedProvider::new(vec![
-        text_response(crate::agent::dag_runner::CODE_FIX_TEMPLATE_JSON),
+        text_response(LIVE_FILLED_CODE_FIX_JSON),
         text_response("located"),
         text_response("patched"),
         text_response("verified"),

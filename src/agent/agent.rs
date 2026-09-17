@@ -1068,11 +1068,6 @@ impl Agent {
                         planned.dag.id.as_str(),
                         first,
                     );
-                    tracing::info!(
-                        node_id = first.id.as_str(),
-                        sigma = ?crate::agent::graph_scheduler::node_sigma(first),
-                        "work hop start"
-                    );
                 }
                 if run_ids.len() > 1 {
                     let index = planned
@@ -1238,6 +1233,13 @@ impl Agent {
                     self.session_work_model(),
                     &self.available_hints,
                     force_default,
+                );
+                tracing::info!(
+                    node_id = node.id.as_str(),
+                    sigma = ?crate::agent::graph_scheduler::node_sigma(&node),
+                    model = contact.model.as_str(),
+                    reason = contact.reason.as_str(),
+                    "work hop start"
                 );
                 crate::agent::bounded_dag_context::reset_chat_scope(
                     &mut chat_hist,

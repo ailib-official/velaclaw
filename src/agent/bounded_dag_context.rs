@@ -635,6 +635,24 @@ mod tests {
         );
         assert_eq!(tools.model, "hint:tools", "{}", tools.reason);
         assert_ne!(tools.reason, "explicit_user_pick");
+        let json_tc = r#"{
+          "schema_version": "0.1.0",
+          "id": "t",
+          "entry": "n",
+          "max_steps": 8,
+          "nodes": [
+            {"id":"n","task_type":"work","model_selector":{"capabilities":["tool_calling"]},"next":null}
+          ]
+        }"#;
+        let tc_dag = parse_dag_json(json_tc).unwrap();
+        let tc = contact_for_live_node(
+            &tc_dag.nodes[0],
+            "nvidia/nemotron-3-ultra-550b-a55b",
+            &["fast".into(), "code".into(), "tools".into()],
+            false,
+        );
+        assert_eq!(tc.model, "hint:tools", "{}", tc.reason);
+        assert_ne!(tc.reason, "explicit_user_pick");
         let empty_node = crate::agent::dag_runner::DagNode {
             id: "n".into(),
             task_type: "work".into(),

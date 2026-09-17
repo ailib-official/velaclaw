@@ -763,11 +763,6 @@ pub async fn run(
                                     dag.id.as_str(),
                                     node,
                                 );
-                                tracing::info!(
-                                    node_id = node.id.as_str(),
-                                    sigma = ?crate::agent::graph_scheduler::node_sigma(node),
-                                    "work hop start"
-                                );
                                 security.set_graph_scratch_rel(Some(
                                     crate::agent::bounded_dag_context::graph_scratch_rel(
                                         session_id.as_str(),
@@ -804,6 +799,13 @@ pub async fn run(
                                         &available_hints,
                                         force_default,
                                     );
+                                tracing::info!(
+                                    node_id = node.id.as_str(),
+                                    sigma = ?crate::agent::graph_scheduler::node_sigma(node),
+                                    model = contact.model.as_str(),
+                                    reason = contact.reason.as_str(),
+                                    "work hop start"
+                                );
                                 crate::agent::bounded_dag_context::reset_chat_scope(
                                     &mut history,
                                     &crate::agent::bounded_dag_context::NodeWorkPacket {
@@ -1708,11 +1710,6 @@ pub async fn run(
                                     dag.id.as_str(),
                                     node,
                                 );
-                                tracing::info!(
-                                    node_id = node.id.as_str(),
-                                    sigma = ?crate::agent::graph_scheduler::node_sigma(node),
-                                    "work hop start"
-                                );
                                 security.set_graph_scratch_rel(Some(
                                     crate::agent::bounded_dag_context::graph_scratch_rel(
                                         session_id.as_str(),
@@ -1747,6 +1744,13 @@ pub async fn run(
                                     &session_model,
                                     &available_hints,
                                     force_default,
+                                );
+                                tracing::info!(
+                                    node_id = node.id.as_str(),
+                                    sigma = ?crate::agent::graph_scheduler::node_sigma(node),
+                                    model = contact.model.as_str(),
+                                    reason = contact.reason.as_str(),
+                                    "work hop start"
                                 );
                                 crate::agent::bounded_dag_context::reset_chat_scope(
                                     &mut history,

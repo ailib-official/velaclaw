@@ -39,6 +39,25 @@ pub fn is_cheap_capability_route(cap: &str) -> bool {
     )
 }
 
+/// Caps that mean the hop must have a shell/tool I (not document/speed/coding).
+#[must_use]
+pub fn is_tool_invoke_capability(cap: &str) -> bool {
+    let t = cap.trim().to_ascii_lowercase();
+    t == "tools" || t == "tool_calling" || t == "shell.exec"
+}
+
+/// Tool-invoke hops without a coding/cognition cap (empty cap is cognition, not this).
+#[must_use]
+pub fn node_is_tool_invoke_without_cognition(capabilities: &[String]) -> bool {
+    if capabilities.is_empty() {
+        return false;
+    }
+    if is_work_cognition_node(capabilities) {
+        return false;
+    }
+    capabilities.iter().any(|c| is_tool_invoke_capability(c))
+}
+
 /// True when this node should run on the session picker (tier 1).
 #[must_use]
 pub fn is_work_cognition_node(capabilities: &[String]) -> bool {

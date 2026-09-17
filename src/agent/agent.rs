@@ -1241,6 +1241,21 @@ impl Agent {
                     reason = contact.reason.as_str(),
                     "work hop start"
                 );
+                if crate::agent::graph_scheduler::llm_work_missing_i(&node) {
+                    let stop = format_work_node_stop(
+                        user_message,
+                        &node.id,
+                        crate::agent::graph_scheduler::EMPTY_I_ASK,
+                        index + 1,
+                        node_count,
+                    );
+                    self.push_operator_note(&mut operator_prefix, &stop);
+                    self.end_live_graph_host_state();
+                    return Ok(crate::agent::bounded_dag_delivery::session_assistant_body(
+                        user_message,
+                        &operator_prefix,
+                    ));
+                }
                 crate::agent::bounded_dag_context::reset_chat_scope(
                     &mut chat_hist,
                     &crate::agent::bounded_dag_context::NodeWorkPacket {
@@ -1638,6 +1653,9 @@ impl Agent {
             == crate::agent::graph_scheduler::NodeSigma::ToolDirect
         {
             return self.invoke_tool_direct(node).await;
+        }
+        if crate::agent::graph_scheduler::llm_work_missing_i(node) {
+            anyhow::bail!("{}", crate::agent::graph_scheduler::EMPTY_I_ASK);
         }
         crate::agent::graph_scheduler::ensure_live_llm_native(
             self.config.tool_dispatcher.as_str(),

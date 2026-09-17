@@ -131,6 +131,19 @@ fn admit_graph_shape(
         .iter()
         .all(|n| node_sigma(n) == NodeSigma::LlmWork);
     if all_llm {
+        let any_i = dag.nodes.iter().any(|n| artifact_command(n).is_some());
+        if !any_i {
+            let tool_shaped = dag.nodes.iter().all(|n| {
+                crate::agent::capability_route::node_is_tool_invoke_without_cognition(
+                    &n.model_selector.capabilities,
+                )
+            });
+            if tool_shaped {
+                bail!(
+                    "plan rejected: empty I on LLM hops; Ask for a command or permission (do not invent ls)"
+                );
+            }
+        }
         let readonly: Vec<String> = dag
             .nodes
             .iter()
@@ -422,5 +435,22 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("missing admit-safe I"), "{err}");
+    }
+
+    #[test]
+    fn empty_i_llm_graph_asks_or_rejects_without_ls() {
+        let mut dag = parse_dag_json(
+            r#"{"schema_version":"0.1.0","id":"g","entry":"a","max_steps":4,"nodes":[{"id":"a","task_type":"ops-check","model_selector":{"capabilities":["tool_calling"]},"sigma":"llm_cognition","next":"b"},{"id":"b","task_type":"ops-check","model_selector":{"capabilities":["tool_calling"]},"sigma":"llm_cognition","next":null}]}"#,
+        )
+        .unwrap();
+        let err = admit_capability_contract(&mut dag, "any natural language task", &policy(), &[])
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("empty I"), "{err}");
+        assert!(err.contains("Ask"), "{err}");
+        assert!(
+            dag.nodes.iter().all(|n| artifact_command(n).is_none()),
+            "must not invent ls"
+        );
     }
 }

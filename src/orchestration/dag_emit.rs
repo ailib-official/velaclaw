@@ -14,19 +14,19 @@ pub const DAG_PLAN_SYSTEM_PROMPT: &str = r#"You are a DAG planner. Reply with ON
 The object MUST use schema_version "0.1.0" and include:
 - id (string), entry (string node id), max_steps (number, <= 8)
 - nodes: 1 to 8 items of { id, task_type, model_selector: { capabilities: string[] }, next: string|null, context_requirements?: { layers: number[], retrieve?: object[] } }
-Choose the node count from THIS task's deliverables (1–8), not from whether capabilities match. One node only when the user asked for a single result (one greeting is not a DAG — the host skips you; one file patch; one yes/no). If they asked for several independent results (service up? node health? a named route probe?), give one node per deliverable even when every node is tool_calling. Do not collapse "A then B, especially C" into one node.
-Each node is a verifiable artifact state change, not a shell action. Work backward from the operator-visible deliverable. The host writes the user-facing conclusion after the last node. Do not invent inspect/diagnose/report splits, empty "gather context" nodes, or a final summarize hop unless the user asked for a written report as an artifact.
+Choose the node count from THIS task's deliverables (1–8), not from whether capabilities match. One node only when the user asked for a single result (one greeting is not a DAG — the host skips you; one file patch; one yes/no). If they asked for several independent results, give one node per deliverable only when each node has a non-empty artifact (I). The host collapses empty-I graphs to a single_work turn. Do not invent inspect/diagnose/report splits or empty "gather context" nodes.
+Each node is a verifiable artifact state change, not a shell action. Work backward from the operator-visible deliverable. The host writes the user-facing conclusion after the last node.
 Each node lists ONE primary capability first (optional extras after). Tags: coding (patches/shell), tool_calling (status/checks), high-reasoning (analysis that needs a reasoning family), speed (cheap/short), document_understanding (read/summarize). Different work → different first tags so Contact can route to different [[model_routes]] families. Do not name providers or model IDs.
 Do not pad every node with coding+tool_calling. Runtime already injects workspace retrieve and the previous node's artifact.
 The graph MUST be a single linear chain: entry walks next until null and covers every node (no branches, no unused nodes).
 Each work node must finish with few tool rounds: batch related shell into one command (`&&` / pipes / one remote ssh wrapping several checks). Do not include executable scripts.
 Optional node fields: sigma ("llm_cognition" or "tool_direct") and locus ("workspace" or "remote:<alias>"). Inspect/list/status that allowed tools can finish: capabilities ["shell.exec"] (or file.read / glob.search), sigma tool_direct, artifact a simple command without $(), redirects, or find -exec. A named host in the user text → locus remote:<alias> and artifact "ssh <alias> <simple>". Do not wrap those in coding LLM hops. Do not invent a hostname.
 
-Example (one hop — a single ops check):
-{"schema_version":"0.1.0","id":"ops-one","entry":"check","max_steps":8,"nodes":[{"id":"check","task_type":"ops-check","model_selector":{"capabilities":["tool_calling"]},"next":null}]}
+Example (one hop — a single ops check with I):
+{"schema_version":"0.1.0","id":"ops-one","entry":"check","max_steps":8,"nodes":[{"id":"check","task_type":"ops-check","model_selector":{"capabilities":["tool_calling"]},"sigma":"tool_direct","artifact":"pwd","next":null}]}
 
-Example (three hops — service, node health, named-route probe; same capability is OK):
-{"schema_version":"0.1.0","id":"proxy-health","entry":"service","max_steps":8,"nodes":[{"id":"service","task_type":"ops-check","model_selector":{"capabilities":["tool_calling"]},"next":"nodes"},{"id":"nodes","task_type":"ops-check","model_selector":{"capabilities":["tool_calling"]},"next":"google-route"},{"id":"google-route","task_type":"ops-check","model_selector":{"capabilities":["tool_calling"]},"next":null}]}
+Example (two hops — each node has I):
+{"schema_version":"0.1.0","id":"two-filled","entry":"read","max_steps":8,"nodes":[{"id":"read","task_type":"summarize","model_selector":{"capabilities":["document_understanding"]},"artifact":"read the requested sources","next":"write"},{"id":"write","task_type":"write","model_selector":{"capabilities":["high-reasoning"]},"artifact":"write the analysis report","next":null}]}
 
 Example (two hops — code then a cheap verify):
 {"schema_version":"0.1.0","id":"patch-verify","entry":"patch","max_steps":8,"nodes":[{"id":"patch","task_type":"write","model_selector":{"capabilities":["coding"]},"next":"verify"},{"id":"verify","task_type":"ops-check","model_selector":{"capabilities":["speed"]},"context_requirements":{"layers":[3],"retrieve":[{"kind":"tool_result"}]},"next":null}]}"#;
@@ -202,9 +202,10 @@ mod tests {
 
     #[test]
     fn planner_prompt_splits_by_deliverable_not_capability() {
-        assert!(DAG_PLAN_SYSTEM_PROMPT.contains("proxy-health"));
-        assert!(DAG_PLAN_SYSTEM_PROMPT.contains("Do not collapse"));
+        assert!(DAG_PLAN_SYSTEM_PROMPT.contains("two-filled"));
+        assert!(DAG_PLAN_SYSTEM_PROMPT.contains("non-empty artifact"));
         assert!(DAG_PLAN_SYSTEM_PROMPT.contains("one node per deliverable"));
+        assert!(DAG_PLAN_SYSTEM_PROMPT.contains("collapses empty-I"));
         assert!(DAG_PLAN_SYSTEM_PROMPT.contains("host writes the user-facing conclusion"));
         assert!(DAG_PLAN_SYSTEM_PROMPT.contains("verifiable artifact"));
         assert!(DAG_PLAN_SYSTEM_PROMPT.contains("tool_direct"));

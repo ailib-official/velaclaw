@@ -66,7 +66,7 @@ Start this VelaClaw turn now. Reply with ONLY one JSON object, no markdown.\n\
 Prior user/assistant messages are this same session. Continue that work (same hosts, paths, and findings). Do not claim you forgot earlier turns. Do not ask what to do if the session already did it.\n\
 Greeting, thanks, or general knowledge (no repo/host/files): {\"path\":\"chat_only\",\"reply\":\"<full user-visible reply>\"}\n\
 One atomic tool turn in the user environment: {\"path\":\"single_work\"}\n\
-Independently verifiable deliverables: a linear DAG JSON object using the planner rules below (schema_version 0.1.0, 2 to 8 nodes). A 1-node graph that is not tool_direct is treated as single_work.\n\
+Independently verifiable deliverables: a linear DAG JSON object using the planner rules below (schema_version 0.1.0, 2 to 8 nodes) with a non-empty artifact on every node. The host collapses graphs with fewer than two filled-I nodes to single_work. A 1-node graph that is not tool_direct is treated as single_work.\n\
 Never use chat_only when the user asks to inspect a local repo, workspace, or host.\n";
 
 #[must_use]
@@ -273,17 +273,23 @@ pub fn one_node_live_dag(user_task: &str) -> PlannedLiveDag {
 }
 
 /// GOV-007: live `single_work` is one hop on the DAG executor, not a second loop.
+/// Capability is session cognition (R7: chosen model + native tools), not cheap `tool_calling`.
 #[must_use]
 pub fn single_work_as_live_plan(user_task: &str) -> PlannedLiveDag {
     let mut plan = one_node_live_dag(user_task);
     plan.source = "single_work";
+    if let Some(node) = plan.dag.nodes.first_mut() {
+        node.model_selector.capabilities = vec!["high-reasoning".into()];
+        node.sigma = Some("llm_cognition".into());
+    }
     plan
 }
 
-/// Map TurnMode `single_work` onto the canonical live hop plan (R7 + R14).
+/// Map TurnMode onto the canonical live hop plan (R7 + R14).
+/// Unfilled graphs collapse here so HostPhase::Plan / repair cache cannot bypass R7.
 #[must_use]
 pub fn execute_as_live_plan(hop: LiveFirstHop, user_task: &str) -> LiveFirstHop {
-    match hop {
+    match collapse_trivial_plan(hop) {
         LiveFirstHop::SingleWork => LiveFirstHop::Plan(single_work_as_live_plan(user_task)),
         other => other,
     }
@@ -327,6 +333,12 @@ fn plan_is_one_node_tool_direct(plan: &PlannedLiveDag) -> bool {
         .is_some_and(|n| node_sigma(n) == NodeSigma::ToolDirect)
 }
 
+fn node_has_filled_i(node: &crate::agent::dag_runner::DagNode) -> bool {
+    node.artifact
+        .as_deref()
+        .is_some_and(|s| !s.trim().is_empty())
+}
+
 fn plan_one_node_has_i(plan: &PlannedLiveDag) -> bool {
     if plan.order.len() != 1 {
         return false;
@@ -338,15 +350,32 @@ fn plan_one_node_has_i(plan: &PlannedLiveDag) -> bool {
         .nodes
         .iter()
         .find(|n| n.id == *id)
-        .is_some_and(|n| n.artifact.as_deref().is_some_and(|s| !s.trim().is_empty()))
+        .is_some_and(node_has_filled_i)
 }
 
-/// Empty-I 1-node LlmWork → SingleWork (R9). A filled I stays on the hop path.
+fn plan_filled_i_count(plan: &PlannedLiveDag) -> usize {
+    plan.order
+        .iter()
+        .filter(|id| {
+            plan.dag
+                .nodes
+                .iter()
+                .find(|n| n.id == **id)
+                .is_some_and(node_has_filled_i)
+        })
+        .count()
+}
+
+fn plan_survives_collapse(plan: &PlannedLiveDag) -> bool {
+    plan_filled_i_count(plan) >= 2
+        || plan_is_one_node_tool_direct(plan)
+        || plan_one_node_has_i(plan)
+}
+
+/// R7: `plan_dag` only when ≥2 nodes have filled I. Else SingleWork (then hop).
 fn collapse_trivial_plan(hop: LiveFirstHop) -> LiveFirstHop {
     match hop {
-        LiveFirstHop::Plan(plan) if plan.order.len() >= 2 => LiveFirstHop::Plan(plan),
-        LiveFirstHop::Plan(plan) if plan_is_one_node_tool_direct(&plan) => LiveFirstHop::Plan(plan),
-        LiveFirstHop::Plan(plan) if plan_one_node_has_i(&plan) => LiveFirstHop::Plan(plan),
+        LiveFirstHop::Plan(plan) if plan_survives_collapse(&plan) => LiveFirstHop::Plan(plan),
         LiveFirstHop::Plan(_) => LiveFirstHop::SingleWork,
         other => other,
     }
@@ -414,7 +443,7 @@ pub async fn live_first_hop(
             host_phase,
         )
         .await?;
-        return Ok(LiveFirstHop::Plan(planned));
+        return Ok(collapse_trivial_plan(LiveFirstHop::Plan(planned)));
     }
     let fallback = fallback_template_json(agent)?;
     let hop_messages = first_hop_chat_messages(&live_first_hop_system_prompt(), history, user_task);
@@ -1273,6 +1302,13 @@ pub async fn obtain_planned_live_dag_with_provider(
             session_id = %session_id,
             "planner used fallback template; not caching for session"
         );
+    } else if !plan_survives_collapse(&planned) {
+        tracing::info!(
+            target: "bounded_dag_live",
+            session_id = %session_id,
+            nodes = planned.order.len(),
+            "unfilled plan not cached; host will collapse to single_work"
+        );
     } else {
         let json = planned_store_json(&planned, &fallback);
         if let Err(err) = store_planned_json(mem, session_id, &json).await {
@@ -1903,6 +1939,7 @@ mod tests {
         assert!(first.contains("single_work"));
         assert!(!first.contains("Do not use path single_work"));
         assert!(first.contains("one node per deliverable"));
+        assert!(first.contains("non-empty artifact"));
         assert!(first.contains(DAG_PLAN_SYSTEM_PROMPT));
         assert!(!TURN_OBSERVE_SYSTEM_PROMPT.contains("even when remaining_nodes is 0"));
     }
@@ -1941,8 +1978,8 @@ mod tests {
                     .model_selector
                     .capabilities
                     .iter()
-                    .any(|c| c == "tool_calling"));
-                assert!(crate::agent::graph_scheduler::llm_work_missing_i(node));
+                    .any(|c| c == "high-reasoning"));
+                assert!(!crate::agent::graph_scheduler::llm_work_missing_i(node));
             }
             other => panic!("expected 1-node plan, got {other:?}"),
         }
@@ -1990,6 +2027,13 @@ mod tests {
             LiveFirstHop::Plan(plan) => {
                 assert_eq!(plan.source, "single_work");
                 assert_eq!(plan.order.len(), 1);
+                let node = plan.dag.nodes.iter().find(|n| n.id == "work").unwrap();
+                assert!(node
+                    .model_selector
+                    .capabilities
+                    .iter()
+                    .any(|c| c == "high-reasoning"));
+                assert_eq!(node.sigma.as_deref(), Some("llm_cognition"));
             }
             other => panic!("{other:?}"),
         }
@@ -2056,11 +2100,15 @@ mod tests {
         assert_eq!(provider.responses.lock().unwrap().len(), 1);
     }
 
+    const THREE_UNFILLED_JSON: &str = r#"{"schema_version":"0.1.0","id":"g","entry":"a","max_steps":4,"nodes":[{"id":"a","task_type":"ops-check","model_selector":{"capabilities":["tool_calling"]},"sigma":"llm_cognition","next":"b"},{"id":"b","task_type":"ops-check","model_selector":{"capabilities":["tool_calling"]},"sigma":"llm_cognition","next":"c"},{"id":"c","task_type":"analysis","model_selector":{"capabilities":["high-reasoning"]},"sigma":"llm_cognition","next":null}]}"#;
+
+    const TWO_FILLED_JSON: &str = r#"{"schema_version":"0.1.0","id":"g","entry":"read","max_steps":4,"nodes":[{"id":"read","task_type":"summarize","model_selector":{"capabilities":["document_understanding"]},"artifact":"read the requested sources","next":"write"},{"id":"write","task_type":"write","model_selector":{"capabilities":["high-reasoning"]},"artifact":"write the analysis report","next":null}]}"#;
+
     #[tokio::test]
-    async fn live_first_hop_skips_refine_for_multi_node() {
+    async fn live_first_hop_unfilled_multi_node_collapses_to_single_work() {
         let provider = TwoShotPlanner {
             responses: std::sync::Mutex::new(vec![
-                CODE_FIX_TEMPLATE_JSON.to_string(),
+                THREE_UNFILLED_JSON.into(),
                 "MUST_NOT_REFINE".into(),
             ]),
         };
@@ -2070,7 +2118,53 @@ mod tests {
             "sess",
             &provider,
             "m",
-            "fix the compiler error",
+            "inspect the requested sources and write a report",
+            &[],
+            0.0,
+            &SecurityPolicy::default(),
+            &[],
+            HostPhase::Build,
+        )
+        .await
+        .unwrap();
+        assert!(
+            matches!(hop, LiveFirstHop::SingleWork),
+            "unfilled multi-node must collapse, got {hop:?}"
+        );
+        assert_eq!(provider.responses.lock().unwrap().len(), 1);
+        let executed =
+            execute_as_live_plan(hop, "inspect the requested sources and write a report");
+        match executed {
+            LiveFirstHop::Plan(plan) => {
+                assert_eq!(plan.source, "single_work");
+                assert_eq!(plan.order.len(), 1);
+                let node = &plan.dag.nodes[0];
+                assert!(node
+                    .model_selector
+                    .capabilities
+                    .iter()
+                    .any(|c| c == "high-reasoning"));
+                assert!(!crate::agent::graph_scheduler::llm_work_missing_i(node));
+            }
+            other => panic!("collapsed graph must execute as cognition hop, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn live_first_hop_skips_refine_for_multi_node() {
+        let provider = TwoShotPlanner {
+            responses: std::sync::Mutex::new(vec![
+                TWO_FILLED_JSON.into(),
+                "MUST_NOT_REFINE".into(),
+            ]),
+        };
+        let hop = live_first_hop(
+            &live_agent_cfg(),
+            &live_mem(),
+            "sess",
+            &provider,
+            "m",
+            "read sources then write the report",
             &[],
             0.0,
             &SecurityPolicy::default(),
@@ -2080,8 +2174,8 @@ mod tests {
         .await
         .unwrap();
         match hop {
-            LiveFirstHop::Plan(plan) => assert_eq!(plan.order.len(), 3),
-            other => panic!("expected 3-node plan, got {other:?}"),
+            LiveFirstHop::Plan(plan) => assert_eq!(plan.order.len(), 2),
+            other => panic!("expected filled-I plan, got {other:?}"),
         }
         assert_eq!(provider.responses.lock().unwrap().len(), 1);
     }

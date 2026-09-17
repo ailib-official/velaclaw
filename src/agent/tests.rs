@@ -1537,10 +1537,10 @@ async fn bounded_dag_follow_up_first_hop_sees_prior_report() {
 
 #[cfg(feature = "ai-protocol")]
 #[tokio::test]
-async fn bounded_dag_single_work_asks_empty_i() {
+async fn bounded_dag_single_work_runs_native_tools() {
     let provider = ScriptedProvider::new(vec![
         text_response(r#"{"path":"single_work"}"#),
-        text_response("MUST_NOT_RUN_WORK_MODEL"),
+        text_response("report ready"),
     ]);
     let calls = provider.call_counter();
     let mut agent = build_agent_with_config(
@@ -1557,16 +1557,16 @@ async fn bounded_dag_single_work_asks_empty_i() {
         .turn("check remote git then sync the workspace")
         .await
         .unwrap();
-    assert_eq!(
-        calls.load(Ordering::SeqCst),
-        1,
-        "single_work empty I must Ask; no work-model loop"
+    assert!(
+        calls.load(Ordering::SeqCst) >= 2,
+        "single_work must start the work-model loop, calls={}",
+        calls.load(Ordering::SeqCst)
     );
     assert!(
-        out.contains("empty I") || out.contains("Approve an allowed command"),
+        !out.contains("empty I") && !out.contains("Approve an allowed command"),
         "{out}"
     );
-    assert!(!out.contains("MUST_NOT_RUN_WORK_MODEL"), "{out}");
+    assert!(out.contains("report ready"), "{out}");
 }
 
 #[cfg(feature = "ai-protocol")]

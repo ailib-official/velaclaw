@@ -272,6 +272,23 @@ pub fn one_node_live_dag(user_task: &str) -> PlannedLiveDag {
     }
 }
 
+/// GOV-007: live `single_work` is one hop on the DAG executor, not a second loop.
+#[must_use]
+pub fn single_work_as_live_plan(user_task: &str) -> PlannedLiveDag {
+    let mut plan = one_node_live_dag(user_task);
+    plan.source = "single_work";
+    plan
+}
+
+/// Map TurnMode `single_work` onto the canonical live hop plan (R7 + R14).
+#[must_use]
+pub fn execute_as_live_plan(hop: LiveFirstHop, user_task: &str) -> LiveFirstHop {
+    match hop {
+        LiveFirstHop::SingleWork => LiveFirstHop::Plan(single_work_as_live_plan(user_task)),
+        other => other,
+    }
+}
+
 fn admit_planned_dag(
     plan: &mut PlannedLiveDag,
     user_task: &str,
@@ -310,11 +327,26 @@ fn plan_is_one_node_tool_direct(plan: &PlannedLiveDag) -> bool {
         .is_some_and(|n| node_sigma(n) == NodeSigma::ToolDirect)
 }
 
-/// 1-node LlmWork (or unlabeled) graphs are one tool loop, not a DAG schedule.
+fn plan_one_node_has_i(plan: &PlannedLiveDag) -> bool {
+    if plan.order.len() != 1 {
+        return false;
+    }
+    let Some(id) = plan.order.first() else {
+        return false;
+    };
+    plan.dag
+        .nodes
+        .iter()
+        .find(|n| n.id == *id)
+        .is_some_and(|n| n.artifact.as_deref().is_some_and(|s| !s.trim().is_empty()))
+}
+
+/// Empty-I 1-node LlmWork → SingleWork (R9). A filled I stays on the hop path.
 fn collapse_trivial_plan(hop: LiveFirstHop) -> LiveFirstHop {
     match hop {
         LiveFirstHop::Plan(plan) if plan.order.len() >= 2 => LiveFirstHop::Plan(plan),
         LiveFirstHop::Plan(plan) if plan_is_one_node_tool_direct(&plan) => LiveFirstHop::Plan(plan),
+        LiveFirstHop::Plan(plan) if plan_one_node_has_i(&plan) => LiveFirstHop::Plan(plan),
         LiveFirstHop::Plan(_) => LiveFirstHop::SingleWork,
         other => other,
     }
@@ -1605,6 +1637,10 @@ pub fn planned_store_json(plan: &PlannedLiveDag, fallback_json: &str) -> String 
                     },
                     "max_steps": n.max_steps,
                     "next": n.next,
+                    "fork": n.fork,
+                    "artifact": n.artifact,
+                    "sigma": n.sigma,
+                    "locus": n.locus,
                 })
             }).collect::<Vec<_>>(),
         })
@@ -1896,6 +1932,67 @@ mod tests {
         .unwrap();
         assert!(matches!(hop, LiveFirstHop::SingleWork));
         assert_eq!(provider.responses.lock().unwrap().len(), 1);
+        match execute_as_live_plan(hop, "check remote git then sync") {
+            LiveFirstHop::Plan(plan) => {
+                assert_eq!(plan.source, "single_work");
+                assert_eq!(plan.order, vec!["work"]);
+                let node = plan.dag.nodes.iter().find(|n| n.id == "work").unwrap();
+                assert!(node
+                    .model_selector
+                    .capabilities
+                    .iter()
+                    .any(|c| c == "tool_calling"));
+                assert!(crate::agent::graph_scheduler::llm_work_missing_i(node));
+            }
+            other => panic!("expected 1-node plan, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn live_first_hop_one_node_with_i_stays_plan() {
+        let mut seed = one_node_live_dag("summarize the requested files");
+        seed.dag.nodes[0].artifact = Some("produce a short summary of the requested files".into());
+        seed.dag.nodes[0].model_selector.capabilities = vec!["document_understanding".into()];
+        let json = planned_store_json(&seed, CODE_FIX_TEMPLATE_JSON);
+        let provider = TwoShotPlanner {
+            responses: std::sync::Mutex::new(vec![json, "MUST_NOT_REFINE".into()]),
+        };
+        let hop = live_first_hop(
+            &live_agent_cfg(),
+            &live_mem(),
+            "sess",
+            &provider,
+            "m",
+            "summarize the requested files",
+            &[],
+            0.0,
+            &SecurityPolicy::default(),
+            &[],
+            HostPhase::Build,
+        )
+        .await
+        .unwrap();
+        match hop {
+            LiveFirstHop::Plan(plan) => {
+                assert_eq!(plan.order, vec!["work"]);
+                assert!(!plan_is_one_node_tool_direct(&plan));
+                assert!(plan_one_node_has_i(&plan));
+            }
+            other => panic!("expected 1-node Plan with I, got {other:?}"),
+        }
+        assert_eq!(provider.responses.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn execute_as_live_plan_single_work_is_one_hop() {
+        let hop = execute_as_live_plan(LiveFirstHop::SingleWork, "any user task");
+        match hop {
+            LiveFirstHop::Plan(plan) => {
+                assert_eq!(plan.source, "single_work");
+                assert_eq!(plan.order.len(), 1);
+            }
+            other => panic!("{other:?}"),
+        }
     }
 
     #[tokio::test]

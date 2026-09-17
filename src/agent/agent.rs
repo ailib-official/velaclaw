@@ -934,20 +934,23 @@ impl Agent {
                 )
                 .to_string()
             };
-            crate::agent::bounded_dag_live::live_first_hop(
-                &self.config,
-                self.memory.as_ref(),
-                self.session_id.as_str(),
-                self.provider.as_ref(),
-                planner_model.as_str(),
+            crate::agent::bounded_dag_live::execute_as_live_plan(
+                crate::agent::bounded_dag_live::live_first_hop(
+                    &self.config,
+                    self.memory.as_ref(),
+                    self.session_id.as_str(),
+                    self.provider.as_ref(),
+                    planner_model.as_str(),
+                    user_message,
+                    &hop_history,
+                    self.temperature,
+                    &self.security.snapshot(),
+                    self.host_aliases.as_slice(),
+                    self.host_phase,
+                )
+                .await?,
                 user_message,
-                &hop_history,
-                self.temperature,
-                &self.security.snapshot(),
-                self.host_aliases.as_slice(),
-                self.host_phase,
             )
-            .await?
         } else {
             crate::agent::bounded_dag_live::LiveFirstHop::SingleWork
         };

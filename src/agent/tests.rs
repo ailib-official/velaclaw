@@ -1574,6 +1574,108 @@ async fn bounded_dag_single_work_asks_on_empty_invoke_i() {
 
 #[cfg(feature = "ai-protocol")]
 #[tokio::test]
+async fn bounded_dag_empty_i_hub_fill_continues_same_turn() {
+    let provider = ScriptedProvider::new(vec![
+        text_response(r#"{"path":"single_work"}"#),
+        text_response("report ready"),
+    ]);
+    let calls = provider.call_counter();
+    let mut agent = build_agent_with_config(
+        Box::new(provider),
+        vec![],
+        AgentConfig {
+            bounded_dag_live: true,
+            envelope_assemble: false,
+            ..AgentConfig::default()
+        },
+    );
+    agent.set_host_phase(crate::agent::host_phase::HostPhase::Build);
+    let hub = Arc::new(crate::approval::HumanInputHub::new(Arc::new(
+        crate::approval::SecretSlotStore::new(),
+    )));
+    agent.enable_gateway_hitl(Arc::clone(&hub));
+    let mut sub = hub.subscribe();
+    let hub_r = Arc::clone(&hub);
+    tokio::spawn(async move {
+        let ev = tokio::time::timeout(std::time::Duration::from_secs(5), sub.recv())
+            .await
+            .expect("hub prompt")
+            .expect("event");
+        let _ = hub_r.respond(
+            &ev.id,
+            crate::approval::HumanInputRespondBody {
+                cancelled: false,
+                selected: None,
+                text: Some("pwd".into()),
+                secret: None,
+            },
+        );
+    });
+    let out = agent
+        .turn("check remote git then sync the workspace")
+        .await
+        .unwrap();
+    assert!(
+        !out.contains("empty I") && !out.contains("Approve an allowed command"),
+        "filled I must continue the same turn, calls={} out={out}",
+        calls.load(Ordering::SeqCst)
+    );
+}
+
+#[cfg(feature = "ai-protocol")]
+#[tokio::test]
+async fn bounded_dag_empty_i_hub_cancel_does_not_invent_command() {
+    let provider = ScriptedProvider::new(vec![text_response(r#"{"path":"single_work"}"#)]);
+    let calls = provider.call_counter();
+    let mut agent = build_agent_with_config(
+        Box::new(provider),
+        vec![],
+        AgentConfig {
+            bounded_dag_live: true,
+            envelope_assemble: false,
+            ..AgentConfig::default()
+        },
+    );
+    agent.set_host_phase(crate::agent::host_phase::HostPhase::Build);
+    let hub = Arc::new(crate::approval::HumanInputHub::new(Arc::new(
+        crate::approval::SecretSlotStore::new(),
+    )));
+    agent.enable_gateway_hitl(Arc::clone(&hub));
+    let mut sub = hub.subscribe();
+    let hub_r = Arc::clone(&hub);
+    tokio::spawn(async move {
+        let ev = tokio::time::timeout(std::time::Duration::from_secs(5), sub.recv())
+            .await
+            .expect("hub prompt")
+            .expect("event");
+        let _ = hub_r.respond(
+            &ev.id,
+            crate::approval::HumanInputRespondBody {
+                cancelled: true,
+                selected: None,
+                text: None,
+                secret: None,
+            },
+        );
+    });
+    let out = agent
+        .turn("check remote git then sync the workspace")
+        .await
+        .unwrap();
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "cancel must not start work"
+    );
+    assert!(
+        out.contains("empty I") || out.contains("cancelled"),
+        "{out}"
+    );
+    assert!(!out.contains("report ready"), "{out}");
+}
+
+#[cfg(feature = "ai-protocol")]
+#[tokio::test]
 async fn bounded_dag_single_work_runs_native_tools_when_i_is_invoke() {
     let provider = ScriptedProvider::new(vec![
         text_response(

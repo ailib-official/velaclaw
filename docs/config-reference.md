@@ -85,7 +85,7 @@ Quota/EOL notices name the **executed** logical id (`executed model \`…\``); t
 
 **Shared pre-turn (CLI + Web + Channel):** `resolve_turn_model` (CLI/Web), **`context_orch::prepare_turn_history`** (compact + `assemble_layered`; VL-CTX-001 / GOV-007), and L2 `agent-policy.yaml` tool_dispatcher merge. **Shared tool loop (VL-CTX-002):** `run_tool_call_loop` is the single iteration body; Web injects ApprovalHub/HITL via gate extras (adapters, not a second policy). CLI stdin uses the same `ApprovalGate`; cron/heartbeat jobs reuse this loop with channel names `cron`/`heartbeat` (no stdin elevation). **Shared bootstrap (VL-REVIEW2-A0 / GOV-007):** `agent::assemble::assemble_runtime` is the canonical Config → provider/memory/security/tools/dispatcher entry for CLI, Web, and Channel hosts.
 
-DAG-related keys below: **`template_dag` / candidate emit / shadow** stay library/doctor (AI-DAG frozen off the default turn). **`bounded_dag_live` is a separate opt-in** for a handwritten linear L2 graph on CLI + Web (not L4 emit).
+DAG-related keys below: **`template_dag` / candidate emit / shadow** stay library/doctor (AI-DAG frozen off the default turn). **`bounded_dag_live` is a separate opt-in** for a handwritten linear L2 graph on CLI + Web (not L4 emit). On Web, an empty-I hop opens a text prompt for one allowed command (`ssh <alias> …` only when that alias is in `deploy.servers`); filling it continues the same turn. CLI without HITL keeps the short Ask. This does not widen the default allowlist.
 
 | Key | Default | Purpose |
 |---|---|---|

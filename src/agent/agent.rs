@@ -1,7 +1,10 @@
 use crate::agent::dispatcher::ToolDispatcher;
 use crate::agent::memory_loader::{DefaultMemoryLoader, MemoryLoader};
 use crate::agent::prompt::{PromptContext, SystemPromptBuilder};
-use crate::approval::{ApprovalHub, ApprovalManager, HumanInputHub};
+use crate::approval::{
+    ApprovalHub, ApprovalManager, HumanInputHub, HumanInputKind, HumanInputOutcome,
+    HumanInputRequest,
+};
 use crate::cli_render::{prefix_agent_lines, RenderOpts};
 use crate::config::{Config, DEFAULT_PROTOCOL_MODEL_ID};
 use crate::memory::{self, Memory, MemoryCategory};
@@ -539,6 +542,93 @@ impl Agent {
         self.human_input_hub = Some(hub);
     }
 
+    /// R23: empty-I Ask is a fill contract when HITL is attached; same turn continues.
+    #[cfg(feature = "ai-protocol")]
+    async fn fill_empty_i_contract(
+        &self,
+        hop: crate::agent::bounded_dag_live::LiveFirstHop,
+        user_task: &str,
+    ) -> crate::agent::bounded_dag_live::LiveFirstHop {
+        use crate::agent::bounded_dag_live::LiveFirstHop;
+        use crate::agent::bounded_dag_live::{
+            fill_plan_operator_invoke, hop_needs_empty_i_contract, parse_operator_invoke_i,
+            plan_from_operator_invoke, EMPTY_I_CONTRACT_PROMPT,
+        };
+        use crate::agent::graph_scheduler::EMPTY_I_ASK;
+
+        if !hop_needs_empty_i_contract(&hop) {
+            return hop;
+        }
+        let Some(hub) = self.human_input_hub.as_ref() else {
+            return hop;
+        };
+        let outcome = hub
+            .request(HumanInputRequest {
+                kind: HumanInputKind::Text,
+                prompt: EMPTY_I_CONTRACT_PROMPT.to_string(),
+                options: Vec::new(),
+                risk_note: Some(
+                    "This fills the hop I contract. It does not widen the default allowlist."
+                        .into(),
+                ),
+            })
+            .await;
+        let text = match outcome {
+            HumanInputOutcome::Text(t) => t,
+            HumanInputOutcome::Cancelled => {
+                return LiveFirstHop::ChatOnly {
+                    reply: format!("{EMPTY_I_ASK} Operator cancelled filling I."),
+                };
+            }
+            HumanInputOutcome::TimedOut => {
+                return LiveFirstHop::ChatOnly {
+                    reply: format!("{EMPTY_I_ASK} Operator did not fill I in time."),
+                };
+            }
+            _ => {
+                return LiveFirstHop::ChatOnly {
+                    reply: format!("{EMPTY_I_ASK} Reply was not an invoke command."),
+                };
+            }
+        };
+        let fill = match parse_operator_invoke_i(text.as_str(), self.host_aliases.as_slice()) {
+            Ok(fill) => fill,
+            Err(_) => {
+                return LiveFirstHop::ChatOnly {
+                    reply: format!(
+                        "{EMPTY_I_ASK} Reply was not an invoke command; the host will not invent one."
+                    ),
+                };
+            }
+        };
+        let policy = self.security.snapshot();
+        match hop {
+            LiveFirstHop::Plan(plan) => match fill_plan_operator_invoke(
+                plan,
+                &fill,
+                user_task,
+                &policy,
+                self.host_aliases.as_slice(),
+            ) {
+                Ok(plan) => LiveFirstHop::Plan(plan),
+                Err(err) => LiveFirstHop::ChatOnly {
+                    reply: format!("Plan rejected before execute: {err}."),
+                },
+            },
+            _ => match plan_from_operator_invoke(
+                &fill,
+                user_task,
+                &policy,
+                self.host_aliases.as_slice(),
+            ) {
+                Ok(plan) => LiveFirstHop::Plan(plan),
+                Err(err) => LiveFirstHop::ChatOnly {
+                    reply: format!("Plan rejected before execute: {err}."),
+                },
+            },
+        }
+    }
+
     pub fn from_config(config: &Config) -> Result<Self> {
         let assembled = crate::agent::assemble::assemble_runtime(
             config,
@@ -953,6 +1043,12 @@ impl Agent {
             )
         } else {
             crate::agent::bounded_dag_live::LiveFirstHop::SingleWork
+        };
+        #[cfg(feature = "ai-protocol")]
+        let hop = if self.config.bounded_dag_live {
+            self.fill_empty_i_contract(hop, user_message).await
+        } else {
+            hop
         };
         #[cfg(feature = "ai-protocol")]
         let (use_live_dag, planned_from_first, chat_only_reply) = {

@@ -575,7 +575,7 @@ pub async fn finish_live_graph(
             Ok(ensure_user_visible(user_task, last_body))
         }
         AfterSuccessfulHop::FinishParlor => {
-            if graph_artifacts.trim().is_empty() {
+            if graph_artifacts.trim().is_empty() && !last_body_has_parlor_substance(last_body) {
                 tracing::info!(
                     parlor_rewrite = false,
                     graph_artifact_bytes = 0,
@@ -600,6 +600,28 @@ pub async fn finish_live_graph(
             .await
         }
     }
+}
+
+fn last_body_has_parlor_substance(last_body: &str) -> bool {
+    let stripped = crate::util::strip_tool_call_markup(last_body);
+    let t = stripped.trim();
+    if t.is_empty() {
+        return false;
+    }
+    !looks_like_orphan_markup_tag(t)
+}
+
+fn looks_like_orphan_markup_tag(t: &str) -> bool {
+    let Some(inner) = t.strip_prefix("</").or_else(|| t.strip_prefix('<')) else {
+        return false;
+    };
+    let Some(name) = inner.strip_suffix('>') else {
+        return false;
+    };
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
 }
 
 #[cfg(test)]
@@ -890,39 +912,34 @@ mod tests {
         let p = CountChat {
             n: std::sync::atomic::AtomicUsize::new(0),
         };
-        let empty_graph = finish_live_graph(&p, "m", 0.0, "task", ENVELOPE, "", "", 3)
+        let _ = finish_live_graph(&p, "m", 0.0, "task", ENVELOPE, "", "", 3)
             .await
             .unwrap();
         let envelope_calls = p.n.load(std::sync::atomic::Ordering::SeqCst);
-        assert_eq!(
-            envelope_calls, 0,
-            "empty graph artifacts must not spend parlor LLM, got {envelope_calls}"
-        );
         assert!(
-            empty_graph.contains("no operator-visible") || empty_graph.contains("没有可展示"),
-            "{empty_graph}"
+            envelope_calls <= 1,
+            "parlor LLM must be ≤1, got {envelope_calls}"
         );
-        assert!(!empty_graph.contains("</tool_call>"), "{empty_graph}");
-        let p_art = CountChat {
+        assert_eq!(
+            envelope_calls, 1,
+            "internodal last hop spends the parlor budget"
+        );
+        let empty_art = CountChat {
             n: std::sync::atomic::AtomicUsize::new(0),
         };
-        let _ = finish_live_graph(
-            &p_art,
-            "m",
-            0.0,
-            "task",
-            ENVELOPE,
-            "",
-            "node check: pwd\n/workspace",
-            3,
-        )
-        .await
-        .unwrap();
+        let markup_out = finish_live_graph(&empty_art, "m", 0.0, "task", "</tool_call>", "", "", 3)
+            .await
+            .unwrap();
         assert_eq!(
-            p_art.n.load(std::sync::atomic::Ordering::SeqCst),
-            1,
-            "internodal last hop with graph artifacts spends parlor"
+            empty_art.n.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "empty graph + markup last_body must not parlor"
         );
+        assert!(
+            markup_out.contains("no operator-visible") || markup_out.contains("没有可展示"),
+            "{markup_out}"
+        );
+        assert!(!markup_out.contains("</tool_call>"), "{markup_out}");
         let vis = CountChat {
             n: std::sync::atomic::AtomicUsize::new(0),
         };

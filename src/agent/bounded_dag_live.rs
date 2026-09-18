@@ -1989,7 +1989,10 @@ mod tests {
                     .capabilities
                     .iter()
                     .any(|c| c == "high-reasoning"));
-                assert!(!crate::agent::graph_scheduler::llm_work_missing_i(node));
+                assert!(crate::agent::graph_scheduler::llm_work_missing_i(node));
+                assert!(!crate::agent::graph_scheduler::llm_work_missing_i_at(
+                    node, 1
+                ));
             }
             other => panic!("expected 1-node plan, got {other:?}"),
         }
@@ -2156,7 +2159,10 @@ mod tests {
                     .capabilities
                     .iter()
                     .any(|c| c == "high-reasoning"));
-                assert!(!crate::agent::graph_scheduler::llm_work_missing_i(node));
+                assert!(crate::agent::graph_scheduler::llm_work_missing_i(node));
+                assert!(!crate::agent::graph_scheduler::llm_work_missing_i_at(
+                    node, 1
+                ));
             }
             other => panic!("collapsed graph must execute as cognition hop, got {other:?}"),
         }

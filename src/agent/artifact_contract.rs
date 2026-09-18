@@ -87,6 +87,26 @@ fn artifact_signals_layer(text: &str, layer: EvidenceLayer) -> bool {
     }
 }
 
+/// Agent diagnostic tree: not a task locus and not evidence_layer (R20).
+#[must_use]
+pub fn is_agent_diagnostic_path(text: &str) -> bool {
+    let t = text.replace('\\', "/").to_ascii_lowercase();
+    t.contains(".velaclaw/chat_sessions")
+        || t.contains(".velaclaw/tmp/graphs")
+        || t.contains(".velaclaw/tmp/")
+        || t.contains("tool_receipts.jsonl")
+}
+
+/// Tool output whose only paths are diagnostic (R20 / P8).
+#[must_use]
+pub fn is_diagnostic_only_evidence(text: &str) -> bool {
+    let t = text.trim();
+    if t.is_empty() {
+        return false;
+    }
+    is_agent_diagnostic_path(t)
+}
+
 /// True when findings are only workspace listing (pwd/ls/find) without higher layers.
 #[must_use]
 pub fn is_workspace_only_listing(text: &str) -> bool {
@@ -137,6 +157,9 @@ pub fn hop_artifact_contract(
 ) -> HopArtifactVerdict {
     if artifact.trim().is_empty() {
         return HopArtifactVerdict::Empty;
+    }
+    if is_diagnostic_only_evidence(tool_evidence) {
+        return HopArtifactVerdict::InsufficientEvidenceLayer;
     }
     if !tool_evidence.trim().is_empty()
         && is_off_goal_listing(tool_evidence)
@@ -296,6 +319,29 @@ mod tests {
             hop_artifact_contract(&n2, prose, listing),
             HopArtifactVerdict::InsufficientEvidenceLayer
         );
+    }
+
+    #[test]
+    fn diagnostic_path_is_not_task_evidence() {
+        assert!(is_agent_diagnostic_path(
+            ".velaclaw/chat_sessions/abcd.json: prism notes"
+        ));
+        assert!(is_agent_diagnostic_path(
+            "workspace/.velaclaw/tmp/graphs/sess/one-node/admit.json"
+        ));
+        assert!(is_diagnostic_only_evidence(
+            "grep hit .velaclaw/chat_sessions/old.json\nprotocol-looking prose"
+        ));
+        let n = node("work", None, None);
+        let prose = "Architecture share is feasible at the protocol layer.";
+        let diag = "grep -r prism .velaclaw/chat_sessions/foo.json | head -20";
+        assert_eq!(
+            hop_artifact_contract(&n, prose, diag),
+            HopArtifactVerdict::InsufficientEvidenceLayer
+        );
+        assert!(!is_agent_diagnostic_path(
+            "ai-lib-plans/active/projects/overview.md"
+        ));
     }
 
     #[test]

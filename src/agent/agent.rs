@@ -1244,7 +1244,7 @@ impl Agent {
                     reason = contact.reason.as_str(),
                     "work hop start"
                 );
-                if crate::agent::graph_scheduler::llm_work_missing_i(&node) {
+                if crate::agent::graph_scheduler::llm_work_missing_i_at(&node, index) {
                     let stop = format_work_node_stop(
                         user_message,
                         &node.id,
@@ -1657,7 +1657,7 @@ impl Agent {
         {
             return self.invoke_tool_direct(node).await;
         }
-        if crate::agent::graph_scheduler::llm_work_missing_i(node) {
+        if crate::agent::graph_scheduler::llm_work_missing_i_at(node, 0) {
             anyhow::bail!("{}", crate::agent::graph_scheduler::EMPTY_I_ASK);
         }
         crate::agent::graph_scheduler::ensure_live_llm_native(

@@ -324,7 +324,7 @@ mod tests {
     #[test]
     fn diagnostic_path_is_not_task_evidence() {
         assert!(is_agent_diagnostic_path(
-            ".velaclaw/chat_sessions/abcd.json: prism notes"
+            ".velaclaw/chat_sessions/abcd.json: session notes"
         ));
         assert!(is_agent_diagnostic_path(
             "workspace/.velaclaw/tmp/graphs/sess/one-node/admit.json"
@@ -334,14 +334,12 @@ mod tests {
         ));
         let n = node("work", None, None);
         let prose = "Architecture share is feasible at the protocol layer.";
-        let diag = "grep -r prism .velaclaw/chat_sessions/foo.json | head -20";
+        let diag = "grep -r notes .velaclaw/chat_sessions/foo.json | head -20";
         assert_eq!(
             hop_artifact_contract(&n, prose, diag),
             HopArtifactVerdict::InsufficientEvidenceLayer
         );
-        assert!(!is_agent_diagnostic_path(
-            "ai-lib-plans/active/projects/overview.md"
-        ));
+        assert!(!is_agent_diagnostic_path("workspace/src/lib.rs"));
     }
 
     #[test]

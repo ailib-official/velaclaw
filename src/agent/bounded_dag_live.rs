@@ -66,7 +66,7 @@ Start this VelaClaw turn now. Reply with ONLY one JSON object, no markdown.\n\
 Prior user/assistant messages are this same session. Continue that work (same hosts, paths, and findings). Do not claim you forgot earlier turns. Do not ask what to do if the session already did it.\n\
 Greeting, thanks, or general knowledge (no repo/host/files): {\"path\":\"chat_only\",\"reply\":\"<full user-visible reply>\"}\n\
 One atomic tool turn in the user environment: {\"path\":\"single_work\"}\n\
-Independently verifiable deliverables: a linear DAG JSON object using the planner rules below (schema_version 0.1.0, 2 to 8 nodes) with a non-empty artifact on every node. The host collapses graphs with fewer than two filled-I nodes to single_work. A 1-node graph that is not tool_direct is treated as single_work.\n\
+Independently verifiable deliverables: a linear DAG JSON object using the planner rules below (schema_version 0.1.0, 2 to 8 nodes). tool_direct artifact must be an executable command (or ssh <alias> …), not a caption. Cognition nodes may use a work description as I. The host collapses graphs with fewer than two Σ-shaped filled-I nodes to single_work. A 1-node graph that is not tool_direct is treated as single_work.\n\
 Never use chat_only when the user asks to inspect a local repo, workspace, or host.\n";
 
 #[must_use]
@@ -334,9 +334,18 @@ fn plan_is_one_node_tool_direct(plan: &PlannedLiveDag) -> bool {
 }
 
 fn node_has_filled_i(node: &crate::agent::dag_runner::DagNode) -> bool {
-    node.artifact
+    let Some(raw) = node
+        .artifact
         .as_deref()
-        .is_some_and(|s| !s.trim().is_empty())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    else {
+        return false;
+    };
+    match node_sigma(node) {
+        NodeSigma::ToolDirect => crate::agent::graph_scheduler::tool_direct_artifact_is_invoke(raw),
+        NodeSigma::LlmWork => true,
+    }
 }
 
 fn plan_one_node_has_i(plan: &PlannedLiveDag) -> bool {
@@ -368,7 +377,7 @@ fn plan_filled_i_count(plan: &PlannedLiveDag) -> usize {
 
 fn plan_survives_collapse(plan: &PlannedLiveDag) -> bool {
     plan_filled_i_count(plan) >= 2
-        || plan_is_one_node_tool_direct(plan)
+        || (plan_is_one_node_tool_direct(plan) && plan_one_node_has_i(plan))
         || plan_one_node_has_i(plan)
 }
 
@@ -1939,7 +1948,8 @@ mod tests {
         assert!(first.contains("single_work"));
         assert!(!first.contains("Do not use path single_work"));
         assert!(first.contains("one node per deliverable"));
-        assert!(first.contains("non-empty artifact"));
+        assert!(first.contains("Σ-shaped filled"));
+        assert!(!first.contains("read the requested sources"));
         assert!(first.contains(DAG_PLAN_SYSTEM_PROMPT));
         assert!(!TURN_OBSERVE_SYSTEM_PROMPT.contains("even when remaining_nodes is 0"));
     }
@@ -2102,7 +2112,9 @@ mod tests {
 
     const THREE_UNFILLED_JSON: &str = r#"{"schema_version":"0.1.0","id":"g","entry":"a","max_steps":4,"nodes":[{"id":"a","task_type":"ops-check","model_selector":{"capabilities":["tool_calling"]},"sigma":"llm_cognition","next":"b"},{"id":"b","task_type":"ops-check","model_selector":{"capabilities":["tool_calling"]},"sigma":"llm_cognition","next":"c"},{"id":"c","task_type":"analysis","model_selector":{"capabilities":["high-reasoning"]},"sigma":"llm_cognition","next":null}]}"#;
 
-    const TWO_FILLED_JSON: &str = r#"{"schema_version":"0.1.0","id":"g","entry":"read","max_steps":4,"nodes":[{"id":"read","task_type":"summarize","model_selector":{"capabilities":["document_understanding"]},"artifact":"read the requested sources","next":"write"},{"id":"write","task_type":"write","model_selector":{"capabilities":["high-reasoning"]},"artifact":"write the analysis report","next":null}]}"#;
+    const TWO_FILLED_JSON: &str = r#"{"schema_version":"0.1.0","id":"g","entry":"check","max_steps":4,"nodes":[{"id":"check","task_type":"ops-check","model_selector":{"capabilities":["coding"]},"sigma":"tool_direct","artifact":"pwd","next":"write"},{"id":"write","task_type":"write","model_selector":{"capabilities":["high-reasoning"]},"sigma":"llm_cognition","artifact":"write the analysis report","next":null}]}"#;
+
+    const CAPTION_TOOLDIRECT_JSON: &str = r#"{"schema_version":"0.1.0","id":"g","entry":"a","max_steps":4,"nodes":[{"id":"a","task_type":"ops-check","model_selector":{"capabilities":["coding"]},"sigma":"tool_direct","artifact":"Product planning info regarding alignment","next":"b"},{"id":"b","task_type":"ops-check","model_selector":{"capabilities":["coding"]},"sigma":"tool_direct","artifact":"read the requested sources","next":"c"},{"id":"c","task_type":"analysis","model_selector":{"capabilities":["high-reasoning"]},"sigma":"llm_cognition","artifact":"analysis report","next":null}]}"#;
 
     #[tokio::test]
     async fn live_first_hop_unfilled_multi_node_collapses_to_single_work() {
@@ -2177,6 +2189,36 @@ mod tests {
             LiveFirstHop::Plan(plan) => assert_eq!(plan.order.len(), 2),
             other => panic!("expected filled-I plan, got {other:?}"),
         }
+        assert_eq!(provider.responses.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn live_first_hop_caption_tooldirect_collapses_to_single_work() {
+        let provider = TwoShotPlanner {
+            responses: std::sync::Mutex::new(vec![
+                CAPTION_TOOLDIRECT_JSON.into(),
+                "MUST_NOT_REFINE".into(),
+            ]),
+        };
+        let hop = live_first_hop(
+            &live_agent_cfg(),
+            &live_mem(),
+            "sess",
+            &provider,
+            "m",
+            "inspect the requested sources and write a report",
+            &[],
+            0.0,
+            &SecurityPolicy::default(),
+            &[],
+            HostPhase::Build,
+        )
+        .await
+        .unwrap();
+        assert!(
+            matches!(hop, LiveFirstHop::SingleWork),
+            "caption ToolDirect I must not stay Plan, got {hop:?}"
+        );
         assert_eq!(provider.responses.lock().unwrap().len(), 1);
     }
 

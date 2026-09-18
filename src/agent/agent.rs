@@ -1244,7 +1244,7 @@ impl Agent {
                     reason = contact.reason.as_str(),
                     "work hop start"
                 );
-                if crate::agent::graph_scheduler::llm_work_missing_i(&node) {
+                if crate::agent::graph_scheduler::llm_work_missing_i_at(&node, index) {
                     let stop = format_work_node_stop(
                         user_message,
                         &node.id,
@@ -1304,7 +1304,7 @@ impl Agent {
                     Some(&contacts),
                 ));
                 let text = match self
-                    .invoke_live_work_node(&node, contact.model.clone())
+                    .invoke_live_work_node(&node, contact.model.clone(), index)
                     .await
                 {
                     Ok(text) => {
@@ -1651,13 +1651,14 @@ impl Agent {
         &mut self,
         node: &crate::agent::dag_runner::DagNode,
         effective_model: String,
+        hop_index: usize,
     ) -> Result<String> {
         if crate::agent::graph_scheduler::node_sigma(node)
             == crate::agent::graph_scheduler::NodeSigma::ToolDirect
         {
             return self.invoke_tool_direct(node).await;
         }
-        if crate::agent::graph_scheduler::llm_work_missing_i(node) {
+        if crate::agent::graph_scheduler::llm_work_missing_i_at(node, hop_index) {
             anyhow::bail!("{}", crate::agent::graph_scheduler::EMPTY_I_ASK);
         }
         crate::agent::graph_scheduler::ensure_live_llm_native(

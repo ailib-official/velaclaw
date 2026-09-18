@@ -1367,7 +1367,7 @@ const LIVE_MODE_CHAT: &str = r#"{"path":"chat_only","reply":"Hi — ready."}"#;
 const LIVE_MODE_CHAT_EMPTY: &str =
     r#"{"path":"chat_only","reply":"I compared agent runtimes from memory."}"#;
 /// Three filled-I nodes so R7 keeps `plan_dag` (the empty L2 template collapses).
-const LIVE_FILLED_CODE_FIX_JSON: &str = r#"{"schema_version":"0.1.0","id":"code-fix-template","entry":"locate","max_steps":6,"nodes":[{"id":"locate","task_type":"code-fix","model_selector":{"capabilities":["coding","tool_calling"]},"artifact":"find the compiler error","next":"patch"},{"id":"patch","task_type":"code-fix","model_selector":{"capabilities":["coding","tool_calling"]},"artifact":"apply the fix","next":"verify"},{"id":"verify","task_type":"code-fix","model_selector":{"capabilities":["speed"]},"artifact":"recompile and confirm","next":null}]}"#;
+const LIVE_FILLED_CODE_FIX_JSON: &str = r#"{"schema_version":"0.1.0","id":"code-fix-template","entry":"locate","max_steps":6,"nodes":[{"id":"locate","task_type":"code-fix","model_selector":{"capabilities":["coding","tool_calling"]},"artifact":"cargo check","next":"patch"},{"id":"patch","task_type":"code-fix","model_selector":{"capabilities":["coding","tool_calling"]},"artifact":"apply the fix","next":"verify"},{"id":"verify","task_type":"code-fix","model_selector":{"capabilities":["speed"]},"artifact":"recompile and confirm","next":null}]}"#;
 
 #[cfg(feature = "ai-protocol")]
 #[tokio::test]
@@ -1542,9 +1542,43 @@ async fn bounded_dag_follow_up_first_hop_sees_prior_report() {
 
 #[cfg(feature = "ai-protocol")]
 #[tokio::test]
-async fn bounded_dag_single_work_runs_native_tools() {
+async fn bounded_dag_single_work_asks_on_empty_invoke_i() {
+    let provider = ScriptedProvider::new(vec![text_response(r#"{"path":"single_work"}"#)]);
+    let calls = provider.call_counter();
+    let mut agent = build_agent_with_config(
+        Box::new(provider),
+        vec![],
+        AgentConfig {
+            bounded_dag_live: true,
+            envelope_assemble: false,
+            ..AgentConfig::default()
+        },
+    );
+    agent.set_host_phase(crate::agent::host_phase::HostPhase::Build);
+    let out = agent
+        .turn("check remote git then sync the workspace")
+        .await
+        .unwrap();
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "empty-I single_work must Ask before the work-model loop, calls={}",
+        calls.load(Ordering::SeqCst)
+    );
+    assert!(
+        out.contains("empty I") || out.contains("Approve an allowed command"),
+        "{out}"
+    );
+    assert!(!out.contains("report ready"), "{out}");
+}
+
+#[cfg(feature = "ai-protocol")]
+#[tokio::test]
+async fn bounded_dag_single_work_runs_native_tools_when_i_is_invoke() {
     let provider = ScriptedProvider::new(vec![
-        text_response(r#"{"path":"single_work"}"#),
+        text_response(
+            r#"{"schema_version":"0.1.0","id":"sw","entry":"work","max_steps":4,"nodes":[{"id":"work","task_type":"ops","model_selector":{"capabilities":["coding"]},"sigma":"llm_cognition","artifact":"cargo check","next":null}]}"#,
+        ),
         text_response("report ready"),
     ]);
     let calls = provider.call_counter();
@@ -1564,7 +1598,7 @@ async fn bounded_dag_single_work_runs_native_tools() {
         .unwrap();
     assert!(
         calls.load(Ordering::SeqCst) >= 2,
-        "single_work must start the work-model loop, calls={}",
+        "invoke-I live hop must start the work-model loop, calls={}",
         calls.load(Ordering::SeqCst)
     );
     assert!(
@@ -1671,16 +1705,15 @@ async fn bounded_dag_writeback_and_node_contact() {
         4,
         "first hop DAG + 3 work; no mid observe; got {used:?}"
     );
-    let session = crate::config::DEFAULT_PROTOCOL_MODEL_ID;
     assert_eq!(
         used[1],
-        session.to_string(),
-        "locate uses session default; got {used:?}"
+        "hint:code".to_string(),
+        "locate uses coding capability route; got {used:?}"
     );
     assert_eq!(
         used[2],
-        session.to_string(),
-        "patch uses session default; got {used:?}"
+        "hint:code".to_string(),
+        "patch uses coding capability route; got {used:?}"
     );
     assert_eq!(
         used[3],
@@ -1729,14 +1762,10 @@ async fn bounded_dag_session_picker_runs_work_hops() {
     );
     assert_eq!(
         used[1],
-        "nvidia/nemotron-3-ultra-550b-a55b".to_string(),
-        "coding hops must use the session picker; got {used:?}"
+        "hint:code".to_string(),
+        "live coding hops use capability route, not explicit_user_pick; got {used:?}"
     );
-    assert_eq!(
-        used[2],
-        "nvidia/nemotron-3-ultra-550b-a55b".to_string(),
-        "got {used:?}"
-    );
+    assert_eq!(used[2], "hint:code".to_string(), "got {used:?}");
     assert_eq!(
         used[3],
         "hint:fast".to_string(),

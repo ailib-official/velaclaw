@@ -503,11 +503,8 @@ pub fn contact_for_node(
     }
 }
 
-/// Live work hop: Route(C, Context) (VL-APE-002 / VL-APE-022).
-///
-/// Tier 1: session picker for empty-cap / work-cognition nodes. Tier 2:
-/// capability hints for speed/tools/document (and embed). Tier 3:
-/// [`force_default`] after typed provider fail — never first-hop caps→hint:code.
+/// Live work hop: capability Contact (R13/R21). Do not pass the session
+/// picker as `explicit_user_pick`. [`force_default`] is fail-strategy only.
 pub fn contact_for_live_node(
     node: &DagNode,
     default_model: &str,
@@ -520,16 +517,7 @@ pub fn contact_for_live_node(
             node.model_selector.capabilities.clone(),
         );
     }
-    let session = default_model.trim();
-    let pref = crate::agent::capability_route::work_preference(
-        &node.model_selector.capabilities,
-        if session.is_empty() {
-            None
-        } else {
-            Some(session)
-        },
-    );
-    contact_for_node(node, default_model, available_hints, pref)
+    contact_for_node(node, default_model, available_hints, None)
 }
 
 #[cfg(test)]
@@ -580,7 +568,7 @@ mod tests {
     }
 
     #[test]
-    fn live_work_hop_uses_session_model_not_coding_hint() {
+    fn live_work_hop_uses_capability_hint_not_explicit_pick() {
         let dag = parse_dag_json(CODE_FIX_TEMPLATE_JSON).unwrap();
         let locate = dag.nodes.iter().find(|n| n.id == "locate").unwrap();
         let c = contact_for_live_node(
@@ -589,8 +577,8 @@ mod tests {
             &["code".into(), "fast".into()],
             false,
         );
-        assert_eq!(c.model, "nvidia/nemotron-3-ultra-550b-a55b");
-        assert_eq!(c.reason, "explicit_user_pick");
+        assert_eq!(c.model, "hint:code");
+        assert_ne!(c.reason, "explicit_user_pick");
         let retried = contact_for_live_node(
             locate,
             "nvidia/nemotron-3-ultra-550b-a55b",
@@ -674,7 +662,7 @@ mod tests {
             false,
         );
         assert_eq!(empty_c.model, "nvidia/nemotron-3-ultra-550b-a55b");
-        assert_eq!(empty_c.reason, "explicit_user_pick");
+        assert_eq!(empty_c.reason, "node_capability:unmapped_default");
     }
 
     #[test]

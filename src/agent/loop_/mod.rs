@@ -809,7 +809,8 @@ pub async fn run(
                                     reason = contact.reason.as_str(),
                                     "work hop start"
                                 );
-                                if crate::agent::graph_scheduler::llm_work_missing_i(node) {
+                                if crate::agent::graph_scheduler::llm_work_missing_i_at(node, index)
+                                {
                                     crate::agent::bounded_dag_delivery::print_operator_note(
                                         &mut operator_prefix,
                                         &crate::agent::bounded_dag_live::format_work_node_stop(
@@ -1778,7 +1779,7 @@ pub async fn run(
                                     reason = contact.reason.as_str(),
                                     "work hop start"
                                 );
-                                if crate::agent::graph_scheduler::llm_work_missing_i(node) {
+                                if crate::agent::graph_scheduler::llm_work_missing_i_at(node, index) {
                                     crate::agent::bounded_dag_delivery::print_operator_note(
                                         &mut operator_prefix,
                                         &crate::agent::bounded_dag_live::format_work_node_stop(

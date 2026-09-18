@@ -62,7 +62,11 @@ impl HopToolAccumulator {
 
     #[must_use]
     pub fn as_evidence(&self) -> String {
-        clip_chars(&self.chunks.join("\n---\n"), TOOL_EVIDENCE_MAX)
+        let joined = self.chunks.join("\n---\n");
+        if crate::agent::artifact_contract::is_diagnostic_only_evidence(&joined) {
+            return String::new();
+        }
+        clip_chars(&joined, TOOL_EVIDENCE_MAX)
     }
 }
 
@@ -289,33 +293,53 @@ pub fn node_sigma(node: &DagNode) -> NodeSigma {
     }
 }
 
-/// Operator-visible Ask when a live LLM hop has no command (R14 / A13).
+/// Operator-visible Ask when a live LLM hop has no command (R14 / A13 / R19).
 pub const EMPTY_I_ASK: &str = "This hop has empty I (no command). Approve an allowed command or permission; the host will not wait for a model to invent a shell script.";
 
-/// True when a cheap tool-invoke LlmWork has no command I and must Ask.
-/// Explicit `llm_cognition` / work-cognition hops run native tools (R7); they do not
-/// ask the operator to approve a shell script.
+fn llm_work_has_invoke_i(node: &DagNode) -> bool {
+    node.artifact
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|s| !s.is_empty() && tool_direct_artifact_is_invoke(s))
+}
+
+/// First work hop (`hop_index == 0`): any LlmWork without invoke I must Ask (R19).
+/// Later hops: cognition / coding / document may write without a shell I;
+/// cheap tool-invoke still Asks when I is empty.
 #[must_use]
-pub fn llm_work_missing_i(node: &DagNode) -> bool {
+pub fn llm_work_missing_i_at(node: &DagNode, hop_index: usize) -> bool {
     if node_sigma(node) != NodeSigma::LlmWork {
         return false;
     }
-    if node
-        .sigma
-        .as_deref()
-        .is_some_and(|s| s.eq_ignore_ascii_case("llm_cognition"))
-    {
+    if llm_work_has_invoke_i(node) {
         return false;
     }
-    if crate::agent::capability_route::is_work_cognition_node(&node.model_selector.capabilities) {
-        return false;
+    if hop_index > 0 {
+        if node
+            .sigma
+            .as_deref()
+            .is_some_and(|s| s.eq_ignore_ascii_case("llm_cognition"))
+        {
+            return false;
+        }
+        if crate::agent::capability_route::is_work_cognition_node(&node.model_selector.capabilities)
+        {
+            return false;
+        }
+        if !crate::agent::capability_route::node_is_tool_invoke_without_cognition(
+            &node.model_selector.capabilities,
+        ) {
+            return false;
+        }
+        return node.artifact.as_deref().is_none_or(|s| s.trim().is_empty());
     }
-    if !crate::agent::capability_route::node_is_tool_invoke_without_cognition(
-        &node.model_selector.capabilities,
-    ) {
-        return false;
-    }
-    node.artifact.as_deref().is_none_or(|s| s.trim().is_empty())
+    true
+}
+
+/// Convenience: first remaining hop (`hop_index = 0`).
+#[must_use]
+pub fn llm_work_missing_i(node: &DagNode) -> bool {
+    llm_work_missing_i_at(node, 0)
 }
 
 #[must_use]
@@ -973,8 +997,12 @@ mod tests {
         )
         .unwrap();
         assert!(
-            !llm_work_missing_i(&cognition.nodes[0]),
-            "llm_cognition hops run native tools"
+            llm_work_missing_i(&cognition.nodes[0]),
+            "first-hop llm_cognition without invoke I must Ask"
+        );
+        assert!(
+            !llm_work_missing_i_at(&cognition.nodes[0], 1),
+            "later cognition hops may write without a shell I"
         );
         let with_i = crate::agent::dag_runner::parse_dag_json(
             r#"{"schema_version":"0.1.0","id":"g","entry":"a","max_steps":2,"nodes":[{"id":"a","task_type":"ops","model_selector":{"capabilities":["shell.exec"]},"sigma":"tool_direct","artifact":"pwd","next":null}]}"#,
@@ -986,16 +1014,22 @@ mod tests {
         )
         .unwrap();
         assert!(
-            !llm_work_missing_i(&coding.nodes[0]),
-            "coding hops may still start a tool loop"
+            llm_work_missing_i(&coding.nodes[0]),
+            "first coding hop without invoke I must Ask"
         );
+        assert!(!llm_work_missing_i_at(&coding.nodes[0], 1));
         let doc = crate::agent::dag_runner::parse_dag_json(
             r#"{"schema_version":"0.1.0","id":"g","entry":"a","max_steps":2,"nodes":[{"id":"a","task_type":"summarize","model_selector":{"capabilities":["document_understanding"]},"sigma":"llm_cognition","next":null}]}"#,
         )
         .unwrap();
         assert!(
-            !llm_work_missing_i(&doc.nodes[0]),
-            "document hops do not Ask for a shell I"
+            llm_work_missing_i(&doc.nodes[0]),
+            "first document hop without invoke I must Ask"
         );
+        let pwd = crate::agent::dag_runner::parse_dag_json(
+            r#"{"schema_version":"0.1.0","id":"g","entry":"a","max_steps":2,"nodes":[{"id":"a","task_type":"ops","model_selector":{"capabilities":["high-reasoning"]},"sigma":"llm_cognition","artifact":"pwd","next":null}]}"#,
+        )
+        .unwrap();
+        assert!(!llm_work_missing_i(&pwd.nodes[0]));
     }
 }

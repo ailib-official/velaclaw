@@ -14,7 +14,7 @@ pub const DAG_PLAN_SYSTEM_PROMPT: &str = r#"You are a DAG planner. Reply with ON
 The object MUST use schema_version "0.1.0" and include:
 - id (string), entry (string node id), max_steps (number, <= 8)
 - nodes: 1 to 8 items of { id, task_type, model_selector: { capabilities: string[] }, next: string|null, context_requirements?: { layers: number[], retrieve?: object[] } }
-Choose the node count from THIS task's deliverables (1–8), not from whether capabilities match. One node only when the user asked for a single result (one greeting is not a DAG — the host skips you; one file patch; one yes/no). If they asked for several independent results, give one node per deliverable only when each node has Σ-shaped filled I: tool_direct artifact is a command (pwd, ls, ssh <alias> …), not a caption. Cognition I may be a work description. The host collapses graphs without two such I values to a single_work turn. Do not invent inspect/diagnose/report splits or empty "gather context" nodes.
+Choose the node count from THIS task's deliverables (1–8), not from whether capabilities match. One node only when the user asked for a single result (one greeting is not a DAG — the host skips you; one file patch; one yes/no). If they asked for several independent results, give one node per deliverable only when each node has Σ-shaped filled I: tool_direct artifact is a command (pwd, ls, ssh <alias> …), not a caption. Cognition I may be a work description. The host Asks when no node has executable I. Do not emit a path-only object with no nodes. Do not invent inspect/diagnose/report splits or empty "gather context" nodes.
 Each node is a verifiable artifact state change. Work backward from the operator-visible deliverable. The host writes the user-facing conclusion after the last node.
 Each node lists ONE primary capability first (optional extras after). Tags: coding (patches/shell), tool_calling (status/checks), high-reasoning (analysis that needs a reasoning family), speed (cheap/short), document_understanding (read/summarize). Different work → different first tags so Contact can route to different [[model_routes]] families. Do not name providers or model IDs.
 Do not pad every node with coding+tool_calling. Runtime already injects workspace retrieve and the previous node's artifact.
@@ -212,6 +212,8 @@ mod tests {
         assert!(DAG_PLAN_SYSTEM_PROMPT.contains("tool_direct"));
         assert!(DAG_PLAN_SYSTEM_PROMPT.contains("remote:<alias>"));
         assert!(DAG_PLAN_SYSTEM_PROMPT.contains("\"artifact\":\"pwd\""));
+        assert!(DAG_PLAN_SYSTEM_PROMPT.contains("Do not emit a path-only object with no nodes"));
+        assert!(!DAG_PLAN_SYSTEM_PROMPT.contains("collapses graphs without two such I values"));
     }
 
     #[test]

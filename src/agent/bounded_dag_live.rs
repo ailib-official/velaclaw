@@ -1,11 +1,10 @@
-//! Live bounded DAG: first hop is chat_only, single_work, or a linear graph.
+//! Live bounded DAG: first hop is chat_only or a linear graph with filled I.
 //!
 //! When `[agent].bounded_dag_live` is on and `bounded_dag_path` is empty, the
-//! first hop emits in-band `chat_only`, `single_work`, or a 1–8 node DAG.
-//! `single_work` (and invalid / empty `chat_only`) is one native tool loop.
-//! A 1-node non-ToolDirect graph collapses to that same loop; 2+ nodes or a
-//! 1-node ToolDirect stay Plan. There is no 1-node split-refine hop.
-//! Dist default remains off.
+//! first hop emits in-band `chat_only` or a 1–8 node DAG. Path-only
+//! `single_work` / invalid JSON / unfilled graphs Ask (`EMPTY_I_ASK`); the host
+//! does not synthesize an empty `llm_cognition` node. A 1-node ToolDirect with
+//! invoke I stays Plan. Dist default remains off.
 //!
 //! Turn contract (VL-CTX-001 / VL-NA-019 / VL-NA-030): append the user message,
 //! run `prepare_turn_history` on the session (skip only HostPhase::Plan preview),
@@ -13,14 +12,14 @@
 //! `reset_chat_scope` (intra-graph). Session follow-ups do not replace the
 //! stored graph task.
 //!
-//! 有界 DAG live：首跳 chat_only / single_work / 线性图；1 节点非 ToolDirect 塌缩。
+//! 有界 DAG live：首跳 chat_only 或已填 I 线性图；未填则 Ask，不合成空认知节点。
 
 use super::bounded_dag::{format_preview, linear_node_ids, load_bounded_dag, schedule_node_ids};
 use super::bounded_dag_context::contact_for_live_node;
 use super::candidate_dag::validate_candidate_dag_json;
 use super::capability_contract::admit_capability_contract;
 use super::dag_runner::{parse_dag_json, DagManifest, CODE_FIX_TEMPLATE_JSON};
-use super::graph_scheduler::{node_sigma, NodeSigma};
+use super::graph_scheduler::{node_sigma, NodeSigma, EMPTY_I_ASK};
 use super::host_phase::HostPhase;
 use crate::memory::{Memory, MemoryCategory};
 use crate::orchestration::dag_emit::{
@@ -35,11 +34,17 @@ use std::hash::BuildHasher;
 use std::path::Path;
 
 pub const PLANNED_DAG_KEY_PREFIX: &str = "dag_plan:";
+pub const PLANNER_TRACE_KEY_PREFIX: &str = "dag_planner_trace:";
 pub const DAG_FAIL_KEY_PREFIX: &str = "dag_fail:";
 const MAX_SESSION_DAG_FORGET: usize = 32;
+const PLANNER_TRACE_RAW_CHARS: usize = 8000;
 
 pub fn planned_dag_key(session_id: &str) -> String {
     format!("{PLANNED_DAG_KEY_PREFIX}{session_id}")
+}
+
+pub fn planner_trace_key(session_id: &str) -> String {
+    format!("{PLANNER_TRACE_KEY_PREFIX}{session_id}")
 }
 
 pub fn dag_fail_key(session_id: &str) -> String {
@@ -65,8 +70,7 @@ pub const LIVE_FIRST_HOP_PREAMBLE: &str = "\
 Start this VelaClaw turn now. Reply with ONLY one JSON object, no markdown.\n\
 Prior user/assistant messages are this same session. Continue that work (same hosts, paths, and findings). Do not claim you forgot earlier turns. Do not ask what to do if the session already did it.\n\
 Greeting, thanks, or general knowledge (no repo/host/files): {\"path\":\"chat_only\",\"reply\":\"<full user-visible reply>\"}\n\
-One atomic tool turn in the user environment: {\"path\":\"single_work\"}\n\
-Independently verifiable deliverables: a linear DAG JSON object using the planner rules below (schema_version 0.1.0, 2 to 8 nodes). tool_direct artifact must be an executable command (or ssh <alias> …), not a caption. Cognition nodes may use a work description as I. The host collapses graphs with fewer than two Σ-shaped filled-I nodes to single_work. A 1-node graph that is not tool_direct is treated as single_work.\n\
+Work (inspect a repo, workspace, or host; any tool turn): a linear DAG JSON object using the planner rules below (schema_version 0.1.0, 1 to 8 nodes). One atomic deliverable = one node with Σ-shaped filled I. tool_direct artifact must be an executable command (or ssh <alias> …), not a caption. Cognition nodes may use a work description as I. Do not emit a path-only object with no nodes. Graphs with no executable I are not work — the host Asks.\n\
 Never use chat_only when the user asks to inspect a local repo, workspace, or host.\n";
 
 #[must_use]
@@ -161,8 +165,8 @@ impl LiveFirstHop {
     }
 }
 
-/// Parse first-hop JSON. Invalid / empty chat_only / `single_work` →
-/// [`LiveFirstHop::SingleWork`] (one native tool loop).
+/// Parse first-hop JSON. Invalid / empty chat_only / path-only `single_work` →
+/// [`LiveFirstHop::SingleWork`] (unfilled; [`execute_as_live_plan`] Asks).
 #[must_use]
 pub fn parse_live_first_hop(text: &str, fallback_json: &str) -> LiveFirstHop {
     let Some(obj) = extract_json_object(text) else {
@@ -186,11 +190,91 @@ pub fn parse_live_first_hop(text: &str, fallback_json: &str) -> LiveFirstHop {
                 }
             }
         }
-        Some("single_work") => LiveFirstHop::SingleWork,
+        Some("single_work") => parse_path_single_work(&v, &obj, fallback_json),
         _ => match resolve_planned_manifest(&obj, fallback_json) {
             Ok(plan) if !plan.used_fallback => LiveFirstHop::Plan(plan),
             _ => LiveFirstHop::SingleWork,
         },
+    }
+}
+
+fn parse_path_single_work(v: &serde_json::Value, obj: &str, fallback_json: &str) -> LiveFirstHop {
+    if v.get("nodes").is_some() {
+        return match resolve_planned_manifest(obj, fallback_json) {
+            Ok(plan) if !plan.used_fallback => LiveFirstHop::Plan(plan),
+            _ => LiveFirstHop::SingleWork,
+        };
+    }
+    let Some(artifact) = v
+        .get("artifact")
+        .and_then(|a| a.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    else {
+        return LiveFirstHop::SingleWork;
+    };
+    let sigma = v
+        .get("sigma")
+        .and_then(|s| s.as_str())
+        .unwrap_or("tool_direct");
+    let caps = v
+        .get("model_selector")
+        .and_then(|m| m.get("capabilities"))
+        .and_then(|c| c.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|x| x.as_str().map(str::to_string))
+                .collect::<Vec<_>>()
+        })
+        .filter(|c| !c.is_empty())
+        .unwrap_or_else(|| vec!["tool_calling".into()]);
+    let mut node = serde_json::json!({
+        "id": "work",
+        "task_type": "ops-check",
+        "model_selector": { "capabilities": caps },
+        "sigma": sigma,
+        "artifact": artifact,
+        "next": serde_json::Value::Null
+    });
+    if let Some(locus) = v.get("locus").and_then(|s| s.as_str()) {
+        node["locus"] = serde_json::Value::String(locus.to_string());
+    }
+    let wrapped = serde_json::json!({
+        "schema_version": "0.1.0",
+        "id": "one-node",
+        "entry": "work",
+        "max_steps": 8,
+        "nodes": [node]
+    })
+    .to_string();
+    match resolve_planned_manifest(&wrapped, fallback_json) {
+        Ok(plan) if !plan.used_fallback => LiveFirstHop::Plan(plan),
+        _ => LiveFirstHop::SingleWork,
+    }
+}
+
+/// Why the first hop is not a surviving Plan (R22).
+#[must_use]
+pub fn planner_collapse_reason(raw: &str, hop: &LiveFirstHop) -> &'static str {
+    match hop {
+        LiveFirstHop::ChatOnly { .. } => "chat_only",
+        LiveFirstHop::Plan(_) => "plan",
+        LiveFirstHop::SingleWork => {
+            let Some(obj) = extract_json_object(raw) else {
+                return "invalid_json";
+            };
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(&obj) else {
+                return "invalid_json";
+            };
+            match v
+                .get("path")
+                .or_else(|| v.get("mode"))
+                .and_then(|m| m.as_str())
+            {
+                Some("single_work" | "chat_only") => "declared_unfilled_path",
+                _ => "unfilled_i",
+            }
+        }
     }
 }
 
@@ -272,25 +356,14 @@ pub fn one_node_live_dag(user_task: &str) -> PlannedLiveDag {
     }
 }
 
-/// GOV-007: live `single_work` is one hop on the DAG executor, not a second loop.
-/// Capability is session cognition (R7: chosen model + native tools), not cheap `tool_calling`.
+/// Map TurnMode onto the canonical live hop (R7 + R14 + R22).
+/// Unfilled graphs Ask; they must not become a synthesized empty cognition node.
 #[must_use]
-pub fn single_work_as_live_plan(user_task: &str) -> PlannedLiveDag {
-    let mut plan = one_node_live_dag(user_task);
-    plan.source = "single_work";
-    if let Some(node) = plan.dag.nodes.first_mut() {
-        node.model_selector.capabilities = vec!["high-reasoning".into()];
-        node.sigma = Some("llm_cognition".into());
-    }
-    plan
-}
-
-/// Map TurnMode onto the canonical live hop plan (R7 + R14).
-/// Unfilled graphs collapse here so HostPhase::Plan / repair cache cannot bypass R7.
-#[must_use]
-pub fn execute_as_live_plan(hop: LiveFirstHop, user_task: &str) -> LiveFirstHop {
+pub fn execute_as_live_plan(hop: LiveFirstHop, _user_task: &str) -> LiveFirstHop {
     match collapse_trivial_plan(hop) {
-        LiveFirstHop::SingleWork => LiveFirstHop::Plan(single_work_as_live_plan(user_task)),
+        LiveFirstHop::SingleWork => LiveFirstHop::ChatOnly {
+            reply: EMPTY_I_ASK.to_string(),
+        },
         other => other,
     }
 }
@@ -458,8 +531,14 @@ pub async fn live_first_hop(
     let hop_messages = first_hop_chat_messages(&live_first_hop_system_prompt(), history, user_task);
     let text =
         structured_json_chat_messages(provider, planner_model, temperature, &hop_messages).await?;
-    let hop = collapse_trivial_plan(parse_live_first_hop(&text, &fallback));
-    let hop = admit_live_first_hop(hop, user_task, policy, extra_aliases);
+    let collapsed = collapse_trivial_plan(parse_live_first_hop(&text, &fallback));
+    let collapse = planner_collapse_reason(&text, &collapsed);
+    let hop = admit_live_first_hop(collapsed, user_task, policy, extra_aliases);
+    let collapse = match &hop {
+        LiveFirstHop::ChatOnly { .. } if collapse == "plan" => "admit_reject",
+        _ => collapse,
+    };
+    let _ = store_planner_trace(mem, session_id, &text, hop_kind(&hop), collapse).await;
     if let LiveFirstHop::Plan(plan) = &hop {
         let json = planned_store_json(plan, &fallback);
         let _ = store_planned_json(mem, session_id, &json).await;
@@ -470,6 +549,7 @@ pub async fn live_first_hop(
     tracing::info!(
         target: "bounded_dag_live",
         kind = hop_kind(&hop),
+        collapse,
         planner_model = planner_model,
         plan = hop.is_plan(),
         nodes = match &hop {
@@ -1645,6 +1725,36 @@ pub async fn store_planned_json(mem: &dyn Memory, session_id: &str, json: &str) 
     .await
 }
 
+pub async fn store_planner_trace(
+    mem: &dyn Memory,
+    session_id: &str,
+    raw: &str,
+    kind: &str,
+    collapse: &str,
+) -> Result<()> {
+    let raw: String = raw.chars().take(PLANNER_TRACE_RAW_CHARS).collect();
+    let payload = serde_json::json!({
+        "raw": raw,
+        "kind": kind,
+        "collapse": collapse,
+    })
+    .to_string();
+    mem.store(
+        &planner_trace_key(session_id),
+        &payload,
+        MemoryCategory::Daily,
+        Some(session_id),
+    )
+    .await
+}
+
+pub async fn load_planner_trace(mem: &dyn Memory, session_id: &str) -> Result<Option<String>> {
+    Ok(mem
+        .get(&planner_trace_key(session_id))
+        .await?
+        .map(|e| e.content))
+}
+
 pub async fn load_planned_json(mem: &dyn Memory, session_id: &str) -> Result<Option<String>> {
     Ok(mem
         .get(&planned_dag_key(session_id))
@@ -1808,6 +1918,39 @@ mod tests {
             LiveFirstHop::ChatOnly { reply } => assert!(reply.contains("Hi")),
             other => panic!("mode alias should still carry in-band reply, got {other:?}"),
         }
+        match parse_live_first_hop(
+            r#"{"path":"single_work","sigma":"tool_direct","artifact":"pwd"}"#,
+            CODE_FIX_TEMPLATE_JSON,
+        ) {
+            LiveFirstHop::Plan(plan) => {
+                assert_eq!(plan.order, vec!["work"]);
+                assert!(plan_is_one_node_tool_direct(&plan));
+                assert!(plan_one_node_has_i(&plan));
+            }
+            other => panic!("filled path+artifact must be Plan, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn planner_collapse_reason_distinguishes_path_and_unfilled_dag() {
+        let path_hop = parse_live_first_hop(r#"{"path":"single_work"}"#, CODE_FIX_TEMPLATE_JSON);
+        assert_eq!(
+            planner_collapse_reason(r#"{"path":"single_work"}"#, &path_hop),
+            "declared_unfilled_path"
+        );
+        assert_eq!(
+            planner_collapse_reason("not-json", &LiveFirstHop::SingleWork),
+            "invalid_json"
+        );
+        let dag_hop = collapse_trivial_plan(parse_live_first_hop(
+            THREE_UNFILLED_JSON,
+            CODE_FIX_TEMPLATE_JSON,
+        ));
+        assert!(matches!(dag_hop, LiveFirstHop::SingleWork));
+        assert_eq!(
+            planner_collapse_reason(THREE_UNFILLED_JSON, &dag_hop),
+            "unfilled_i"
+        );
     }
 
     #[test]
@@ -1942,11 +2085,12 @@ mod tests {
     }
 
     #[test]
-    fn first_hop_prompt_allows_single_work() {
+    fn first_hop_prompt_requires_filled_nodes() {
         let first = live_first_hop_system_prompt();
         assert!(first.contains("chat_only"));
-        assert!(first.contains("single_work"));
-        assert!(!first.contains("Do not use path single_work"));
+        assert!(first.contains("Do not emit a path-only object with no nodes"));
+        assert!(!first
+            .contains("One atomic tool turn in the user environment: {\"path\":\"single_work\"}"));
         assert!(first.contains("one node per deliverable"));
         assert!(first.contains("Σ-shaped filled"));
         assert!(!first.contains("read the requested sources"));
@@ -1980,22 +2124,45 @@ mod tests {
         assert!(matches!(hop, LiveFirstHop::SingleWork));
         assert_eq!(provider.responses.lock().unwrap().len(), 1);
         match execute_as_live_plan(hop, "check remote git then sync") {
-            LiveFirstHop::Plan(plan) => {
-                assert_eq!(plan.source, "single_work");
-                assert_eq!(plan.order, vec!["work"]);
-                let node = plan.dag.nodes.iter().find(|n| n.id == "work").unwrap();
-                assert!(node
-                    .model_selector
-                    .capabilities
-                    .iter()
-                    .any(|c| c == "high-reasoning"));
-                assert!(crate::agent::graph_scheduler::llm_work_missing_i(node));
-                assert!(!crate::agent::graph_scheduler::llm_work_missing_i_at(
-                    node, 1
-                ));
+            LiveFirstHop::ChatOnly { reply } => {
+                assert!(reply.contains("empty I"));
             }
-            other => panic!("expected 1-node plan, got {other:?}"),
+            other => panic!("expected Ask, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn live_first_hop_stores_planner_raw_on_unfilled() {
+        let dir = tempfile::tempdir().unwrap();
+        let mem = crate::memory::MarkdownMemory::new(dir.path());
+        let provider = TwoShotPlanner {
+            responses: std::sync::Mutex::new(vec![
+                r#"{"path":"single_work"}"#.into(),
+                "MUST_NOT_REFINE".into(),
+            ]),
+        };
+        let hop = live_first_hop(
+            &live_agent_cfg(),
+            &mem,
+            "sess",
+            &provider,
+            "m",
+            "check remote git then sync",
+            &[],
+            0.0,
+            &SecurityPolicy::default(),
+            &[],
+            HostPhase::Build,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(hop, LiveFirstHop::SingleWork));
+        let stored = load_planner_trace(&mem, "sess")
+            .await
+            .unwrap()
+            .expect("trace");
+        assert!(stored.contains("declared_unfilled_path"), "{stored}");
+        assert!(stored.contains("single_work"), "{stored}");
     }
 
     #[tokio::test]
@@ -2034,21 +2201,14 @@ mod tests {
     }
 
     #[test]
-    fn execute_as_live_plan_single_work_is_one_hop() {
+    fn execute_as_live_plan_unfilled_asks_without_synth_node() {
         let hop = execute_as_live_plan(LiveFirstHop::SingleWork, "any user task");
         match hop {
-            LiveFirstHop::Plan(plan) => {
-                assert_eq!(plan.source, "single_work");
-                assert_eq!(plan.order.len(), 1);
-                let node = plan.dag.nodes.iter().find(|n| n.id == "work").unwrap();
-                assert!(node
-                    .model_selector
-                    .capabilities
-                    .iter()
-                    .any(|c| c == "high-reasoning"));
-                assert_eq!(node.sigma.as_deref(), Some("llm_cognition"));
+            LiveFirstHop::ChatOnly { reply } => {
+                assert!(reply.contains("empty I"));
+                assert!(reply.contains("Approve an allowed command"));
             }
-            other => panic!("{other:?}"),
+            other => panic!("unfilled must Ask, got {other:?}"),
         }
     }
 
@@ -2150,21 +2310,10 @@ mod tests {
         let executed =
             execute_as_live_plan(hop, "inspect the requested sources and write a report");
         match executed {
-            LiveFirstHop::Plan(plan) => {
-                assert_eq!(plan.source, "single_work");
-                assert_eq!(plan.order.len(), 1);
-                let node = &plan.dag.nodes[0];
-                assert!(node
-                    .model_selector
-                    .capabilities
-                    .iter()
-                    .any(|c| c == "high-reasoning"));
-                assert!(crate::agent::graph_scheduler::llm_work_missing_i(node));
-                assert!(!crate::agent::graph_scheduler::llm_work_missing_i_at(
-                    node, 1
-                ));
+            LiveFirstHop::ChatOnly { reply } => {
+                assert!(reply.contains("empty I"));
             }
-            other => panic!("collapsed graph must execute as cognition hop, got {other:?}"),
+            other => panic!("unfilled graph must Ask, got {other:?}"),
         }
     }
 

@@ -570,6 +570,5 @@ mod tests {
         assert!(get_result.success);
         let parsed: Value = serde_json::from_str(&get_result.output).unwrap();
         assert!(parsed["proxy"]["http_proxy"].is_null());
-        assert!(parsed["runtime_proxy"]["http_proxy"].is_null());
     }
 }

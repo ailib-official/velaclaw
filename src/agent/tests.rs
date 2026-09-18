@@ -1385,12 +1385,12 @@ async fn bounded_dag_plan_runs_planner_then_preview() {
     agent.set_host_phase(crate::agent::host_phase::HostPhase::Plan);
     let out = agent.turn("fix the compiler error").await.unwrap();
     assert!(
-        out.contains("Approve Build"),
-        "invalid planner still offers Build, got {out}"
+        out.contains("empty I") || out.contains("Approve an allowed command"),
+        "invalid planner is unfilled Ask, not a synth cognition preview, got {out}"
     );
     assert!(
-        out.contains("high-reasoning") || out.contains("1 node"),
-        "empty L2 template collapses to one cognition hop, got {out}"
+        !out.contains("report ready"),
+        "Plan phase must not start a work loop, got {out}"
     );
 }
 

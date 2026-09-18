@@ -18,7 +18,7 @@ const DEFAULT_INPUT_TIMEOUT: Duration = Duration::from_secs(600);
 pub enum HumanInputKind {
     /// Pick one of `options` (short labels).
     Choice,
-    /// Free-form non-secret **short** text (codes / ids — not command dumps).
+    /// Free-form non-secret **short** text (invoke I, codes / ids — not command dumps).
     Text,
     /// Secret (password / token / pairing code) — stored in a local slot only.
     Secret,

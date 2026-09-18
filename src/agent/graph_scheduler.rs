@@ -2,8 +2,8 @@
 //! 宿主图调度：成功路径不 observe；LLM native；工具直调；就绪集并行。
 
 use crate::agent::bounded_dag_delivery::{
-    ensure_user_visible, hop_body_closes_graph, host_delivery, last_hop_ends_graph,
-    looks_like_internodal_envelope, strip_internodal_suffix,
+    empty_hop_stop_reason, ensure_user_visible, hop_body_closes_graph, host_delivery,
+    last_hop_ends_graph, looks_like_internodal_envelope, strip_internodal_suffix,
 };
 use crate::agent::dag_runner::DagManifest;
 use crate::agent::dag_runner::DagNode;
@@ -337,6 +337,63 @@ fn invoke_tool_name(label: &str) -> Option<&'static str> {
     }
 }
 
+fn token_is_letter_word(tok: &str) -> bool {
+    !tok.is_empty() && tok.chars().all(|c| c.is_ascii_alphabetic())
+}
+
+fn program_token_is_invoke_name(tok: &str) -> bool {
+    if tok.contains('/') || tok.starts_with('.') {
+        return tok
+            .chars()
+            .all(|c| c.is_ascii() && !c.is_ascii_whitespace());
+    }
+    let mut chars = tok.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !first.is_ascii_lowercase() {
+        return false;
+    }
+    tok.chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '+' | '-'))
+}
+
+fn shell_line_is_invoke(cmd: &str) -> bool {
+    let mut tokens = cmd.split_whitespace();
+    let Some(first) = tokens.next() else {
+        return false;
+    };
+    let rest: Vec<&str> = tokens.collect();
+    if invoke_tool_name(first).is_some() {
+        return true;
+    }
+    if first.eq_ignore_ascii_case("ssh") {
+        return !rest.is_empty();
+    }
+    if !program_token_is_invoke_name(first) {
+        return false;
+    }
+    if rest.len() >= 2 && rest.iter().copied().all(token_is_letter_word) {
+        return false;
+    }
+    true
+}
+
+/// R17: ToolDirect I is an executable invoke, not a deliverable caption.
+#[must_use]
+pub fn tool_direct_artifact_is_invoke(artifact: &str) -> bool {
+    let raw = artifact.trim();
+    if raw.is_empty() {
+        return false;
+    }
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(raw) {
+        return v.as_object().is_some_and(|obj| {
+            obj.contains_key("command") || obj.contains_key("path") || obj.contains_key("pattern")
+        });
+    }
+    shell_line_is_invoke(raw)
+}
+
 /// Build the E-side tool call for a tool-only node (no provider chat).
 pub(crate) fn direct_tool_call(node: &DagNode) -> Result<ParsedToolCall> {
     if node_sigma(node) != NodeSigma::ToolDirect {
@@ -357,6 +414,12 @@ pub(crate) fn direct_tool_call(node: &DagNode) -> Result<ParsedToolCall> {
     else {
         bail!("tool-only node {} missing I contract (artifact)", node.id);
     };
+    if !tool_direct_artifact_is_invoke(artifact) {
+        bail!(
+            "tool-only node {} I is not an invoke (caption is not a command)",
+            node.id
+        );
+    }
     let arguments = if let Ok(v) = serde_json::from_str::<serde_json::Value>(artifact) {
         if v.is_object() {
             v
@@ -512,6 +575,14 @@ pub async fn finish_live_graph(
             Ok(ensure_user_visible(user_task, last_body))
         }
         AfterSuccessfulHop::FinishParlor => {
+            if graph_artifacts.trim().is_empty() && !last_body_has_parlor_substance(last_body) {
+                tracing::info!(
+                    parlor_rewrite = false,
+                    graph_artifact_bytes = 0,
+                    "host_delivery_empty_graph"
+                );
+                return Ok(empty_hop_stop_reason(user_task));
+            }
             tracing::info!(
                 parlor_rewrite = true,
                 graph_artifact_bytes = graph_artifacts.len(),
@@ -529,6 +600,28 @@ pub async fn finish_live_graph(
             .await
         }
     }
+}
+
+fn last_body_has_parlor_substance(last_body: &str) -> bool {
+    let stripped = crate::util::strip_tool_call_markup(last_body);
+    let t = stripped.trim();
+    if t.is_empty() {
+        return false;
+    }
+    !looks_like_orphan_markup_tag(t)
+}
+
+fn looks_like_orphan_markup_tag(t: &str) -> bool {
+    let Some(inner) = t.strip_prefix("</").or_else(|| t.strip_prefix('<')) else {
+        return false;
+    };
+    let Some(name) = inner.strip_suffix('>') else {
+        return false;
+    };
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
 }
 
 #[cfg(test)]
@@ -607,6 +700,27 @@ mod tests {
         let call = direct_tool_call(&dag.nodes[0]).unwrap();
         assert_eq!(call.name, "shell");
         assert_eq!(call.arguments["command"], "pwd");
+    }
+
+    #[test]
+    fn caption_artifact_is_not_invoke() {
+        assert!(tool_direct_artifact_is_invoke("pwd"));
+        assert!(tool_direct_artifact_is_invoke("ls -la"));
+        assert!(tool_direct_artifact_is_invoke("git status"));
+        assert!(tool_direct_artifact_is_invoke("ssh lab-host uptime"));
+        assert!(tool_direct_artifact_is_invoke(r#"{"path":"README.md"}"#));
+        assert!(!tool_direct_artifact_is_invoke(
+            "Product planning info regarding alignment"
+        ));
+        assert!(!tool_direct_artifact_is_invoke(
+            "read the requested sources"
+        ));
+        let dag = crate::agent::dag_runner::parse_dag_json(
+            r#"{"schema_version":"0.1.0","id":"ls","entry":"ls","max_steps":2,"nodes":[{"id":"ls","task_type":"shell.exec","model_selector":{"capabilities":["shell.exec"]},"artifact":"Product planning info regarding alignment","next":null}]}"#,
+        )
+        .unwrap();
+        let err = direct_tool_call(&dag.nodes[0]).unwrap_err().to_string();
+        assert!(err.contains("not an invoke"), "{err}");
     }
 
     #[test]
@@ -810,6 +924,22 @@ mod tests {
             envelope_calls, 1,
             "internodal last hop spends the parlor budget"
         );
+        let empty_art = CountChat {
+            n: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let markup_out = finish_live_graph(&empty_art, "m", 0.0, "task", "</tool_call>", "", "", 3)
+            .await
+            .unwrap();
+        assert_eq!(
+            empty_art.n.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "empty graph + markup last_body must not parlor"
+        );
+        assert!(
+            markup_out.contains("no operator-visible") || markup_out.contains("没有可展示"),
+            "{markup_out}"
+        );
+        assert!(!markup_out.contains("</tool_call>"), "{markup_out}");
         let vis = CountChat {
             n: std::sync::atomic::AtomicUsize::new(0),
         };

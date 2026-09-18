@@ -287,6 +287,24 @@ mod tests {
     }
 
     #[test]
+    fn caption_tool_direct_i_rejected_before_approval() {
+        let mut dag = parse_dag_json(
+            r#"{"schema_version":"0.1.0","id":"t","entry":"n1","max_steps":8,"nodes":[{"id":"n1","task_type":"ops","model_selector":{"capabilities":["shell.exec"]},"sigma":"tool_direct","next":null,"artifact":"Product planning info regarding alignment"}]}"#,
+        )
+        .unwrap();
+        let err = admit_capability_contract(
+            &mut dag,
+            "summarize the architecture in prose",
+            &policy(),
+            &[],
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("not an invoke"), "{err}");
+        assert!(!err.contains("unsafe_construct"), "{err}");
+    }
+
+    #[test]
     fn unsafe_i_rejected_before_execute() {
         let mut dag = parse_dag_json(
             r#"{"schema_version":"0.1.0","id":"t","entry":"n1","max_steps":8,"nodes":[{"id":"n1","task_type":"ops","model_selector":{"capabilities":["shell.exec"]},"next":null,"artifact":"echo $(whoami) > /tmp/x"}]}"#,

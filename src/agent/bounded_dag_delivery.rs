@@ -6,22 +6,17 @@ use crate::providers::{ChatMessage, ChatRequest, Provider};
 use anyhow::Result;
 
 /// System prompt for the host Delivery rewrite (not a planner node, not a work-node card).
+/// Operator bubble is human prose only (R25): no internodal or contract field names.
 pub const DELIVERY_SYSTEM_PROMPT: &str = "\
 You write the operator-visible conclusion for USER TASK.\n\
-Use the node artifacts as evidence. Be direct.\n\
+Use the node artifacts as evidence. Be direct, in ordinary language.\n\
 Do not use internodal envelope headers: HANDOFF, verdict:, findings:, pointers:, gaps:.\n\
+Do not write host-contract section titles. The chat bubble is prose, not a spec form.\n\
 Do not tell the operator to hand off to another node.\n\
-Every claim has a vantage (where evidence was gathered) and coverage (sample|partial|exhaustive).\n\
-Exclusive wording (only/none/all of a population) is allowed only when coverage is exhaustive.\n\
-Otherwise say what this vantage saw, not what the unseen rest of the world is.\n\
-If a later artifact expands vantage, revise earlier exclusive claims instead of leaving both.\n\
-Name evidence_layer on each claim: this-hop-tool | this-graph-artifact | prior-graph-artifact | host-config | protocol-dist | upstream-live | inference.\n\
-Recommend changes only to a layer you observed. Do not treat leftover workspace tmp from other graphs as this-task evidence.\n\
-Do not report live host/service health from prior-graph-artifact or other-session memory; put those in the gap, not the conclusion.\n\
-Cached hop_fail blocks are prior errors, not this-hop upstream-live.\n\
-Do not invent geography, identity, or type labels that are not in the artifacts; mark guesses as inference.\n\
 If evidence is incomplete, say what is known and the single next action.\n\
-When PRIOR OPERATOR-VISIBLE CLAIMS are provided, later evidence supersedes earlier exclusivity.\n";
+Do not treat leftover workspace tmp or other-session memory as this-task evidence.\n\
+Do not invent geography, identity, or type labels that are not in the artifacts.\n\
+When PRIOR OPERATOR-VISIBLE CLAIMS are provided, later evidence supersedes earlier exclusive wording.\n";
 
 /// True when `text` is a work-node internodal envelope, not a parlor reply.
 #[must_use]
@@ -65,6 +60,49 @@ fn is_handoff_heading(line: &str) -> bool {
 fn is_verdict_field_line(line: &str) -> bool {
     let t = internodal_line_key(line);
     t == "verdict" || t == "verdict:" || t.starts_with("verdict:")
+}
+
+fn internodal_contract_heading_name(line: &str) -> Option<&'static str> {
+    let t = internodal_line_key(line);
+    let name = t.split(':').next().unwrap_or("").trim();
+    match name {
+        "vantage" => Some("vantage"),
+        "coverage" => Some("coverage"),
+        "evidence_layer" | "evidencelayer" => Some("evidence_layer"),
+        _ => None,
+    }
+}
+
+/// True when the body uses internodal contract headings (Vantage / Coverage / evidence_layer).
+#[must_use]
+pub fn looks_like_internodal_contract_fields(text: &str) -> bool {
+    text.lines()
+        .any(|line| internodal_contract_heading_name(line).is_some())
+}
+
+/// Drop internodal contract heading lines; keep remaining prose.
+#[must_use]
+pub fn strip_internodal_contract_fields(text: &str) -> String {
+    text.lines()
+        .filter(|line| internodal_contract_heading_name(line).is_none())
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string()
+}
+
+/// Stripped last-hop body used to decide parlor vs deliver (R10/R25).
+#[must_use]
+pub fn operator_visible_source(text: &str) -> String {
+    let without_markup = crate::util::strip_tool_call_markup(text);
+    let without_notice =
+        if velaclaw_agent_runtime::looks_like_tool_format_exhausted_notice(&without_markup) {
+            velaclaw_agent_runtime::strip_tool_format_exhausted_notice(&without_markup)
+        } else {
+            without_markup
+        };
+    let stripped = strip_internodal_suffix(&without_notice);
+    strip_internodal_contract_fields(&stripped)
 }
 
 /// Byte offset where an internodal suffix begins (`HANDOFF` / `verdict:` / `---` + those).
@@ -215,7 +253,7 @@ pub fn stamp_unscoped_exclusivity(text: &str, cjk: bool) -> String {
     let stamp = if cjk {
         "（范围：当前观测所及，并非全集穷尽。）\n"
     } else {
-        "(Scope: current vantage only; not an exhaustive census.)\n"
+        "(Scope: from what was observed this hop; not an exhaustive census.)\n"
     };
     format!("{stamp}{text}")
 }
@@ -300,15 +338,9 @@ fn section_after(text: &str, headers: &[&str]) -> Option<String> {
 /// Hard gate: internodal skeleton never leaves as the chat body.
 #[must_use]
 pub fn ensure_user_visible(user_task: &str, body: &str) -> String {
-    let without_markup = crate::util::strip_tool_call_markup(body);
-    let without_notice =
-        if velaclaw_agent_runtime::looks_like_tool_format_exhausted_notice(&without_markup) {
-            velaclaw_agent_runtime::strip_tool_format_exhausted_notice(&without_markup)
-        } else {
-            without_markup
-        };
-    let stripped = strip_internodal_suffix(&without_notice);
+    let stripped = operator_visible_source(body);
     if looks_like_internodal_envelope(&stripped)
+        || looks_like_internodal_contract_fields(&stripped)
         || velaclaw_agent_runtime::looks_like_tool_format_exhausted_notice(&stripped)
     {
         parlor_fallback(user_task, &stripped)
@@ -540,9 +572,11 @@ pub async fn host_delivery(
     } else {
         stripped_notice.as_str()
     };
-    let stripped = strip_internodal_suffix(evidence);
-    let needs_rewrite =
-        looks_like_internodal_envelope(&stripped) || exhausted || stripped.trim().is_empty();
+    let stripped = operator_visible_source(evidence);
+    let needs_rewrite = looks_like_internodal_envelope(&stripped)
+        || looks_like_internodal_contract_fields(&stripped)
+        || exhausted
+        || stripped.trim().is_empty();
     let body = if needs_rewrite {
         let chat_evidence = if stripped.trim().is_empty() {
             prior_visible
@@ -661,11 +695,24 @@ mod tests {
     }
 
     #[test]
-    fn delivery_prompt_names_evidence_layer() {
-        assert!(DELIVERY_SYSTEM_PROMPT.contains("evidence_layer"));
-        assert!(DELIVERY_SYSTEM_PROMPT.contains("prior-graph-artifact"));
-        assert!(DELIVERY_SYSTEM_PROMPT.contains("live host/service health"));
-        assert!(DELIVERY_SYSTEM_PROMPT.contains("other-session memory"));
+    fn delivery_prompt_forbids_internodal_field_names_in_bubble() {
+        let p = DELIVERY_SYSTEM_PROMPT.to_ascii_lowercase();
+        assert!(!p.contains("evidence_layer"));
+        assert!(!p.contains("vantage"));
+        assert!(!p.contains("coverage"));
+        assert!(p.contains("ordinary language"));
+    }
+
+    #[test]
+    fn internodal_envelope_stripped_from_user_bubble() {
+        let jargon =
+            "Vantage: remote\nCoverage: partial\nevidence_layer: this-hop-tool\n服务在跑。";
+        let out = ensure_user_visible("检查", jargon);
+        let lower = out.to_ascii_lowercase();
+        assert!(out.contains("服务在跑"));
+        assert!(!lower.contains("vantage"));
+        assert!(!lower.contains("coverage"));
+        assert!(!lower.contains("evidence_layer"));
     }
 
     #[test]

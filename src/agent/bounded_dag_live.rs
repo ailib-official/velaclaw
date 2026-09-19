@@ -71,10 +71,9 @@ pub enum ObserveVerdict {
 /// Chat-only vs DAG. DAG rules are [`DAG_PLAN_SYSTEM_PROMPT`] (GOV-007; not a second planner).
 pub const LIVE_FIRST_HOP_PREAMBLE: &str = "\
 Start this VelaClaw turn now. Reply with ONLY one JSON object, no markdown.\n\
-Prior user/assistant messages are this same session. Continue that work (same hosts, paths, and findings). Do not claim you forgot earlier turns. Do not ask what to do if the session already did it.\n\
+Prior user/assistant messages are this same session. Continue that work. Do not claim you forgot earlier turns. Do not ask what to do if the session already did it.\n\
 Greeting, thanks, or general knowledge (no repo/host/files): {\"path\":\"chat_only\",\"reply\":\"<full user-visible reply>\"}\n\
-Work (inspect a repo, workspace, or host; any tool turn): a linear DAG JSON object using the planner rules below (schema_version 0.1.0, 1 to 8 nodes). One atomic deliverable = one node with Σ-shaped filled I. Two or more independent results = that many filled-I nodes (or one node whose I covers every result). tool_direct artifact must be an executable command (or ssh <alias> …), not a caption. Cognition nodes may use a work description as I. Do not emit a path-only object with no nodes. Graphs with no executable I are not work — the host Asks.\n\
-Never use chat_only when the user asks to inspect a local repo, workspace, or host.\n";
+Inspect a repo, workspace, or host: emit the DAG JSON using the planner rules below. Never use chat_only for that.\n";
 
 #[must_use]
 pub fn live_first_hop_system_prompt() -> String {
@@ -397,7 +396,7 @@ pub struct OperatorInvokeI {
 }
 
 /// Web HITL prompt when filling empty I (R23). CLI without a hub keeps [`EMPTY_I_ASK`].
-pub const EMPTY_I_CONTRACT_PROMPT: &str = "This hop has empty I (no command). Reply with one allowed command (for example: pwd). Optional: ssh <alias> <simple> using a configured deploy alias. Caption text is not a command. Cancel aborts this hop; the host will not invent a script.";
+pub const EMPTY_I_CONTRACT_PROMPT: &str = "This hop has empty I (no command). Reply with one admit-safe invoke (for example: pwd). Optional: ssh <alias> <simple argv> using a configured deploy alias. A caption is not a command. Do not send $(), backticks, redirects, or several checks wrapped in one ssh. Cancel aborts this hop; the host will not invent a command.";
 
 /// Visible Ask when a node has I but caps are outside the host table (R24/E37). Not R23.
 pub const CAP_REJECT_ASK: &str = "This hop used a capability tag the host does not admit. Use one of: high-reasoning, coding, speed, document_understanding, tool_calling, long_context (aliases of tool_calling: tools, shell.exec, file.read, glob.search). This is not a request for a shell command.";
@@ -2113,7 +2112,8 @@ mod tests {
             other => panic!("two filled-I deliverables must keep plan_dag, got {other:?}"),
         }
         assert_eq!(planner_collapse_reason(json, &hop), "plan");
-        assert!(LIVE_FIRST_HOP_PREAMBLE.contains("Two or more independent results"));
+        assert!(LIVE_FIRST_HOP_PREAMBLE.contains("Never use chat_only for that"));
+        assert!(!LIVE_FIRST_HOP_PREAMBLE.contains("one node whose I covers every result"));
     }
 
     #[test]

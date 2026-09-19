@@ -14,22 +14,30 @@ pub const DAG_PLAN_SYSTEM_PROMPT: &str = r#"You are a DAG planner. Reply with ON
 The object MUST use schema_version "0.1.0" and include:
 - id (string), entry (string node id), max_steps (number, <= 8)
 - nodes: 1 to 8 items of { id, task_type, model_selector: { capabilities: string[] }, next: string|null, context_requirements?: { layers: number[], retrieve?: object[] } }
-Choose the node count from THIS task's deliverables (1–8), not from whether capabilities match. One node only when the user asked for a single result (one greeting is not a DAG — the host skips you; one file patch; one yes/no). If they asked for several independent results, give one node per deliverable only when each node has Σ-shaped filled I: tool_direct artifact is a command (pwd, ls, ssh <alias> …), not a caption. Cognition I may be a work description. The host Asks when no node has executable I. Do not emit a path-only object with no nodes. Do not invent inspect/diagnose/report splits or empty "gather context" nodes.
-Each node is a verifiable artifact state change. Work backward from the operator-visible deliverable. The host writes the user-facing conclusion after the last node.
-Each node lists ONE primary capability first (optional extras after). Tags: coding (patches/shell), tool_calling (status/checks), high-reasoning (analysis that needs a reasoning family), speed (cheap/short), document_understanding (read/summarize). Different work → different first tags so Contact can route to different [[model_routes]] families. Do not name providers or model IDs.
-Do not pad every node with coding+tool_calling. Runtime already injects workspace retrieve and the previous node's artifact.
+
+Capability tags — one primary first, optional extras after. Use only these tokens or the declared aliases:
+high-reasoning, coding, speed, document_understanding, tool_calling, long_context.
+aliases of the same tag tool_calling: tools, shell.exec, file.read, glob.search.
+Do not invent other tags. Do not name providers or model IDs. Do not pad every node with coding+tool_calling.
+
+Filled I (Σ-shaped):
+- tool_direct artifact = one admit-safe invoke the host can run as-is. Legal: a simple argv (pwd, ls) or ssh <alias> <simple argv>. A pipe `|` between simple programs is allowed. Forbidden in I: $(), backticks, ${, <(, >(, unquoted redirects, tee, find -exec, variable assignment, wrapping several checks in one ssh. Counting, parsing, and interpretation are a later llm_cognition node (work-description I), not a script inside the command. A caption is not a command.
+- llm_cognition artifact = a work description, not an invoke.
+
+Node count follows this task's deliverables (1–8), not whether capabilities match. One node only when the user asked for a single result (a greeting is not a DAG — the host skips you). Several independent results → one node per deliverable, each with filled I. Do not stuff every result into one mega-I. Do not emit a path-only object with no nodes. Do not invent inspect/diagnose/report splits or empty gather-context nodes. The host Asks when no node has executable I.
+
+Each node is a verifiable artifact state change. Work backward from the operator-visible deliverable. The host writes the user-facing conclusion after the last node. Runtime already injects workspace retrieve and the previous node's artifact.
+
+Inspect/list/status that allowed tools can finish: capabilities ["tool_calling"], sigma tool_direct, artifact one admit-safe invoke. A named host in the user text → locus remote:<alias> and artifact "ssh <alias> <simple>". Do not invent a hostname. Do not wrap those checks in coding LLM hops.
+
 The graph MUST be a single linear chain: entry walks next until null and covers every node (no branches, no unused nodes).
-Each work node must finish with few tool rounds: batch related shell into one command (`&&` / pipes / one remote ssh wrapping several checks). Do not include executable scripts.
-Optional node fields: sigma ("llm_cognition" or "tool_direct") and locus ("workspace" or "remote:<alias>"). Inspect/list/status that allowed tools can finish: capabilities ["tool_calling"] (aliases of the same tag: tools, shell.exec, file.read, glob.search — do not invent other tags), sigma tool_direct, artifact a simple command without $(), redirects, or find -exec. A named host in the user text → locus remote:<alias> and artifact "ssh <alias> <simple>". Do not wrap those in coding LLM hops. Do not invent a hostname.
+Optional node fields: sigma ("llm_cognition" or "tool_direct") and locus ("workspace" or "remote:<alias>").
 
 Example (one hop — a single ops check with I):
 {"schema_version":"0.1.0","id":"ops-one","entry":"check","max_steps":8,"nodes":[{"id":"check","task_type":"ops-check","model_selector":{"capabilities":["tool_calling"]},"sigma":"tool_direct","artifact":"pwd","next":null}]}
 
 Example (two hops — tool_direct I is a command, cognition I is a work description):
-{"schema_version":"0.1.0","id":"two-filled","entry":"check","max_steps":8,"nodes":[{"id":"check","task_type":"ops-check","model_selector":{"capabilities":["tool_calling"]},"sigma":"tool_direct","artifact":"pwd","next":"write"},{"id":"write","task_type":"write","model_selector":{"capabilities":["high-reasoning"]},"sigma":"llm_cognition","artifact":"write the analysis report","next":null}]}
-
-Example (two hops — code then a cheap verify):
-{"schema_version":"0.1.0","id":"patch-verify","entry":"patch","max_steps":8,"nodes":[{"id":"patch","task_type":"write","model_selector":{"capabilities":["coding"]},"next":"verify"},{"id":"verify","task_type":"ops-check","model_selector":{"capabilities":["speed"]},"context_requirements":{"layers":[3],"retrieve":[{"kind":"tool_result"}]},"next":null}]}"#;
+{"schema_version":"0.1.0","id":"two-filled","entry":"check","max_steps":8,"nodes":[{"id":"check","task_type":"ops-check","model_selector":{"capabilities":["tool_calling"]},"sigma":"tool_direct","artifact":"pwd","next":"write"},{"id":"write","task_type":"write","model_selector":{"capabilities":["high-reasoning"]},"sigma":"llm_cognition","artifact":"write the analysis report","next":null}]}"#;
 
 /// Tool-free planner turn: one system prompt + user task → raw model text.
 pub async fn planner_chat_text(
@@ -203,9 +211,12 @@ mod tests {
     #[test]
     fn planner_prompt_splits_by_deliverable_not_capability() {
         assert!(DAG_PLAN_SYSTEM_PROMPT.contains("two-filled"));
-        assert!(DAG_PLAN_SYSTEM_PROMPT.contains("Σ-shaped filled I"));
         assert!(DAG_PLAN_SYSTEM_PROMPT.contains("one node per deliverable"));
-        assert!(DAG_PLAN_SYSTEM_PROMPT.contains("not a caption"));
+        assert!(DAG_PLAN_SYSTEM_PROMPT.contains("A caption is not a command"));
+        assert!(DAG_PLAN_SYSTEM_PROMPT.contains("one admit-safe invoke"));
+        assert!(DAG_PLAN_SYSTEM_PROMPT.contains("wrapping several checks"));
+        assert!(!DAG_PLAN_SYSTEM_PROMPT.contains("batch related shell"));
+        assert!(!DAG_PLAN_SYSTEM_PROMPT.contains("one node whose I covers every result"));
         assert!(!DAG_PLAN_SYSTEM_PROMPT.contains("read the requested sources"));
         assert!(DAG_PLAN_SYSTEM_PROMPT.contains("host writes the user-facing conclusion"));
         assert!(DAG_PLAN_SYSTEM_PROMPT.contains("verifiable artifact"));

@@ -2319,7 +2319,9 @@ mod tests {
         assert!(!first
             .contains("One atomic tool turn in the user environment: {\"path\":\"single_work\"}"));
         assert!(first.contains("one node per deliverable"));
-        assert!(first.contains("Σ-shaped filled"));
+        assert!(first.contains("Filled I (Σ-shaped)"));
+        assert!(first.contains("one admit-safe invoke"));
+        assert!(!first.contains("one node whose I covers every result"));
         assert!(!first.contains("read the requested sources"));
         assert!(first.contains(DAG_PLAN_SYSTEM_PROMPT));
         assert!(!TURN_OBSERVE_SYSTEM_PROMPT.contains("even when remaining_nodes is 0"));

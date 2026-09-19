@@ -1616,8 +1616,10 @@ async fn bounded_dag_empty_i_hub_fill_continues_same_turn() {
         .await
         .unwrap();
     assert!(
-        !out.contains("empty I") && !out.contains("Approve an allowed command"),
-        "filled I must continue the same turn, calls={} out={out}",
+        !out.contains("Plan rejected")
+            && !out.contains("empty I")
+            && !out.contains("Approve an allowed command"),
+        "filled I must admit and continue the same turn, calls={} out={out}",
         calls.load(Ordering::SeqCst)
     );
 }

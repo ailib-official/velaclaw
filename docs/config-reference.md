@@ -74,7 +74,7 @@ Same `[agent]` keys must not silently mean different things on different shells.
 3. **`intent_capability_route`** (if enabled) — Tag/Hint → CAP reachable ∩ `[[model_routes]]`
 4. **`query_classification`** / configured **`default_model`**
 
-Quota/EOL notices name the **executed** logical id (`executed model \`…\``); the Web picker is a second field only when it differs. The live DAG planner hop uses the `fast` `[[model_routes]]` id (else session default), not the picker. Live work hops with `speed` / `tools` / `tool_calling` / `document` use the matching cheap `[[model_routes]]` hint; empty-cap / `coding` keep the session default. Journal `work hop start` includes `model` and `reason`.
+Quota/EOL notices name the **executed** logical id (`executed model \`…\``); the Web picker is a second field only when it differs. The live DAG planner hop uses the `fast` `[[model_routes]]` id (else session default), not the picker. Live work hops with `speed` / `tools` / `tool_calling` / `document` use the matching cheap `[[model_routes]]` hint; planner aliases `shell.exec` / `file.read` / `glob.search` admit as `tool_calling`. Empty-cap / `coding` keep the session default. Journal `work hop start` includes `model` and `reason`.
 
 | Surface | Uses `resolve_turn_model` | Notes |
 |---|---|---|

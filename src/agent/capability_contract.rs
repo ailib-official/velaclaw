@@ -82,6 +82,7 @@ pub fn admit_capability_contract(
     let configured = remote_alias_from_user(user_task, extra_aliases).map(str::to_string);
     for node in &mut dag.nodes {
         fill_defaults(node);
+        canonicalize_node_caps(node)?;
         if node_sigma(node) == NodeSigma::ToolDirect {
             normalize_tool_direct_invoke(node, configured.as_deref())?;
         }
@@ -171,6 +172,23 @@ fn admit_graph_shape(
     Ok(())
 }
 
+fn canonicalize_node_caps(node: &mut DagNode) -> Result<()> {
+    let mut out = Vec::new();
+    for raw in &node.model_selector.capabilities {
+        let Some(canon) = super::candidate_dag::canonicalize_capability_tag(raw) else {
+            bail!(
+                "unknown capability tag '{raw}' on node `{}` (cap_reject)",
+                node.id
+            );
+        };
+        if !out.iter().any(|e: &String| e == canon) {
+            out.push(canon.to_string());
+        }
+    }
+    node.model_selector.capabilities = out;
+    Ok(())
+}
+
 fn fill_defaults(node: &mut DagNode) {
     if node.sigma.is_none() {
         node.sigma = Some(
@@ -191,7 +209,7 @@ fn fill_defaults(node: &mut DagNode) {
 fn normalize_tool_direct_invoke(node: &mut DagNode, configured: Option<&str>) -> Result<()> {
     node.sigma = Some("tool_direct".into());
     if direct_tool_call(node).is_err() {
-        node.model_selector.capabilities = vec!["shell.exec".into()];
+        node.model_selector.capabilities = vec!["tool_calling".into()];
         node.task_type = "shell.exec".into();
     }
     let alias = ssh_alias(node, configured).map(str::to_string);

@@ -91,7 +91,7 @@ pub mod m3_metrics {
     }
 }
 
-/// Capability tags allowed by L2 `dag-schema.json` v0.1.0.
+/// Canonical capability tags (L2 `dag-schema.json` v0.1.0). Planner aliases map here (R24).
 pub const ALLOWED_CAPABILITY_TAGS: &[&str] = &[
     "high-reasoning",
     "coding",
@@ -100,6 +100,21 @@ pub const ALLOWED_CAPABILITY_TAGS: &[&str] = &[
     "tool_calling",
     "long_context",
 ];
+
+/// Map a planner/operator cap token onto the L2 table. Unknown → `None` (`cap_reject`).
+#[must_use]
+pub fn canonicalize_capability_tag(tag: &str) -> Option<&'static str> {
+    match tag.trim() {
+        "high-reasoning" => Some("high-reasoning"),
+        "coding" => Some("coding"),
+        "speed" => Some("speed"),
+        "document_understanding" | "document" => Some("document_understanding"),
+        "long_context" | "long-context" => Some("long_context"),
+        "tool_calling" | "tools" | "shell.exec" | "file.read" | "glob.search" | "shell"
+        | "file" => Some("tool_calling"),
+        _ => None,
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct CandidateValidateReport {
@@ -167,11 +182,13 @@ pub fn validate_candidate_dag_json(json: &str) -> CandidateValidateReport {
     if let Some(report) = reject_forbidden_source(&value) {
         return report;
     }
-    if let Some(report) = reject_unknown_capabilities(&value) {
+    let mut value = value;
+    if let Some(report) = rewrite_capability_aliases(&mut value) {
         return report;
     }
 
-    match parse_dag_json(json) {
+    let rewritten = value.to_string();
+    match parse_dag_json(&rewritten) {
         Ok(dag) => CandidateValidateReport {
             valid: true,
             category: CandidateFailCategory::Ok,
@@ -214,13 +231,16 @@ fn reject_forbidden_source(value: &Value) -> Option<CandidateValidateReport> {
     None
 }
 
-fn reject_unknown_capabilities(value: &Value) -> Option<CandidateValidateReport> {
-    let nodes = value.get("nodes")?.as_array()?;
+fn rewrite_capability_aliases(value: &mut Value) -> Option<CandidateValidateReport> {
+    let nodes = value.get_mut("nodes").and_then(|n| n.as_array_mut())?;
     for node in nodes {
-        let caps = node
-            .pointer("/model_selector/capabilities")
-            .and_then(|c| c.as_array())?;
-        for cap in caps {
+        let Some(caps) = node
+            .pointer_mut("/model_selector/capabilities")
+            .and_then(|c| c.as_array_mut())
+        else {
+            continue;
+        };
+        for cap in caps.iter_mut() {
             let Some(tag) = cap.as_str() else {
                 return Some(CandidateValidateReport {
                     valid: false,
@@ -229,13 +249,16 @@ fn reject_unknown_capabilities(value: &Value) -> Option<CandidateValidateReport>
                     dag: None,
                 });
             };
-            if !ALLOWED_CAPABILITY_TAGS.contains(&tag) {
-                return Some(CandidateValidateReport {
-                    valid: false,
-                    category: CandidateFailCategory::UnknownCapability,
-                    message: format!("unknown capability tag '{tag}'"),
-                    dag: None,
-                });
+            match canonicalize_capability_tag(tag) {
+                Some(canon) => *cap = Value::String(canon.to_string()),
+                None => {
+                    return Some(CandidateValidateReport {
+                        valid: false,
+                        category: CandidateFailCategory::UnknownCapability,
+                        message: format!("unknown capability tag '{tag}'"),
+                        dag: None,
+                    });
+                }
             }
         }
     }
@@ -460,6 +483,31 @@ mod tests {
         let report = validate_candidate_dag_json(BAD_CAP);
         assert!(!report.valid);
         assert_eq!(report.category, CandidateFailCategory::UnknownCapability);
+    }
+
+    #[test]
+    fn validate_shell_exec_alias_admits_as_tool_calling() {
+        assert_eq!(
+            canonicalize_capability_tag("shell.exec"),
+            Some("tool_calling")
+        );
+        assert_eq!(ALLOWED_CAPABILITY_TAGS.len(), 6);
+        let json = r#"{
+      "schema_version":"0.1.0",
+      "id":"alias-admit",
+      "entry":"check",
+      "max_steps":2,
+      "nodes":[
+        {"id":"check","task_type":"ops-check","model_selector":{"capabilities":["shell.exec"]},
+         "sigma":"tool_direct","artifact":"pwd","next":null}
+      ]
+    }"#;
+        let report = validate_candidate_dag_json(json);
+        assert!(report.valid, "{}", report.message);
+        let caps = &report.dag.as_ref().unwrap().nodes[0]
+            .model_selector
+            .capabilities;
+        assert_eq!(caps, &vec!["tool_calling".to_string()]);
     }
 
     #[test]

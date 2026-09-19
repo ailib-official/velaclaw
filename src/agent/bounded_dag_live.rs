@@ -17,7 +17,7 @@
 
 use super::bounded_dag::{format_preview, linear_node_ids, load_bounded_dag, schedule_node_ids};
 use super::bounded_dag_context::contact_for_live_node;
-use super::candidate_dag::validate_candidate_dag_json;
+use super::candidate_dag::{validate_candidate_dag_json, CandidateFailCategory};
 use super::capability_contract::admit_capability_contract;
 use super::dag_runner::{parse_dag_json, DagManifest, DagNode, CODE_FIX_TEMPLATE_JSON};
 use super::graph_scheduler::{
@@ -194,19 +194,30 @@ pub fn parse_live_first_hop(text: &str, fallback_json: &str) -> LiveFirstHop {
             }
         }
         Some("single_work") => parse_path_single_work(&v, &obj, fallback_json),
-        _ => match resolve_planned_manifest(&obj, fallback_json) {
-            Ok(plan) if !plan.used_fallback => LiveFirstHop::Plan(plan),
-            _ => LiveFirstHop::SingleWork,
-        },
+        _ => hop_from_candidate_json(&obj, fallback_json),
+    }
+}
+
+fn hop_from_candidate_json(obj: &str, fallback_json: &str) -> LiveFirstHop {
+    match resolve_planned_manifest(obj, fallback_json) {
+        Ok(plan) if !plan.used_fallback => LiveFirstHop::Plan(plan),
+        _ => {
+            let extracted = extract_json_object(obj).unwrap_or_else(|| obj.trim().to_string());
+            let report = validate_candidate_dag_json(&extracted);
+            if report.category == CandidateFailCategory::UnknownCapability {
+                LiveFirstHop::ChatOnly {
+                    reply: CAP_REJECT_ASK.to_string(),
+                }
+            } else {
+                LiveFirstHop::SingleWork
+            }
+        }
     }
 }
 
 fn parse_path_single_work(v: &serde_json::Value, obj: &str, fallback_json: &str) -> LiveFirstHop {
     if v.get("nodes").is_some() {
-        return match resolve_planned_manifest(obj, fallback_json) {
-            Ok(plan) if !plan.used_fallback => LiveFirstHop::Plan(plan),
-            _ => LiveFirstHop::SingleWork,
-        };
+        return hop_from_candidate_json(obj, fallback_json);
     }
     let Some(artifact) = v
         .get("artifact")
@@ -252,7 +263,7 @@ fn parse_path_single_work(v: &serde_json::Value, obj: &str, fallback_json: &str)
     .to_string();
     match resolve_planned_manifest(&wrapped, fallback_json) {
         Ok(plan) if !plan.used_fallback => LiveFirstHop::Plan(plan),
-        _ => LiveFirstHop::SingleWork,
+        _ => hop_from_candidate_json(&wrapped, fallback_json),
     }
 }
 
@@ -260,6 +271,7 @@ fn parse_path_single_work(v: &serde_json::Value, obj: &str, fallback_json: &str)
 #[must_use]
 pub fn planner_collapse_reason(raw: &str, hop: &LiveFirstHop) -> &'static str {
     match hop {
+        LiveFirstHop::ChatOnly { reply } if reply.trim() == CAP_REJECT_ASK => "cap_reject",
         LiveFirstHop::ChatOnly { .. } => "chat_only",
         LiveFirstHop::Plan(_) => "plan",
         LiveFirstHop::SingleWork => {
@@ -269,6 +281,12 @@ pub fn planner_collapse_reason(raw: &str, hop: &LiveFirstHop) -> &'static str {
             let Ok(v) = serde_json::from_str::<serde_json::Value>(&obj) else {
                 return "invalid_json";
             };
+            let extracted = extract_json_object(raw).unwrap_or_else(|| raw.trim().to_string());
+            if validate_candidate_dag_json(&extracted).category
+                == CandidateFailCategory::UnknownCapability
+            {
+                return "cap_reject";
+            }
             match v
                 .get("path")
                 .or_else(|| v.get("mode"))
@@ -381,6 +399,9 @@ pub struct OperatorInvokeI {
 /// Web HITL prompt when filling empty I (R23). CLI without a hub keeps [`EMPTY_I_ASK`].
 pub const EMPTY_I_CONTRACT_PROMPT: &str = "This hop has empty I (no command). Reply with one allowed command (for example: pwd). Optional: ssh <alias> <simple> using a configured deploy alias. Caption text is not a command. Cancel aborts this hop; the host will not invent a script.";
 
+/// Visible Ask when a node has I but caps are outside the host table (R24/E37). Not R23.
+pub const CAP_REJECT_ASK: &str = "This hop used a capability tag the host does not admit. Use one of: high-reasoning, coding, speed, document_understanding, tool_calling, long_context (aliases of tool_calling: tools, shell.exec, file.read, glob.search). This is not a request for a shell command.";
+
 /// True when the hop is waiting for an operator invoke I (R19/R23).
 #[must_use]
 pub fn hop_needs_empty_i_contract(hop: &LiveFirstHop) -> bool {
@@ -457,9 +478,9 @@ pub fn apply_operator_invoke_to_node(node: &mut DagNode, fill: &OperatorInvokeI)
         .model_selector
         .capabilities
         .iter()
-        .any(|c| c == "shell.exec")
+        .any(|c| c == "tool_calling")
     {
-        node.model_selector.capabilities.push("shell.exec".into());
+        node.model_selector.capabilities.push("tool_calling".into());
     }
 }
 
@@ -473,7 +494,7 @@ pub fn plan_from_operator_invoke(
     let mut node = serde_json::json!({
         "id": "work",
         "task_type": "ops-check",
-        "model_selector": { "capabilities": ["shell.exec"] },
+        "model_selector": { "capabilities": ["tool_calling"] },
         "sigma": "tool_direct",
         "artifact": fill.command,
         "next": serde_json::Value::Null
@@ -2100,6 +2121,48 @@ mod tests {
             planner_collapse_reason(THREE_UNFILLED_JSON, &dag_hop),
             "unfilled_i"
         );
+    }
+
+    #[test]
+    fn planner_collapse_reason_unknown_cap_is_cap_reject() {
+        let json = r#"{"schema_version":"0.1.0","id":"bad","entry":"n","max_steps":2,"nodes":[{"id":"n","task_type":"ops","model_selector":{"capabilities":["super-intelligence"]},"sigma":"tool_direct","artifact":"pwd","next":null}]}"#;
+        let hop = parse_live_first_hop(json, CODE_FIX_TEMPLATE_JSON);
+        match &hop {
+            LiveFirstHop::ChatOnly { reply } => assert_eq!(reply, CAP_REJECT_ASK),
+            other => panic!("expected cap_reject Ask, got {other:?}"),
+        }
+        assert_eq!(planner_collapse_reason(json, &hop), "cap_reject");
+        assert!(!hop_needs_empty_i_contract(&hop));
+    }
+
+    #[test]
+    fn resolve_shell_exec_filled_i_does_not_fallback() {
+        let json = r#"{"schema_version":"0.1.0","id":"two-filled","entry":"check","max_steps":8,"nodes":[{"id":"check","task_type":"ops-check","model_selector":{"capabilities":["shell.exec"]},"sigma":"tool_direct","artifact":"pwd","next":"write"},{"id":"write","task_type":"write","model_selector":{"capabilities":["high-reasoning"]},"sigma":"llm_cognition","artifact":"write the analysis report","next":null}]}"#;
+        let plan = resolve_planned_manifest(json, CODE_FIX_TEMPLATE_JSON).unwrap();
+        assert!(!plan.used_fallback);
+        assert_eq!(
+            plan.dag.nodes[0].model_selector.capabilities,
+            vec!["tool_calling".to_string()]
+        );
+        let hop = parse_live_first_hop(json, CODE_FIX_TEMPLATE_JSON);
+        assert!(matches!(hop, LiveFirstHop::Plan(_)));
+        assert_eq!(planner_collapse_reason(json, &hop), "plan");
+    }
+
+    #[test]
+    fn plan_from_operator_invoke_admits_pwd() {
+        let fill = parse_operator_invoke_i("pwd", &[]).expect("pwd is invoke I");
+        let policy = crate::security::SecurityPolicy {
+            autonomy: crate::security::AutonomyLevel::Full,
+            ..crate::security::SecurityPolicy::default()
+        };
+        let plan = plan_from_operator_invoke(&fill, "check cwd", &policy, &[]).unwrap();
+        assert!(!plan.used_fallback);
+        assert_eq!(
+            plan.dag.nodes[0].model_selector.capabilities,
+            vec!["tool_calling".to_string()]
+        );
+        assert_eq!(plan.dag.nodes[0].artifact.as_deref(), Some("pwd"));
     }
 
     #[test]

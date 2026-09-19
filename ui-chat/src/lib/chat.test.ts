@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
     lastAssistantHasVelaClawNotice,
     looksLikeVelaClawNotice,
     outboundChatHistory,
+    persistableChatHistory,
     parseLiveDagPreview,
   } from "./chat";
 
@@ -134,6 +135,16 @@ describe("progress frames", () => {
       { role: "assistant", content: "done" },
     ]);
     expect(hist.map((m) => m.role)).toEqual(["user", "assistant"]);
+  });
+
+  it("persistable history keeps step and status", () => {
+    const hist = persistableChatHistory([
+      { role: "user", content: "hi" },
+      { role: "status", content: "locate code-fix" },
+      { role: "step", content: "git status", stepOk: true },
+      { role: "assistant", content: "done" },
+    ]);
+    expect(hist.map((m) => m.role)).toEqual(["user", "status", "step", "assistant"]);
   });
 });
 

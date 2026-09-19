@@ -317,6 +317,40 @@ pub fn event_to_progress(event: &ObserverEvent) -> Option<TurnProgress> {
     }
 }
 
+/// User-bus hop start (A21). Not internodal evidence and not a complete-gate (P7).
+#[must_use]
+pub fn hop_begin_status(node_id: &str, task_type: &str) -> TurnProgress {
+    let detail = if task_type.is_empty() {
+        node_id.to_string()
+    } else {
+        format!("{node_id} {task_type}")
+    };
+    TurnProgress::Status {
+        phase: "hop_begin".into(),
+        detail,
+    }
+}
+
+/// True when a hop_begin/running-node frame is recorded before the first invoke/step.
+#[must_use]
+pub fn hop_begin_precedes_invoke(frames: &[TurnProgress]) -> bool {
+    let begin = frames.iter().position(|f| match f {
+        TurnProgress::Status { phase, .. } if phase == "hop_begin" => true,
+        TurnProgress::Dag { nodes, .. } => nodes.iter().any(|n| n.status == "running"),
+        _ => false,
+    });
+    let invoke = frames.iter().position(|f| match f {
+        TurnProgress::Status { phase, .. } if phase == "run" => true,
+        TurnProgress::Step { .. } => true,
+        _ => false,
+    });
+    match (begin, invoke) {
+        (Some(b), Some(i)) => b < i,
+        (Some(_), None) => true,
+        _ => false,
+    }
+}
+
 /// Fan-out observer: keep the configured backend, plus optional progress sink.
 pub struct ProgressObserver {
     inner: Arc<dyn Observer>,
@@ -559,5 +593,71 @@ mod tests {
         assert!(capped.chars().count() <= EXPAND_MAX_CHARS);
         assert!(capped.ends_with('…'));
         assert!(progress_expand_body("   ").is_none());
+    }
+
+    #[test]
+    fn hop_start_frame_before_first_invoke() {
+        let frames = [
+            hop_begin_status("locate", "code-fix"),
+            TurnProgress::Status {
+                phase: "run".into(),
+                detail: "git status".into(),
+            },
+            TurnProgress::Step {
+                kind: "tool_result".into(),
+                tool: "shell".into(),
+                ok: true,
+                summary: "git status".into(),
+                expand: None,
+            },
+        ];
+        assert!(hop_begin_precedes_invoke(&frames));
+        let inverted = [frames[1].clone(), frames[2].clone(), frames[0].clone()];
+        assert!(!hop_begin_precedes_invoke(&inverted));
+    }
+
+    #[test]
+    fn tooldirect_emits_progress_step() {
+        let start = event_to_progress(&ObserverEvent::ToolCallStart {
+            tool: "shell".into(),
+            caption: Some("git status".into()),
+        })
+        .expect("start");
+        let step = event_to_progress(&ObserverEvent::ToolCall {
+            tool: "shell".into(),
+            duration: Duration::from_millis(1),
+            success: true,
+            summary: Some("git status".into()),
+            detail: Some("On branch main".into()),
+        })
+        .expect("step");
+        assert_eq!(
+            start,
+            TurnProgress::Status {
+                phase: "run".into(),
+                detail: "git status".into(),
+            }
+        );
+        assert!(matches!(step, TurnProgress::Step { ok: true, .. }));
+        assert!(hop_begin_precedes_invoke(&[
+            hop_begin_status("n1", "code-fix"),
+            start,
+            step,
+        ]));
+    }
+
+    #[test]
+    fn step_frames_are_not_complete_gate_evidence() {
+        let step = TurnProgress::Step {
+            kind: "tool_result".into(),
+            tool: "shell".into(),
+            ok: true,
+            summary: "ok".into(),
+            expand: Some("dump".into()),
+        };
+        match step {
+            TurnProgress::Step { .. } | TurnProgress::Status { .. } | TurnProgress::Dag { .. } => {}
+            TurnProgress::Note { .. } => panic!("notes are operator text, not dag_art"),
+        }
     }
 }

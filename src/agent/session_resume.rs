@@ -55,10 +55,12 @@ pub async fn append_user_assistant_turn(
         ChatMessageInput {
             role: "user".into(),
             content: user.to_string(),
+            ..Default::default()
         },
         ChatMessageInput {
             role: "assistant".into(),
             content: assistant.to_string(),
+            ..Default::default()
         },
     ];
     store.append_messages(session_id, &msgs, model_id).await?;
@@ -80,5 +82,30 @@ mod tests {
         let (again, hist) = load_or_create_session(dir.path(), Some(&id)).await.unwrap();
         assert_eq!(again, id);
         assert!(hist.iter().any(|m| m.content.contains("hello-ctx")));
+    }
+
+    #[test]
+    fn history_from_session_drops_step_and_status() {
+        let msgs = [
+            ChatMessageInput {
+                role: "user".into(),
+                content: "hi".into(),
+                ..Default::default()
+            },
+            ChatMessageInput {
+                role: "step".into(),
+                content: "git status".into(),
+                step_ok: Some(true),
+                expand: None,
+            },
+            ChatMessageInput {
+                role: "assistant".into(),
+                content: "done".into(),
+                ..Default::default()
+            },
+        ];
+        let hist = history_from_session_messages(&msgs);
+        assert_eq!(hist.len(), 2);
+        assert!(hist.iter().all(|m| m.role != "step"));
     }
 }

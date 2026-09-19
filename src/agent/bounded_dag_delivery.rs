@@ -10,8 +10,7 @@ use anyhow::Result;
 pub const DELIVERY_SYSTEM_PROMPT: &str = "\
 You write the operator-visible conclusion for USER TASK.\n\
 Use the node artifacts as evidence. Be direct, in ordinary language.\n\
-Do not use internodal envelope headers: HANDOFF, verdict:, findings:, pointers:, gaps:.\n\
-Do not write host-contract section titles. The chat bubble is prose, not a spec form.\n\
+The chat bubble is prose, not a spec form and not an internodal envelope.\n\
 Do not tell the operator to hand off to another node.\n\
 If evidence is incomplete, say what is known and the single next action.\n\
 Do not treat leftover workspace tmp or other-session memory as this-task evidence.\n\

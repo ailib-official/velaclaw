@@ -201,27 +201,21 @@ pub fn format_preview(dag: &DagManifest, order: &[String]) -> String {
 pub fn node_task_card(dag_id: &str, node: &DagNode, index: usize, node_count: usize) -> String {
     let next = node.next.as_deref().unwrap_or("END");
     let last = node.next.is_none();
-    let tools = "Prefer one compound shell (`&&` / pipes) over many tool rounds. \
-         Independent checks: several commands in one ssh / one assistant message. \
-         Work in this node's vantage. If INPUTS or USER TASK already name a vantage \
-         (host, path, artifact), start there — do not substitute a local stand-in probe. \
+    let tools = "Run this node's filled I as given. One invoke per tool round: a simple argv, \
+         or ssh <alias> <simple argv>. A pipe between simple programs is allowed. \
+         Do not write $(), backticks, ${, redirects, tee, find -exec, assignment scripts, \
+         or wrap several checks in one ssh. \
+         If INPUTS or USER TASK already name a vantage (host, path, artifact), start there — \
+         do not substitute a local stand-in probe. \
          Do not re-run a probe whose result is already in INPUTS as this-hop-tool or this-graph-artifact. \
-         Do not rewrite the same check as a new script_v2/v3 file; fix or compound the command. \
+         Do not rewrite the same check as a new script file. \
          Do not `find /` or open-ended local scans. \
          prior-graph-artifact (and other-session memory) is context for gaps only — \
          not a substitute for this-hop-tool on a live host or service check.";
     let success = if last {
-        "Stop with the operator-visible conclusion as the last assistant message. \
-         Do not emit internodal envelope headers (HANDOFF, verdict:, findings:, pointers:, gaps:). \
-         State vantage (where you looked) and coverage (sample|partial|exhaustive). \
-         Exclusive claims (only/none/all) require coverage=exhaustive; otherwise scope them \
-         to the vantage. Label guesses as inference. \
-         Name evidence_layer (this-hop-tool | this-graph-artifact | prior-graph-artifact | \
-         host-config | protocol-dist | upstream-live | inference). \
-         Recommend changes only on a layer you observed this hop. \
-         Live health/status facts need this-hop-tool or this-graph-artifact from this run. \
-         If later evidence revises an earlier exclusivity, say the revision. \
-         The host delivers this text to the user; internodal handoff is only for mid-graph nodes."
+        "Stop with the operator-visible conclusion as the last assistant message, \
+         in ordinary language. Do not emit an internodal envelope. \
+         The host delivers this text to the user."
     } else {
         "Stop with a HANDOFF as the last assistant message:\n\
          - vantage: this_host | remote_host | artifact | lan_passive | mixed\n\
@@ -236,7 +230,8 @@ pub fn node_task_card(dag_id: &str, node: &DagNode, index: usize, node_count: us
     let mid_hint = "The host counts a shell round only after a command actually ran \
          (policy-deny and repeat-skip do not consume the cap). After four such rounds \
          the host injects a cap notice. Do not stop early or claim a cap unless that \
-         notice appeared. Until then, compound remaining checks in one ssh.";
+         notice appeared. Then finish this node's internodal envelope from INPUTS, \
+         or issue another admit-safe invoke.";
     format!(
         "NODE TASK (host-filled slots; do not rewrite this card)\n\
          - dag_id: {dag_id}\n\
@@ -369,7 +364,9 @@ mod tests {
         let card = node_task_card("code-fix-template", locate, 1, 3);
         assert!(card.contains("next_node_id: patch"));
         assert!(card.contains("HANDOFF"));
-        assert!(card.contains("compound shell"));
+        assert!(card.contains("admit-safe invoke"));
+        assert!(!card.contains("compound shell"));
+        assert!(card.contains("Do not write $()"));
         assert!(card.contains("vantage:"));
         assert!(card.contains("coverage:"));
         assert!(card.contains("claim_kind:"));
@@ -388,8 +385,11 @@ mod tests {
             "last hop must not demand internodal HANDOFF: {end}"
         );
         assert!(end.contains("operator-visible conclusion"));
-        assert!(end.contains("evidence_layer"));
-        assert!(end.contains("coverage=exhaustive"));
+        assert!(end.contains("ordinary language"));
+        assert!(
+            !end.contains("evidence_layer"),
+            "last hop must not teach internodal field names: {end}"
+        );
         assert!(
             !card.contains("Aim for at most four shell rounds"),
             "must not teach early HANDOFF on a soft four-round slogan: {card}"

@@ -5,9 +5,9 @@ use crate::agent::hop_stop::{policy_deny_class, HopClose};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
-pub const REPEAT_PROBE_NOTICE: &str = "Host skipped a repeat probe (same fingerprint as an earlier call this hop). Use INPUTS; compound remaining work or HANDOFF.";
+pub const REPEAT_PROBE_NOTICE: &str = "Host skipped a repeat probe (same fingerprint as an earlier call this hop). Use INPUTS; issue a different admit-safe invoke or finish this node's internodal envelope.";
 
-pub const SHELL_ROUND_CAP_NOTICE: &str = "Host capped this hop at four executed shell rounds. Finish this node's internodal envelope from current INPUTS; do not start script_v2/v3.";
+pub const SHELL_ROUND_CAP_NOTICE: &str = "Host capped this hop at four executed shell rounds. Finish this node's internodal envelope from current INPUTS; do not start a new script file.";
 
 pub const MAX_SHELL_ROUNDS_PER_HOP: u32 = 4;
 pub const MAX_OFF_GOAL_LISTING_ROUNDS: u32 = 2;

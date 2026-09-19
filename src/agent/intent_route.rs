@@ -31,6 +31,9 @@ const HINT_TO_TAG: &[(&str, &str)] = &[
     ("document_understanding", "document_understanding"),
     ("tools", "tool_calling"),
     ("tool_calling", "tool_calling"),
+    ("shell.exec", "tool_calling"),
+    ("file.read", "tool_calling"),
+    ("glob.search", "tool_calling"),
     ("long_context", "long_context"),
     ("long-context", "long_context"),
 ];

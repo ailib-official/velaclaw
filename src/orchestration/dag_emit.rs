@@ -20,13 +20,13 @@ Each node lists ONE primary capability first (optional extras after). Tags: codi
 Do not pad every node with coding+tool_calling. Runtime already injects workspace retrieve and the previous node's artifact.
 The graph MUST be a single linear chain: entry walks next until null and covers every node (no branches, no unused nodes).
 Each work node must finish with few tool rounds: batch related shell into one command (`&&` / pipes / one remote ssh wrapping several checks). Do not include executable scripts.
-Optional node fields: sigma ("llm_cognition" or "tool_direct") and locus ("workspace" or "remote:<alias>"). Inspect/list/status that allowed tools can finish: capabilities ["shell.exec"] (or file.read / glob.search), sigma tool_direct, artifact a simple command without $(), redirects, or find -exec. A named host in the user text → locus remote:<alias> and artifact "ssh <alias> <simple>". Do not wrap those in coding LLM hops. Do not invent a hostname.
+Optional node fields: sigma ("llm_cognition" or "tool_direct") and locus ("workspace" or "remote:<alias>"). Inspect/list/status that allowed tools can finish: capabilities ["tool_calling"] (aliases of the same tag: tools, shell.exec, file.read, glob.search — do not invent other tags), sigma tool_direct, artifact a simple command without $(), redirects, or find -exec. A named host in the user text → locus remote:<alias> and artifact "ssh <alias> <simple>". Do not wrap those in coding LLM hops. Do not invent a hostname.
 
 Example (one hop — a single ops check with I):
 {"schema_version":"0.1.0","id":"ops-one","entry":"check","max_steps":8,"nodes":[{"id":"check","task_type":"ops-check","model_selector":{"capabilities":["tool_calling"]},"sigma":"tool_direct","artifact":"pwd","next":null}]}
 
 Example (two hops — tool_direct I is a command, cognition I is a work description):
-{"schema_version":"0.1.0","id":"two-filled","entry":"check","max_steps":8,"nodes":[{"id":"check","task_type":"ops-check","model_selector":{"capabilities":["shell.exec"]},"sigma":"tool_direct","artifact":"pwd","next":"write"},{"id":"write","task_type":"write","model_selector":{"capabilities":["high-reasoning"]},"sigma":"llm_cognition","artifact":"write the analysis report","next":null}]}
+{"schema_version":"0.1.0","id":"two-filled","entry":"check","max_steps":8,"nodes":[{"id":"check","task_type":"ops-check","model_selector":{"capabilities":["tool_calling"]},"sigma":"tool_direct","artifact":"pwd","next":"write"},{"id":"write","task_type":"write","model_selector":{"capabilities":["high-reasoning"]},"sigma":"llm_cognition","artifact":"write the analysis report","next":null}]}
 
 Example (two hops — code then a cheap verify):
 {"schema_version":"0.1.0","id":"patch-verify","entry":"patch","max_steps":8,"nodes":[{"id":"patch","task_type":"write","model_selector":{"capabilities":["coding"]},"next":"verify"},{"id":"verify","task_type":"ops-check","model_selector":{"capabilities":["speed"]},"context_requirements":{"layers":[3],"retrieve":[{"kind":"tool_result"}]},"next":null}]}"#;
@@ -213,6 +213,7 @@ mod tests {
         assert!(DAG_PLAN_SYSTEM_PROMPT.contains("remote:<alias>"));
         assert!(DAG_PLAN_SYSTEM_PROMPT.contains("\"artifact\":\"pwd\""));
         assert!(DAG_PLAN_SYSTEM_PROMPT.contains("Do not emit a path-only object with no nodes"));
+        assert!(DAG_PLAN_SYSTEM_PROMPT.contains("aliases of the same tag"));
         assert!(!DAG_PLAN_SYSTEM_PROMPT.contains("collapses graphs without two such I values"));
     }
 

@@ -27,6 +27,11 @@ pub fn is_cheap_capability_route(cap: &str) -> bool {
         || raw == "fast"
         || raw == "document"
         || raw == "speed"
+        || raw == "shell.exec"
+        || raw == "file.read"
+        || raw == "glob.search"
+        || raw == "shell"
+        || raw == "file"
     {
         return true;
     }
@@ -43,7 +48,13 @@ pub fn is_cheap_capability_route(cap: &str) -> bool {
 #[must_use]
 pub fn is_tool_invoke_capability(cap: &str) -> bool {
     let t = cap.trim().to_ascii_lowercase();
-    t == "tools" || t == "tool_calling" || t == "shell.exec"
+    t == "tools"
+        || t == "tool_calling"
+        || t == "shell.exec"
+        || t == "file.read"
+        || t == "glob.search"
+        || t == "shell"
+        || t == "file"
 }
 
 /// Tool-invoke hops without a coding/cognition cap (empty cap is cognition, not this).

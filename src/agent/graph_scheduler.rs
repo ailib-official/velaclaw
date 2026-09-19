@@ -1070,4 +1070,20 @@ mod tests {
         .unwrap();
         assert!(!llm_work_missing_i(&pwd.nodes[0]));
     }
+
+    #[test]
+    fn summarize_hop_without_invoke_after_accumulator() {
+        let hop = crate::agent::dag_runner::parse_dag_json(
+            r#"{"schema_version":"0.1.0","id":"g","entry":"a","max_steps":2,"nodes":[{"id":"a","task_type":"write","model_selector":{"capabilities":["high-reasoning"]},"sigma":"llm_cognition","next":null}]}"#,
+        )
+        .unwrap();
+        assert!(
+            llm_work_missing_i(&hop.nodes[0]),
+            "first hop still Asks without invoke I"
+        );
+        assert!(
+            !llm_work_missing_i_at(&hop.nodes[0], 1),
+            "later cognition may write without a new invoke when hop_index>0"
+        );
+    }
 }

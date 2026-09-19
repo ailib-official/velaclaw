@@ -3,7 +3,8 @@
 
 use crate::agent::bounded_dag_delivery::{
     empty_hop_stop_reason, ensure_user_visible, hop_body_closes_graph, host_delivery,
-    last_hop_ends_graph, looks_like_internodal_envelope, strip_internodal_suffix,
+    last_hop_ends_graph, looks_like_internodal_contract_fields, looks_like_internodal_envelope,
+    operator_visible_source,
 };
 use crate::agent::dag_runner::DagManifest;
 use crate::agent::dag_runner::DagNode;
@@ -21,20 +22,22 @@ pub enum AfterSuccessfulHop {
     FinishParlor,
 }
 
-/// Last hop text already answers the user — do not spend another parlor LLM.
+/// Last hop text already answers the user — do not spend another parlor LLM (R10).
 #[must_use]
 pub fn hop_text_is_user_visible(body: &str) -> bool {
-    let without_markup = crate::util::strip_tool_call_markup(body);
-    let stripped = strip_internodal_suffix(&without_markup);
-    !stripped.trim().is_empty()
+    let stripped = operator_visible_source(body);
+    let t = stripped.trim();
+    !t.is_empty()
+        && !looks_like_orphan_markup_tag(t)
         && !looks_like_internodal_envelope(&stripped)
+        && !looks_like_internodal_contract_fields(&stripped)
         && !velaclaw_agent_runtime::looks_like_tool_format_exhausted_notice(&stripped)
 }
 
-/// Single-node graphs with visible assistant text skip the parlor LLM (R8).
+/// Visible assistant prose skips the parlor LLM, including multi-node graphs (R10/A20).
 #[must_use]
-pub fn skip_parlor_llm(node_count: usize, last_body: &str) -> bool {
-    node_count <= 1 && hop_text_is_user_visible(last_body)
+pub fn skip_parlor_llm(_node_count: usize, last_body: &str) -> bool {
+    hop_text_is_user_visible(last_body)
 }
 
 const TOOL_EVIDENCE_MAX: usize = 3_500;
@@ -583,6 +586,12 @@ pub fn parlor_llm_budget(node_count: usize, last_body: &str) -> usize {
     }
 }
 
+/// P7: complete/log metric is stripped dag_art payload size, not parlor LLM output length.
+#[must_use]
+pub fn delivery_dag_artifact_bytes(graph_artifacts: &str) -> usize {
+    graph_artifacts.len()
+}
+
 /// Graph-end delivery used by [`crate::agent::agent::Agent::turn`] and CLI live DAG.
 pub async fn finish_live_graph(
     provider: &dyn Provider,
@@ -599,20 +608,18 @@ pub async fn finish_live_graph(
             Ok(ensure_user_visible(user_task, last_body))
         }
         AfterSuccessfulHop::FinishParlor => {
+            let dag_artifact_bytes = delivery_dag_artifact_bytes(graph_artifacts);
             if graph_artifacts.trim().is_empty() && !last_body_has_parlor_substance(last_body) {
                 tracing::info!(
                     parlor_rewrite = false,
-                    graph_artifact_bytes = 0,
+                    dag_artifact_bytes,
+                    parlor_output_bytes = 0,
+                    graph_artifact_bytes = dag_artifact_bytes,
                     "host_delivery_empty_graph"
                 );
                 return Ok(empty_hop_stop_reason(user_task));
             }
-            tracing::info!(
-                parlor_rewrite = true,
-                graph_artifact_bytes = graph_artifacts.len(),
-                "host_delivery"
-            );
-            host_delivery(
+            let out = host_delivery(
                 provider,
                 model,
                 temperature,
@@ -621,7 +628,16 @@ pub async fn finish_live_graph(
                 prior_visible,
                 graph_artifacts,
             )
-            .await
+            .await?;
+            let parlor_rewrite = !hop_text_is_user_visible(last_body);
+            tracing::info!(
+                parlor_rewrite,
+                dag_artifact_bytes,
+                parlor_output_bytes = out.len(),
+                graph_artifact_bytes = dag_artifact_bytes,
+                "host_delivery"
+            );
+            Ok(out)
         }
     }
 }
@@ -678,7 +694,7 @@ mod tests {
             AfterSuccessfulHop::FinishDeliver
         );
         assert!(skip_parlor_llm(1, "done"));
-        assert!(!skip_parlor_llm(3, "verified"));
+        assert!(skip_parlor_llm(3, "verified"));
     }
 
     #[test]
@@ -697,11 +713,32 @@ mod tests {
     }
 
     #[test]
-    fn multi_node_end_uses_parlor_policy() {
+    fn last_hop_prose_skips_parlor() {
         assert_eq!(
             after_successful_hop(0, 3, "verified"),
+            AfterSuccessfulHop::FinishDeliver
+        );
+        assert!(!hop_text_is_user_visible(
+            "Vantage: remote\nCoverage: partial\nevidence_layer: this-hop-tool"
+        ));
+    }
+
+    #[test]
+    fn empty_body_skip_parlor_is_not_complete() {
+        assert_eq!(
+            after_successful_hop(0, 2, ""),
             AfterSuccessfulHop::FinishParlor
         );
+        assert!(!hop_text_is_user_visible(""));
+        assert!(!hop_text_is_user_visible("</tool_call>"));
+    }
+
+    #[test]
+    fn complete_metric_uses_dag_art_not_parlor_bytes() {
+        let dag = "[dag_artifact node=check]\nup\n";
+        assert_eq!(delivery_dag_artifact_bytes(dag), dag.len());
+        assert_ne!(delivery_dag_artifact_bytes(dag), 0);
+        assert_eq!(delivery_dag_artifact_bytes(""), 0);
     }
 
     #[test]
@@ -892,8 +929,9 @@ mod tests {
         assert_eq!(observe_llm_on_successful_hops(3), 0);
         assert_eq!(observe_llm_on_successful_hops(8), 0);
         assert_eq!(parlor_llm_budget(1, "Google 路由当前可用。"), 0);
-        assert_eq!(parlor_llm_budget(3, "verified"), 1);
-        assert!(parlor_llm_budget(8, "verified") <= 1);
+        assert_eq!(parlor_llm_budget(3, "verified"), 0);
+        assert_eq!(parlor_llm_budget(8, "verified"), 0);
+        assert_eq!(parlor_llm_budget(3, ""), 1);
         assert!(!success_path_splices_remaining());
         assert!(!crate::config::AgentConfig::default().bounded_dag_live);
         assert!(!crate::config::AgentConfig::default().candidate_dag_emit);

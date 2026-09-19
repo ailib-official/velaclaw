@@ -18,7 +18,11 @@ pub enum GraphArtifactVerdict {
     Ok,
     AllEmpty,
     InsufficientEvidenceLayer,
+    PartialUnsatisfied,
 }
+
+/// P9 Ask prefix: gap in evidence/coverage, not EMPTY_I / R23, session stays open.
+pub const PARTIAL_STOP_ASK: &str = "Ask: this graph still has an evidence or coverage gap. Name the missing layer or deliverable in a follow-up on this same session. This turn is not completed.";
 
 /// Evidence layers a node may require beyond mere non-emptiness.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -189,6 +193,12 @@ pub fn graph_artifact_contract(
     if artifacts.is_empty() || artifacts.iter().all(|(_, b)| b.trim().is_empty()) {
         return GraphArtifactVerdict::AllEmpty;
     }
+    if artifacts
+        .iter()
+        .any(|(_, b)| internodal_declares_unsatisfied_sigma(b))
+    {
+        return GraphArtifactVerdict::PartialUnsatisfied;
+    }
     for node in nodes {
         let body = artifacts
             .iter()
@@ -235,7 +245,27 @@ pub fn hop_contract_stop_reason(user_task: &str, verdict: HopArtifactVerdict) ->
     }
 }
 
-/// Operator-visible stop when the graph cannot deliver (I16).
+/// Internodal / hop body said partial or unsatisfied Σ (P9). Not empty-I.
+#[must_use]
+pub fn internodal_declares_unsatisfied_sigma(text: &str) -> bool {
+    let t = text.to_ascii_lowercase();
+    t.contains("verdict: partial")
+        || t.contains("verdict:partial")
+        || t.contains("**verdict: partial**")
+        || t.contains("coverage: partial")
+}
+
+/// True when a stop reply is an Ask/short-reason, not a completed turn.
+#[must_use]
+pub fn honest_stop_keeps_session_open(stop: &str) -> bool {
+    let t = stop.to_ascii_lowercase();
+    stop.contains(PARTIAL_STOP_ASK)
+        && t.contains("same session")
+        && !t.contains("new session")
+        && !t.contains("empty i")
+}
+
+/// Operator-visible stop when the graph cannot deliver (I16 / P9).
 #[must_use]
 pub fn graph_contract_stop_reason(user_task: &str, verdict: GraphArtifactVerdict) -> String {
     let cjk = crate::agent::bounded_dag_live::user_prefers_cjk(user_task);
@@ -243,16 +273,33 @@ pub fn graph_contract_stop_reason(user_task: &str, verdict: GraphArtifactVerdict
         GraphArtifactVerdict::Ok => String::new(),
         GraphArtifactVerdict::AllEmpty => {
             if cjk {
-                "本图没有可写入报告的节点制品：助手正文为空且未留下工具摘要，无法完成交付。".into()
+                format!(
+                    "{PARTIAL_STOP_ASK} 本图没有可写入报告的节点制品（助手正文为空且未留下工具摘要）。"
+                )
             } else {
-                "This graph produced no node artifacts to deliver (empty assistant text and no tool gist).".into()
+                format!(
+                    "{PARTIAL_STOP_ASK} This graph produced no node artifacts to deliver (empty assistant text and no tool gist)."
+                )
             }
         }
         GraphArtifactVerdict::InsufficientEvidenceLayer => {
             if cjk {
-                "节点制品未满足声明的证据层（例如协议清单或上游可用性），无法完成交付。".into()
+                format!(
+                    "{PARTIAL_STOP_ASK} 节点制品未满足声明的证据层（例如协议清单或上游可用性）。"
+                )
             } else {
-                "Node artifacts did not satisfy the declared evidence layers (e.g. protocol catalog or upstream reachability).".into()
+                format!(
+                    "{PARTIAL_STOP_ASK} Node artifacts did not satisfy the declared evidence layers (for example protocol catalog or upstream reachability)."
+                )
+            }
+        }
+        GraphArtifactVerdict::PartialUnsatisfied => {
+            if cjk {
+                format!("{PARTIAL_STOP_ASK} 制品仍是 Σ/覆盖缺口（partial），不是完成。")
+            } else {
+                format!(
+                    "{PARTIAL_STOP_ASK} Artifacts still show an unsatisfied Σ or partial coverage gap."
+                )
             }
         }
     }
@@ -349,5 +396,32 @@ mod tests {
             graph_artifact_contract(&[n], &[("a".into(), String::new())]),
             GraphArtifactVerdict::AllEmpty
         );
+    }
+
+    #[test]
+    fn nonempty_dag_art_unsatisfied_sigma_is_not_completed() {
+        let n = node("a", None, None);
+        let body = "HANDOFF\nverdict: partial\nfindings:\n- listing only\ngaps:\n- protocol layer";
+        assert!(internodal_declares_unsatisfied_sigma(body));
+        assert_eq!(
+            graph_artifact_contract(std::slice::from_ref(&n), &[("a".into(), body.into())]),
+            GraphArtifactVerdict::PartialUnsatisfied
+        );
+        let stop = graph_contract_stop_reason(
+            "check the protocol catalog",
+            GraphArtifactVerdict::PartialUnsatisfied,
+        );
+        assert!(honest_stop_keeps_session_open(&stop));
+        assert!(stop.to_ascii_lowercase().contains("not completed"));
+        assert!(!stop.contains(crate::agent::graph_scheduler::EMPTY_I_ASK));
+    }
+
+    #[test]
+    fn partial_stop_keeps_session_continuable() {
+        let stop = graph_contract_stop_reason(
+            "continue here",
+            GraphArtifactVerdict::InsufficientEvidenceLayer,
+        );
+        assert!(honest_stop_keeps_session_open(&stop));
     }
 }

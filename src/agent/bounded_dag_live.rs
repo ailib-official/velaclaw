@@ -73,7 +73,7 @@ pub const LIVE_FIRST_HOP_PREAMBLE: &str = "\
 Start this VelaClaw turn now. Reply with ONLY one JSON object, no markdown.\n\
 Prior user/assistant messages are this same session. Continue that work (same hosts, paths, and findings). Do not claim you forgot earlier turns. Do not ask what to do if the session already did it.\n\
 Greeting, thanks, or general knowledge (no repo/host/files): {\"path\":\"chat_only\",\"reply\":\"<full user-visible reply>\"}\n\
-Work (inspect a repo, workspace, or host; any tool turn): a linear DAG JSON object using the planner rules below (schema_version 0.1.0, 1 to 8 nodes). One atomic deliverable = one node with Σ-shaped filled I. tool_direct artifact must be an executable command (or ssh <alias> …), not a caption. Cognition nodes may use a work description as I. Do not emit a path-only object with no nodes. Graphs with no executable I are not work — the host Asks.\n\
+Work (inspect a repo, workspace, or host; any tool turn): a linear DAG JSON object using the planner rules below (schema_version 0.1.0, 1 to 8 nodes). One atomic deliverable = one node with Σ-shaped filled I. Two or more independent results = that many filled-I nodes (or one node whose I covers every result). tool_direct artifact must be an executable command (or ssh <alias> …), not a caption. Cognition nodes may use a work description as I. Do not emit a path-only object with no nodes. Graphs with no executable I are not work — the host Asks.\n\
 Never use chat_only when the user asks to inspect a local repo, workspace, or host.\n";
 
 #[must_use]
@@ -2099,6 +2099,21 @@ mod tests {
             }
             other => panic!("filled path+artifact must be Plan, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn planner_two_deliverables_filled_i() {
+        let json = r#"{"schema_version":"0.1.0","id":"two-filled","entry":"check","max_steps":8,"nodes":[{"id":"check","task_type":"ops-check","model_selector":{"capabilities":["tool_calling"]},"sigma":"tool_direct","artifact":"pwd","next":"write"},{"id":"write","task_type":"write","model_selector":{"capabilities":["high-reasoning"]},"sigma":"llm_cognition","artifact":"write the analysis report","next":null}]}"#;
+        let hop = collapse_trivial_plan(parse_live_first_hop(json, CODE_FIX_TEMPLATE_JSON));
+        match &hop {
+            LiveFirstHop::Plan(plan) => {
+                assert_eq!(plan_filled_i_count(plan), 2);
+                assert!(plan_survives_collapse(plan));
+            }
+            other => panic!("two filled-I deliverables must keep plan_dag, got {other:?}"),
+        }
+        assert_eq!(planner_collapse_reason(json, &hop), "plan");
+        assert!(LIVE_FIRST_HOP_PREAMBLE.contains("Two or more independent results"));
     }
 
     #[test]

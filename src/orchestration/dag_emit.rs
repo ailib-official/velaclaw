@@ -215,6 +215,9 @@ mod tests {
         assert!(DAG_PLAN_SYSTEM_PROMPT.contains("Do not emit a path-only object with no nodes"));
         assert!(DAG_PLAN_SYSTEM_PROMPT.contains("aliases of the same tag"));
         assert!(!DAG_PLAN_SYSTEM_PROMPT.contains("collapses graphs without two such I values"));
+        let two = r#"{"schema_version":"0.1.0","id":"two-filled","entry":"check","max_steps":8,"nodes":[{"id":"check","task_type":"ops-check","model_selector":{"capabilities":["tool_calling"]},"sigma":"tool_direct","artifact":"pwd","next":"write"},{"id":"write","task_type":"write","model_selector":{"capabilities":["high-reasoning"]},"sigma":"llm_cognition","artifact":"write the analysis report","next":null}]}"#;
+        let report = crate::agent::candidate_dag::validate_candidate_dag_json(two);
+        assert!(report.valid, "{}", report.message);
     }
 
     #[test]

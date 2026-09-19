@@ -344,6 +344,7 @@ mod tests {
         ChatMessageInput {
             role: "user".into(),
             content: content.into(),
+            ..Default::default()
         }
     }
 
@@ -351,6 +352,7 @@ mod tests {
         ChatMessageInput {
             role: "assistant".into(),
             content: content.into(),
+            ..Default::default()
         }
     }
 
@@ -516,5 +518,39 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(&path).expect("fixture"))
                 .expect("parse golden");
         assert_eq!(body, golden);
+    }
+
+    #[tokio::test]
+    async fn chat_persist_keeps_step_frames() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ChatSessionStore::new(dir.path());
+        let created = store.create(None, None).await.unwrap();
+        store
+            .append_messages(
+                &created.id,
+                &[
+                    user("do work"),
+                    ChatMessageInput {
+                        role: "status".into(),
+                        content: "locate code-fix".into(),
+                        ..Default::default()
+                    },
+                    ChatMessageInput {
+                        role: "step".into(),
+                        content: "git status".into(),
+                        step_ok: Some(true),
+                        expand: Some("On branch main".into()),
+                    },
+                    assistant("done"),
+                ],
+                None,
+            )
+            .await
+            .unwrap();
+        let loaded = store.get(&created.id).await.unwrap().unwrap();
+        let roles: Vec<&str> = loaded.messages.iter().map(|m| m.role.as_str()).collect();
+        assert_eq!(roles, ["user", "status", "step", "assistant"]);
+        assert_eq!(loaded.messages[2].step_ok, Some(true));
+        assert_eq!(loaded.messages[2].expand.as_deref(), Some("On branch main"));
     }
 }

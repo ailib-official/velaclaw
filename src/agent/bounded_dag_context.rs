@@ -340,7 +340,30 @@ pub fn persist_hop_begin(
     });
     let bytes = serde_json::to_vec_pretty(&body)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    // Per-node key (W8): last-write hop_begin.json is not the source of truth.
+    std::fs::write(dir.join(hop_begin_file_name(&node.id)), bytes.clone())?;
     std::fs::write(dir.join("hop_begin.json"), bytes)
+}
+
+/// Scratch filename for one hop_begin record (`hop_begin-<node_id>.json`).
+#[must_use]
+pub fn hop_begin_file_name(node_id: &str) -> String {
+    let safe: String = node_id
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let safe = if safe.is_empty() {
+        "node".to_string()
+    } else {
+        safe
+    };
+    format!("hop_begin-{safe}.json")
 }
 
 #[must_use]
@@ -915,6 +938,25 @@ mod tests {
             retrieve.iter().all(|t| !t.contains("this-graph-artifact")),
             "{retrieve:?}"
         );
+    }
+
+    #[test]
+    fn hop_begin_per_node_id_not_overwritten() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dag = parse_dag_json(CODE_FIX_TEMPLATE_JSON).unwrap();
+        let a = &dag.nodes[0];
+        let b = &dag.nodes[1];
+        persist_hop_begin(tmp.path(), "sess", "g1", a).unwrap();
+        persist_hop_begin(tmp.path(), "sess", "g1", b).unwrap();
+        let dir = ensure_graph_scratch(tmp.path(), "sess", "g1").unwrap();
+        let pa = dir.join(hop_begin_file_name(&a.id));
+        let pb = dir.join(hop_begin_file_name(&b.id));
+        assert!(pa.is_file() && pb.is_file());
+        let ja: serde_json::Value = serde_json::from_slice(&std::fs::read(pa).unwrap()).unwrap();
+        let jb: serde_json::Value = serde_json::from_slice(&std::fs::read(pb).unwrap()).unwrap();
+        assert_eq!(ja["node_id"], a.id);
+        assert_eq!(jb["node_id"], b.id);
+        assert_ne!(ja["node_id"], jb["node_id"]);
     }
 
     #[test]

@@ -3,8 +3,8 @@
 
 use super::local_control::auth::{check_pairing_auth, unauthorized_response};
 use super::local_control::runner::{
-    chunk_text_for_stream, persist_assistant_message, persist_user_message, run_agent_chat,
-    user_facing_turn_error,
+    chunk_text_for_stream, persist_assistant_message, persist_progress_messages,
+    persist_user_message, run_agent_chat, user_facing_turn_error,
 };
 use super::local_control::types::{ChatApiRequest, WsClientMessage, WsDagNode, WsServerMessage};
 use super::AppState;
@@ -268,6 +268,7 @@ async fn handle_ws_socket(socket: WebSocket, state: AppState) {
         ));
 
         let mut streamed_operator = String::new();
+        let mut persist_progress: Vec<crate::agent::turn_progress::TurnProgress> = Vec::new();
         let chat_result = loop {
             tokio::select! {
                 result = &mut chat_fut => {
@@ -278,6 +279,7 @@ async fn handle_ws_socket(socket: WebSocket, state: AppState) {
                         if let crate::agent::turn_progress::TurnProgress::Note { text } = &progress {
                             streamed_operator.push_str(text);
                         }
+                        persist_progress.push(progress.clone());
                         let frame = progress_frame(progress);
                         if send_frame(sink.clone(), &frame).await.is_err() {
                             tracing::warn!(
@@ -313,6 +315,16 @@ async fn handle_ws_socket(socket: WebSocket, state: AppState) {
 
         match classify_turn_result(chat_result) {
             TurnFinish::Completed(resp) => {
+                if let Err(e) = persist_progress_messages(
+                    &config,
+                    req.session_id.as_deref(),
+                    &req,
+                    &persist_progress,
+                )
+                .await
+                {
+                    tracing::warn!("session persist progress failed: {e:#}");
+                }
                 if let Err(e) = persist_assistant_message(
                     &config,
                     req.session_id.as_deref(),
@@ -346,6 +358,16 @@ async fn handle_ws_socket(socket: WebSocket, state: AppState) {
                 }
             }
             TurnFinish::Cancelled => {
+                if let Err(e) = persist_progress_messages(
+                    &config,
+                    req.session_id.as_deref(),
+                    &req,
+                    &persist_progress,
+                )
+                .await
+                {
+                    tracing::warn!("session persist progress cancelled failed: {e:#}");
+                }
                 if let Err(e) = persist_assistant_message(
                     &config,
                     req.session_id.as_deref(),
@@ -364,6 +386,16 @@ async fn handle_ws_socket(socket: WebSocket, state: AppState) {
                 }
             }
             TurnFinish::Failed(e) => {
+                if let Err(pe) = persist_progress_messages(
+                    &config,
+                    req.session_id.as_deref(),
+                    &req,
+                    &persist_progress,
+                )
+                .await
+                {
+                    tracing::warn!("session persist progress failed-turn: {pe:#}");
+                }
                 tracing::warn!(error = %format!("{e:#}"), "websocket chat turn failed");
                 let frame = WsServerMessage::Error {
                     message: user_facing_turn_error(&e, req.model_id.as_deref()),

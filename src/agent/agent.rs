@@ -454,6 +454,47 @@ impl Agent {
     }
 
     #[cfg(feature = "ai-protocol")]
+    fn emit_live_hop_begin(
+        &self,
+        dag: &crate::agent::dag_runner::DagManifest,
+        dag_id: &str,
+        used_fallback: bool,
+        outline: &str,
+        order: &[String],
+        run_ids: &[String],
+        completed: &std::collections::HashSet<String>,
+    ) {
+        let contacts = self.dag_contact_labels(dag, order);
+        for id in run_ids {
+            if let Some(node) = dag.nodes.iter().find(|n| n.id == *id) {
+                let _ = crate::agent::bounded_dag_context::persist_hop_begin(
+                    &self.workspace_dir,
+                    self.session_id.as_str(),
+                    dag_id,
+                    node,
+                );
+                self.emit_turn_progress(crate::agent::turn_progress::hop_begin_status(
+                    &node.id,
+                    &node.task_type,
+                ));
+            }
+        }
+        if let Some(first) = run_ids.first() {
+            self.emit_turn_progress(crate::agent::bounded_dag_live::live_dag_progress(
+                dag_id,
+                used_fallback,
+                outline,
+                dag,
+                order,
+                Some(first.as_str()),
+                completed,
+                None,
+                Some(&contacts),
+            ));
+        }
+    }
+
+    #[cfg(feature = "ai-protocol")]
     fn push_operator_note(&self, prefix: &mut String, text: &str) {
         if let Some(progress) =
             crate::agent::bounded_dag_delivery::append_operator_chunk(prefix, text)
@@ -1160,14 +1201,15 @@ impl Agent {
                 if run_ids.is_empty() {
                     break;
                 }
-                if let Some(first) = planned.dag.nodes.iter().find(|n| n.id == run_ids[0]) {
-                    let _ = crate::agent::bounded_dag_context::persist_hop_begin(
-                        &self.workspace_dir,
-                        self.session_id.as_str(),
-                        planned.dag.id.as_str(),
-                        first,
-                    );
-                }
+                self.emit_live_hop_begin(
+                    &planned.dag,
+                    planned.dag.id.as_str(),
+                    planned.used_fallback,
+                    &outline,
+                    &planned.order,
+                    &run_ids,
+                    &completed,
+                );
                 if run_ids.len() > 1 {
                     let index = planned
                         .order
@@ -1859,10 +1901,20 @@ impl Agent {
             host_phase: self.host_phase,
         };
         let approval_mgr = self.gateway_approval.as_ref().map(|(mgr, _)| mgr);
+        let progress_obs = self.progress_tx.as_ref().map(|tx| {
+            crate::agent::turn_progress::ProgressObserver::forwarding(
+                Arc::clone(&self.observer),
+                tx.clone(),
+            )
+        });
+        let observer: &dyn crate::observability::Observer = match progress_obs.as_ref() {
+            Some(obs) => obs,
+            None => self.observer.as_ref(),
+        };
         let results = crate::agent::tool_batch::execute_tool_batch(
             &calls,
             &self.tools,
-            self.observer.as_ref(),
+            observer,
             approval_mgr,
             Some(&self.security),
             "web",

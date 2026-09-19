@@ -3,10 +3,14 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ChatMessageInput {
     pub role: String,
     pub content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step_ok: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expand: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

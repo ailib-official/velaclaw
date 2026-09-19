@@ -312,9 +312,16 @@ export function clearStatusMessages(messages: ChatMessage[]): ChatMessage[] {
   return messages.filter((m) => m.role !== "status");
 }
 
-/** History sent to the model: user + assistant only. */
+/** History sent to the model: user + assistant only (R20: steps are not evidence). */
 export function outboundChatHistory(messages: ChatMessage[]): ChatMessage[] {
   return messages.filter((m) => m.role === "user" || m.role === "assistant");
+}
+
+/** Session replay payload: keep step/status so refresh is not user+assistant only. */
+export function persistableChatHistory(messages: ChatMessage[]): ChatMessage[] {
+  return messages.filter(
+    (m) => m.role === "user" || m.role === "assistant" || m.role === "status" || m.role === "step",
+  );
 }
 
 export function applyStatusFrame(messages: ChatMessage[], phase: string, detail?: string): ChatMessage[] {

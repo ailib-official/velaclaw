@@ -218,6 +218,7 @@ pub async fn persist_user_message(
     let to_store = vec![ChatMessageInput {
         role: "user".into(),
         content: user_message,
+        ..Default::default()
     }];
     let append = store
         .append_messages(id, &to_store, req.model_id.as_deref())
@@ -253,11 +254,63 @@ pub async fn persist_assistant_message(
     let to_store = vec![ChatMessageInput {
         role: "assistant".into(),
         content,
+        ..Default::default()
     }];
     store
         .append_messages(id, &to_store, req.model_id.as_deref())
         .await?;
     Ok(())
+}
+
+/// Persist hop_begin / tool-step frames for refresh (not model history; R20).
+pub async fn persist_progress_messages(
+    config: &Config,
+    session_id: Option<&str>,
+    req: &ChatApiRequest,
+    frames: &[crate::agent::turn_progress::TurnProgress],
+) -> Result<()> {
+    let Some(id) = session_id.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Ok(());
+    };
+    let to_store: Vec<ChatMessageInput> =
+        frames.iter().filter_map(progress_to_session_row).collect();
+    if to_store.is_empty() {
+        return Ok(());
+    }
+    let store = ChatSessionStore::new(&config.workspace_dir);
+    store
+        .append_messages(id, &to_store, req.model_id.as_deref())
+        .await?;
+    Ok(())
+}
+
+fn progress_to_session_row(
+    progress: &crate::agent::turn_progress::TurnProgress,
+) -> Option<ChatMessageInput> {
+    use crate::agent::turn_progress::TurnProgress;
+    match progress {
+        TurnProgress::Status { phase, detail } if phase == "hop_begin" => Some(ChatMessageInput {
+            role: "status".into(),
+            content: if detail.is_empty() {
+                phase.clone()
+            } else {
+                detail.clone()
+            },
+            ..Default::default()
+        }),
+        TurnProgress::Step {
+            ok,
+            summary,
+            expand,
+            ..
+        } => Some(ChatMessageInput {
+            role: "step".into(),
+            content: summary.clone(),
+            step_ok: Some(*ok),
+            expand: expand.clone(),
+        }),
+        _ => None,
+    }
 }
 
 const TITLE_SYSTEM: &str = "You name chat sessions. Reply with ONLY a concise title \
@@ -541,14 +594,17 @@ mod tests {
             ChatMessageInput {
                 role: "user".into(),
                 content: "first".into(),
+                ..Default::default()
             },
             ChatMessageInput {
                 role: "assistant".into(),
                 content: "ok".into(),
+                ..Default::default()
             },
             ChatMessageInput {
                 role: "user".into(),
                 content: "second".into(),
+                ..Default::default()
             },
         ];
         assert_eq!(
@@ -562,6 +618,7 @@ mod tests {
         let messages = vec![ChatMessageInput {
             role: "assistant".into(),
             content: "only assistant".into(),
+            ..Default::default()
         }];
         assert!(extract_last_user_message(&messages).is_err());
     }
@@ -706,14 +763,17 @@ metadata:
             ChatMessageInput {
                 role: "user".into(),
                 content: "hi".into(),
+                ..Default::default()
             },
             ChatMessageInput {
                 role: "assistant".into(),
                 content: "hello".into(),
+                ..Default::default()
             },
             ChatMessageInput {
                 role: "user".into(),
                 content: "run ls".into(),
+                ..Default::default()
             },
         ];
         let last_user_idx = messages

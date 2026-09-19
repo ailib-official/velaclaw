@@ -71,7 +71,7 @@ export interface SessionSummary {
 }
 
 export interface SessionDetail extends SessionSummary {
-  messages: { role: string; content: string }[];
+  messages: { role: string; content: string; step_ok?: boolean; expand?: string }[];
 }
 
 export async function fetchSessions(token: string): Promise<SessionSummary[]> {

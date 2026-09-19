@@ -214,6 +214,8 @@
       messages = detail.messages.map((m) => ({
         role: m.role as ChatMessage["role"],
         content: m.content,
+        stepOk: m.step_ok,
+        expand: m.expand,
       }));
       if (detail.model_id) selectedModel = detail.model_id;
       scrollToBottom();

@@ -296,11 +296,7 @@ pub fn node_sigma(node: &DagNode) -> NodeSigma {
             return NodeSigma::LlmWork;
         }
     }
-    if is_tool_only_node(node) {
-        NodeSigma::ToolDirect
-    } else {
-        NodeSigma::LlmWork
-    }
+    NodeSigma::LlmWork
 }
 
 /// Operator-visible Ask when a live LLM hop has no command (R14 / A13 / R19).
@@ -1147,6 +1143,8 @@ mod tests {
             r#"{"schema_version":"0.1.0","id":"g","entry":"a","max_steps":2,"nodes":[{"id":"a","task_type":"ops","model_selector":{"capabilities":["tool_calling"]},"next":null}]}"#,
         )
         .unwrap();
+        assert!(is_tool_only_node(&cheap.nodes[0]));
+        assert_eq!(node_sigma(&cheap.nodes[0]), NodeSigma::LlmWork);
         assert!(llm_work_missing_i(&cheap.nodes[0]));
         assert!(EMPTY_I_ASK.contains("empty I"));
         let cognition = crate::agent::dag_runner::parse_dag_json(

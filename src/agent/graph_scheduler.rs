@@ -286,7 +286,9 @@ pub fn node_sigma(node: &DagNode) -> NodeSigma {
             return NodeSigma::ToolDirect;
         }
     }
-    if registered_host_tool(node).is_some() {
+    let cognition =
+        crate::agent::capability_route::is_work_cognition_node(&node.model_selector.capabilities);
+    if !cognition && registered_host_tool(node).is_some() {
         return NodeSigma::ToolDirect;
     }
     if let Some(s) = node.sigma.as_deref().map(str::trim) {
@@ -369,7 +371,7 @@ pub fn is_tool_only_node(node: &DagNode) -> bool {
 fn invoke_tool_name(label: &str) -> Option<&'static str> {
     let t = label.trim().to_ascii_lowercase().replace('_', ".");
     match t.as_str() {
-        "shell.exec" | "shell" => Some("shell"),
+        "shell.exec" | "shell" | "tool.calling" => Some("shell"),
         "repo.inspect" | "glob.search" | "glob" => Some("glob_search"),
         "file.read" => Some("file_read"),
         _ => None,
@@ -415,7 +417,13 @@ pub fn registered_host_tool(node: &DagNode) -> Option<&'static str> {
     if !tool_direct_artifact_is_invoke(artifact) {
         return None;
     }
-    cap_or_task_tool(node).or_else(|| artifact_host_tool(artifact))
+    cap_or_task_tool(node).or_else(|| {
+        node.sigma
+            .as_deref()
+            .is_some_and(|s| s.eq_ignore_ascii_case("tool_direct"))
+            .then(|| artifact_host_tool(artifact))
+            .flatten()
+    })
 }
 
 /// LlmWork without this-hop invoke I must not open retrieve tools (E43).

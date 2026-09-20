@@ -503,9 +503,6 @@ pub fn tool_direct_artifact_is_invoke(artifact: &str) -> bool {
 
 /// Build the E-side tool call for a tool-only node (no provider chat).
 pub(crate) fn direct_tool_call(node: &DagNode) -> Result<ParsedToolCall> {
-    if node_sigma(node) != NodeSigma::ToolDirect {
-        bail!("node {} is not a tool-only capability", node.id);
-    }
     let Some(artifact) = node
         .artifact
         .as_deref()
@@ -519,6 +516,9 @@ pub(crate) fn direct_tool_call(node: &DagNode) -> Result<ParsedToolCall> {
             "tool-only node {} I is not an invoke (caption is not a command)",
             node.id
         );
+    }
+    if node_sigma(node) != NodeSigma::ToolDirect {
+        bail!("node {} is not a tool-only capability", node.id);
     }
     let name = registered_host_tool(node)
         .ok_or_else(|| anyhow::anyhow!("tool-only node {} missing invoke contract", node.id))?;

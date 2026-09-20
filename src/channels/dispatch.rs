@@ -465,6 +465,7 @@ pub(crate) async fn process_channel_message(
                     session_model: Some(ctx.model.as_str()),
                     probe: None,
                     hop_tool_accum: None,
+                    block_retrieve_tools: false,
                 }),
             None,
             ),

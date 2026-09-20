@@ -78,6 +78,7 @@ pub struct Agent {
     #[cfg(feature = "ai-protocol")]
     hop_tool_accum:
         Option<Arc<std::sync::Mutex<crate::agent::graph_scheduler::HopToolAccumulator>>>,
+    block_retrieve_tools: bool,
     /// Active live DAG topology for parlor artifact load (VL-APE-016 / I17).
     #[cfg(feature = "ai-protocol")]
     live_graph_order: Option<Vec<String>>,
@@ -368,6 +369,7 @@ impl AgentBuilder {
             current_hop_probe: None,
             #[cfg(feature = "ai-protocol")]
             hop_tool_accum: None,
+            block_retrieve_tools: false,
             #[cfg(feature = "ai-protocol")]
             live_graph_order: None,
             #[cfg(feature = "ai-protocol")]
@@ -1807,11 +1809,14 @@ impl Agent {
             crate::agent::graph_scheduler::HopToolAccumulator::new(),
         ));
         self.hop_tool_accum = Some(Arc::clone(&accum));
+        self.block_retrieve_tools = crate::agent::graph_scheduler::llm_hop_blocks_retrieve(node);
         let hop_start = self.history.len();
         let text = self
             .invoke_tool_loop_resolved_with(effective_model, true)
-            .await?;
+            .await;
+        self.block_retrieve_tools = false;
         self.hop_tool_accum = None;
+        let text = text?;
         let evidence = accum.lock().map(|a| a.as_evidence()).unwrap_or_default();
         let fallback = crate::agent::graph_scheduler::tool_evidence_from_conversation(
             self.history.get(hop_start..).unwrap_or(&[]),
@@ -1874,6 +1879,25 @@ impl Agent {
         let mut loop_history = self.tool_dispatcher.to_provider_messages(&self.history);
         crate::agent::graph_scheduler::append_role_tool_results(&mut loop_history, &results);
         self.history = conversation_from_tool_loop_history(&loop_history);
+        {
+            if let Some(accum) = &self.hop_tool_accum {
+                let mut g = accum.lock().unwrap_or_else(|e| e.into_inner());
+                for result in &results {
+                    g.push_tool_output(&result.output);
+                }
+            }
+        }
+        if crate::agent::graph_scheduler::tool_direct_failed(&results) {
+            let reason = results
+                .iter()
+                .map(|r| r.output.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            anyhow::bail!(
+                "{}\n{reason}",
+                crate::agent::graph_scheduler::TOOL_DIRECT_FAIL_ASK
+            );
+        }
         Ok(crate::agent::graph_scheduler::tool_direct_body(&results))
     }
 
@@ -1924,7 +1948,11 @@ impl Agent {
         )
         .await?;
         if let Some(failed) = results.iter().find(|r| !r.success) {
-            anyhow::bail!("{}", failed.output);
+            anyhow::bail!(
+                "{}\n{}",
+                crate::agent::graph_scheduler::TOOL_DIRECT_FAIL_ASK,
+                failed.output
+            );
         }
         if let Some(probe) = &self.current_hop_probe {
             let mut g = probe.lock().unwrap_or_else(|e| e.into_inner());
@@ -1996,6 +2024,7 @@ impl Agent {
                 .or(Some(self.model_name.as_str())),
             probe: self.current_hop_probe.as_ref().map(|c| c.as_ref()),
             hop_tool_accum: self.hop_tool_accum.clone(),
+            block_retrieve_tools: self.block_retrieve_tools,
         };
 
         let render_opts = self.cli_render.unwrap_or(RenderOpts {

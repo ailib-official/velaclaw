@@ -107,6 +107,8 @@ pub(crate) struct SoftFailLoopCtx<'a> {
     /// Per-hop tool gist (VL-APE-016 / I18).
     pub hop_tool_accum:
         Option<std::sync::Arc<std::sync::Mutex<crate::agent::graph_scheduler::HopToolAccumulator>>>,
+    /// VL-APE-037: cognition hop must not advertise/execute retrieve substitutes.
+    pub block_retrieve_tools: bool,
 }
 
 #[cfg(feature = "ai-protocol")]
@@ -168,8 +170,15 @@ pub(crate) async fn run_tool_call_loop(
     let mut peer_continue_used = false;
     let mut local_probe = Box::new(crate::agent::probe_dedup::HopProbeGovernor::new());
 
-    let tool_specs: Vec<crate::tools::ToolSpec> =
-        tools_registry.iter().map(|tool| tool.spec()).collect();
+    let block_retrieve = soft_fail.as_ref().is_some_and(|c| c.block_retrieve_tools);
+    let tool_specs: Vec<crate::tools::ToolSpec> = tools_registry
+        .iter()
+        .filter(|tool| {
+            !(block_retrieve
+                && crate::agent::graph_scheduler::is_retrieve_substitute_tool(tool.name()))
+        })
+        .map(|tool| tool.spec())
+        .collect();
     let use_native_tools = tool_dispatcher
         .map(|d| d.should_send_tool_specs() && !tool_specs.is_empty())
         .unwrap_or_else(|| provider.supports_native_tools() && !tool_specs.is_empty());
@@ -624,6 +633,13 @@ pub(crate) async fn run_tool_call_loop(
         let mut runnable: Vec<ParsedToolCall> = Vec::new();
         let mut runnable_idx: Vec<usize> = Vec::new();
         for (i, call) in tool_calls.iter().enumerate() {
+            if block_retrieve
+                && crate::agent::graph_scheduler::is_retrieve_substitute_tool(&call.name)
+            {
+                skip_outputs[i] =
+                    Some(crate::agent::graph_scheduler::RETRIEVE_SUBSTITUTE_BLOCKED.into());
+                continue;
+            }
             let is_shell = call.name.eq_ignore_ascii_case("shell");
             if is_shell {
                 let fp =

@@ -285,6 +285,11 @@ pub fn node_sigma(node: &DagNode) -> NodeSigma {
         if s.eq_ignore_ascii_case("tool_direct") {
             return NodeSigma::ToolDirect;
         }
+    }
+    if registered_host_tool(node).is_some() {
+        return NodeSigma::ToolDirect;
+    }
+    if let Some(s) = node.sigma.as_deref().map(str::trim) {
         if s.eq_ignore_ascii_case("llm_cognition") {
             return NodeSigma::LlmWork;
         }
@@ -298,6 +303,13 @@ pub fn node_sigma(node: &DagNode) -> NodeSigma {
 
 /// Operator-visible Ask when a live LLM hop has no command (R14 / A13 / R19).
 pub const EMPTY_I_ASK: &str = "This hop has empty I (no command). Approve an allowed command or permission; the host will not wait for a model to invent a shell script.";
+
+/// Planned ToolDirect I ran and failed: stop the graph (VL-APE-037 / E43).
+pub const TOOL_DIRECT_FAIL_ASK: &str = "Ask: the planned command did not succeed. Approve a corrected allowed command or permission; the host will not invent a substitute retrieve.";
+
+/// Cognition hop must not open retrieve tools (VL-APE-037).
+pub const RETRIEVE_SUBSTITUTE_BLOCKED: &str =
+    "host will not invent a retrieve tool; use upstream hop artifacts";
 
 fn llm_work_has_invoke_i(node: &DagNode) -> bool {
     node.artifact
@@ -364,6 +376,67 @@ fn invoke_tool_name(label: &str) -> Option<&'static str> {
     }
 }
 
+fn cap_or_task_tool(node: &DagNode) -> Option<&'static str> {
+    node.model_selector
+        .capabilities
+        .iter()
+        .find_map(|c| invoke_tool_name(c))
+        .or_else(|| invoke_tool_name(&node.task_type))
+}
+
+fn artifact_host_tool(artifact: &str) -> Option<&'static str> {
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(artifact) {
+        if let Some(obj) = v.as_object() {
+            if obj.contains_key("command") {
+                return Some("shell");
+            }
+            if obj.contains_key("path") {
+                return Some("file_read");
+            }
+            if obj.contains_key("pattern") {
+                return Some("glob_search");
+            }
+        }
+    }
+    if shell_line_is_invoke(artifact) {
+        return Some("shell");
+    }
+    None
+}
+
+/// Registered host tool for an invoke I. Never returns `task_type` as a tool name (A2).
+#[must_use]
+pub fn registered_host_tool(node: &DagNode) -> Option<&'static str> {
+    let artifact = node
+        .artifact
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())?;
+    if !tool_direct_artifact_is_invoke(artifact) {
+        return None;
+    }
+    cap_or_task_tool(node).or_else(|| artifact_host_tool(artifact))
+}
+
+/// LlmWork without this-hop invoke I must not open retrieve tools (E43).
+#[must_use]
+pub fn llm_hop_blocks_retrieve(node: &DagNode) -> bool {
+    node_sigma(node) == NodeSigma::LlmWork && !llm_work_has_invoke_i(node)
+}
+
+#[must_use]
+pub fn is_retrieve_substitute_tool(name: &str) -> bool {
+    matches!(
+        name.trim(),
+        "shell" | "http_request" | "web_search" | "browser" | "glob_search"
+    )
+}
+
+#[must_use]
+pub fn tool_direct_failed(results: &[ToolBatchResult]) -> bool {
+    results.is_empty() || results.iter().any(|r| !r.success)
+}
+
 fn token_is_letter_word(tok: &str) -> bool {
     !tok.is_empty() && tok.chars().all(|c| c.is_ascii_alphabetic())
 }
@@ -401,7 +474,10 @@ fn shell_line_is_invoke(cmd: &str) -> bool {
         return false;
     }
     if rest.len() >= 2 && rest.iter().copied().all(token_is_letter_word) {
-        return false;
+        // English captions: "read the requested sources". Short CLIs (`gh repo list`) stay invokes.
+        if first.chars().count() >= 3 && token_is_letter_word(first) {
+            return false;
+        }
     }
     true
 }
@@ -426,13 +502,6 @@ pub(crate) fn direct_tool_call(node: &DagNode) -> Result<ParsedToolCall> {
     if node_sigma(node) != NodeSigma::ToolDirect {
         bail!("node {} is not a tool-only capability", node.id);
     }
-    let name = node
-        .model_selector
-        .capabilities
-        .iter()
-        .find_map(|c| invoke_tool_name(c))
-        .or_else(|| invoke_tool_name(&node.task_type))
-        .ok_or_else(|| anyhow::anyhow!("tool-only node {} missing invoke contract", node.id))?;
     let Some(artifact) = node
         .artifact
         .as_deref()
@@ -447,6 +516,8 @@ pub(crate) fn direct_tool_call(node: &DagNode) -> Result<ParsedToolCall> {
             node.id
         );
     }
+    let name = registered_host_tool(node)
+        .ok_or_else(|| anyhow::anyhow!("tool-only node {} missing invoke contract", node.id))?;
     let arguments = if let Ok(v) = serde_json::from_str::<serde_json::Value>(artifact) {
         if v.is_object() {
             v
@@ -761,6 +832,46 @@ mod tests {
         let call = direct_tool_call(&dag.nodes[0]).unwrap();
         assert_eq!(call.name, "shell");
         assert_eq!(call.arguments["command"], "pwd");
+    }
+
+    #[test]
+    fn tool_calling_cap_with_gh_i_is_shell_direct() {
+        let dag = crate::agent::dag_runner::parse_dag_json(
+            r#"{"schema_version":"0.1.0","id":"ops","entry":"list","max_steps":3,"nodes":[{"id":"list","task_type":"ops","sigma":"llm_cognition","model_selector":{"capabilities":["tool_calling"]},"artifact":"gh repo list","next":null}]}"#,
+        )
+        .unwrap();
+        assert_eq!(node_sigma(&dag.nodes[0]), NodeSigma::ToolDirect);
+        let call = direct_tool_call(&dag.nodes[0]).unwrap();
+        assert_eq!(call.name, "shell");
+        assert_eq!(call.arguments["command"], "gh repo list");
+        assert_ne!(call.name, "ops");
+        assert_ne!(call.name, "tool_calling");
+    }
+
+    #[test]
+    fn cognition_without_invoke_i_blocks_retrieve() {
+        let dag = crate::agent::dag_runner::parse_dag_json(
+            r#"{"schema_version":"0.1.0","id":"cmp","entry":"cmp","max_steps":2,"nodes":[{"id":"cmp","task_type":"compare","sigma":"llm_cognition","model_selector":{"capabilities":["llm_cognition"]},"artifact":"","next":null}]}"#,
+        )
+        .unwrap();
+        assert_eq!(node_sigma(&dag.nodes[0]), NodeSigma::LlmWork);
+        assert!(llm_hop_blocks_retrieve(&dag.nodes[0]));
+        assert!(is_retrieve_substitute_tool("http_request"));
+        assert!(is_retrieve_substitute_tool("shell"));
+        assert!(!is_retrieve_substitute_tool("file_read"));
+    }
+
+    #[test]
+    fn tool_direct_failed_on_missing_or_error() {
+        assert!(tool_direct_failed(&[]));
+        assert!(tool_direct_failed(&[ToolBatchResult {
+            output: "Missing 'command' parameter".into(),
+            success: false,
+        }]));
+        assert!(!tool_direct_failed(&[ToolBatchResult {
+            output: "ok".into(),
+            success: true,
+        }]));
     }
 
     #[test]

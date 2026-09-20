@@ -916,6 +916,7 @@ pub async fn run(
                                         session_model: Some(model_name.as_str()),
                                         probe: Some(probe_cell.as_ref()),
                                         hop_tool_accum: Some(Arc::clone(&hop_accum)),
+                                        block_retrieve_tools: false,
                                     }),
                                     Some(&cli_gate_extras),
                                 )
@@ -1247,6 +1248,7 @@ pub async fn run(
                                 session_model: Some(turn_model.as_str()),
                                 probe: None,
                                 hop_tool_accum: None,
+                                block_retrieve_tools: false,
                             }),
                             Some(&cli_gate_extras),
                         )
@@ -1287,6 +1289,7 @@ pub async fn run(
                         session_model: Some(turn_model.as_str()),
                         probe: None,
                         hop_tool_accum: None,
+                        block_retrieve_tools: false,
                     }),
                     Some(&cli_gate_extras),
                 )
@@ -1913,6 +1916,42 @@ pub async fn run(
                                         &mut history,
                                         &results,
                                     );
+                                    {
+                                        let mut accum = hop_accum
+                                            .lock()
+                                            .unwrap_or_else(|e| e.into_inner());
+                                        for result in &results {
+                                            accum.push_tool_output(&result.output);
+                                        }
+                                    }
+                                    if crate::agent::graph_scheduler::tool_direct_failed(&results) {
+                                        let reason = results
+                                            .iter()
+                                            .map(|r| r.output.as_str())
+                                            .collect::<Vec<_>>()
+                                            .join("\n");
+                                        crate::agent::bounded_dag_delivery::print_operator_note(
+                                            &mut operator_prefix,
+                                            &crate::agent::bounded_dag_live::format_work_node_stop(
+                                                &user_input,
+                                                &node.id,
+                                                &format!(
+                                                    "{}\n{reason}",
+                                                    crate::agent::graph_scheduler::TOOL_DIRECT_FAIL_ASK
+                                                ),
+                                                index + 1,
+                                                node_count,
+                                            ),
+                                            None,
+                                        );
+                                        security.set_graph_scratch_rel(None);
+                                        return Ok(
+                                            crate::agent::bounded_dag_delivery::session_assistant_body(
+                                                &user_input,
+                                                &operator_prefix,
+                                            ),
+                                        );
+                                    }
                                     Ok(crate::agent::graph_scheduler::tool_direct_body(&results))
                                 } else {
                                     crate::agent::graph_scheduler::ensure_live_llm_native(
@@ -1952,6 +1991,7 @@ pub async fn run(
                                         session_model: Some(session_model.as_str()),
                                         probe: Some(probe_cell.as_ref()),
                                         hop_tool_accum: Some(Arc::clone(&hop_accum)),
+                                        block_retrieve_tools: crate::agent::graph_scheduler::llm_hop_blocks_retrieve(node),
                                     }),
                                     Some(&cli_gate_extras),
                                 )
@@ -2334,6 +2374,7 @@ pub async fn run(
                                     session_model: Some(session_model.as_str()),
                                     probe: None,
                                     hop_tool_accum: None,
+                                        block_retrieve_tools: false,
                                 }),
                                 Some(&cli_gate_extras),
                             )
@@ -2376,6 +2417,7 @@ pub async fn run(
                             session_model: Some(session_model.as_str()),
                             probe: None,
                             hop_tool_accum: None,
+                            block_retrieve_tools: false,
                         }),
                         Some(&cli_gate_extras),
                     )

@@ -1271,28 +1271,12 @@ pub fn brief_dag_outline(
 #[must_use]
 pub fn operator_plan_gist(
     user_message: &str,
-    dag: &crate::agent::dag_runner::DagManifest,
+    _dag: &crate::agent::dag_runner::DagManifest,
     order: &[String],
     used_fallback: bool,
 ) -> String {
     let cjk = user_prefers_cjk(user_message);
-    let by_id: std::collections::HashMap<&str, _> =
-        dag.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
-    let hops: Vec<String> = order
-        .iter()
-        .map(|id| {
-            by_id
-                .get(id.as_str())
-                .and_then(|n| {
-                    n.artifact
-                        .as_deref()
-                        .map(str::trim)
-                        .filter(|s| !s.is_empty())
-                        .map(ToOwned::to_owned)
-                })
-                .unwrap_or_else(|| prettify_node_id(id))
-        })
-        .collect();
+    let hops: Vec<String> = order.iter().map(|id| prettify_node_id(id)).collect();
     let list = hops.join(" → ");
     if cjk {
         if used_fallback {
@@ -2828,7 +2812,7 @@ mod tests {
     }
 
     #[test]
-    fn operator_plan_gist_lists_artifacts_without_handoff() {
+    fn operator_plan_gist_lists_node_ids_without_invoke_i() {
         let dag = parse_dag_json(
             r#"{
               "schema_version":"0.1.0","id":"t","entry":"research-official-upgrade-method","max_steps":4,
@@ -2849,8 +2833,10 @@ mod tests {
             false,
         );
         assert!(gist.contains("将按 2 步"), "{gist}");
-        assert!(gist.contains("官方升级路径"), "{gist}");
-        assert!(gist.contains("执行升级"), "{gist}");
+        assert!(gist.contains("research official upgrade method"), "{gist}");
+        assert!(gist.contains("apply upgrade"), "{gist}");
+        assert!(!gist.contains("官方升级路径"), "{gist}");
+        assert!(!gist.contains("执行升级"), "{gist}");
         assert!(!gist.to_ascii_lowercase().contains("handoff"), "{gist}");
         assert!(!gist.contains('\n'), "{gist}");
     }

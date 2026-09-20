@@ -228,7 +228,26 @@ fn normalize_tool_direct_invoke(node: &mut DagNode, configured: Option<&str>) ->
             None => "workspace".into(),
         });
     }
+    prefix_remote_ssh_if_needed(node, configured);
     Ok(())
+}
+
+/// R11/A2: remote locus + local argv I → `ssh <alias> <I>`. Alias from node locus, not invented.
+fn prefix_remote_ssh_if_needed(node: &mut DagNode, configured: Option<&str>) {
+    let Some(alias) = ssh_alias(node, configured).map(str::to_string) else {
+        return;
+    };
+    let Some(cmd) = artifact_command(node) else {
+        return;
+    };
+    let trimmed = cmd.trim();
+    if trimmed.is_empty() || trimmed.to_ascii_lowercase().starts_with("ssh ") {
+        return;
+    }
+    if !crate::agent::graph_scheduler::tool_direct_artifact_is_invoke(trimmed) {
+        return;
+    }
+    node.artifact = Some(format!("ssh {alias} {trimmed}"));
 }
 
 fn apply_admit_safe_i(node: &mut DagNode, remote: Option<&str>) {
@@ -458,6 +477,24 @@ mod tests {
         .unwrap();
         let cmd = artifact_command(&dag.nodes[0]).unwrap();
         assert!(cmd.starts_with("ssh lab-host "), "{cmd}");
+        direct_tool_call(&dag.nodes[0]).unwrap();
+    }
+
+    #[test]
+    fn remote_locus_prefixes_filled_cli_i() {
+        let mut dag = parse_dag_json(
+            r#"{"schema_version":"0.1.0","id":"g","entry":"check_service","max_steps":2,"nodes":[{"id":"check_service","task_type":"ops-check","model_selector":{"capabilities":["tool_calling"]},"sigma":"tool_direct","locus":"remote:lab-host","artifact":"systemctl status xray","next":null}]}"#,
+        )
+        .unwrap();
+        admit_capability_contract(
+            &mut dag,
+            "check the service on lab-host",
+            &policy(),
+            &["lab-host".into()],
+        )
+        .unwrap();
+        let cmd = artifact_command(&dag.nodes[0]).unwrap();
+        assert_eq!(cmd, "ssh lab-host systemctl status xray");
         direct_tool_call(&dag.nodes[0]).unwrap();
     }
 

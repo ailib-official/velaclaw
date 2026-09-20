@@ -462,6 +462,41 @@ fn program_token_is_invoke_name(tok: &str) -> bool {
         .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '+' | '-'))
 }
 
+/// English deliverable sentences, not argv0. `systemctl status xray` is invoke.
+fn looks_like_english_caption(first: &str, rest: &[&str]) -> bool {
+    const HEADS: &[&str] = &[
+        "analyze",
+        "collect",
+        "combine",
+        "compare",
+        "compute",
+        "describe",
+        "determine",
+        "document",
+        "evaluate",
+        "explain",
+        "extract",
+        "gather",
+        "generate",
+        "identify",
+        "inspect",
+        "investigate",
+        "outline",
+        "planning",
+        "produce",
+        "product",
+        "provide",
+        "read",
+        "report",
+        "review",
+        "summarize",
+    ];
+    rest.len() >= 2
+        && rest.iter().copied().all(token_is_letter_word)
+        && token_is_letter_word(first)
+        && HEADS.iter().any(|h| first.eq_ignore_ascii_case(h))
+}
+
 fn shell_line_is_invoke(cmd: &str) -> bool {
     let mut tokens = cmd.split_whitespace();
     let Some(first) = tokens.next() else {
@@ -477,13 +512,7 @@ fn shell_line_is_invoke(cmd: &str) -> bool {
     if !program_token_is_invoke_name(first) {
         return false;
     }
-    if rest.len() >= 2 && rest.iter().copied().all(token_is_letter_word) {
-        // English captions: "read the requested sources". Short CLIs (`gh repo list`) stay invokes.
-        if first.chars().count() >= 3 && token_is_letter_word(first) {
-            return false;
-        }
-    }
-    true
+    !looks_like_english_caption(first, &rest)
 }
 
 /// R17: ToolDirect I is an executable invoke, not a deliverable caption.
@@ -883,6 +912,8 @@ mod tests {
         assert!(tool_direct_artifact_is_invoke("pwd"));
         assert!(tool_direct_artifact_is_invoke("ls -la"));
         assert!(tool_direct_artifact_is_invoke("git status"));
+        assert!(tool_direct_artifact_is_invoke("systemctl status xray"));
+        assert!(tool_direct_artifact_is_invoke("cat /var/log/app.log"));
         assert!(tool_direct_artifact_is_invoke("ssh lab-host uptime"));
         assert!(tool_direct_artifact_is_invoke(r#"{"path":"README.md"}"#));
         assert!(!tool_direct_artifact_is_invoke(

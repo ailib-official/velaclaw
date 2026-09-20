@@ -707,6 +707,16 @@ mod tests {
     }
 
     #[test]
+    fn delivery_prompt_answers_user_task_not_homework() {
+        let p = DELIVERY_SYSTEM_PROMPT.to_ascii_lowercase();
+        assert!(p.contains("user task"));
+        assert!(p.contains("ordinary language"));
+        assert!(p.contains("not a homework"));
+        assert!(!p.contains("next-action"));
+        assert!(!p.contains("complete the remaining"));
+    }
+
+    #[test]
     fn revision_stamp_ignores_internodal_only_prior() {
         let internodal =
             "HANDOFF\nverdict: ok\npointers:\n- hop art\ngaps:\n- none\nonly this layer";

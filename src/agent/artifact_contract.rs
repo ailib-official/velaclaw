@@ -208,6 +208,11 @@ pub fn graph_artifact_contract(
         match hop_artifact_contract(node, body, "") {
             HopArtifactVerdict::Ok => {}
             HopArtifactVerdict::Empty => {
+                if crate::agent::graph_scheduler::node_sigma(node)
+                    == crate::agent::graph_scheduler::NodeSigma::ToolDirect
+                {
+                    return GraphArtifactVerdict::PartialUnsatisfied;
+                }
                 if required_evidence_layers(node).is_empty() {
                     continue;
                 }
@@ -414,6 +419,43 @@ mod tests {
         assert!(honest_stop_keeps_session_open(&stop));
         assert!(stop.to_ascii_lowercase().contains("not completed"));
         assert!(!stop.contains(crate::agent::graph_scheduler::EMPTY_I_ASK));
+    }
+
+    #[test]
+    fn missing_tooldirect_receipt_is_ask_not_completed() {
+        let n = DagNode {
+            id: "list".into(),
+            task_type: "shell.exec".into(),
+            model_selector: ModelSelector {
+                capabilities: vec!["shell.exec".into()],
+            },
+            context_requirements: ContextRequirements::default(),
+            max_steps: None,
+            next: None,
+            fork: vec![],
+            artifact: Some("gh repo list".into()),
+            sigma: Some("tool_direct".into()),
+            locus: None,
+        };
+        assert_eq!(
+            crate::agent::graph_scheduler::node_sigma(&n),
+            crate::agent::graph_scheduler::NodeSigma::ToolDirect
+        );
+        let cog = node("cmp", None, None);
+        assert_eq!(
+            graph_artifact_contract(
+                &[n, cog.clone()],
+                &[
+                    ("list".into(), String::new()),
+                    ("cmp".into(), "comparison without the planned list".into()),
+                ]
+            ),
+            GraphArtifactVerdict::PartialUnsatisfied
+        );
+        let stop =
+            graph_contract_stop_reason("list the repos", GraphArtifactVerdict::PartialUnsatisfied);
+        assert!(honest_stop_keeps_session_open(&stop));
+        assert!(stop.to_ascii_lowercase().contains("not completed"));
     }
 
     #[test]

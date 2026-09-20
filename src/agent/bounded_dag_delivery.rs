@@ -8,14 +8,13 @@ use anyhow::Result;
 /// System prompt for the host Delivery rewrite (not a planner node, not a work-node card).
 /// Operator bubble is human prose only (R25): no internodal or contract field names.
 pub const DELIVERY_SYSTEM_PROMPT: &str = "\
-You write the operator-visible conclusion for USER TASK.\n\
-Use the node artifacts as evidence. Be direct, in ordinary language.\n\
-The chat bubble is prose, not a spec form and not an internodal envelope.\n\
-Do not tell the operator to hand off to another node.\n\
-If evidence is incomplete, say what is known and the single next action.\n\
+You write the operator-visible answer to USER TASK.\n\
+Use hop artifacts as evidence. Be direct, in ordinary language.\n\
+The chat bubble is the answer to the user, not a spec form, not an internodal envelope, and not a homework sheet.\n\
+Do not tell the operator to run a shell command or to hand off to another node.\n\
+If evidence is missing, state the gap in ordinary language; the host Asks. Do not invent a next command.\n\
 Do not treat leftover workspace tmp or other-session memory as this-task evidence.\n\
-Do not invent geography, identity, or type labels that are not in the artifacts.\n\
-When PRIOR OPERATOR-VISIBLE CLAIMS are provided, later evidence supersedes earlier exclusive wording.\n";
+Do not invent geography, identity, or type labels that are not in the artifacts.\n";
 
 /// True when `text` is a work-node internodal envelope, not a parlor reply.
 #[must_use]
@@ -199,6 +198,9 @@ pub fn empty_hop_stop_reason(user_task: &str) -> String {
 /// a domain-specific denylist — host uses this to stamp vantage, not to ban topics.
 #[must_use]
 pub fn has_exclusivity_quantifier(text: &str) -> bool {
+    if looks_like_internodal_envelope(text) || looks_like_internodal_contract_fields(text) {
+        return false;
+    }
     let lower = text.to_ascii_lowercase();
     const CJK: &[&str] = &[
         "只有",
@@ -700,6 +702,27 @@ mod tests {
         assert!(!p.contains("vantage"));
         assert!(!p.contains("coverage"));
         assert!(p.contains("ordinary language"));
+        assert!(!p.contains("next action"));
+        assert!(!p.contains("what is known"));
+    }
+
+    #[test]
+    fn delivery_prompt_answers_user_task_not_homework() {
+        let p = DELIVERY_SYSTEM_PROMPT.to_ascii_lowercase();
+        assert!(p.contains("user task"));
+        assert!(p.contains("ordinary language"));
+        assert!(p.contains("not a homework"));
+        assert!(!p.contains("next-action"));
+        assert!(!p.contains("complete the remaining"));
+    }
+
+    #[test]
+    fn revision_stamp_ignores_internodal_only_prior() {
+        let internodal =
+            "HANDOFF\nverdict: ok\npointers:\n- hop art\ngaps:\n- none\nonly this layer";
+        assert!(!has_exclusivity_quantifier(internodal));
+        assert!(revision_lead(internodal, "仓库名单还没有取到。", true).is_none());
+        assert_eq!(stamp_unscoped_exclusivity(internodal, true), internodal);
     }
 
     #[test]

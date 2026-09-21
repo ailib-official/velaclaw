@@ -490,7 +490,18 @@ pub fn mid_hop_operator_note(
             format!("Step `{label}` did not finish. {err}")
         };
     }
-    let extracted = gist_from_node_body(body);
+    let extracted = if crate::agent::turn_progress::is_directory_listing(body) {
+        let n = body
+            .lines()
+            .filter(|l| {
+                crate::agent::turn_progress::directory_listing_line(l)
+                    && !l.trim().starts_with("total ")
+            })
+            .count();
+        format!("listed {n} entries")
+    } else {
+        gist_from_node_body(body)
+    };
     format!("### {label}\n{extracted}")
 }
 
@@ -895,6 +906,25 @@ gaps:\n- other hosts unknown";
             note.chars().count()
         );
         assert!(!note.contains("请检查局域网"), "{note}");
+    }
+
+    #[test]
+    fn directory_listing_stays_out_of_assistant_note() {
+        let listing = "total 8\n\
+drwxr-xr-x 2 user user 4096 Jan 1 00:00 .\n\
+-rw-r--r-- 1 user user 10 Jan 1 00:00 notes.txt\n";
+        let note = mid_hop_operator_note("查看目录", "list_dir", listing, None);
+        assert!(note.contains("listed"), "{note}");
+        assert!(!note.contains("notes.txt"), "{note}");
+        let frames = crate::agent::turn_progress::tool_direct_hop_frames(
+            "list_dir", "list_dir", "ls -la", listing, true,
+        );
+        match &frames[2] {
+            crate::agent::turn_progress::TurnProgress::Step { expand, .. } => {
+                assert!(expand.as_deref().unwrap_or("").contains("notes.txt"));
+            }
+            other => panic!("expected step expand, got {other:?}"),
+        }
     }
 
     #[test]

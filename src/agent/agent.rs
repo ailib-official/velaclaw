@@ -1855,10 +1855,20 @@ impl Agent {
             host_phase: self.host_phase,
         };
         let approval_mgr = self.gateway_approval.as_ref().map(|(mgr, _)| mgr);
+        let progress_obs = self.progress_tx.as_ref().map(|tx| {
+            crate::agent::turn_progress::ProgressObserver::forwarding(
+                Arc::clone(&self.observer),
+                tx.clone(),
+            )
+        });
+        let observer: &dyn crate::observability::Observer = match progress_obs.as_ref() {
+            Some(obs) => obs,
+            None => self.observer.as_ref(),
+        };
         let results = crate::agent::tool_batch::execute_tool_batch(
             std::slice::from_ref(&call),
             &self.tools,
-            self.observer.as_ref(),
+            observer,
             approval_mgr,
             Some(&self.security),
             "web",

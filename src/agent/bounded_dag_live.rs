@@ -1010,7 +1010,8 @@ pub fn hop_close_fail_cursor(
     }
 }
 
-/// Same-turn retry vs stop (VL-NA-024). Dist default off via config.
+/// Same-turn retry vs stop (VL-NA-024 / VL-APE-043).
+/// Only unavailable and quota retry once. Other errors, including a missing path, stop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkNodeFailDecision {
     RetrySame { force_default: bool },
@@ -1035,10 +1036,8 @@ pub fn decide_work_node_fail(
             force_default: true,
         },
         crate::providers::hint_peer::HopFailClass::Policy
-        | crate::providers::hint_peer::HopFailClass::Transport => WorkNodeFailDecision::Stop,
-        crate::providers::hint_peer::HopFailClass::Other => WorkNodeFailDecision::RetrySame {
-            force_default: false,
-        },
+        | crate::providers::hint_peer::HopFailClass::Transport
+        | crate::providers::hint_peer::HopFailClass::Other => WorkNodeFailDecision::Stop,
     }
 }
 
@@ -2881,6 +2880,34 @@ mod tests {
             ),
             WorkNodeFailDecision::RetrySame {
                 force_default: false
+            }
+        );
+    }
+
+    #[test]
+    fn missing_path_and_other_errors_do_not_retry_same() {
+        assert_eq!(
+            decide_work_node_fail(
+                true,
+                false,
+                "ls: cannot access 'missing/': No such file or directory"
+            ),
+            WorkNodeFailDecision::Stop
+        );
+        assert_eq!(
+            decide_work_node_fail(true, false, "command failed: exit status 2"),
+            WorkNodeFailDecision::Stop
+        );
+        assert_eq!(
+            decide_work_node_fail(true, false, "HTTP 429 rate limit"),
+            WorkNodeFailDecision::RetrySame {
+                force_default: true
+            }
+        );
+        assert_eq!(
+            decide_work_node_fail(true, false, "HTTP 410 Gone"),
+            WorkNodeFailDecision::RetrySame {
+                force_default: true
             }
         );
     }

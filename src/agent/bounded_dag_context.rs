@@ -340,9 +340,9 @@ pub fn persist_hop_begin(
     });
     let bytes = serde_json::to_vec_pretty(&body)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    // Per-node key (W8): last-write hop_begin.json is not the source of truth.
-    std::fs::write(dir.join(hop_begin_file_name(&node.id)), bytes.clone())?;
-    std::fs::write(dir.join("hop_begin.json"), bytes)
+    // Per-node key only (W8 / VL-APE-045). A shared hop_begin.json is the last hop's
+    // record and hides earlier hops.
+    std::fs::write(dir.join(hop_begin_file_name(&node.id)), bytes)
 }
 
 /// Scratch filename for one hop_begin record (`hop_begin-<node_id>.json`).
@@ -957,6 +957,10 @@ mod tests {
         assert_eq!(ja["node_id"], a.id);
         assert_eq!(jb["node_id"], b.id);
         assert_ne!(ja["node_id"], jb["node_id"]);
+        assert!(
+            !dir.join("hop_begin.json").exists(),
+            "a shared hop_begin.json is replaced by the next hop"
+        );
     }
 
     #[test]

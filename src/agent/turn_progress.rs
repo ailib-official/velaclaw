@@ -320,15 +320,77 @@ pub fn event_to_progress(event: &ObserverEvent) -> Option<TurnProgress> {
 /// User-bus hop start (A21). Not internodal evidence and not a complete-gate (P7).
 #[must_use]
 pub fn hop_begin_status(node_id: &str, task_type: &str) -> TurnProgress {
-    let detail = if task_type.is_empty() {
-        node_id.to_string()
+    let id = node_id.trim();
+    let task = task_type.trim();
+    let detail = if task.is_empty() || id.eq_ignore_ascii_case(task) {
+        id.to_string()
     } else {
-        format!("{node_id} {task_type}")
+        format!("{id} {task}")
     };
     TurnProgress::Status {
         phase: "hop_begin".into(),
         detail,
     }
+}
+
+/// `ls -l` permission line or the `total N` header.
+#[must_use]
+pub fn directory_listing_line(line: &str) -> bool {
+    let t = line.trim();
+    if let Some(rest) = t.strip_prefix("total ") {
+        return !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit());
+    }
+    let b = t.as_bytes();
+    b.len() > 10
+        && matches!(b[0], b'd' | b'-' | b'l')
+        && matches!(b[1], b'r' | b'-')
+        && matches!(b[2], b'w' | b'-')
+        && matches!(b[3], b'x' | b'-' | b's' | b'S')
+}
+
+/// True when most non-empty lines are an `ls -l` listing.
+#[must_use]
+pub fn is_directory_listing(text: &str) -> bool {
+    let lines: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    if lines.len() < 2 {
+        return false;
+    }
+    let hits = lines.iter().filter(|l| directory_listing_line(l)).count();
+    hits * 2 >= lines.len()
+}
+
+/// ToolDirect user-bus frames: begin, invoke summary, then ok/fail with output in expand.
+#[must_use]
+pub fn tool_direct_hop_frames(
+    node_id: &str,
+    task_type: &str,
+    invoke: &str,
+    output: &str,
+    ok: bool,
+) -> Vec<TurnProgress> {
+    let invoke = invoke.trim();
+    vec![
+        hop_begin_status(node_id, task_type),
+        TurnProgress::Status {
+            phase: "run".into(),
+            detail: invoke.to_string(),
+        },
+        TurnProgress::Step {
+            kind: "tool_result".into(),
+            tool: "shell".into(),
+            ok,
+            summary: if ok { "ok".into() } else { "fail".into() },
+            expand: if output.trim().is_empty() {
+                None
+            } else {
+                Some(output.to_string())
+            },
+        },
+    ]
 }
 
 /// True when a hop_begin/running-node frame is recorded before the first invoke/step.
@@ -658,6 +720,65 @@ mod tests {
         match step {
             TurnProgress::Step { .. } | TurnProgress::Status { .. } | TurnProgress::Dag { .. } => {}
             TurnProgress::Note { .. } => panic!("notes are operator text, not dag_art"),
+        }
+    }
+
+    #[test]
+    fn hop_begin_shows_id_once_when_task_type_matches() {
+        match hop_begin_status("list_dir", "list_dir") {
+            TurnProgress::Status { detail, .. } => assert_eq!(detail, "list_dir"),
+            other => panic!("expected status, got {other:?}"),
+        }
+        match hop_begin_status(" List_Dir ", "list_dir") {
+            TurnProgress::Status { detail, .. } => assert_eq!(detail, "List_Dir"),
+            other => panic!("expected status, got {other:?}"),
+        }
+        match hop_begin_status("locate", "code-fix") {
+            TurnProgress::Status { detail, .. } => assert_eq!(detail, "locate code-fix"),
+            other => panic!("expected status, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tool_direct_frames_are_begin_invoke_then_ok_and_listing_stays_in_expand() {
+        let listing = "total 8\ndrwxr-xr-x 2 user user 4096 Jan 1 00:00 .\n-rw-r--r-- 1 user user 10 Jan 1 00:00 notes.txt\n";
+        let frames = tool_direct_hop_frames("list_dir", "list_dir", "ls -la", listing, true);
+        assert_eq!(frames.len(), 3);
+        match &frames[0] {
+            TurnProgress::Status { phase, detail } => {
+                assert_eq!(phase, "hop_begin");
+                assert_eq!(detail, "list_dir");
+            }
+            other => panic!("expected begin, got {other:?}"),
+        }
+        match &frames[1] {
+            TurnProgress::Status { phase, detail } => {
+                assert_eq!(phase, "run");
+                assert_eq!(detail, "ls -la");
+            }
+            other => panic!("expected invoke, got {other:?}"),
+        }
+        match &frames[2] {
+            TurnProgress::Step {
+                ok,
+                summary,
+                expand,
+                ..
+            } => {
+                assert!(ok);
+                assert_eq!(summary, "ok");
+                let expand = expand.as_deref().unwrap_or("");
+                assert!(expand.contains("notes.txt"));
+            }
+            other => panic!("expected step, got {other:?}"),
+        }
+        let fail = tool_direct_hop_frames("list_dir", "ops", "ls missing", "err", false);
+        match &fail[2] {
+            TurnProgress::Step { ok, summary, .. } => {
+                assert!(!ok);
+                assert_eq!(summary, "fail");
+            }
+            other => panic!("expected fail step, got {other:?}"),
         }
     }
 }

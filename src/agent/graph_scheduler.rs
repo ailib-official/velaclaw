@@ -305,6 +305,25 @@ pub const EMPTY_I_ASK: &str = "This hop has empty I (no command). Approve an all
 /// Planned ToolDirect I ran and failed: stop the graph (VL-APE-037 / E43).
 pub const TOOL_DIRECT_FAIL_ASK: &str = "Ask: the planned command did not succeed. Approve a corrected allowed command or permission; the host will not invent a substitute retrieve.";
 
+/// Missing path is not a permission gap (VL-APE-044).
+pub const MISSING_PATH_ASK: &str = "Ask: the planned command failed because a path is missing. Name the correct path in a follow-up on this same session. The host will not invent a substitute path.";
+
+/// Stop text for a failed ToolDirect invoke. Missing paths ask for the path.
+#[must_use]
+pub fn tool_direct_failure_text(invoke: &str, output: &str) -> String {
+    let invoke = invoke.trim();
+    if command_output_missing_path(output) {
+        format!("{MISSING_PATH_ASK} Failed invoke: `{invoke}`.\n{output}")
+    } else {
+        format!("{TOOL_DIRECT_FAIL_ASK}\n{output}")
+    }
+}
+
+fn command_output_missing_path(output: &str) -> bool {
+    let lower = output.to_ascii_lowercase();
+    lower.contains("no such file") || lower.contains("not a directory")
+}
+
 /// Cognition hop must not open retrieve tools (VL-APE-037).
 pub const RETRIEVE_SUBSTITUTE_BLOCKED: &str =
     "host will not invent a retrieve tool; use upstream hop artifacts";
@@ -892,6 +911,33 @@ mod tests {
         assert!(is_retrieve_substitute_tool("http_request"));
         assert!(is_retrieve_substitute_tool("shell"));
         assert!(!is_retrieve_substitute_tool("file_read"));
+    }
+
+    #[test]
+    fn missing_path_stop_names_invoke_and_keeps_replan() {
+        let invoke = "ls -la missing/";
+        let output = "ls: cannot access 'missing/': No such file or directory";
+        let text = tool_direct_failure_text(invoke, output);
+        assert!(text.contains(invoke));
+        assert!(text.contains("correct path"));
+        assert!(!text.contains("Approve a corrected"));
+        let stop = crate::agent::bounded_dag_live::format_work_node_stop(
+            "查看目录",
+            "list_dir",
+            &text,
+            2,
+            7,
+        );
+        assert!(stop.contains("重新规划"));
+        assert!(stop.contains(invoke));
+    }
+
+    #[test]
+    fn policy_deny_stop_still_asks_for_approval() {
+        let text =
+            tool_direct_failure_text("rm -rf /tmp/x", "[policy_deny] not in allowed_commands");
+        assert!(text.contains(TOOL_DIRECT_FAIL_ASK));
+        assert!(text.contains("Approve a corrected"));
     }
 
     #[test]

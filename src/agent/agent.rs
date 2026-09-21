@@ -1893,9 +1893,10 @@ impl Agent {
                 .map(|r| r.output.as_str())
                 .collect::<Vec<_>>()
                 .join("\n");
+            let invoke = node.artifact.as_deref().unwrap_or("");
             anyhow::bail!(
-                "{}\n{reason}",
-                crate::agent::graph_scheduler::TOOL_DIRECT_FAIL_ASK
+                "{}",
+                crate::agent::graph_scheduler::tool_direct_failure_text(invoke, &reason)
             );
         }
         Ok(crate::agent::graph_scheduler::tool_direct_body(&results))
@@ -1947,11 +1948,15 @@ impl Agent {
             Some(&gate_extras),
         )
         .await?;
-        if let Some(failed) = results.iter().find(|r| !r.success) {
+        if let Some((idx, failed)) = results.iter().enumerate().find(|(_, r)| !r.success) {
+            let invoke = ids
+                .get(idx)
+                .and_then(|id| dag.nodes.iter().find(|n| n.id == *id))
+                .and_then(|n| n.artifact.as_deref())
+                .unwrap_or("");
             anyhow::bail!(
-                "{}\n{}",
-                crate::agent::graph_scheduler::TOOL_DIRECT_FAIL_ASK,
-                failed.output
+                "{}",
+                crate::agent::graph_scheduler::tool_direct_failure_text(invoke, &failed.output)
             );
         }
         if let Some(probe) = &self.current_hop_probe {

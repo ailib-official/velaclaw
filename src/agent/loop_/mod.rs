@@ -1930,14 +1930,14 @@ pub async fn run(
                                             .map(|r| r.output.as_str())
                                             .collect::<Vec<_>>()
                                             .join("\n");
+                                        let invoke = node.artifact.as_deref().unwrap_or("");
                                         crate::agent::bounded_dag_delivery::print_operator_note(
                                             &mut operator_prefix,
                                             &crate::agent::bounded_dag_live::format_work_node_stop(
                                                 &user_input,
                                                 &node.id,
-                                                &format!(
-                                                    "{}\n{reason}",
-                                                    crate::agent::graph_scheduler::TOOL_DIRECT_FAIL_ASK
+                                                &crate::agent::graph_scheduler::tool_direct_failure_text(
+                                                    invoke, &reason,
                                                 ),
                                                 index + 1,
                                                 node_count,

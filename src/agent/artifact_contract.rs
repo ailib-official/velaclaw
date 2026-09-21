@@ -1,5 +1,6 @@
 //! Hop / graph artifact contract gates (VL-APE-016 / I16).
 //! 制品合同门：空制品与 evidence_layer 未满足时不得假装成功。
+//! P9：YAML 与 JSON internodal 的 verdict 同等；JSON 解析失败不算声明不足。
 
 use super::dag_runner::DagNode;
 use super::graph_scheduler::hop_text_is_user_visible;
@@ -250,14 +251,51 @@ pub fn hop_contract_stop_reason(user_task: &str, verdict: HopArtifactVerdict) ->
     }
 }
 
-/// Internodal / hop body said partial or unsatisfied Σ (P9). Not empty-I.
+/// Internodal hop body declared an unsatisfied Σ (P9). Not empty-I.
+///
+/// YAML (`verdict: partial` and the same tokens for `failed` / `unsatisfied`)
+/// and a parsed JSON object (`"verdict": "partial"`) are one gate. A JSON
+/// value that parses decides only from its `verdict` field. A parse failure
+/// is not a declaration — truncated JSON stays silent here (budget is not
+/// this gate). Callers run this on every `dag_art` before Completed, including
+/// after A20 skip-parlor.
 #[must_use]
 pub fn internodal_declares_unsatisfied_sigma(text: &str) -> bool {
-    let t = text.to_ascii_lowercase();
-    t.contains("verdict: partial")
-        || t.contains("verdict:partial")
-        || t.contains("**verdict: partial**")
-        || t.contains("coverage: partial")
+    let trimmed = text.trim();
+    match serde_json::from_str::<serde_json::Value>(trimmed) {
+        Ok(value) => json_object_verdict_unsatisfied(&value),
+        Err(_) => yaml_declares_unsatisfied_sigma(&trimmed.to_ascii_lowercase()),
+    }
+}
+
+fn yaml_declares_unsatisfied_sigma(lower: &str) -> bool {
+    lower.contains("verdict: partial")
+        || lower.contains("verdict:partial")
+        || lower.contains("**verdict: partial**")
+        || lower.contains("coverage: partial")
+        || lower.contains("verdict: failed")
+        || lower.contains("verdict:failed")
+        || lower.contains("verdict: unsatisfied")
+        || lower.contains("verdict:unsatisfied")
+}
+
+fn json_object_verdict_unsatisfied(value: &serde_json::Value) -> bool {
+    let Some(obj) = value.as_object() else {
+        return false;
+    };
+    obj.iter().any(|(key, val)| {
+        key.eq_ignore_ascii_case("verdict")
+            && val
+                .as_str()
+                .is_some_and(|s| verdict_token_unsatisfied(s.trim()))
+    })
+}
+
+fn verdict_token_unsatisfied(token: &str) -> bool {
+    matches!(
+        token.to_ascii_lowercase().as_str(),
+        "partial" | "failed" | "unsatisfied"
+    )
 }
 
 /// True when a stop reply is an Ask/short-reason, not a completed turn.
@@ -419,6 +457,53 @@ mod tests {
         assert!(honest_stop_keeps_session_open(&stop));
         assert!(stop.to_ascii_lowercase().contains("not completed"));
         assert!(!stop.contains(crate::agent::graph_scheduler::EMPTY_I_ASK));
+    }
+
+    #[test]
+    fn yaml_and_json_internodal_declare_unsatisfied_equally() {
+        let yaml = "HANDOFF\nverdict: partial\nfindings:\n- gap\n";
+        let json = "{\n  \"verdict\": \"Partial\"\n}\n";
+        assert!(internodal_declares_unsatisfied_sigma(yaml));
+        assert!(internodal_declares_unsatisfied_sigma(json));
+        assert!(internodal_declares_unsatisfied_sigma("verdict: failed"));
+        assert!(internodal_declares_unsatisfied_sigma("verdict:unsatisfied"));
+        assert!(internodal_declares_unsatisfied_sigma(
+            r#"{"Verdict":"failed"}"#
+        ));
+        assert!(internodal_declares_unsatisfied_sigma(
+            r#"{"verdict":"unsatisfied"}"#
+        ));
+        assert!(!internodal_declares_unsatisfied_sigma(
+            r#"{"verdict":"ok","note":"verdict: partial"}"#
+        ));
+        assert!(!internodal_declares_unsatisfied_sigma(r#"{"note":"done"}"#));
+    }
+
+    #[test]
+    fn truncated_json_is_not_declared_unsatisfied() {
+        let cut = r#"{"verdict": "partial", "gap": "still ope"#;
+        assert!(serde_json::from_str::<serde_json::Value>(cut).is_err());
+        assert!(!internodal_declares_unsatisfied_sigma(cut));
+    }
+
+    #[test]
+    fn skip_parlor_still_gates_json_internodal_before_complete() {
+        let mid = r#"{"verdict":"partial","note":"gap remains"}"#;
+        let last = "The catalog check is finished.";
+        assert!(crate::agent::graph_scheduler::skip_parlor_llm(2, last));
+        assert_eq!(
+            graph_artifact_contract(
+                &[node("mid", None, None), node("last", None, None)],
+                &[("mid".into(), mid.into()), ("last".into(), last.into())],
+            ),
+            GraphArtifactVerdict::PartialUnsatisfied
+        );
+        let stop = graph_contract_stop_reason(
+            "check the catalog",
+            GraphArtifactVerdict::PartialUnsatisfied,
+        );
+        assert!(honest_stop_keeps_session_open(&stop));
+        assert!(stop.to_ascii_lowercase().contains("not completed"));
     }
 
     #[test]

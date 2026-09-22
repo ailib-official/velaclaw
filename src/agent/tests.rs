@@ -1800,11 +1800,9 @@ async fn bounded_dag_session_picker_runs_work_hops() {
     assert!(out.contains("verified"), "{out}");
     assert!(!out.contains("contact model="), "{out}");
     let used = models.lock().unwrap().clone();
-    let session = crate::config::DEFAULT_PROTOCOL_MODEL_ID;
     assert_eq!(
-        used[0],
-        session.to_string(),
-        "planner/judge stay on cheap default; got {used:?}"
+        used[0], "nvidia/nemotron-3-ultra-550b-a55b",
+        "live planner uses the session cognition model; got {used:?}"
     );
     assert_eq!(
         used[1],

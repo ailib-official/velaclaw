@@ -16,6 +16,22 @@ use std::sync::Arc;
 use std::time::Instant;
 use velaclaw_agent_runtime::{conversation_from_tool_loop_history, reintegrate_prepared_chat};
 
+/// Facts the live close step reads after the last hop.
+#[derive(Debug, Clone, Copy)]
+struct LiveCloseFacts {
+    ran_retrieve: bool,
+    upstream_ready: bool,
+}
+
+impl Default for LiveCloseFacts {
+    fn default() -> Self {
+        Self {
+            ran_retrieve: false,
+            upstream_ready: true,
+        }
+    }
+}
+
 pub struct Agent {
     #[cfg(feature = "ai-protocol")]
     execution: Option<crate::execution::ExecutionHandle>,
@@ -75,7 +91,8 @@ pub struct Agent {
     #[cfg(feature = "ai-protocol")]
     hop_tool_accum:
         Option<Arc<std::sync::Mutex<crate::agent::graph_scheduler::HopToolAccumulator>>>,
-    last_hop_ran_retrieve: bool,
+    /// Close facts for the live graph (VL-APE-050).
+    live_close: LiveCloseFacts,
     block_retrieve_tools: bool,
     /// Active live DAG topology for parlor artifact load (VL-APE-016 / I17).
     #[cfg(feature = "ai-protocol")]
@@ -367,7 +384,7 @@ impl AgentBuilder {
             current_hop_probe: None,
             #[cfg(feature = "ai-protocol")]
             hop_tool_accum: None,
-            last_hop_ran_retrieve: false,
+            live_close: LiveCloseFacts::default(),
             block_retrieve_tools: false,
             #[cfg(feature = "ai-protocol")]
             live_graph_order: None,
@@ -526,6 +543,26 @@ impl Agent {
         self.current_hop_probe = None;
         self.hop_probes.clear();
         self.hop_tool_accum = None;
+        self.live_graph_order = None;
+        self.live_graph_nodes = None;
+    }
+
+    #[cfg(feature = "ai-protocol")]
+    async fn note_upstream_tool_artifacts(&mut self) {
+        let (Some(order), Some(nodes)) =
+            (self.live_graph_order.clone(), self.live_graph_nodes.clone())
+        else {
+            self.live_close.upstream_ready = true;
+            return;
+        };
+        let artifacts = crate::agent::bounded_dag_context::collect_graph_artifacts_for_parlor(
+            self.memory.as_ref(),
+            self.session_id.as_str(),
+            &order,
+        )
+        .await;
+        self.live_close.upstream_ready =
+            crate::agent::graph_scheduler::upstream_tool_artifacts_ready(&nodes, &artifacts);
     }
 
     fn session_work_model(&self) -> &str {
@@ -1146,7 +1183,7 @@ impl Agent {
                                 prior.push(id.clone());
                                 last_body = text;
                                 last_hop_tool = true;
-                                self.last_hop_ran_retrieve = false;
+                                self.live_close.ran_retrieve = false;
                             }
                             chat_hist = self
                                 .history
@@ -1167,6 +1204,7 @@ impl Agent {
                                     self.session_id.as_str(),
                                 )
                                 .await;
+                                self.note_upstream_tool_artifacts().await;
                                 self.end_live_graph_host_state();
                                 return self
                                     .parlor_live_reply(
@@ -1509,7 +1547,7 @@ impl Agent {
                 last_hop_tool = crate::agent::graph_scheduler::node_sigma(&node)
                     == crate::agent::graph_scheduler::NodeSigma::ToolDirect;
                 if last_hop_tool {
-                    self.last_hop_ran_retrieve = false;
+                    self.live_close.ran_retrieve = false;
                 }
                 prior.push(node.id.clone());
                 chat_hist = self
@@ -1552,6 +1590,7 @@ impl Agent {
                         self.session_id.as_str(),
                     )
                     .await;
+                    self.note_upstream_tool_artifacts().await;
                     self.end_live_graph_host_state();
                     return self
                         .parlor_live_reply(
@@ -1577,6 +1616,7 @@ impl Agent {
                             self.session_id.as_str(),
                         )
                         .await;
+                        self.note_upstream_tool_artifacts().await;
                         self.end_live_graph_host_state();
                         return self
                             .parlor_live_reply(
@@ -1600,6 +1640,7 @@ impl Agent {
             } else {
                 last_body
             };
+            self.note_upstream_tool_artifacts().await;
             self.end_live_graph_host_state();
             return self
                 .parlor_live_reply(
@@ -1635,7 +1676,8 @@ impl Agent {
         let prior = crate::agent::bounded_dag_delivery::collect_prior_exclusivity(
             std::iter::once(prefix).chain(hist),
         );
-        let (graph_block, upstream_ready) = if let (Some(order), Some(nodes)) =
+        let upstream_ready = self.live_close.upstream_ready;
+        let graph_block = if let (Some(order), Some(nodes)) =
             (&self.live_graph_order, &self.live_graph_nodes)
         {
             let artifacts = crate::agent::bounded_dag_context::collect_graph_artifacts_for_parlor(
@@ -1646,8 +1688,6 @@ impl Agent {
             .await;
             let verdict =
                 crate::agent::artifact_contract::graph_artifact_contract(nodes, &artifacts);
-            let ready =
-                crate::agent::graph_scheduler::upstream_tool_artifacts_ready(nodes, &artifacts);
             if verdict != crate::agent::artifact_contract::GraphArtifactVerdict::Ok {
                 let stop =
                     crate::agent::artifact_contract::graph_contract_stop_reason(user_task, verdict);
@@ -1655,12 +1695,9 @@ impl Agent {
                     user_task, &stop,
                 ));
             }
-            (
-                crate::agent::bounded_dag_context::format_graph_artifacts_block(&artifacts),
-                ready,
-            )
+            crate::agent::bounded_dag_context::format_graph_artifacts_block(&artifacts)
         } else {
-            (String::new(), true)
+            String::new()
         };
         let close_model = crate::agent::bounded_dag_context::close_contact_model(
             self.session_work_model(),
@@ -1677,7 +1714,7 @@ impl Agent {
             node_count,
             crate::agent::graph_scheduler::CloseEvidence {
                 last_hop_tool_evidence,
-                last_hop_ran_retrieve: self.last_hop_ran_retrieve,
+                last_hop_ran_retrieve: self.live_close.ran_retrieve,
                 upstream_tool_artifacts_ready: upstream_ready,
             },
         )
@@ -1770,7 +1807,7 @@ impl Agent {
             .invoke_tool_loop_resolved_with(effective_model, true)
             .await;
         self.block_retrieve_tools = false;
-        self.last_hop_ran_retrieve = accum
+        self.live_close.ran_retrieve = accum
             .lock()
             .map(|guard| guard.ran_retrieve())
             .unwrap_or(false);

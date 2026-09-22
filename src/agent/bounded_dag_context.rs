@@ -543,6 +543,22 @@ pub fn contact_for_live_node(
     contact_for_node(node, default_model, available_hints, None)
 }
 
+/// Close node: document or reasoning hint, then the cognition default.
+/// Not the cheap planner and not an explicit session pick.
+#[must_use]
+pub fn close_contact_model(default_model: &str, available_hints: &[String]) -> String {
+    let caps = vec![
+        "document_understanding".to_string(),
+        "high-reasoning".to_string(),
+    ];
+    for tag in ["document_understanding", "high-reasoning"] {
+        if let Some(contact) = hint_contact_for_tag(tag, available_hints, caps.clone()) {
+            return contact.model;
+        }
+    }
+    default_model.to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

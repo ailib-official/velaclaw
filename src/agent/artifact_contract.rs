@@ -490,7 +490,9 @@ mod tests {
     fn skip_parlor_still_gates_json_internodal_before_complete() {
         let mid = r#"{"verdict":"partial","note":"gap remains"}"#;
         let last = "The catalog check is finished.";
-        assert!(crate::agent::graph_scheduler::skip_parlor_llm(2, last));
+        assert!(crate::agent::graph_scheduler::skip_parlor_llm(
+            2, last, false
+        ));
         assert_eq!(
             graph_artifact_contract(
                 &[node("mid", None, None), node("last", None, None)],

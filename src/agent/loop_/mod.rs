@@ -680,6 +680,7 @@ pub async fn run(
                             let by_id: HashMap<_, _> =
                                 dag.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
                             let mut last_body = String::new();
+                            let mut last_hop_tool = false;
                             let mut operator_prefix = String::new();
                             let mut hop_probes: HashMap<
                                 String,
@@ -1109,6 +1110,8 @@ pub async fn run(
                                 )
                                 .await;
                                 last_body = piece;
+                                last_hop_tool = crate::agent::graph_scheduler::node_sigma(node)
+                                    == crate::agent::graph_scheduler::NodeSigma::ToolDirect;
                                 prior.push(node.id.clone());
                                 completed.insert(node.id.clone());
                                 let remaining = order.len().saturating_sub(completed.len());
@@ -1185,13 +1188,21 @@ pub async fn run(
                                     );
                                 crate::agent::graph_scheduler::finish_live_graph(
                                     provider.as_ref(),
-                                    &model_name,
+                                    &crate::agent::bounded_dag_context::close_contact_model(
+                                        &model_name,
+                                        &config
+                                            .model_routes
+                                            .iter()
+                                            .map(|r| r.hint.clone())
+                                            .collect::<Vec<_>>(),
+                                    ),
                                     temperature,
                                     &graph_task,
                                     &raw,
                                     &prior,
                                     &graph_block,
                                     node_count,
+                                    last_hop_tool,
                                 )
                                 .await?
                             }
@@ -1632,6 +1643,7 @@ pub async fn run(
                             let by_id: HashMap<_, _> =
                                 dag.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
                             let mut last_body = String::new();
+                            let mut last_hop_tool = false;
                             let mut operator_prefix = String::new();
                             let mut hop_probes: HashMap<
                                 String,
@@ -2205,6 +2217,8 @@ pub async fn run(
                                 .await;
                                 completed.insert(node.id.clone());
                                 last_body = piece;
+                                last_hop_tool = crate::agent::graph_scheduler::node_sigma(node)
+                                    == crate::agent::graph_scheduler::NodeSigma::ToolDirect;
                                 prior.push(node.id.clone());
                                 let contacts = crate::agent::bounded_dag_live::dag_contact_labels(
                                     provider.as_ref(),
@@ -2299,13 +2313,21 @@ pub async fn run(
                                     );
                                 Ok(crate::agent::graph_scheduler::finish_live_graph(
                                     provider.as_ref(),
-                                    &session_model,
+                                    &crate::agent::bounded_dag_context::close_contact_model(
+                                        &session_model,
+                                        &config
+                                            .model_routes
+                                            .iter()
+                                            .map(|r| r.hint.clone())
+                                            .collect::<Vec<_>>(),
+                                    ),
                                     temperature,
                                     &graph_task,
                                     &raw,
                                     &prior,
                                     &graph_block,
                                     node_count,
+                                    last_hop_tool,
                                 )
                                 .await?)
                             }

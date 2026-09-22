@@ -21,7 +21,7 @@ aliases of the same tag tool_calling: tools, shell.exec, file.read, glob.search.
 Do not invent other tags. Do not name providers or model IDs. Do not pad every node with coding+tool_calling.
 
 Filled I (Σ-shaped):
-- tool_direct artifact = one admit-safe invoke the host can run as-is. Legal: a simple argv (pwd, ls) or ssh <alias> <simple argv>. A pipe `|` between simple programs is allowed. Forbidden in I: $(), backticks, ${, <(, >(, unquoted redirects, tee, find -exec, variable assignment, wrapping several checks in one ssh. Counting, parsing, and interpretation are a later llm_cognition node (work-description I), not a script inside the command. A caption is not a command.
+- tool_direct artifact = one admit-safe invoke the host can run as-is. Legal: a simple argv (pwd, ls) or ssh <alias> <simple argv>. A pipe `|` between simple programs is allowed. Forbidden in I: $(), backticks, ${, <(, >(, unquoted redirects, tee, find -exec, variable assignment, &&, ||, ;, xargs, sh -c, bash -c, and wrapping several checks in one ssh. Counting, parsing, and interpretation are a later llm_cognition node (work-description I), not a script inside the command. A caption is not a command.
 - llm_cognition artifact = a work description, not an invoke.
 
 Node count follows this task's deliverables (1–8), not whether capabilities match. One node only when the user asked for a single result (a greeting is not a DAG — the host skips you). Several independent results → one node per deliverable, each with filled I. Do not stuff every result into one mega-I. Do not emit a path-only object with no nodes. Do not invent inspect/diagnose/report splits or empty gather-context nodes. The host Asks when no node has executable I.
@@ -212,7 +212,8 @@ mod tests {
     fn planner_prompt_splits_by_deliverable_not_capability() {
         assert!(DAG_PLAN_SYSTEM_PROMPT.contains("two-filled"));
         assert!(DAG_PLAN_SYSTEM_PROMPT.contains("one node per deliverable"));
-        assert!(DAG_PLAN_SYSTEM_PROMPT.contains("A caption is not a command"));
+        assert!(DAG_PLAN_SYSTEM_PROMPT.contains("xargs"));
+        assert!(DAG_PLAN_SYSTEM_PROMPT.contains("sh -c"));
         assert!(DAG_PLAN_SYSTEM_PROMPT.contains("one admit-safe invoke"));
         assert!(DAG_PLAN_SYSTEM_PROMPT.contains("wrapping several checks"));
         assert!(!DAG_PLAN_SYSTEM_PROMPT.contains("batch related shell"));

@@ -38,10 +38,14 @@ fn autosave_memory_key(prefix: &str) -> String {
 }
 
 #[cfg(feature = "ai-protocol")]
-fn live_planner_model(config: &Config, session_model: &str, picker: Option<&str>) -> String {
+fn live_planner_model(
+    config: &Config,
+    session_model: &str,
+    _picker: Option<&str>,
+) -> Option<String> {
     let fast = crate::orchestration::fast_route_logical_id(&config.model_routes);
-    crate::agent::capability_route::cheap_planner_model(session_model, fast.as_deref(), picker)
-        .to_string()
+    crate::agent::capability_route::strong_planner_model(session_model, fast.as_deref())
+        .map(str::to_string)
 }
 
 fn parse_tool_calls(response: &str) -> (String, Vec<ParsedToolCall>) {
@@ -607,7 +611,7 @@ pub async fn run(
             let policy = security.snapshot();
             let extra =
                 crate::agent::capability_contract::host_aliases_from_deploy(&config.deploy.servers);
-            let planner = live_planner_model(
+            let hop = match live_planner_model(
                 &config,
                 &model_name,
                 if cli_explicit_flags {
@@ -615,24 +619,29 @@ pub async fn run(
                 } else {
                     None
                 },
-            );
-            crate::agent::bounded_dag_live::execute_as_live_plan(
-                crate::agent::bounded_dag_live::live_first_hop(
-                    &config.agent,
-                    mem.as_ref(),
-                    session_id.as_str(),
-                    provider.as_ref(),
-                    planner.as_str(),
+            ) {
+                Some(planner) => crate::agent::bounded_dag_live::execute_as_live_plan(
+                    crate::agent::bounded_dag_live::live_first_hop(
+                        &config.agent,
+                        mem.as_ref(),
+                        session_id.as_str(),
+                        provider.as_ref(),
+                        planner.as_str(),
+                        &msg,
+                        &history,
+                        temperature,
+                        &policy,
+                        &extra,
+                        host_phase,
+                    )
+                    .await?,
                     &msg,
-                    &history,
-                    temperature,
-                    &policy,
-                    &extra,
-                    host_phase,
-                )
-                .await?,
-                &msg,
-            )
+                ),
+                None => crate::agent::bounded_dag_live::LiveFirstHop::ChatOnly {
+                    reply: crate::agent::capability_route::PLANNER_MODEL_STOP.to_string(),
+                },
+            };
+            hop
         } else {
             crate::agent::bounded_dag_live::LiveFirstHop::SingleWork
         };
@@ -681,6 +690,7 @@ pub async fn run(
                                 dag.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
                             let mut last_body = String::new();
                             let mut last_hop_tool = false;
+                            let mut last_hop_ran_retrieve = false;
                             let mut operator_prefix = String::new();
                             let mut hop_probes: HashMap<
                                 String,
@@ -1112,6 +1122,14 @@ pub async fn run(
                                 last_body = piece;
                                 last_hop_tool = crate::agent::graph_scheduler::node_sigma(node)
                                     == crate::agent::graph_scheduler::NodeSigma::ToolDirect;
+                                last_hop_ran_retrieve = if last_hop_tool {
+                                    false
+                                } else {
+                                    hop_accum
+                                        .lock()
+                                        .map(|guard| guard.ran_retrieve())
+                                        .unwrap_or(false)
+                                };
                                 prior.push(node.id.clone());
                                 completed.insert(node.id.clone());
                                 let remaining = order.len().saturating_sub(completed.len());
@@ -1202,7 +1220,15 @@ pub async fn run(
                                     &prior,
                                     &graph_block,
                                     node_count,
-                                    last_hop_tool,
+                                    crate::agent::graph_scheduler::CloseEvidence {
+                                        last_hop_tool_evidence: last_hop_tool,
+                                        last_hop_ran_retrieve,
+                                        upstream_tool_artifacts_ready:
+                                            crate::agent::graph_scheduler::upstream_tool_artifacts_ready(
+                                                &planned.dag.nodes,
+                                                &artifacts,
+                                            ),
+                                    },
                                 )
                                 .await?
                             }
@@ -1560,7 +1586,7 @@ pub async fn run(
                 let extra = crate::agent::capability_contract::host_aliases_from_deploy(
                     &config.deploy.servers,
                 );
-                let planner = live_planner_model(
+                let hop = match live_planner_model(
                     &config,
                     &session_model,
                     if session_explicit {
@@ -1568,24 +1594,29 @@ pub async fn run(
                     } else {
                         None
                     },
-                );
-                crate::agent::bounded_dag_live::execute_as_live_plan(
-                    crate::agent::bounded_dag_live::live_first_hop(
-                        &config.agent,
-                        mem.as_ref(),
-                        session_id.as_str(),
-                        provider.as_ref(),
-                        planner.as_str(),
+                ) {
+                    Some(planner) => crate::agent::bounded_dag_live::execute_as_live_plan(
+                        crate::agent::bounded_dag_live::live_first_hop(
+                            &config.agent,
+                            mem.as_ref(),
+                            session_id.as_str(),
+                            provider.as_ref(),
+                            planner.as_str(),
+                            &user_input,
+                            &history,
+                            temperature,
+                            &policy,
+                            &extra,
+                            host_phase,
+                        )
+                        .await?,
                         &user_input,
-                        &history,
-                        temperature,
-                        &policy,
-                        &extra,
-                        host_phase,
-                    )
-                    .await?,
-                    &user_input,
-                )
+                    ),
+                    None => crate::agent::bounded_dag_live::LiveFirstHop::ChatOnly {
+                        reply: crate::agent::capability_route::PLANNER_MODEL_STOP.to_string(),
+                    },
+                };
+                hop
             } else {
                 crate::agent::bounded_dag_live::LiveFirstHop::SingleWork
             };
@@ -1644,6 +1675,7 @@ pub async fn run(
                                 dag.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
                             let mut last_body = String::new();
                             let mut last_hop_tool = false;
+                            let mut last_hop_ran_retrieve = false;
                             let mut operator_prefix = String::new();
                             let mut hop_probes: HashMap<
                                 String,
@@ -2219,6 +2251,14 @@ pub async fn run(
                                 last_body = piece;
                                 last_hop_tool = crate::agent::graph_scheduler::node_sigma(node)
                                     == crate::agent::graph_scheduler::NodeSigma::ToolDirect;
+                                last_hop_ran_retrieve = if last_hop_tool {
+                                    false
+                                } else {
+                                    hop_accum
+                                        .lock()
+                                        .map(|guard| guard.ran_retrieve())
+                                        .unwrap_or(false)
+                                };
                                 prior.push(node.id.clone());
                                 let contacts = crate::agent::bounded_dag_live::dag_contact_labels(
                                     provider.as_ref(),
@@ -2327,7 +2367,15 @@ pub async fn run(
                                     &prior,
                                     &graph_block,
                                     node_count,
-                                    last_hop_tool,
+                                    crate::agent::graph_scheduler::CloseEvidence {
+                                        last_hop_tool_evidence: last_hop_tool,
+                                        last_hop_ran_retrieve,
+                                        upstream_tool_artifacts_ready:
+                                            crate::agent::graph_scheduler::upstream_tool_artifacts_ready(
+                                                &dag.nodes,
+                                                &artifacts,
+                                            ),
+                                    },
                                 )
                                 .await?)
                             }

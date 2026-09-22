@@ -81,6 +81,7 @@ pub fn is_work_cognition_node(capabilities: &[String]) -> bool {
 }
 
 /// Planner/judge cheap default: `fast` route if set, else session default; never picker.
+/// Live planning does not use this. Title refine may still prefer the fast route.
 #[must_use]
 pub fn cheap_planner_model<'a>(
     session_default: &'a str,
@@ -91,6 +92,28 @@ pub fn cheap_planner_model<'a>(
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .unwrap_or(session_default)
+}
+
+/// Shown when the live planner has no cognition model distinct from the fast route.
+pub const PLANNER_MODEL_STOP: &str = "The planner needs a cognition model that is not the fast route. Configure that model and send the task again on this session. The host will not plan on the fast route, and it will not ask for a shell command.";
+
+/// Live planner: the session cognition model, once. Never the fast route, even as a fallback.
+#[must_use]
+pub fn strong_planner_model<'a>(
+    session_default: &'a str,
+    fast_route: Option<&str>,
+) -> Option<&'a str> {
+    let session = session_default.trim();
+    if session.is_empty() {
+        return None;
+    }
+    if fast_route
+        .map(str::trim)
+        .is_some_and(|fast| !fast.is_empty() && fast == session)
+    {
+        return None;
+    }
+    Some(session)
 }
 
 /// SoT identity on a planner node is the capability list, not a provider id.
@@ -152,6 +175,29 @@ mod tests {
                 Some("nvidia/ultra"),
             ),
             "groq/openai/gpt-oss-20b"
+        );
+    }
+
+    #[test]
+    fn live_planner_uses_cognition_model_not_fast_route() {
+        assert_eq!(
+            strong_planner_model(
+                "deepseek/deepseek-v4-flash",
+                Some("groq/openai/gpt-oss-20b")
+            ),
+            Some("deepseek/deepseek-v4-flash")
+        );
+        assert_eq!(
+            strong_planner_model("groq/openai/gpt-oss-20b", Some("groq/openai/gpt-oss-20b")),
+            None
+        );
+        assert_eq!(
+            strong_planner_model("  ", Some("groq/openai/gpt-oss-20b")),
+            None
+        );
+        assert_eq!(
+            strong_planner_model("deepseek/deepseek-v4-flash", None),
+            Some("deepseek/deepseek-v4-flash")
         );
     }
 

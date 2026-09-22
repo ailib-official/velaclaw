@@ -48,6 +48,7 @@ const GRAPH_ARTIFACTS_MAX: usize = 12_000;
 #[derive(Debug, Default)]
 pub struct HopToolAccumulator {
     chunks: Vec<String>,
+    retrieve_executed: bool,
 }
 
 impl HopToolAccumulator {
@@ -62,6 +63,15 @@ impl HopToolAccumulator {
             return;
         }
         self.chunks.push(body.to_string());
+    }
+
+    pub fn note_retrieve_executed(&mut self) {
+        self.retrieve_executed = true;
+    }
+
+    #[must_use]
+    pub fn ran_retrieve(&self) -> bool {
+        self.retrieve_executed
     }
 
     #[must_use]
@@ -462,10 +472,6 @@ pub fn tool_direct_failed(results: &[ToolBatchResult]) -> bool {
     results.is_empty() || results.iter().any(|r| !r.success)
 }
 
-fn token_is_letter_word(tok: &str) -> bool {
-    !tok.is_empty() && tok.chars().all(|c| c.is_ascii_alphabetic())
-}
-
 fn program_token_is_invoke_name(tok: &str) -> bool {
     if tok.contains('/') || tok.starts_with('.') {
         return tok
@@ -512,10 +518,7 @@ fn looks_like_english_caption(first: &str, rest: &[&str]) -> bool {
         "review",
         "summarize",
     ];
-    rest.len() >= 2
-        && rest.iter().copied().all(token_is_letter_word)
-        && token_is_letter_word(first)
-        && HEADS.iter().any(|h| first.eq_ignore_ascii_case(h))
+    rest.len() >= 2 && HEADS.iter().any(|h| first.eq_ignore_ascii_case(h))
 }
 
 fn shell_line_is_invoke(cmd: &str) -> bool {
@@ -551,6 +554,80 @@ pub fn tool_direct_artifact_is_invoke(artifact: &str) -> bool {
     shell_line_is_invoke(raw)
 }
 
+/// Planned shell I: one simple argv, `ssh <alias> <simple argv>`, or a pipe of those.
+/// Command lists, `sh -c`, and `xargs` are not one invoke. Injection gates stay separate.
+#[must_use]
+pub fn planned_shell_i_is_one_invoke(cmd: &str) -> bool {
+    let cmd = cmd.trim();
+    if cmd.is_empty()
+        || cmd.contains("&&")
+        || cmd.contains("||")
+        || cmd.contains(';')
+        || cmd.contains('\n')
+    {
+        return false;
+    }
+    let segments = split_unquoted_pipes(cmd);
+    if segments.is_empty() {
+        return false;
+    }
+    let mut saw_ssh = false;
+    for segment in &segments {
+        let words: Vec<&str> = segment.split_whitespace().collect();
+        let Some(argv0) = words.first() else {
+            return false;
+        };
+        let base = argv0.rsplit('/').next().unwrap_or(argv0);
+        if base.eq_ignore_ascii_case("xargs") || shell_dash_c(base, &words[1..]) {
+            return false;
+        }
+        if base.eq_ignore_ascii_case("ssh") {
+            saw_ssh = true;
+            if !ssh_remote_is_simple(&words[1..]) {
+                return false;
+            }
+        }
+    }
+    !(saw_ssh && segments.len() != 1)
+}
+
+fn split_unquoted_pipes(cmd: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    let mut quote: Option<char> = None;
+    for (i, c) in cmd.char_indices() {
+        match quote {
+            Some(q) if c == q => quote = None,
+            None if c == '\'' || c == '"' => quote = Some(c),
+            None if c == '|' => {
+                out.push(cmd[start..i].trim());
+                start = i + 1;
+            }
+            Some(_) | None => {}
+        }
+    }
+    out.push(cmd[start..].trim());
+    out.into_iter().filter(|s| !s.is_empty()).collect()
+}
+
+fn shell_dash_c(base: &str, args: &[&str]) -> bool {
+    (base.eq_ignore_ascii_case("sh") || base.eq_ignore_ascii_case("bash"))
+        && args.iter().any(|arg| *arg == "-c" || *arg == "-lc")
+}
+
+fn ssh_remote_is_simple(args: &[&str]) -> bool {
+    if args.iter().any(|arg| arg.starts_with('-')) {
+        return false;
+    }
+    let Some(prog) = args.get(1) else {
+        return false;
+    };
+    let base = prog.rsplit('/').next().unwrap_or(prog);
+    !base.eq_ignore_ascii_case("xargs")
+        && !base.eq_ignore_ascii_case("sh")
+        && !base.eq_ignore_ascii_case("bash")
+}
+
 /// Build the E-side tool call for a tool-only node (no provider chat).
 pub(crate) fn direct_tool_call(node: &DagNode) -> Result<ParsedToolCall> {
     let Some(artifact) = node
@@ -581,6 +658,15 @@ pub(crate) fn direct_tool_call(node: &DagNode) -> Result<ParsedToolCall> {
     } else {
         default_invoke_args(name, artifact)
     };
+    if name == "shell" {
+        let cmd = arguments
+            .get("command")
+            .and_then(|v| v.as_str())
+            .unwrap_or(artifact);
+        if !planned_shell_i_is_one_invoke(cmd) {
+            bail!("tool-only node {} I is not one invoke", node.id);
+        }
+    }
     Ok(ParsedToolCall {
         name: name.to_string(),
         arguments,
@@ -721,6 +807,41 @@ pub fn delivery_dag_artifact_bytes(graph_artifacts: &str) -> usize {
     graph_artifacts.len()
 }
 
+/// Facts the close step needs besides the last hop text.
+#[derive(Debug, Clone, Copy)]
+pub struct CloseEvidence {
+    pub last_hop_tool_evidence: bool,
+    pub last_hop_ran_retrieve: bool,
+    pub upstream_tool_artifacts_ready: bool,
+}
+
+impl CloseEvidence {
+    #[must_use]
+    pub const fn ready(last_hop_tool_evidence: bool) -> Self {
+        Self {
+            last_hop_tool_evidence,
+            last_hop_ran_retrieve: false,
+            upstream_tool_artifacts_ready: true,
+        }
+    }
+}
+
+/// Cognition prose is not a conclusion when this hop ran retrieve or a tool hop stored nothing.
+pub const EVIDENCE_GAP_STOP: &str = "This hop cannot finish. A cognition draft is not the conclusion when the hop ran a retrieve tool or an upstream tool hop stored no output.";
+
+#[must_use]
+pub fn upstream_tool_artifacts_ready(nodes: &[DagNode], artifacts: &[(String, String)]) -> bool {
+    nodes
+        .iter()
+        .filter(|n| node_sigma(n) == NodeSigma::ToolDirect)
+        .all(|node| {
+            artifacts
+                .iter()
+                .find(|(id, _)| id == &node.id)
+                .is_some_and(|(_, body)| !body.trim().is_empty())
+        })
+}
+
 /// Graph-end delivery used by [`crate::agent::agent::Agent::turn`] and CLI live DAG.
 pub async fn finish_live_graph(
     provider: &dyn Provider,
@@ -731,9 +852,14 @@ pub async fn finish_live_graph(
     prior_visible: &str,
     graph_artifacts: &str,
     node_count: usize,
-    last_hop_tool_evidence: bool,
+    evidence: CloseEvidence,
 ) -> Result<String> {
-    match after_successful_hop(0, node_count, last_body, last_hop_tool_evidence) {
+    if !evidence.last_hop_tool_evidence
+        && (evidence.last_hop_ran_retrieve || !evidence.upstream_tool_artifacts_ready)
+    {
+        return Ok(EVIDENCE_GAP_STOP.to_string());
+    }
+    match after_successful_hop(0, node_count, last_body, evidence.last_hop_tool_evidence) {
         AfterSuccessfulHop::FinishDeliver | AfterSuccessfulHop::NextRemaining => {
             Ok(ensure_user_visible(user_task, last_body))
         }
@@ -757,7 +883,7 @@ pub async fn finish_live_graph(
                 last_body,
                 prior_visible,
                 graph_artifacts,
-                last_hop_tool_evidence,
+                evidence.last_hop_tool_evidence,
             )
             .await?;
             let parlor_rewrite = !hop_text_is_user_visible(last_body);
@@ -990,6 +1116,41 @@ mod tests {
     }
 
     #[test]
+    fn deliverable_sentence_with_punctuation_blocks_retrieve() {
+        let sentence = "produce a markdown table of columns:";
+        assert!(!tool_direct_artifact_is_invoke(sentence));
+        assert!(tool_direct_artifact_is_invoke("systemctl status xray"));
+        let dag = crate::agent::dag_runner::parse_dag_json(&format!(
+            r#"{{"schema_version":"0.1.0","id":"fmt","entry":"fmt","max_steps":2,"nodes":[{{"id":"fmt","task_type":"format","sigma":"llm_cognition","model_selector":{{"capabilities":["llm_cognition"]}},"artifact":{artifact},"next":null}}]}}"#,
+            artifact = serde_json::to_string(sentence).unwrap(),
+        ))
+        .unwrap();
+        assert_eq!(node_sigma(&dag.nodes[0]), NodeSigma::LlmWork);
+        assert!(llm_hop_blocks_retrieve(&dag.nodes[0]));
+    }
+
+    #[test]
+    fn planned_shell_rejects_command_lists_and_keeps_simple_pipes() {
+        assert!(!planned_shell_i_is_one_invoke(
+            "ssh host find /git -print0 | xargs -0 sh -c 'echo'"
+        ));
+        assert!(!planned_shell_i_is_one_invoke("ls && pwd"));
+        assert!(!planned_shell_i_is_one_invoke("ls || true"));
+        assert!(!planned_shell_i_is_one_invoke("sh -c ls"));
+        assert!(planned_shell_i_is_one_invoke("git status | head"));
+        assert!(planned_shell_i_is_one_invoke(
+            "ssh alias systemctl status unit"
+        ));
+        assert!(planned_shell_i_is_one_invoke("ls"));
+        let dag = crate::agent::dag_runner::parse_dag_json(
+            r#"{"schema_version":"0.1.0","id":"ls","entry":"ls","max_steps":2,"nodes":[{"id":"ls","task_type":"shell.exec","model_selector":{"capabilities":["shell.exec"]},"artifact":"ls && pwd","next":null}]}"#,
+        )
+        .unwrap();
+        let err = direct_tool_call(&dag.nodes[0]).unwrap_err().to_string();
+        assert!(err.contains("not one invoke"), "{err}");
+    }
+
+    #[test]
     fn live_llm_auto_fails_without_native() {
         assert!(live_llm_fail_closed("auto", false));
         assert!(!live_llm_fail_closed("auto", true));
@@ -1204,9 +1365,19 @@ mod tests {
         let p = CountChat {
             n: std::sync::atomic::AtomicUsize::new(0),
         };
-        let _ = finish_live_graph(&p, "m", 0.0, "task", ENVELOPE, "", "", 3, false)
-            .await
-            .unwrap();
+        let _ = finish_live_graph(
+            &p,
+            "m",
+            0.0,
+            "task",
+            ENVELOPE,
+            "",
+            "",
+            3,
+            CloseEvidence::ready(false),
+        )
+        .await
+        .unwrap();
         let envelope_calls = p.n.load(std::sync::atomic::Ordering::SeqCst);
         assert!(
             envelope_calls <= 1,
@@ -1228,7 +1399,7 @@ mod tests {
             "",
             "",
             3,
-            false,
+            CloseEvidence::ready(false),
         )
         .await
         .unwrap();
@@ -1245,9 +1416,19 @@ mod tests {
         let vis = CountChat {
             n: std::sync::atomic::AtomicUsize::new(0),
         };
-        let _ = finish_live_graph(&vis, "m", 0.0, "task", "verified", "", "", 3, false)
-            .await
-            .unwrap();
+        let _ = finish_live_graph(
+            &vis,
+            "m",
+            0.0,
+            "task",
+            "verified",
+            "",
+            "",
+            3,
+            CloseEvidence::ready(false),
+        )
+        .await
+        .unwrap();
         assert_eq!(
             vis.n.load(std::sync::atomic::Ordering::SeqCst),
             0,
@@ -1265,7 +1446,7 @@ mod tests {
             "",
             "",
             1,
-            false,
+            CloseEvidence::ready(false),
         )
         .await
         .unwrap();
@@ -1282,7 +1463,7 @@ mod tests {
             "",
             "node=work\n/home/alex",
             1,
-            true,
+            CloseEvidence::ready(true),
         )
         .await
         .unwrap();
@@ -1302,12 +1483,96 @@ mod tests {
             "",
             "node=work\n/home/alex",
             1,
-            true,
+            CloseEvidence::ready(true),
         )
         .await
         .unwrap();
         assert!(failed.contains("stays in the step"), "{failed}");
         assert_ne!(failed.trim(), "/home/alex");
+    }
+
+    #[tokio::test]
+    async fn cognition_close_stops_without_tool_artifacts() {
+        let draft = "invented three repositories";
+        let retrieved = CountChat {
+            n: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let out = finish_live_graph(
+            &retrieved,
+            "m",
+            0.0,
+            "task",
+            draft,
+            "",
+            "",
+            2,
+            CloseEvidence {
+                last_hop_tool_evidence: false,
+                last_hop_ran_retrieve: true,
+                upstream_tool_artifacts_ready: true,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(out, EVIDENCE_GAP_STOP);
+        assert!(!out.contains("repositories"));
+        assert_eq!(retrieved.n.load(std::sync::atomic::Ordering::SeqCst), 0);
+        let missing = CountChat {
+            n: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let gap = finish_live_graph(
+            &missing,
+            "m",
+            0.0,
+            "task",
+            draft,
+            "",
+            "",
+            2,
+            CloseEvidence {
+                last_hop_tool_evidence: false,
+                last_hop_ran_retrieve: false,
+                upstream_tool_artifacts_ready: false,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(gap, EVIDENCE_GAP_STOP);
+        assert_eq!(missing.n.load(std::sync::atomic::Ordering::SeqCst), 0);
+        let ready = CountChat {
+            n: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let kept = finish_live_graph(
+            &ready,
+            "m",
+            0.0,
+            "task",
+            "verified",
+            "",
+            "node=collect\nrepo\n",
+            2,
+            CloseEvidence {
+                last_hop_tool_evidence: false,
+                last_hop_ran_retrieve: false,
+                upstream_tool_artifacts_ready: true,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(ready.n.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert!(kept.contains("verified"), "{kept}");
+        let tool = crate::agent::dag_runner::parse_dag_json(
+            r#"{"schema_version":"0.1.0","id":"ls","entry":"collect","max_steps":2,"nodes":[{"id":"collect","task_type":"shell.exec","model_selector":{"capabilities":["shell.exec"]},"artifact":"ls","next":null}]}"#,
+        )
+        .unwrap();
+        assert!(!upstream_tool_artifacts_ready(
+            &tool.nodes,
+            &[("collect".into(), "  ".into())]
+        ));
+        assert!(upstream_tool_artifacts_ready(
+            &tool.nodes,
+            &[("collect".into(), "repo\n".into())]
+        ));
     }
 
     #[test]

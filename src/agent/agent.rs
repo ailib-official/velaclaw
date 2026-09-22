@@ -75,6 +75,7 @@ pub struct Agent {
     #[cfg(feature = "ai-protocol")]
     hop_tool_accum:
         Option<Arc<std::sync::Mutex<crate::agent::graph_scheduler::HopToolAccumulator>>>,
+    last_hop_ran_retrieve: bool,
     block_retrieve_tools: bool,
     /// Active live DAG topology for parlor artifact load (VL-APE-016 / I17).
     #[cfg(feature = "ai-protocol")]
@@ -366,6 +367,7 @@ impl AgentBuilder {
             current_hop_probe: None,
             #[cfg(feature = "ai-protocol")]
             hop_tool_accum: None,
+            last_hop_ran_retrieve: false,
             block_retrieve_tools: false,
             #[cfg(feature = "ai-protocol")]
             live_graph_order: None,
@@ -524,8 +526,6 @@ impl Agent {
         self.current_hop_probe = None;
         self.hop_probes.clear();
         self.hop_tool_accum = None;
-        self.live_graph_order = None;
-        self.live_graph_nodes = None;
     }
 
     fn session_work_model(&self) -> &str {
@@ -970,12 +970,21 @@ impl Agent {
                 .collect();
             let planner_model = {
                 let fast = crate::orchestration::fast_route_logical_id(&self.model_routes);
-                crate::agent::capability_route::cheap_planner_model(
-                    self.model_name.as_str(),
+                crate::agent::capability_route::strong_planner_model(
+                    self.session_work_model(),
                     fast.as_deref(),
-                    self.explicit_model.as_deref(),
                 )
-                .to_string()
+                .map(str::to_string)
+            };
+            let Some(planner_model) = planner_model else {
+                let visible = crate::agent::bounded_dag_delivery::session_assistant_body(
+                    user_message,
+                    crate::agent::capability_route::PLANNER_MODEL_STOP,
+                );
+                self.history
+                    .push(ConversationMessage::Chat(ChatMessage::assistant(&visible)));
+                self.prepare_history_after_turn().await?;
+                return Ok(visible);
             };
             crate::agent::bounded_dag_live::execute_as_live_plan(
                 crate::agent::bounded_dag_live::live_first_hop(
@@ -1137,6 +1146,7 @@ impl Agent {
                                 prior.push(id.clone());
                                 last_body = text;
                                 last_hop_tool = true;
+                                self.last_hop_ran_retrieve = false;
                             }
                             chat_hist = self
                                 .history
@@ -1498,6 +1508,9 @@ impl Agent {
                 last_body = text;
                 last_hop_tool = crate::agent::graph_scheduler::node_sigma(&node)
                     == crate::agent::graph_scheduler::NodeSigma::ToolDirect;
+                if last_hop_tool {
+                    self.last_hop_ran_retrieve = false;
+                }
                 prior.push(node.id.clone());
                 chat_hist = self
                     .history
@@ -1622,7 +1635,7 @@ impl Agent {
         let prior = crate::agent::bounded_dag_delivery::collect_prior_exclusivity(
             std::iter::once(prefix).chain(hist),
         );
-        let graph_block = if let (Some(order), Some(nodes)) =
+        let (graph_block, upstream_ready) = if let (Some(order), Some(nodes)) =
             (&self.live_graph_order, &self.live_graph_nodes)
         {
             let artifacts = crate::agent::bounded_dag_context::collect_graph_artifacts_for_parlor(
@@ -1633,6 +1646,8 @@ impl Agent {
             .await;
             let verdict =
                 crate::agent::artifact_contract::graph_artifact_contract(nodes, &artifacts);
+            let ready =
+                crate::agent::graph_scheduler::upstream_tool_artifacts_ready(nodes, &artifacts);
             if verdict != crate::agent::artifact_contract::GraphArtifactVerdict::Ok {
                 let stop =
                     crate::agent::artifact_contract::graph_contract_stop_reason(user_task, verdict);
@@ -1640,9 +1655,12 @@ impl Agent {
                     user_task, &stop,
                 ));
             }
-            crate::agent::bounded_dag_context::format_graph_artifacts_block(&artifacts)
+            (
+                crate::agent::bounded_dag_context::format_graph_artifacts_block(&artifacts),
+                ready,
+            )
         } else {
-            String::new()
+            (String::new(), true)
         };
         let close_model = crate::agent::bounded_dag_context::close_contact_model(
             self.session_work_model(),
@@ -1657,7 +1675,11 @@ impl Agent {
             &prior,
             &graph_block,
             node_count,
-            last_hop_tool_evidence,
+            crate::agent::graph_scheduler::CloseEvidence {
+                last_hop_tool_evidence,
+                last_hop_ran_retrieve: self.last_hop_ran_retrieve,
+                upstream_tool_artifacts_ready: upstream_ready,
+            },
         )
         .await
     }
@@ -1680,12 +1702,14 @@ impl Agent {
 
         let planner_model = {
             let fast = crate::orchestration::fast_route_logical_id(&self.model_routes);
-            crate::agent::capability_route::cheap_planner_model(
-                self.model_name.as_str(),
+            crate::agent::capability_route::strong_planner_model(
+                self.session_work_model(),
                 fast.as_deref(),
-                self.explicit_model.as_deref(),
             )
-            .to_string()
+            .map(str::to_string)
+        };
+        let Some(planner_model) = planner_model else {
+            anyhow::bail!("{}", crate::agent::capability_route::PLANNER_MODEL_STOP);
         };
         let policy = self.security.snapshot();
         let planned = prepare_session_live_dag(
@@ -1746,6 +1770,10 @@ impl Agent {
             .invoke_tool_loop_resolved_with(effective_model, true)
             .await;
         self.block_retrieve_tools = false;
+        self.last_hop_ran_retrieve = accum
+            .lock()
+            .map(|guard| guard.ran_retrieve())
+            .unwrap_or(false);
         self.hop_tool_accum = None;
         let text = text?;
         let evidence = accum.lock().map(|a| a.as_evidence()).unwrap_or_default();

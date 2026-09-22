@@ -201,7 +201,7 @@ mod tests {
     }
 
     #[test]
-    fn judge_planner_uses_fast_not_strongest() {
+    fn live_planner_uses_cognition_not_fast() {
         let routes = vec![
             ModelRouteConfig {
                 hint: "code".into(),
@@ -231,12 +231,18 @@ mod tests {
             Some("groq/openai/gpt-oss-20b")
         );
         assert_eq!(
-            crate::agent::capability_route::cheap_planner_model(
+            crate::agent::capability_route::strong_planner_model(
                 "nvidia/super",
                 fast_route_logical_id(&routes).as_deref(),
-                Some("nvidia/ultra"),
             ),
-            "groq/openai/gpt-oss-20b"
+            Some("nvidia/super")
+        );
+        assert_eq!(
+            crate::agent::capability_route::strong_planner_model(
+                "groq/openai/gpt-oss-20b",
+                fast_route_logical_id(&routes).as_deref(),
+            ),
+            None
         );
     }
 }

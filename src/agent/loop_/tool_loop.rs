@@ -663,6 +663,15 @@ pub(crate) async fn run_tool_call_loop(
             }
             runnable.push(call.clone());
             runnable_idx.push(i);
+            if crate::agent::graph_scheduler::is_retrieve_substitute_tool(&call.name) {
+                if let Some(ctx) = soft_fail.as_ref() {
+                    if let Some(acc) = &ctx.hop_tool_accum {
+                        if let Ok(mut guard) = acc.lock() {
+                            guard.note_retrieve_executed();
+                        }
+                    }
+                }
+            }
         }
         let mut batch_outputs: Vec<String> = vec![String::new(); tool_calls.len()];
         if !runnable.is_empty() {

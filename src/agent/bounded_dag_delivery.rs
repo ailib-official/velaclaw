@@ -184,6 +184,17 @@ pub fn parlor_fallback(user_task: &str, internodal: &str) -> String {
     }
 }
 
+/// Short stop when a tool-evidence close model does not write a conclusion.
+/// The tool body stays in the step and is not the assistant bubble.
+#[must_use]
+pub fn close_without_conclusion(user_task: &str) -> String {
+    if crate::agent::bounded_dag_live::user_prefers_cjk(user_task) {
+        "收口没有写出结论。工具输出留在本步，不会当作答复。".into()
+    } else {
+        "The close step did not write a conclusion. Tool output stays in the step.".into()
+    }
+}
+
 /// Short operator stop when strip/parlor left no report (I12 / I13). Never points at hidden UI.
 #[must_use]
 pub fn empty_hop_stop_reason(user_task: &str) -> String {
@@ -572,6 +583,7 @@ pub async fn host_delivery(
     last_node_body: &str,
     prior_visible: &str,
     graph_artifacts: &str,
+    force_close: bool,
 ) -> Result<String> {
     let exhausted = velaclaw_agent_runtime::looks_like_tool_format_exhausted_notice(last_node_body);
     let stripped_notice = if exhausted {
@@ -585,7 +597,8 @@ pub async fn host_delivery(
         stripped_notice.as_str()
     };
     let stripped = operator_visible_source(evidence);
-    let needs_rewrite = looks_like_internodal_envelope(&stripped)
+    let needs_rewrite = force_close
+        || looks_like_internodal_envelope(&stripped)
         || looks_like_internodal_contract_fields(&stripped)
         || exhausted
         || stripped.trim().is_empty();
@@ -619,7 +632,12 @@ pub async fn host_delivery(
                     text
                 }
                 Ok(_) | Err(_) => {
-                    if stripped.trim().is_empty() {
+                    if force_close
+                        && !looks_like_internodal_envelope(&stripped)
+                        && !looks_like_internodal_contract_fields(&stripped)
+                    {
+                        close_without_conclusion(user_task)
+                    } else if stripped.trim().is_empty() {
                         parlor_fallback(user_task, prior_visible)
                     } else {
                         parlor_fallback(user_task, &stripped)

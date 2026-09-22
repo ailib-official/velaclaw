@@ -3,9 +3,9 @@
 //! When `[agent].bounded_dag_live` is on and `bounded_dag_path` is empty, the
 //! first hop emits in-band `chat_only` or a 1–8 node DAG. Path-only
 //! `single_work` / invalid JSON / unfilled graphs Ask (`EMPTY_I_ASK`); the host
-//! does not synthesize an empty `llm_cognition` node. With a HumanInputHub the
-//! Ask is a fill contract (R23): operator invoke I continues the same turn.
-//! A 1-node ToolDirect with invoke I stays Plan. Dist default remains off.
+//! does not synthesize an empty `llm_cognition` node and does not collect a
+//! shell command. A 1-node ToolDirect with invoke I stays Plan. Dist default
+//! remains off.
 //!
 //! Turn contract (VL-CTX-001 / VL-NA-019 / VL-NA-030): append the user message,
 //! run `prepare_turn_history` on the session (skip only HostPhase::Plan preview),
@@ -19,10 +19,8 @@ use super::bounded_dag::{format_preview, linear_node_ids, load_bounded_dag, sche
 use super::bounded_dag_context::contact_for_live_node;
 use super::candidate_dag::{validate_candidate_dag_json, CandidateFailCategory};
 use super::capability_contract::admit_capability_contract;
-use super::dag_runner::{parse_dag_json, DagManifest, DagNode, CODE_FIX_TEMPLATE_JSON};
-use super::graph_scheduler::{
-    llm_work_missing_i_at, node_sigma, tool_direct_artifact_is_invoke, NodeSigma, EMPTY_I_ASK,
-};
+use super::dag_runner::{parse_dag_json, DagManifest, CODE_FIX_TEMPLATE_JSON};
+use super::graph_scheduler::{node_sigma, NodeSigma, EMPTY_I_ASK};
 use super::host_phase::HostPhase;
 use crate::memory::{Memory, MemoryCategory};
 use crate::orchestration::dag_emit::{
@@ -388,154 +386,8 @@ pub fn execute_as_live_plan(hop: LiveFirstHop, _user_task: &str) -> LiveFirstHop
     }
 }
 
-/// Operator-filled invoke I (R17). Parsed from the Ask reply only — not the user task.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OperatorInvokeI {
-    pub command: String,
-    pub locus: Option<String>,
-}
-
-/// Web HITL prompt when filling empty I (R23). CLI without a hub keeps [`EMPTY_I_ASK`].
-pub const EMPTY_I_CONTRACT_PROMPT: &str = "This hop has empty I (no command). Reply with one admit-safe invoke (for example: pwd). Optional: ssh <alias> <simple argv> using a configured deploy alias. A caption is not a command. Do not send $(), backticks, redirects, or several checks wrapped in one ssh. Cancel aborts this hop; the host will not invent a command.";
-
 /// Visible Ask when a node has I but caps are outside the host table (R24/E37). Not R23.
 pub const CAP_REJECT_ASK: &str = "This hop used a capability tag the host does not admit. Use one of: high-reasoning, coding, speed, document_understanding, tool_calling, long_context (aliases of tool_calling: tools, shell.exec, file.read, glob.search). This is not a request for a shell command.";
-
-/// True when the hop is waiting for an operator invoke I (R19/R23).
-#[must_use]
-pub fn hop_needs_empty_i_contract(hop: &LiveFirstHop) -> bool {
-    match hop {
-        LiveFirstHop::ChatOnly { reply } => reply.trim() == EMPTY_I_ASK,
-        LiveFirstHop::Plan(plan) => first_remaining_node_missing_i(plan),
-        LiveFirstHop::SingleWork => true,
-    }
-}
-
-fn first_remaining_node_missing_i(plan: &PlannedLiveDag) -> bool {
-    let Some(id) = plan.order.get(plan.resume_from) else {
-        return false;
-    };
-    plan.dag
-        .nodes
-        .iter()
-        .find(|n| n.id == *id)
-        .is_some_and(|n| llm_work_missing_i_at(n, 0))
-}
-
-fn locus_from_operator_command(cmd: &str, extra_aliases: &[String]) -> Option<String> {
-    let mut parts = cmd.split_whitespace();
-    let prog = parts.next()?;
-    if !prog.eq_ignore_ascii_case("ssh") {
-        return None;
-    }
-    let mut skip_value = false;
-    for tok in parts {
-        if skip_value {
-            skip_value = false;
-            continue;
-        }
-        if tok.starts_with('-') {
-            if matches!(tok, "-o" | "-i" | "-l" | "-p" | "-F" | "-J") {
-                skip_value = true;
-            }
-            continue;
-        }
-        if extra_aliases.iter().any(|a| a == tok) {
-            return Some(format!("remote:{tok}"));
-        }
-        return None;
-    }
-    None
-}
-
-/// Parse the operator Ask reply into invoke I. Does not read the user task.
-pub fn parse_operator_invoke_i(
-    raw: &str,
-    extra_aliases: &[String],
-) -> Result<OperatorInvokeI, &'static str> {
-    let command = raw.trim();
-    if command.is_empty() {
-        return Err("empty");
-    }
-    if !tool_direct_artifact_is_invoke(command) {
-        return Err("not_invoke");
-    }
-    Ok(OperatorInvokeI {
-        locus: locus_from_operator_command(command, extra_aliases),
-        command: command.to_string(),
-    })
-}
-
-/// Write operator invoke I onto a node (ToolDirect + artifact).
-pub fn apply_operator_invoke_to_node(node: &mut DagNode, fill: &OperatorInvokeI) {
-    node.sigma = Some("tool_direct".into());
-    node.artifact = Some(fill.command.clone());
-    if let Some(locus) = fill.locus.as_deref() {
-        node.locus = Some(locus.to_string());
-    }
-    if !node
-        .model_selector
-        .capabilities
-        .iter()
-        .any(|c| c == "tool_calling")
-    {
-        node.model_selector.capabilities.push("tool_calling".into());
-    }
-}
-
-/// One-node live plan from an operator-filled invoke I, then admit (C7).
-pub fn plan_from_operator_invoke(
-    fill: &OperatorInvokeI,
-    user_task: &str,
-    policy: &SecurityPolicy,
-    extra_aliases: &[String],
-) -> Result<PlannedLiveDag, anyhow::Error> {
-    let mut node = serde_json::json!({
-        "id": "work",
-        "task_type": "ops-check",
-        "model_selector": { "capabilities": ["tool_calling"] },
-        "sigma": "tool_direct",
-        "artifact": fill.command,
-        "next": serde_json::Value::Null
-    });
-    if let Some(locus) = fill.locus.as_deref() {
-        node["locus"] = serde_json::Value::String(locus.to_string());
-    }
-    let wrapped = serde_json::json!({
-        "schema_version": "0.1.0",
-        "id": "one-node",
-        "entry": "work",
-        "max_steps": 8,
-        "nodes": [node]
-    })
-    .to_string();
-    let mut plan = resolve_planned_manifest(&wrapped, CODE_FIX_TEMPLATE_JSON)?;
-    if plan.used_fallback {
-        anyhow::bail!("operator invoke I did not admit as a live plan");
-    }
-    plan.source = "operator_i";
-    admit_planned_dag(&mut plan, user_task, policy, extra_aliases)?;
-    Ok(plan)
-}
-
-/// Apply fill to the first remaining missing-I node, then admit.
-pub fn fill_plan_operator_invoke(
-    mut plan: PlannedLiveDag,
-    fill: &OperatorInvokeI,
-    user_task: &str,
-    policy: &SecurityPolicy,
-    extra_aliases: &[String],
-) -> Result<PlannedLiveDag, anyhow::Error> {
-    let Some(id) = plan.order.get(plan.resume_from).cloned() else {
-        anyhow::bail!("plan has no remaining node");
-    };
-    let Some(node) = plan.dag.nodes.iter_mut().find(|n| n.id == id) else {
-        anyhow::bail!("plan node {id} missing");
-    };
-    apply_operator_invoke_to_node(node, fill);
-    admit_planned_dag(&mut plan, user_task, policy, extra_aliases)?;
-    Ok(plan)
-}
 
 fn admit_planned_dag(
     plan: &mut PlannedLiveDag,
@@ -2130,7 +1982,6 @@ mod tests {
             other => panic!("expected cap_reject Ask, got {other:?}"),
         }
         assert_eq!(planner_collapse_reason(json, &hop), "cap_reject");
-        assert!(!hop_needs_empty_i_contract(&hop));
     }
 
     #[test]
@@ -2145,22 +1996,6 @@ mod tests {
         let hop = parse_live_first_hop(json, CODE_FIX_TEMPLATE_JSON);
         assert!(matches!(hop, LiveFirstHop::Plan(_)));
         assert_eq!(planner_collapse_reason(json, &hop), "plan");
-    }
-
-    #[test]
-    fn plan_from_operator_invoke_admits_pwd() {
-        let fill = parse_operator_invoke_i("pwd", &[]).expect("pwd is invoke I");
-        let policy = crate::security::SecurityPolicy {
-            autonomy: crate::security::AutonomyLevel::Full,
-            ..crate::security::SecurityPolicy::default()
-        };
-        let plan = plan_from_operator_invoke(&fill, "check cwd", &policy, &[]).unwrap();
-        assert!(!plan.used_fallback);
-        assert_eq!(
-            plan.dag.nodes[0].model_selector.capabilities,
-            vec!["tool_calling".to_string()]
-        );
-        assert_eq!(plan.dag.nodes[0].artifact.as_deref(), Some("pwd"));
     }
 
     #[test]
@@ -2418,24 +2253,11 @@ mod tests {
         match hop {
             LiveFirstHop::ChatOnly { ref reply } => {
                 assert!(reply.contains("empty I"));
-                assert!(reply.contains("Approve an allowed command"));
+                assert!(reply.contains("will not ask for a shell command"));
+                assert!(!reply.contains("pwd"));
             }
             other => panic!("unfilled must Ask, got {other:?}"),
         }
-        assert!(hop_needs_empty_i_contract(&hop));
-    }
-
-    #[test]
-    fn parse_operator_invoke_i_accepts_command_not_caption() {
-        let pwd = parse_operator_invoke_i("pwd", &[]).unwrap();
-        assert_eq!(pwd.command, "pwd");
-        assert_eq!(pwd.locus, None);
-        let ssh = parse_operator_invoke_i("ssh lab uname -a", &["lab".into()]).unwrap();
-        assert_eq!(ssh.locus.as_deref(), Some("remote:lab"));
-        let unknown = parse_operator_invoke_i("ssh lab uname -a", &[]).unwrap();
-        assert_eq!(unknown.locus, None);
-        assert!(parse_operator_invoke_i("inspect the workspace", &[]).is_err());
-        assert!(parse_operator_invoke_i("", &[]).is_err());
     }
 
     #[tokio::test]

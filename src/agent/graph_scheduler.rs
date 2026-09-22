@@ -34,10 +34,11 @@ pub fn hop_text_is_user_visible(body: &str) -> bool {
         && !velaclaw_agent_runtime::looks_like_tool_format_exhausted_notice(&stripped)
 }
 
-/// Visible assistant prose skips the parlor LLM, including multi-node graphs (R10/A20).
+/// Skip the close model only when the last hop already wrote the user-facing conclusion.
+/// Tool evidence is not that conclusion, even when the bytes look like ordinary text.
 #[must_use]
-pub fn skip_parlor_llm(_node_count: usize, last_body: &str) -> bool {
-    hop_text_is_user_visible(last_body)
+pub fn skip_parlor_llm(_node_count: usize, last_body: &str, last_hop_tool_evidence: bool) -> bool {
+    !last_hop_tool_evidence && hop_text_is_user_visible(last_body)
 }
 
 const TOOL_EVIDENCE_MAX: usize = 3_500;
@@ -252,10 +253,11 @@ pub fn after_successful_hop(
     remaining: usize,
     node_count: usize,
     last_body: &str,
+    last_hop_tool_evidence: bool,
 ) -> AfterSuccessfulHop {
     if remaining > 0 && !hop_body_closes_graph(last_body) && !last_hop_ends_graph(remaining) {
         AfterSuccessfulHop::NextRemaining
-    } else if skip_parlor_llm(node_count, last_body) {
+    } else if skip_parlor_llm(node_count, last_body, last_hop_tool_evidence) {
         AfterSuccessfulHop::FinishDeliver
     } else {
         AfterSuccessfulHop::FinishParlor
@@ -300,7 +302,7 @@ pub fn node_sigma(node: &DagNode) -> NodeSigma {
 }
 
 /// Operator-visible Ask when a live LLM hop has no command (R14 / A13 / R19).
-pub const EMPTY_I_ASK: &str = "This hop has empty I (no command). Approve an allowed command or permission; the host will not wait for a model to invent a shell script.";
+pub const EMPTY_I_ASK: &str = "This hop has empty I (no executable step). State the missing fact or grant permission in a follow-up on this same session. The host will replan. It will not ask for a shell command.";
 
 /// Planned ToolDirect I ran and failed: stop the graph (VL-APE-037 / E43).
 pub const TOOL_DIRECT_FAIL_ASK: &str = "Ask: the planned command did not succeed. Approve a corrected allowed command or permission; the host will not invent a substitute retrieve.";
@@ -702,8 +704,12 @@ pub const fn observe_llm_on_successful_hops(_work_hops: usize) -> usize {
 
 /// VL-APE-005 / §3: parlor LLM is at most one, and zero when skip_parlor_llm.
 #[must_use]
-pub fn parlor_llm_budget(node_count: usize, last_body: &str) -> usize {
-    match after_successful_hop(0, node_count, last_body) {
+pub fn parlor_llm_budget(
+    node_count: usize,
+    last_body: &str,
+    last_hop_tool_evidence: bool,
+) -> usize {
+    match after_successful_hop(0, node_count, last_body, last_hop_tool_evidence) {
         AfterSuccessfulHop::FinishParlor => 1,
         AfterSuccessfulHop::FinishDeliver | AfterSuccessfulHop::NextRemaining => 0,
     }
@@ -725,8 +731,9 @@ pub async fn finish_live_graph(
     prior_visible: &str,
     graph_artifacts: &str,
     node_count: usize,
+    last_hop_tool_evidence: bool,
 ) -> Result<String> {
-    match after_successful_hop(0, node_count, last_body) {
+    match after_successful_hop(0, node_count, last_body, last_hop_tool_evidence) {
         AfterSuccessfulHop::FinishDeliver | AfterSuccessfulHop::NextRemaining => {
             Ok(ensure_user_visible(user_task, last_body))
         }
@@ -750,6 +757,7 @@ pub async fn finish_live_graph(
                 last_body,
                 prior_visible,
                 graph_artifacts,
+                last_hop_tool_evidence,
             )
             .await?;
             let parlor_rewrite = !hop_text_is_user_visible(last_body);
@@ -805,7 +813,7 @@ mod tests {
     #[test]
     fn successful_mid_hop_walks_remaining() {
         assert_eq!(
-            after_successful_hop(2, 3, "located"),
+            after_successful_hop(2, 3, "located", false),
             AfterSuccessfulHop::NextRemaining
         );
     }
@@ -813,23 +821,28 @@ mod tests {
     #[test]
     fn single_node_visible_skips_parlor() {
         assert_eq!(
-            after_successful_hop(0, 1, "Google 路由当前可用。"),
+            after_successful_hop(0, 1, "Google 路由当前可用。", false),
             AfterSuccessfulHop::FinishDeliver
         );
-        assert!(skip_parlor_llm(1, "done"));
-        assert!(skip_parlor_llm(3, "verified"));
+        assert!(skip_parlor_llm(1, "done", false));
+        assert!(skip_parlor_llm(3, "verified", false));
+        assert!(!skip_parlor_llm(1, "/home/alex", true));
+        assert_eq!(
+            after_successful_hop(0, 1, "/home/alex", true),
+            AfterSuccessfulHop::FinishParlor
+        );
     }
 
     #[test]
     fn empty_or_internodal_last_hop_uses_parlor() {
         assert_eq!(
-            after_successful_hop(0, 1, ""),
+            after_successful_hop(0, 1, "", false),
             AfterSuccessfulHop::FinishParlor
         );
         let internodal = hop_contract_body("", "Cargo.toml\nREADME.md");
         assert!(looks_like_internodal_envelope(&internodal));
         assert_eq!(
-            after_successful_hop(0, 1, &internodal),
+            after_successful_hop(0, 1, &internodal, false),
             AfterSuccessfulHop::FinishParlor
         );
         assert!(hop_contract_body("Google 路由当前可用。", "ignored").contains("Google"));
@@ -838,7 +851,7 @@ mod tests {
     #[test]
     fn last_hop_prose_skips_parlor() {
         assert_eq!(
-            after_successful_hop(0, 3, "verified"),
+            after_successful_hop(0, 3, "verified", false),
             AfterSuccessfulHop::FinishDeliver
         );
         assert!(!hop_text_is_user_visible(
@@ -849,7 +862,7 @@ mod tests {
     #[test]
     fn empty_body_skip_parlor_is_not_complete() {
         assert_eq!(
-            after_successful_hop(0, 2, ""),
+            after_successful_hop(0, 2, "", false),
             AfterSuccessfulHop::FinishParlor
         );
         assert!(!hop_text_is_user_visible(""));
@@ -1120,10 +1133,11 @@ mod tests {
         assert_eq!(chat_only_success_llm_calls(), 1);
         assert_eq!(observe_llm_on_successful_hops(3), 0);
         assert_eq!(observe_llm_on_successful_hops(8), 0);
-        assert_eq!(parlor_llm_budget(1, "Google 路由当前可用。"), 0);
-        assert_eq!(parlor_llm_budget(3, "verified"), 0);
-        assert_eq!(parlor_llm_budget(8, "verified"), 0);
-        assert_eq!(parlor_llm_budget(3, ""), 1);
+        assert_eq!(parlor_llm_budget(1, "Google 路由当前可用。", false), 0);
+        assert_eq!(parlor_llm_budget(3, "verified", false), 0);
+        assert_eq!(parlor_llm_budget(8, "verified", false), 0);
+        assert_eq!(parlor_llm_budget(3, "", false), 1);
+        assert_eq!(parlor_llm_budget(1, "/home/alex", true), 1);
         assert!(!success_path_splices_remaining());
         assert!(!crate::config::AgentConfig::default().bounded_dag_live);
         assert!(!crate::config::AgentConfig::default().candidate_dag_emit);
@@ -1159,6 +1173,30 @@ mod tests {
         }
     }
 
+    struct ErrChat;
+
+    #[async_trait::async_trait]
+    impl Provider for ErrChat {
+        async fn chat_with_system(
+            &self,
+            _system_prompt: Option<&str>,
+            _message: &str,
+            _model: &str,
+            _temperature: f64,
+        ) -> anyhow::Result<String> {
+            Ok(String::new())
+        }
+
+        async fn chat(
+            &self,
+            _request: crate::providers::ChatRequest<'_>,
+            _model: &str,
+            _temperature: f64,
+        ) -> anyhow::Result<crate::providers::ChatResponse> {
+            anyhow::bail!("close model unavailable")
+        }
+    }
+
     #[tokio::test]
     async fn ms_ape_r1_parlor_counts_at_most_one_provider_chat() {
         const ENVELOPE: &str =
@@ -1166,7 +1204,7 @@ mod tests {
         let p = CountChat {
             n: std::sync::atomic::AtomicUsize::new(0),
         };
-        let _ = finish_live_graph(&p, "m", 0.0, "task", ENVELOPE, "", "", 3)
+        let _ = finish_live_graph(&p, "m", 0.0, "task", ENVELOPE, "", "", 3, false)
             .await
             .unwrap();
         let envelope_calls = p.n.load(std::sync::atomic::Ordering::SeqCst);
@@ -1181,9 +1219,19 @@ mod tests {
         let empty_art = CountChat {
             n: std::sync::atomic::AtomicUsize::new(0),
         };
-        let markup_out = finish_live_graph(&empty_art, "m", 0.0, "task", "</tool_call>", "", "", 3)
-            .await
-            .unwrap();
+        let markup_out = finish_live_graph(
+            &empty_art,
+            "m",
+            0.0,
+            "task",
+            "</tool_call>",
+            "",
+            "",
+            3,
+            false,
+        )
+        .await
+        .unwrap();
         assert_eq!(
             empty_art.n.load(std::sync::atomic::Ordering::SeqCst),
             0,
@@ -1197,7 +1245,7 @@ mod tests {
         let vis = CountChat {
             n: std::sync::atomic::AtomicUsize::new(0),
         };
-        let _ = finish_live_graph(&vis, "m", 0.0, "task", "verified", "", "", 3)
+        let _ = finish_live_graph(&vis, "m", 0.0, "task", "verified", "", "", 3, false)
             .await
             .unwrap();
         assert_eq!(
@@ -1208,10 +1256,58 @@ mod tests {
         let p0 = CountChat {
             n: std::sync::atomic::AtomicUsize::new(0),
         };
-        let _ = finish_live_graph(&p0, "m", 0.0, "task", "Google 路由当前可用。", "", "", 1)
-            .await
-            .unwrap();
+        let _ = finish_live_graph(
+            &p0,
+            "m",
+            0.0,
+            "task",
+            "Google 路由当前可用。",
+            "",
+            "",
+            1,
+            false,
+        )
+        .await
+        .unwrap();
         assert_eq!(p0.n.load(std::sync::atomic::Ordering::SeqCst), 0);
+        let tool_ev = CountChat {
+            n: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let tool_out = finish_live_graph(
+            &tool_ev,
+            "m",
+            0.0,
+            "task",
+            "/home/alex",
+            "",
+            "node=work\n/home/alex",
+            1,
+            true,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            tool_ev.n.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "tool evidence must reach the close model"
+        );
+        assert_eq!(tool_out.trim(), "ok");
+        let fail_close = ErrChat;
+        let failed = finish_live_graph(
+            &fail_close,
+            "m",
+            0.0,
+            "task",
+            "/home/alex",
+            "",
+            "node=work\n/home/alex",
+            1,
+            true,
+        )
+        .await
+        .unwrap();
+        assert!(failed.contains("stays in the step"), "{failed}");
+        assert_ne!(failed.trim(), "/home/alex");
     }
 
     #[test]
@@ -1224,6 +1320,7 @@ mod tests {
         assert_eq!(node_sigma(&cheap.nodes[0]), NodeSigma::LlmWork);
         assert!(llm_work_missing_i(&cheap.nodes[0]));
         assert!(EMPTY_I_ASK.contains("empty I"));
+        assert!(EMPTY_I_ASK.contains("will not ask for a shell command"));
         let cognition = crate::agent::dag_runner::parse_dag_json(
             r#"{"schema_version":"0.1.0","id":"g","entry":"a","max_steps":2,"nodes":[{"id":"a","task_type":"ops","model_selector":{"capabilities":["tool_calling"]},"sigma":"llm_cognition","next":null}]}"#,
         )

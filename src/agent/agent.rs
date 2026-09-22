@@ -1,10 +1,7 @@
 use crate::agent::dispatcher::ToolDispatcher;
 use crate::agent::memory_loader::{DefaultMemoryLoader, MemoryLoader};
 use crate::agent::prompt::{PromptContext, SystemPromptBuilder};
-use crate::approval::{
-    ApprovalHub, ApprovalManager, HumanInputHub, HumanInputKind, HumanInputOutcome,
-    HumanInputRequest,
-};
+use crate::approval::{ApprovalHub, ApprovalManager, HumanInputHub};
 use crate::cli_render::{prefix_agent_lines, RenderOpts};
 use crate::config::{Config, DEFAULT_PROTOCOL_MODEL_ID};
 use crate::memory::{self, Memory, MemoryCategory};
@@ -585,93 +582,6 @@ impl Agent {
         self.human_input_hub = Some(hub);
     }
 
-    /// R23: empty-I Ask is a fill contract when HITL is attached; same turn continues.
-    #[cfg(feature = "ai-protocol")]
-    async fn fill_empty_i_contract(
-        &self,
-        hop: crate::agent::bounded_dag_live::LiveFirstHop,
-        user_task: &str,
-    ) -> crate::agent::bounded_dag_live::LiveFirstHop {
-        use crate::agent::bounded_dag_live::LiveFirstHop;
-        use crate::agent::bounded_dag_live::{
-            fill_plan_operator_invoke, hop_needs_empty_i_contract, parse_operator_invoke_i,
-            plan_from_operator_invoke, EMPTY_I_CONTRACT_PROMPT,
-        };
-        use crate::agent::graph_scheduler::EMPTY_I_ASK;
-
-        if !hop_needs_empty_i_contract(&hop) {
-            return hop;
-        }
-        let Some(hub) = self.human_input_hub.as_ref() else {
-            return hop;
-        };
-        let outcome = hub
-            .request(HumanInputRequest {
-                kind: HumanInputKind::Text,
-                prompt: EMPTY_I_CONTRACT_PROMPT.to_string(),
-                options: Vec::new(),
-                risk_note: Some(
-                    "This fills the hop I contract. It does not widen the default allowlist."
-                        .into(),
-                ),
-            })
-            .await;
-        let text = match outcome {
-            HumanInputOutcome::Text(t) => t,
-            HumanInputOutcome::Cancelled => {
-                return LiveFirstHop::ChatOnly {
-                    reply: format!("{EMPTY_I_ASK} Operator cancelled filling I."),
-                };
-            }
-            HumanInputOutcome::TimedOut => {
-                return LiveFirstHop::ChatOnly {
-                    reply: format!("{EMPTY_I_ASK} Operator did not fill I in time."),
-                };
-            }
-            _ => {
-                return LiveFirstHop::ChatOnly {
-                    reply: format!("{EMPTY_I_ASK} Reply was not an invoke command."),
-                };
-            }
-        };
-        let fill = match parse_operator_invoke_i(text.as_str(), self.host_aliases.as_slice()) {
-            Ok(fill) => fill,
-            Err(_) => {
-                return LiveFirstHop::ChatOnly {
-                    reply: format!(
-                        "{EMPTY_I_ASK} Reply was not an invoke command; the host will not invent one."
-                    ),
-                };
-            }
-        };
-        let policy = self.security.snapshot();
-        match hop {
-            LiveFirstHop::Plan(plan) => match fill_plan_operator_invoke(
-                plan,
-                &fill,
-                user_task,
-                &policy,
-                self.host_aliases.as_slice(),
-            ) {
-                Ok(plan) => LiveFirstHop::Plan(plan),
-                Err(err) => LiveFirstHop::ChatOnly {
-                    reply: format!("Plan rejected before execute: {err}."),
-                },
-            },
-            _ => match plan_from_operator_invoke(
-                &fill,
-                user_task,
-                &policy,
-                self.host_aliases.as_slice(),
-            ) {
-                Ok(plan) => LiveFirstHop::Plan(plan),
-                Err(err) => LiveFirstHop::ChatOnly {
-                    reply: format!("Plan rejected before execute: {err}."),
-                },
-            },
-        }
-    }
-
     pub fn from_config(config: &Config) -> Result<Self> {
         let assembled = crate::agent::assemble::assemble_runtime(
             config,
@@ -1088,12 +998,6 @@ impl Agent {
             crate::agent::bounded_dag_live::LiveFirstHop::SingleWork
         };
         #[cfg(feature = "ai-protocol")]
-        let hop = if self.config.bounded_dag_live {
-            self.fill_empty_i_contract(hop, user_message).await
-        } else {
-            hop
-        };
-        #[cfg(feature = "ai-protocol")]
         let (use_live_dag, planned_from_first, chat_only_reply) = {
             use crate::agent::bounded_dag_live::LiveFirstHop;
             match hop {
@@ -1171,6 +1075,7 @@ impl Agent {
                 completed.insert(id.clone());
             }
             let mut last_body = String::new();
+            let mut last_hop_tool = false;
             let mut operator_prefix = String::new();
             self.hop_probes.clear();
             self.current_hop_probe = None;
@@ -1231,6 +1136,7 @@ impl Agent {
                                 completed.insert(id.clone());
                                 prior.push(id.clone());
                                 last_body = text;
+                                last_hop_tool = true;
                             }
                             chat_hist = self
                                 .history
@@ -1258,6 +1164,7 @@ impl Agent {
                                         &last_body,
                                         &operator_prefix,
                                         node_count,
+                                        last_hop_tool,
                                     )
                                     .await;
                             }
@@ -1589,6 +1496,8 @@ impl Agent {
                 }
                 completed.insert(node.id.clone());
                 last_body = text;
+                last_hop_tool = crate::agent::graph_scheduler::node_sigma(&node)
+                    == crate::agent::graph_scheduler::NodeSigma::ToolDirect;
                 prior.push(node.id.clone());
                 chat_hist = self
                     .history
@@ -1632,11 +1541,20 @@ impl Agent {
                     .await;
                     self.end_live_graph_host_state();
                     return self
-                        .parlor_live_reply(&graph_task, &last_body, &operator_prefix, node_count)
+                        .parlor_live_reply(
+                            &graph_task,
+                            &last_body,
+                            &operator_prefix,
+                            node_count,
+                            last_hop_tool,
+                        )
                         .await;
                 }
                 match crate::agent::graph_scheduler::after_successful_hop(
-                    remaining, node_count, &last_body,
+                    remaining,
+                    node_count,
+                    &last_body,
+                    last_hop_tool,
                 ) {
                     crate::agent::graph_scheduler::AfterSuccessfulHop::NextRemaining => {}
                     crate::agent::graph_scheduler::AfterSuccessfulHop::FinishDeliver
@@ -1653,6 +1571,7 @@ impl Agent {
                                 &last_body,
                                 &operator_prefix,
                                 node_count,
+                                last_hop_tool,
                             )
                             .await;
                     }
@@ -1670,7 +1589,13 @@ impl Agent {
             };
             self.end_live_graph_host_state();
             return self
-                .parlor_live_reply(&graph_task, &raw, &operator_prefix, node_count)
+                .parlor_live_reply(
+                    &graph_task,
+                    &raw,
+                    &operator_prefix,
+                    node_count,
+                    last_hop_tool,
+                )
                 .await;
         }
 
@@ -1684,6 +1609,7 @@ impl Agent {
         last_body: &str,
         prefix: &str,
         node_count: usize,
+        last_hop_tool_evidence: bool,
     ) -> Result<String> {
         let hist: Vec<&str> = self
             .history
@@ -1718,15 +1644,20 @@ impl Agent {
         } else {
             String::new()
         };
+        let close_model = crate::agent::bounded_dag_context::close_contact_model(
+            self.session_work_model(),
+            &self.available_hints,
+        );
         crate::agent::graph_scheduler::finish_live_graph(
             self.provider.as_ref(),
-            &self.model_name,
+            &close_model,
             self.temperature,
             user_task,
             last_body,
             &prior,
             &graph_block,
             node_count,
+            last_hop_tool_evidence,
         )
         .await
     }

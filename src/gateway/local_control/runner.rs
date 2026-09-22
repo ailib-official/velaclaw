@@ -190,8 +190,8 @@ fn seed_prior_messages(agent: &mut Agent, messages: &[ChatMessageInput]) -> Resu
 ///
 /// After the first persisted user turn, schedules a **background** title completion (does not
 /// block the chat `done` frame). Model preference: local (ollama / llamacpp /
-/// lmstudio) → `nvidia/nemotron-3-super-120b-a12b` → configured `fast` route.
-/// Does not include EOL `nemotron-mini-4b-instruct`.
+/// lmstudio) → configured `fast` route → `nvidia/nemotron-3-super-120b-a12b` only as fallback.
+/// The title task stays off the live graph. Does not include EOL `nemotron-mini-4b-instruct`.
 pub async fn persist_chat_turn(
     config: &Config,
     session_id: Option<&str>,
@@ -365,7 +365,8 @@ fn detected_local_title_model() -> Option<String> {
     None
 }
 
-/// Ordered candidates: local (configured or detected) → smallest Nemotron.
+/// Ordered candidates: local, then the cheap `fast` route, then the large remote fallback.
+/// Idle title work must not take the graph planner's place in line.
 #[must_use]
 pub(crate) fn title_refine_model_candidates(config: &Config) -> Vec<String> {
     let mut out = Vec::new();
@@ -378,13 +379,13 @@ pub(crate) fn title_refine_model_candidates(config: &Config) -> Vec<String> {
         out.push(local);
     }
 
-    if !out.iter().any(|m| m == TITLE_NEMOTRON_PRIMARY) {
-        out.push(TITLE_NEMOTRON_PRIMARY.to_string());
-    }
     if let Some(fast) = crate::orchestration::fast_route_logical_id(&config.model_routes) {
         if !out.iter().any(|m| m.eq_ignore_ascii_case(&fast)) {
             out.push(fast);
         }
+    }
+    if !out.iter().any(|m| m == TITLE_NEMOTRON_PRIMARY) {
+        out.push(TITLE_NEMOTRON_PRIMARY.to_string());
     }
     out
 }
@@ -831,7 +832,14 @@ metadata:
             ..crate::config::ModelRouteConfig::default()
         });
         let c = title_refine_model_candidates(&cfg);
-        assert!(c.iter().any(|m| m == "groq/openai/gpt-oss-20b"), "{c:?}");
+        assert_eq!(
+            c.first().map(String::as_str),
+            Some("groq/openai/gpt-oss-20b")
+        );
+        assert!(
+            c.iter().position(|m| m == TITLE_NEMOTRON_PRIMARY)
+                > c.iter().position(|m| m == "groq/openai/gpt-oss-20b")
+        );
     }
 
     #[test]

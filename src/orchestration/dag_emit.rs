@@ -21,7 +21,7 @@ aliases of the same tag tool_calling: tools, shell.exec, file.read, glob.search.
 Do not invent other tags. Do not name providers or model IDs. Do not pad every node with coding+tool_calling.
 
 Filled I (Σ-shaped):
-- tool_direct artifact = one admit-safe invoke the host can run as-is. Legal: a simple argv (pwd, ls) or ssh <alias> <simple argv>. A pipe `|` between simple programs is allowed. Forbidden in I: $(), backticks, ${, <(, >(, unquoted redirects, tee, find -exec, variable assignment, &&, ||, ;, xargs, sh -c, bash -c, and wrapping several checks in one ssh. Counting, parsing, and interpretation are a later llm_cognition node (work-description I), not a script inside the command. A caption is not a command.
+- tool_direct artifact = one admit-safe invoke the host can run as-is. Legal: a simple argv including flags (pwd, ls -la, git -C dir remote, systemctl --no-pager status unit); ssh [client-opts] <alias> <that argv>; or a pipe of those segments. Forbidden in I: $(), backticks, ${, <(, >(, unquoted redirects, tee, find -exec, variable assignment, &&, ||, ;, xargs, sh -c, bash -c, wrapping several checks in one ssh remote shell, and a pipe whose later segment is xargs. Counting, parsing, and interpretation are a later llm_cognition node (work-description I), not a script inside the command. A caption is not a command.
 - llm_cognition artifact = a work description, not an invoke.
 
 Node count follows this task's deliverables (1–8), not whether capabilities match. One node only when the user asked for a single result (a greeting is not a DAG — the host skips you). Several independent results → one node per deliverable, each with filled I. Do not stuff every result into one mega-I. Do not emit a path-only object with no nodes. Do not invent inspect/diagnose/report splits or empty gather-context nodes. The host Asks when no node has executable I.
@@ -37,7 +37,10 @@ Example (one hop — a single ops check with I):
 {"schema_version":"0.1.0","id":"ops-one","entry":"check","max_steps":8,"nodes":[{"id":"check","task_type":"ops-check","model_selector":{"capabilities":["tool_calling"]},"sigma":"tool_direct","artifact":"pwd","next":null}]}
 
 Example (two hops — tool_direct I is a command, cognition I is a work description):
-{"schema_version":"0.1.0","id":"two-filled","entry":"check","max_steps":8,"nodes":[{"id":"check","task_type":"ops-check","model_selector":{"capabilities":["tool_calling"]},"sigma":"tool_direct","artifact":"pwd","next":"write"},{"id":"write","task_type":"write","model_selector":{"capabilities":["high-reasoning"]},"sigma":"llm_cognition","artifact":"write the analysis report","next":null}]}"#;
+{"schema_version":"0.1.0","id":"two-filled","entry":"check","max_steps":8,"nodes":[{"id":"check","task_type":"ops-check","model_selector":{"capabilities":["tool_calling"]},"sigma":"tool_direct","artifact":"pwd","next":"write"},{"id":"write","task_type":"write","model_selector":{"capabilities":["high-reasoning"]},"sigma":"llm_cognition","artifact":"write the analysis report","next":null}]}
+
+Example (three hops — two one-invoke checks, then cognition; several results are several nodes):
+{"schema_version":"0.1.0","id":"three-filled","entry":"list","max_steps":8,"nodes":[{"id":"list","task_type":"ops-check","model_selector":{"capabilities":["tool_calling"]},"sigma":"tool_direct","artifact":"ls -la","next":"status"},{"id":"status","task_type":"ops-check","model_selector":{"capabilities":["tool_calling"]},"sigma":"tool_direct","artifact":"ssh lab-host git -C repo remote","next":"write"},{"id":"write","task_type":"write","model_selector":{"capabilities":["high-reasoning"]},"sigma":"llm_cognition","artifact":"write the analysis report","next":null}]}"#;
 
 /// Tool-free planner turn: one system prompt + user task → raw model text.
 pub async fn planner_chat_text(
@@ -229,6 +232,18 @@ mod tests {
         assert!(!DAG_PLAN_SYSTEM_PROMPT.contains("collapses graphs without two such I values"));
         let two = r#"{"schema_version":"0.1.0","id":"two-filled","entry":"check","max_steps":8,"nodes":[{"id":"check","task_type":"ops-check","model_selector":{"capabilities":["tool_calling"]},"sigma":"tool_direct","artifact":"pwd","next":"write"},{"id":"write","task_type":"write","model_selector":{"capabilities":["high-reasoning"]},"sigma":"llm_cognition","artifact":"write the analysis report","next":null}]}"#;
         let report = crate::agent::candidate_dag::validate_candidate_dag_json(two);
+        assert!(report.valid, "{}", report.message);
+        assert!(DAG_PLAN_SYSTEM_PROMPT.contains("three-filled"));
+        assert!(DAG_PLAN_SYSTEM_PROMPT.contains("ls -la"));
+        assert!(DAG_PLAN_SYSTEM_PROMPT.contains("ssh lab-host git -C repo remote"));
+        assert!(crate::agent::graph_scheduler::planned_shell_i_is_one_invoke("ls -la"));
+        assert!(
+            crate::agent::graph_scheduler::planned_shell_i_is_one_invoke(
+                "ssh lab-host git -C repo remote"
+            )
+        );
+        let three = r#"{"schema_version":"0.1.0","id":"three-filled","entry":"list","max_steps":8,"nodes":[{"id":"list","task_type":"ops-check","model_selector":{"capabilities":["tool_calling"]},"sigma":"tool_direct","artifact":"ls -la","next":"status"},{"id":"status","task_type":"ops-check","model_selector":{"capabilities":["tool_calling"]},"sigma":"tool_direct","artifact":"ssh lab-host git -C repo remote","next":"write"},{"id":"write","task_type":"write","model_selector":{"capabilities":["high-reasoning"]},"sigma":"llm_cognition","artifact":"write the analysis report","next":null}]}"#;
+        let report = crate::agent::candidate_dag::validate_candidate_dag_json(three);
         assert!(report.valid, "{}", report.message);
     }
 

@@ -320,6 +320,38 @@ pub fn persist_admitted_dag(
     std::fs::write(dir.join("admit.json"), bytes)
 }
 
+/// Write the planner DAG that admit rejected (VL-APE-051). Not hop evidence.
+pub fn persist_rejected_dag(
+    workspace: &Path,
+    session_id: &str,
+    dag: &crate::agent::dag_runner::DagManifest,
+    error: &str,
+) -> std::io::Result<()> {
+    let dir = ensure_graph_scratch(workspace, session_id, &dag.id)?;
+    let nodes: Vec<serde_json::Value> = dag
+        .nodes
+        .iter()
+        .map(|n| {
+            serde_json::json!({
+                "id": n.id,
+                "task_type": n.task_type,
+                "sigma": n.sigma,
+                "locus": n.locus,
+                "capabilities": n.model_selector.capabilities,
+                "artifact": n.artifact,
+            })
+        })
+        .collect();
+    let body = serde_json::json!({
+        "id": dag.id,
+        "error": error,
+        "nodes": nodes
+    });
+    let bytes = serde_json::to_vec_pretty(&body)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    std::fs::write(dir.join("admit_reject.json"), bytes)
+}
+
 /// Record that a hop actually started (W2): node id, sigma, invoke if any.
 pub fn persist_hop_begin(
     workspace: &Path,
@@ -1017,6 +1049,31 @@ mod tests {
         let body = std::fs::read_to_string(path).unwrap();
         assert!(body.contains("\"pwd\""), "{body}");
         assert!(body.contains("shell.exec"), "{body}");
+    }
+
+    #[test]
+    fn persist_rejected_dag_writes_error_and_artifacts() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dag = parse_dag_json(
+            r#"{"schema_version":"0.1.0","id":"g-rej","entry":"check_service","max_steps":2,"nodes":[{"id":"check_service","task_type":"shell.exec","model_selector":{"capabilities":["shell.exec"]},"artifact":"ls && pwd","next":null}]}"#,
+        )
+        .unwrap();
+        persist_rejected_dag(
+            tmp.path(),
+            "sess-r",
+            &dag,
+            "plan rejected: tool-only node check_service I is not one invoke",
+        )
+        .unwrap();
+        let path = tmp
+            .path()
+            .join(graph_scratch_rel("sess-r", "g-rej"))
+            .join("admit_reject.json");
+        let body = std::fs::read_to_string(&path).unwrap();
+        assert!(body.contains("ls && pwd"), "{body}");
+        assert!(body.contains("check_service"), "{body}");
+        assert!(body.contains("not one invoke"), "{body}");
+        assert!(!path.parent().unwrap().join("admit.json").exists());
     }
 
     #[test]

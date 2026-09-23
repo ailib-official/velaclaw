@@ -489,6 +489,7 @@ fn admit_live_first_hop(
     user_task: &str,
     policy: &SecurityPolicy,
     extra_aliases: &[String],
+    persist_scratch: Option<(&Path, &str)>,
 ) -> LiveFirstHop {
     match hop {
         LiveFirstHop::Plan(mut plan) => {
@@ -500,6 +501,20 @@ fn admit_live_first_hop(
                         error = %err,
                         "capability contract rejected plan"
                     );
+                    if let Some((workspace, session_id)) = persist_scratch {
+                        if let Err(io_err) = super::bounded_dag_context::persist_rejected_dag(
+                            workspace,
+                            session_id,
+                            &plan.dag,
+                            &err.to_string(),
+                        ) {
+                            tracing::warn!(
+                                target: "bounded_dag_live",
+                                error = %io_err,
+                                "failed to persist rejected plan"
+                            );
+                        }
+                    }
                     plan_rejected_chat(&err)
                 }
             }
@@ -521,6 +536,7 @@ pub async fn live_first_hop(
     policy: &SecurityPolicy,
     extra_aliases: &[String],
     host_phase: HostPhase,
+    workspace: &Path,
 ) -> Result<LiveFirstHop> {
     if !agent.bounded_dag_live {
         return Ok(LiveFirstHop::SingleWork);
@@ -554,7 +570,13 @@ pub async fn live_first_hop(
         structured_json_chat_messages(provider, planner_model, temperature, &hop_messages).await?;
     let collapsed = collapse_trivial_plan(parse_live_first_hop(&text, &fallback));
     let collapse = planner_collapse_reason(&text, &collapsed);
-    let hop = admit_live_first_hop(collapsed, user_task, policy, extra_aliases);
+    let hop = admit_live_first_hop(
+        collapsed,
+        user_task,
+        policy,
+        extra_aliases,
+        Some((workspace, session_id)),
+    );
     let collapse = match &hop {
         LiveFirstHop::ChatOnly { .. } if collapse == "plan" => "admit_reject",
         _ => collapse,
@@ -2165,6 +2187,7 @@ mod tests {
             &SecurityPolicy::default(),
             &[],
             HostPhase::Build,
+            std::path::Path::new("/tmp"),
         )
         .await
         .unwrap();
@@ -2200,6 +2223,7 @@ mod tests {
             &SecurityPolicy::default(),
             &[],
             HostPhase::Build,
+            std::path::Path::new("/tmp"),
         )
         .await
         .unwrap();
@@ -2233,6 +2257,7 @@ mod tests {
             &SecurityPolicy::default(),
             &[],
             HostPhase::Build,
+            std::path::Path::new("/tmp"),
         )
         .await
         .unwrap();
@@ -2279,6 +2304,7 @@ mod tests {
             &SecurityPolicy::default(),
             &[],
             HostPhase::Build,
+            std::path::Path::new("/tmp"),
         )
         .await
         .unwrap();
@@ -2308,6 +2334,7 @@ mod tests {
             &SecurityPolicy::default(),
             &[],
             HostPhase::Build,
+            std::path::Path::new("/tmp"),
         )
         .await
         .unwrap();
@@ -2347,6 +2374,7 @@ mod tests {
             &SecurityPolicy::default(),
             &[],
             HostPhase::Build,
+            std::path::Path::new("/tmp"),
         )
         .await
         .unwrap();
@@ -2385,6 +2413,7 @@ mod tests {
             &SecurityPolicy::default(),
             &[],
             HostPhase::Build,
+            std::path::Path::new("/tmp"),
         )
         .await
         .unwrap();
@@ -2415,6 +2444,7 @@ mod tests {
             &SecurityPolicy::default(),
             &[],
             HostPhase::Build,
+            std::path::Path::new("/tmp"),
         )
         .await
         .unwrap();
@@ -2445,6 +2475,7 @@ mod tests {
             &SecurityPolicy::default(),
             &[],
             HostPhase::Build,
+            std::path::Path::new("/tmp"),
         )
         .await
         .unwrap();

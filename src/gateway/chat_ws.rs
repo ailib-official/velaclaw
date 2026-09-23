@@ -397,9 +397,14 @@ async fn handle_ws_socket(socket: WebSocket, state: AppState) {
                     tracing::warn!("session persist progress failed-turn: {pe:#}");
                 }
                 tracing::warn!(error = %format!("{e:#}"), "websocket chat turn failed");
-                let frame = WsServerMessage::Error {
-                    message: user_facing_turn_error(&e, req.model_id.as_deref()),
-                };
+                let message = user_facing_turn_error(&e, req.model_id.as_deref());
+                if let Err(pe) =
+                    persist_assistant_message(&config, req.session_id.as_deref(), &req, &message)
+                        .await
+                {
+                    tracing::warn!("session persist failed-turn: {pe:#}");
+                }
+                let frame = WsServerMessage::Error { message };
                 if send_frame(sink.clone(), &frame).await.is_err() {
                     break;
                 }

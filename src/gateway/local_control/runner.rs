@@ -224,7 +224,7 @@ pub async fn persist_user_message(
         .append_messages(id, &to_store, req.model_id.as_deref())
         .await?;
 
-    if append.needs_title_refine && store.mark_title_refined(id).await.is_ok() {
+    if append.needs_title_refine {
         let config = config.clone();
         let session_id = id.to_string();
         tokio::spawn(async move {

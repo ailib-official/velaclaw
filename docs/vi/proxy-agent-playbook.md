@@ -20,7 +20,7 @@ Dùng mục này để định tuyến vận hành nhanh.
 ### 1.1 Chỉ proxy traffic nội bộ VelaClaw
 
 1. Dùng scope `velaclaw`.
-2. Đặt `http_proxy`/`https_proxy` hoặc `all_proxy`.
+2. Đặt `http_proxy`/`https_proxy` hoặc `all_proxy`. Nếu cả HTTP và HTTPS đều được đặt, `all_proxy` không được áp dụng, vì reqwest `ALL_PROXY` sẽ ghi đè `HTTPS_PROXY`.
 3. Xác minh bằng `{"action":"get"}`.
 
 Xem:

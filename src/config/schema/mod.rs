@@ -1299,23 +1299,30 @@ impl ProxyConfig {
         }
 
         let no_proxy = self.no_proxy_value();
+        let http_url = normalize_proxy_url_option(self.http_proxy.as_deref());
+        let https_url = normalize_proxy_url_option(self.https_proxy.as_deref());
+        // reqwest applies Proxy::all to every scheme. When http and https
+        // proxies are set, skip all_proxy so a socks URL cannot replace them.
+        let use_all = http_url.is_none() || https_url.is_none();
 
-        if let Some(url) = normalize_proxy_url_option(self.all_proxy.as_deref()) {
-            match reqwest::Proxy::all(&url) {
-                Ok(proxy) => {
-                    builder = builder.proxy(apply_no_proxy(proxy, no_proxy.clone()));
-                }
-                Err(error) => {
-                    tracing::warn!(
-                        proxy_url = %url,
-                        service_key,
-                        "Ignoring invalid all_proxy URL: {error}"
-                    );
+        if use_all {
+            if let Some(url) = normalize_proxy_url_option(self.all_proxy.as_deref()) {
+                match reqwest::Proxy::all(&url) {
+                    Ok(proxy) => {
+                        builder = builder.proxy(apply_no_proxy(proxy, no_proxy.clone()));
+                    }
+                    Err(error) => {
+                        tracing::warn!(
+                            proxy_url = %url,
+                            service_key,
+                            "Ignoring invalid all_proxy URL: {error}"
+                        );
+                    }
                 }
             }
         }
 
-        if let Some(url) = normalize_proxy_url_option(self.http_proxy.as_deref()) {
+        if let Some(url) = http_url {
             match reqwest::Proxy::http(&url) {
                 Ok(proxy) => {
                     builder = builder.proxy(apply_no_proxy(proxy, no_proxy.clone()));
@@ -1330,7 +1337,7 @@ impl ProxyConfig {
             }
         }
 
-        if let Some(url) = normalize_proxy_url_option(self.https_proxy.as_deref()) {
+        if let Some(url) = https_url {
             match reqwest::Proxy::https(&url) {
                 Ok(proxy) => {
                     builder = builder.proxy(apply_no_proxy(proxy, no_proxy));
@@ -1351,7 +1358,16 @@ impl ProxyConfig {
     pub fn apply_to_process_env(&self) {
         set_proxy_env_pair("HTTP_PROXY", self.http_proxy.as_deref());
         set_proxy_env_pair("HTTPS_PROXY", self.https_proxy.as_deref());
-        set_proxy_env_pair("ALL_PROXY", self.all_proxy.as_deref());
+        // reqwest writes ALL_PROXY after HTTPS_PROXY and overwrites the https
+        // entry. Keep ALL_PROXY only when a scheme-specific proxy is absent.
+        let http_set = normalize_proxy_url_option(self.http_proxy.as_deref()).is_some();
+        let https_set = normalize_proxy_url_option(self.https_proxy.as_deref()).is_some();
+        let all = if http_set && https_set {
+            None
+        } else {
+            self.all_proxy.as_deref()
+        };
+        set_proxy_env_pair("ALL_PROXY", all);
 
         let no_proxy_joined = {
             let list = self.normalized_no_proxy();

@@ -171,14 +171,11 @@ pub(crate) async fn run_tool_call_loop(
     let mut local_probe = Box::new(crate::agent::probe_dedup::HopProbeGovernor::new());
 
     let block_retrieve = soft_fail.as_ref().is_some_and(|c| c.block_retrieve_tools);
-    let tool_specs: Vec<crate::tools::ToolSpec> = tools_registry
-        .iter()
-        .filter(|tool| {
-            !(block_retrieve
-                && crate::agent::graph_scheduler::is_retrieve_substitute_tool(tool.name()))
-        })
-        .map(|tool| tool.spec())
-        .collect();
+    let tool_specs: Vec<crate::tools::ToolSpec> = if block_retrieve {
+        Vec::new()
+    } else {
+        tools_registry.iter().map(|tool| tool.spec()).collect()
+    };
     let use_native_tools = tool_dispatcher
         .map(|d| d.should_send_tool_specs() && !tool_specs.is_empty())
         .unwrap_or_else(|| provider.supports_native_tools() && !tool_specs.is_empty());
@@ -605,6 +602,12 @@ pub(crate) async fn run_tool_call_loop(
             }
             history.push(ChatMessage::assistant(response_text.clone()));
             return Ok(final_text);
+        }
+
+        if tool_calls.iter().any(|call| {
+            crate::agent::graph_scheduler::cognition_tool_call_rejected(block_retrieve, &call.name)
+        }) {
+            anyhow::bail!("{}", crate::agent::graph_scheduler::COGNITION_TOOL_STOP);
         }
 
         // Print any text the LLM produced alongside tool calls (unless silent)

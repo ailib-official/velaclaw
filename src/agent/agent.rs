@@ -1440,6 +1440,17 @@ impl Agent {
                             crate::agent::hop_stop::AfterHopClose::NextRemainingSkipObserve => text,
                         }
                     }
+                    Err(err) if crate::agent::graph_scheduler::is_cognition_tool_stop(&err) => {
+                        self.current_hop_probe = None;
+                        self.security.set_graph_scratch_rel(None);
+                        let stop =
+                            crate::agent::graph_scheduler::cognition_called_tool_stop(&node.id);
+                        self.end_live_graph_host_state();
+                        return Ok(crate::agent::bounded_dag_delivery::session_assistant_body(
+                            user_message,
+                            &stop,
+                        ));
+                    }
                     Err(err) if is_tool_loop_cancelled(&err) => {
                         let _ = crate::agent::bounded_dag_live::store_dag_fail(
                             self.memory.as_ref(),
@@ -1678,6 +1689,7 @@ impl Agent {
             std::iter::once(prefix).chain(hist),
         );
         let upstream_ready = self.live_close.upstream_ready;
+        let mut missing_tool_node = None;
         let graph_block = if let (Some(order), Some(nodes)) =
             (&self.live_graph_order, &self.live_graph_nodes)
         {
@@ -1687,6 +1699,14 @@ impl Agent {
                 order,
             )
             .await;
+            missing_tool_node =
+                crate::agent::graph_scheduler::first_missing_tool_node(nodes, &artifacts);
+            if let Some(id) = &missing_tool_node {
+                let stop = crate::agent::graph_scheduler::missing_tool_record_stop(id);
+                return Ok(crate::agent::bounded_dag_delivery::session_assistant_body(
+                    user_task, &stop,
+                ));
+            }
             let verdict =
                 crate::agent::artifact_contract::graph_artifact_contract(nodes, &artifacts);
             if verdict != crate::agent::artifact_contract::GraphArtifactVerdict::Ok {
@@ -1717,6 +1737,7 @@ impl Agent {
                 last_hop_tool_evidence,
                 last_hop_ran_retrieve: self.live_close.ran_retrieve,
                 upstream_tool_artifacts_ready: upstream_ready,
+                missing_tool_node,
             },
         )
         .await
@@ -1808,11 +1829,11 @@ impl Agent {
             .invoke_tool_loop_resolved_with(effective_model, true)
             .await;
         self.block_retrieve_tools = false;
+        self.hop_tool_accum = None;
         self.live_close.ran_retrieve = accum
             .lock()
             .map(|guard| guard.ran_retrieve())
             .unwrap_or(false);
-        self.hop_tool_accum = None;
         let text = text?;
         let evidence = accum.lock().map(|a| a.as_evidence()).unwrap_or_default();
         let fallback = crate::agent::graph_scheduler::tool_evidence_from_conversation(

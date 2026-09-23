@@ -161,6 +161,11 @@ pub fn hop_artifact_contract(
     tool_evidence: &str,
 ) -> HopArtifactVerdict {
     if artifact.trim().is_empty() {
+        if crate::agent::graph_scheduler::node_sigma(node)
+            == crate::agent::graph_scheduler::NodeSigma::ToolDirect
+        {
+            return HopArtifactVerdict::Ok;
+        }
         return HopArtifactVerdict::Empty;
     }
     if is_diagnostic_only_evidence(tool_evidence) {
@@ -191,7 +196,13 @@ pub fn graph_artifact_contract(
     nodes: &[DagNode],
     artifacts: &[(String, String)],
 ) -> GraphArtifactVerdict {
-    if artifacts.is_empty() || artifacts.iter().all(|(_, b)| b.trim().is_empty()) {
+    let all_blank = artifacts.iter().all(|(_, body)| body.trim().is_empty());
+    let any_tool_record = nodes.iter().any(|node| {
+        crate::agent::graph_scheduler::node_sigma(node)
+            == crate::agent::graph_scheduler::NodeSigma::ToolDirect
+            && artifacts.iter().any(|(id, _)| id == &node.id)
+    });
+    if artifacts.is_empty() || (all_blank && !any_tool_record) {
         return GraphArtifactVerdict::AllEmpty;
     }
     if artifacts
@@ -201,6 +212,12 @@ pub fn graph_artifact_contract(
         return GraphArtifactVerdict::PartialUnsatisfied;
     }
     for node in nodes {
+        if crate::agent::graph_scheduler::node_sigma(node)
+            == crate::agent::graph_scheduler::NodeSigma::ToolDirect
+            && !artifacts.iter().any(|(id, _)| id == &node.id)
+        {
+            return GraphArtifactVerdict::PartialUnsatisfied;
+        }
         let body = artifacts
             .iter()
             .find(|(id, _)| id == &node.id)
@@ -212,6 +229,10 @@ pub fn graph_artifact_contract(
                 if crate::agent::graph_scheduler::node_sigma(node)
                     == crate::agent::graph_scheduler::NodeSigma::ToolDirect
                 {
+                    let present = artifacts.iter().any(|(id, _)| id == &node.id);
+                    if present {
+                        continue;
+                    }
                     return GraphArtifactVerdict::PartialUnsatisfied;
                 }
                 if required_evidence_layers(node).is_empty() {
@@ -531,11 +552,18 @@ mod tests {
         let cog = node("cmp", None, None);
         assert_eq!(
             graph_artifact_contract(
-                &[n, cog.clone()],
+                &[n.clone(), cog.clone()],
                 &[
                     ("list".into(), String::new()),
                     ("cmp".into(), "comparison without the planned list".into()),
                 ]
+            ),
+            GraphArtifactVerdict::Ok
+        );
+        assert_eq!(
+            graph_artifact_contract(
+                &[n, cog],
+                &[("cmp".into(), "comparison without the planned list".into())]
             ),
             GraphArtifactVerdict::PartialUnsatisfied
         );

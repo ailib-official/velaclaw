@@ -928,7 +928,10 @@ pub async fn run(
                                         session_model: Some(model_name.as_str()),
                                         probe: Some(probe_cell.as_ref()),
                                         hop_tool_accum: Some(Arc::clone(&hop_accum)),
-                                        block_retrieve_tools: false,
+                                        block_retrieve_tools:
+                                            crate::agent::graph_scheduler::llm_hop_blocks_retrieve(
+                                                node,
+                                            ),
                                     }),
                                     Some(&cli_gate_extras),
                                 )
@@ -1006,6 +1009,19 @@ pub async fn run(
                                             ));
                                         }
                                         piece
+                                    }
+                                    Err(err)
+                                        if crate::agent::graph_scheduler::is_cognition_tool_stop(&err) =>
+                                    {
+                                        security.set_graph_scratch_rel(None);
+                                        let stop = crate::agent::graph_scheduler::cognition_called_tool_stop(
+                                            &node.id,
+                                        );
+                                        return Ok(
+                                            crate::agent::bounded_dag_delivery::session_assistant_body(
+                                                &msg, &stop,
+                                            ),
+                                        );
                                     }
                                     Err(err) if is_tool_loop_cancelled(&err) => {
                                         let _ = crate::agent::bounded_dag_live::store_dag_fail(
@@ -1182,6 +1198,22 @@ pub async fn run(
                                         order,
                                     )
                                     .await;
+                                if let Some(id) =
+                                    crate::agent::graph_scheduler::first_missing_tool_node(
+                                        &planned.dag.nodes,
+                                        &artifacts,
+                                    )
+                                {
+                                    let stop =
+                                        crate::agent::graph_scheduler::missing_tool_record_stop(
+                                            &id,
+                                        );
+                                    return Ok(
+                                        crate::agent::bounded_dag_delivery::session_assistant_body(
+                                            &msg, &stop,
+                                        ),
+                                    );
+                                }
                                 let verdict =
                                     crate::agent::artifact_contract::graph_artifact_contract(
                                         &planned.dag.nodes,
@@ -1226,6 +1258,11 @@ pub async fn run(
                                         last_hop_ran_retrieve,
                                         upstream_tool_artifacts_ready:
                                             crate::agent::graph_scheduler::upstream_tool_artifacts_ready(
+                                                &planned.dag.nodes,
+                                                &artifacts,
+                                            ),
+                                        missing_tool_node:
+                                            crate::agent::graph_scheduler::first_missing_tool_node(
                                                 &planned.dag.nodes,
                                                 &artifacts,
                                             ),
@@ -2116,6 +2153,19 @@ pub async fn run(
                                         }
                                         piece
                                     }
+                                    Err(err)
+                                        if crate::agent::graph_scheduler::is_cognition_tool_stop(&err) =>
+                                    {
+                                        security.set_graph_scratch_rel(None);
+                                        let stop = crate::agent::graph_scheduler::cognition_called_tool_stop(
+                                            &node.id,
+                                        );
+                                        return Ok(
+                                            crate::agent::bounded_dag_delivery::session_assistant_body(
+                                                &user_input, &stop,
+                                            ),
+                                        );
+                                    }
                                     Err(err) if is_tool_loop_cancelled(&err) => {
                                         let _ = crate::agent::bounded_dag_live::store_dag_fail(
                                             mem.as_ref(),
@@ -2331,6 +2381,18 @@ pub async fn run(
                                         order,
                                     )
                                     .await;
+                                if let Some(id) = crate::agent::graph_scheduler::first_missing_tool_node(
+                                    &dag.nodes,
+                                    &artifacts,
+                                ) {
+                                    let stop =
+                                        crate::agent::graph_scheduler::missing_tool_record_stop(&id);
+                                    return Ok(
+                                        crate::agent::bounded_dag_delivery::session_assistant_body(
+                                            &user_input, &stop,
+                                        ),
+                                    );
+                                }
                                 let verdict = crate::agent::artifact_contract::graph_artifact_contract(
                                     &dag.nodes,
                                     &artifacts,
@@ -2374,6 +2436,11 @@ pub async fn run(
                                         last_hop_ran_retrieve,
                                         upstream_tool_artifacts_ready:
                                             crate::agent::graph_scheduler::upstream_tool_artifacts_ready(
+                                                &dag.nodes,
+                                                &artifacts,
+                                            ),
+                                        missing_tool_node:
+                                            crate::agent::graph_scheduler::first_missing_tool_node(
                                                 &dag.nodes,
                                                 &artifacts,
                                             ),

@@ -20,7 +20,7 @@ Use this section for quick operational routing.
 ### 1.1 Proxy only VelaClaw internal traffic
 
 1. Use scope `velaclaw`.
-2. Set `http_proxy`/`https_proxy` or `all_proxy`.
+2. Set `http_proxy`/`https_proxy` or `all_proxy`. If both HTTP and HTTPS URLs are set, `all_proxy` is not applied, because reqwest `ALL_PROXY` overwrites `HTTPS_PROXY`.
 3. Validate with `{"action":"get"}`.
 
 Go to:

@@ -1678,6 +1678,7 @@ impl Agent {
             std::iter::once(prefix).chain(hist),
         );
         let upstream_ready = self.live_close.upstream_ready;
+        let mut missing_tool_node = None;
         let graph_block = if let (Some(order), Some(nodes)) =
             (&self.live_graph_order, &self.live_graph_nodes)
         {
@@ -1687,6 +1688,8 @@ impl Agent {
                 order,
             )
             .await;
+            missing_tool_node =
+                crate::agent::graph_scheduler::first_missing_tool_node(nodes, &artifacts);
             let verdict =
                 crate::agent::artifact_contract::graph_artifact_contract(nodes, &artifacts);
             if verdict != crate::agent::artifact_contract::GraphArtifactVerdict::Ok {
@@ -1717,6 +1720,7 @@ impl Agent {
                 last_hop_tool_evidence,
                 last_hop_ran_retrieve: self.live_close.ran_retrieve,
                 upstream_tool_artifacts_ready: upstream_ready,
+                missing_tool_node,
             },
         )
         .await

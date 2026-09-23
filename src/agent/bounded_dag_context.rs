@@ -129,12 +129,13 @@ pub async fn collect_graph_artifacts_for_parlor(
 ) -> Vec<(String, String)> {
     let mut out = Vec::with_capacity(order.len());
     for node_id in order {
-        let body = load_node_artifact(mem, session_id, node_id)
+        if let Some(body) = load_node_artifact(mem, session_id, node_id)
             .await
             .ok()
             .flatten()
-            .unwrap_or_default();
-        out.push((node_id.clone(), body));
+        {
+            out.push((node_id.clone(), body));
+        }
     }
     out
 }
@@ -147,10 +148,12 @@ pub fn format_graph_artifacts_block(artifacts: &[(String, String)]) -> String {
     let mut out = String::new();
     for (node_id, body) in artifacts {
         let trimmed = body.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let _ = write!(out, "[dag_artifact node={node_id}]\n{trimmed}\n\n");
+        let shown = if trimmed.is_empty() {
+            "(no output)"
+        } else {
+            trimmed
+        };
+        let _ = write!(out, "[dag_artifact node={node_id}]\n{shown}\n\n");
         if out.chars().count() >= MAX {
             break;
         }

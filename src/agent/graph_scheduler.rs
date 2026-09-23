@@ -453,10 +453,41 @@ pub fn registered_host_tool(node: &DagNode) -> Option<&'static str> {
     })
 }
 
-/// LlmWork without this-hop invoke I must not open retrieve tools (E43).
+/// An `llm_cognition` hop has an empty tool list. Commands stay on `tool_direct`.
 #[must_use]
 pub fn llm_hop_blocks_retrieve(node: &DagNode) -> bool {
-    node_sigma(node) == NodeSigma::LlmWork && !llm_work_has_invoke_i(node)
+    node_sigma(node) == NodeSigma::LlmWork
+}
+
+/// Cognition hops reject every tool call, including memory.
+#[must_use]
+pub fn cognition_tool_call_rejected(block_tools: bool, tool_name: &str) -> bool {
+    block_tools && !tool_name.trim().is_empty()
+}
+
+pub const COGNITION_TOOL_STOP: &str = "This cognition hop called a tool";
+
+#[must_use]
+pub fn missing_tool_record_stop(node_id: &str) -> String {
+    format!("Node {node_id} has no stored output record.")
+}
+
+#[must_use]
+pub fn first_missing_tool_node(
+    nodes: &[DagNode],
+    artifacts: &[(String, String)],
+) -> Option<String> {
+    nodes.iter().find_map(|node| {
+        if node_sigma(node) != NodeSigma::ToolDirect {
+            return None;
+        }
+        let present = artifacts.iter().any(|(id, _)| id == &node.id);
+        if present {
+            None
+        } else {
+            Some(node.id.clone())
+        }
+    })
 }
 
 #[must_use]
@@ -740,11 +771,7 @@ pub fn tool_direct_body(results: &[ToolBatchResult]) -> String {
         .map(|r| r.output.as_str())
         .collect::<Vec<_>>()
         .join("\n");
-    if joined.trim().is_empty() {
-        "ok".into()
-    } else {
-        joined
-    }
+    joined
 }
 
 /// Explicit `xml` is the only live XML compat; auto must not silent-degrade.
@@ -859,11 +886,12 @@ pub fn delivery_dag_artifact_bytes(graph_artifacts: &str) -> usize {
 }
 
 /// Facts the close step needs besides the last hop text.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct CloseEvidence {
     pub last_hop_tool_evidence: bool,
     pub last_hop_ran_retrieve: bool,
     pub upstream_tool_artifacts_ready: bool,
+    pub missing_tool_node: Option<String>,
 }
 
 impl CloseEvidence {
@@ -873,6 +901,7 @@ impl CloseEvidence {
             last_hop_tool_evidence,
             last_hop_ran_retrieve: false,
             upstream_tool_artifacts_ready: true,
+            missing_tool_node: None,
         }
     }
 }
@@ -882,15 +911,7 @@ pub const EVIDENCE_GAP_STOP: &str = "This hop cannot finish. A cognition draft i
 
 #[must_use]
 pub fn upstream_tool_artifacts_ready(nodes: &[DagNode], artifacts: &[(String, String)]) -> bool {
-    nodes
-        .iter()
-        .filter(|n| node_sigma(n) == NodeSigma::ToolDirect)
-        .all(|node| {
-            artifacts
-                .iter()
-                .find(|(id, _)| id == &node.id)
-                .is_some_and(|(_, body)| !body.trim().is_empty())
-        })
+    first_missing_tool_node(nodes, artifacts).is_none()
 }
 
 /// Graph-end delivery used by [`crate::agent::agent::Agent::turn`] and CLI live DAG.
@@ -905,9 +926,10 @@ pub async fn finish_live_graph(
     node_count: usize,
     evidence: CloseEvidence,
 ) -> Result<String> {
-    if !evidence.last_hop_tool_evidence
-        && (evidence.last_hop_ran_retrieve || !evidence.upstream_tool_artifacts_ready)
-    {
+    if let Some(id) = evidence.missing_tool_node.as_deref() {
+        return Ok(missing_tool_record_stop(id));
+    }
+    if evidence.last_hop_ran_retrieve || !evidence.upstream_tool_artifacts_ready {
         return Ok(EVIDENCE_GAP_STOP.to_string());
     }
     match after_successful_hop(0, node_count, last_body, evidence.last_hop_tool_evidence) {
@@ -1574,6 +1596,7 @@ mod tests {
                 last_hop_tool_evidence: false,
                 last_hop_ran_retrieve: true,
                 upstream_tool_artifacts_ready: true,
+                missing_tool_node: None,
             },
         )
         .await
@@ -1597,11 +1620,13 @@ mod tests {
                 last_hop_tool_evidence: false,
                 last_hop_ran_retrieve: false,
                 upstream_tool_artifacts_ready: false,
+                missing_tool_node: Some("collect".into()),
             },
         )
         .await
         .unwrap();
-        assert_eq!(gap, EVIDENCE_GAP_STOP);
+        assert!(gap.contains("collect"), "{gap}");
+        assert!(gap.contains("no stored output record"), "{gap}");
         assert_eq!(missing.n.load(std::sync::atomic::Ordering::SeqCst), 0);
         let ready = CountChat {
             n: std::sync::atomic::AtomicUsize::new(0),
@@ -1619,6 +1644,7 @@ mod tests {
                 last_hop_tool_evidence: false,
                 last_hop_ran_retrieve: false,
                 upstream_tool_artifacts_ready: true,
+                missing_tool_node: None,
             },
         )
         .await
@@ -1629,14 +1655,52 @@ mod tests {
             r#"{"schema_version":"0.1.0","id":"ls","entry":"collect","max_steps":2,"nodes":[{"id":"collect","task_type":"shell.exec","model_selector":{"capabilities":["shell.exec"]},"artifact":"ls","next":null}]}"#,
         )
         .unwrap();
-        assert!(!upstream_tool_artifacts_ready(
+        assert!(upstream_tool_artifacts_ready(
             &tool.nodes,
             &[("collect".into(), "  ".into())]
         ));
+        assert!(!upstream_tool_artifacts_ready(&tool.nodes, &[]));
         assert!(upstream_tool_artifacts_ready(
             &tool.nodes,
             &[("collect".into(), "repo\n".into())]
         ));
+        let block = crate::agent::bounded_dag_context::format_graph_artifacts_block(&[(
+            "collect".into(),
+            String::new(),
+        )]);
+        assert!(block.contains("collect"));
+        assert!(block.contains("(no output)"));
+        assert!(!block.contains("ok"));
+        let empty_body = tool_direct_body(&[ToolBatchResult {
+            output: " \n".into(),
+            success: true,
+        }]);
+        assert!(empty_body.trim().is_empty());
+        assert_ne!(empty_body.trim(), "ok");
+        assert!(cognition_tool_call_rejected(true, "memory_recall"));
+        assert!(!cognition_tool_call_rejected(false, "memory_recall"));
+        let named = finish_live_graph(
+            &CountChat {
+                n: std::sync::atomic::AtomicUsize::new(0),
+            },
+            "m",
+            0.0,
+            "task",
+            "draft",
+            "",
+            "",
+            1,
+            CloseEvidence {
+                last_hop_tool_evidence: false,
+                last_hop_ran_retrieve: false,
+                upstream_tool_artifacts_ready: false,
+                missing_tool_node: Some("collect".into()),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(named.contains("collect"), "{named}");
+        assert!(named.contains("no stored output record"), "{named}");
     }
 
     #[test]

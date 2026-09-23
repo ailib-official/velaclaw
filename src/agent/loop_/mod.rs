@@ -928,7 +928,10 @@ pub async fn run(
                                         session_model: Some(model_name.as_str()),
                                         probe: Some(probe_cell.as_ref()),
                                         hop_tool_accum: Some(Arc::clone(&hop_accum)),
-                                        block_retrieve_tools: false,
+                                        block_retrieve_tools:
+                                            crate::agent::graph_scheduler::llm_hop_blocks_retrieve(
+                                                node,
+                                            ),
                                     }),
                                     Some(&cli_gate_extras),
                                 )
@@ -1226,6 +1229,11 @@ pub async fn run(
                                         last_hop_ran_retrieve,
                                         upstream_tool_artifacts_ready:
                                             crate::agent::graph_scheduler::upstream_tool_artifacts_ready(
+                                                &planned.dag.nodes,
+                                                &artifacts,
+                                            ),
+                                        missing_tool_node:
+                                            crate::agent::graph_scheduler::first_missing_tool_node(
                                                 &planned.dag.nodes,
                                                 &artifacts,
                                             ),
@@ -2374,6 +2382,11 @@ pub async fn run(
                                         last_hop_ran_retrieve,
                                         upstream_tool_artifacts_ready:
                                             crate::agent::graph_scheduler::upstream_tool_artifacts_ready(
+                                                &dag.nodes,
+                                                &artifacts,
+                                            ),
+                                        missing_tool_node:
+                                            crate::agent::graph_scheduler::first_missing_tool_node(
                                                 &dag.nodes,
                                                 &artifacts,
                                             ),

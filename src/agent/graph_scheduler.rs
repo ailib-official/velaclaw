@@ -468,6 +468,16 @@ pub fn cognition_tool_call_rejected(block_tools: bool, tool_name: &str) -> bool 
 pub const COGNITION_TOOL_STOP: &str = "This cognition hop called a tool";
 
 #[must_use]
+pub fn cognition_called_tool_stop(node_id: &str) -> String {
+    format!("Node {node_id} called a tool.")
+}
+
+#[must_use]
+pub fn is_cognition_tool_stop(err: &anyhow::Error) -> bool {
+    format!("{err:#}").contains(COGNITION_TOOL_STOP)
+}
+
+#[must_use]
 pub fn missing_tool_record_stop(node_id: &str) -> String {
     format!("Node {node_id} has no stored output record.")
 }

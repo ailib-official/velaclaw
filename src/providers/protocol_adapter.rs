@@ -14,13 +14,33 @@ use crate::telemetry::ByokTelemetryReporter;
 use crate::tools::ToolSpec;
 use async_trait::async_trait;
 use futures_util::{stream, StreamExt};
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
+/// Logical id for one call on a provider client.
+///
+/// A wire id such as `openai/gpt-oss-20b` on the groq client becomes
+/// `groq/openai/gpt-oss-20b`. An id that already names this provider is kept.
+fn logical_id_for_provider(provider_id: &str, model_id: &str, requested: &str) -> String {
+    let requested = requested.trim();
+    let bound = format!("{provider_id}/{model_id}");
+    if requested.is_empty() || requested.starts_with("hint:") {
+        return bound;
+    }
+    let prefix = format!("{provider_id}/");
+    if requested.len() > prefix.len() && requested[..prefix.len()].eq_ignore_ascii_case(&prefix) {
+        return requested.to_string();
+    }
+    format!("{provider_id}/{requested}")
+}
 
 pub struct ProtocolBackedProvider {
     client: Arc<ai_lib_rust::AiClient>,
     provider_id: String,
     model_id: String,
     telemetry: Option<Arc<ByokTelemetryReporter>>,
+    /// Clients built for a logical id other than the one bound at construction.
+    extra_clients: Mutex<HashMap<String, Arc<ai_lib_rust::AiClient>>>,
 }
 
 impl ProtocolBackedProvider {
@@ -36,6 +56,7 @@ impl ProtocolBackedProvider {
             provider_id,
             model_id,
             telemetry,
+            extra_clients: Mutex::new(HashMap::new()),
         })
     }
 
@@ -55,16 +76,49 @@ impl ProtocolBackedProvider {
         self.telemetry.as_deref()
     }
 
+    fn bound_logical_id(&self) -> String {
+        format!("{}/{}", self.provider_id, self.model_id)
+    }
+
+    /// Logical id for this call. A wire id such as `openai/gpt-oss-20b` on the
+    /// groq client becomes `groq/openai/gpt-oss-20b`. An id that already names
+    /// this provider is kept.
+    fn logical_for_request(&self, model: &str) -> String {
+        logical_id_for_provider(&self.provider_id, &self.model_id, model)
+    }
+
+    fn client_for(&self, model: &str) -> anyhow::Result<Arc<ai_lib_rust::AiClient>> {
+        let logical = self.logical_for_request(model);
+        if logical.eq_ignore_ascii_case(&self.bound_logical_id()) {
+            return Ok(Arc::clone(&self.client));
+        }
+        let mut guard = self.extra_clients.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(existing) = guard.get(&logical) {
+            return Ok(Arc::clone(existing));
+        }
+        let init = crate::execution::nvidia_byok_ai_client_logical_id(&logical);
+        let client = crate::execution::init_ai_client_sync(&init)?;
+        guard.insert(logical, Arc::clone(&client));
+        Ok(client)
+    }
+
     async fn run_chat(
         &self,
+        model: &str,
         messages: Vec<ai_lib_rust::Message>,
         temperature: f64,
         tools: Option<Vec<serde_json::Value>>,
     ) -> anyhow::Result<ai_lib_rust::client::UnifiedResponse> {
+        let client = self.client_for(model)?;
+        let logical = self.logical_for_request(model);
+        let (provider_id, model_id) = logical
+            .split_once('/')
+            .map(|(p, m)| (p.to_string(), m.to_string()))
+            .unwrap_or_else(|| (self.provider_id.clone(), self.model_id.clone()));
         execute_chat_with_retry(
-            &self.client,
-            &self.provider_id,
-            &self.model_id,
+            &client,
+            &provider_id,
+            &model_id,
             messages,
             temperature,
             tools,
@@ -147,7 +201,7 @@ impl Provider for ProtocolBackedProvider {
         &self,
         system_prompt: Option<&str>,
         message: &str,
-        _model: &str,
+        model: &str,
         temperature: f64,
     ) -> anyhow::Result<String> {
         let mut messages = Vec::new();
@@ -156,7 +210,7 @@ impl Provider for ProtocolBackedProvider {
         }
         messages.push(ai_lib_rust::Message::user(message));
 
-        let response = self.run_chat(messages, temperature, None).await?;
+        let response = self.run_chat(model, messages, temperature, None).await?;
 
         Ok(response.content)
     }
@@ -164,12 +218,12 @@ impl Provider for ProtocolBackedProvider {
     async fn chat_with_history(
         &self,
         messages: &[ChatMessage],
-        _model: &str,
+        model: &str,
         temperature: f64,
     ) -> anyhow::Result<String> {
         let converted = Self::convert_messages(messages);
 
-        let response = self.run_chat(converted, temperature, None).await?;
+        let response = self.run_chat(model, converted, temperature, None).await?;
 
         Ok(response.content)
     }
@@ -177,7 +231,7 @@ impl Provider for ProtocolBackedProvider {
     async fn chat(
         &self,
         request: ChatRequest<'_>,
-        _model: &str,
+        model: &str,
         temperature: f64,
     ) -> anyhow::Result<ChatResponse> {
         let converted = Self::convert_messages(request.messages);
@@ -198,7 +252,7 @@ impl Provider for ProtocolBackedProvider {
                 .collect::<Vec<_>>()
         });
 
-        let response = self.run_chat(converted, temperature, tools).await?;
+        let response = self.run_chat(model, converted, temperature, tools).await?;
 
         Ok(ChatResponse {
             text: Some(response.content),
@@ -218,7 +272,7 @@ impl Provider for ProtocolBackedProvider {
         &self,
         messages: &[ChatMessage],
         tools: &[serde_json::Value],
-        _model: &str,
+        model: &str,
         temperature: f64,
     ) -> anyhow::Result<ChatResponse> {
         let converted = Self::convert_messages(messages);
@@ -229,7 +283,9 @@ impl Provider for ProtocolBackedProvider {
             Some(tools.to_vec())
         };
 
-        let response = self.run_chat(converted, temperature, tools_opt).await?;
+        let response = self
+            .run_chat(model, converted, temperature, tools_opt)
+            .await?;
 
         Ok(ChatResponse {
             text: Some(response.content),
@@ -253,7 +309,7 @@ impl Provider for ProtocolBackedProvider {
         &self,
         system_prompt: Option<&str>,
         message: &str,
-        _model: &str,
+        model: &str,
         temperature: f64,
         _options: StreamOptions,
     ) -> stream::BoxStream<'static, StreamResult<StreamChunk>> {
@@ -263,7 +319,15 @@ impl Provider for ProtocolBackedProvider {
         }
         messages.push(ai_lib_rust::Message::user(message));
 
-        let client = Arc::clone(&self.client);
+        let client = match self.client_for(model) {
+            Ok(client) => client,
+            Err(e) => {
+                let message = e.to_string();
+                return Box::pin(stream::iter(std::iter::once(Err(
+                    crate::providers::traits::StreamError::Provider(message),
+                ))));
+            }
+        };
 
         async_stream::try_stream! {
             let mut stream = client.chat()
@@ -327,6 +391,30 @@ mod tests {
         ];
         let converted = ProtocolBackedProvider::convert_messages(&messages);
         assert_eq!(converted.len(), 2);
+    }
+
+    #[test]
+    fn logical_id_keeps_provider_and_prefixes_wire_ids() {
+        assert_eq!(
+            super::logical_id_for_provider("groq", "openai/gpt-oss-20b", "openai/gpt-oss-20b"),
+            "groq/openai/gpt-oss-20b"
+        );
+        assert_eq!(
+            super::logical_id_for_provider(
+                "groq",
+                "openai/gpt-oss-20b",
+                "groq/llama-3.3-70b-versatile"
+            ),
+            "groq/llama-3.3-70b-versatile"
+        );
+        assert_eq!(
+            super::logical_id_for_provider(
+                "nvidia",
+                "nvidia/nemotron-3-super-120b-a12b",
+                "nvidia/nemotron-3-ultra-550b-a55b"
+            ),
+            "nvidia/nemotron-3-ultra-550b-a55b"
+        );
     }
 
     #[test]

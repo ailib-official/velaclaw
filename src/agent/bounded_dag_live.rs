@@ -2158,9 +2158,10 @@ mod tests {
         assert!(first.contains("Do not emit a path-only object with no nodes"));
         assert!(!first
             .contains("One atomic tool turn in the user environment: {\"path\":\"single_work\"}"));
-        assert!(first.contains("one node per deliverable"));
-        assert!(first.contains("Filled I (Σ-shaped)"));
-        assert!(first.contains("one admit-safe invoke"));
+        assert!(first.contains("several tool_direct nodes"));
+        assert!(first.contains("evidence this user task needs"));
+        assert!(first.contains("That node has no tools"));
+        assert!(first.contains("simple argv"));
         assert!(!first.contains("one node whose I covers every result"));
         assert!(!first.contains("read the requested sources"));
         assert!(first.contains(DAG_PLAN_SYSTEM_PROMPT));

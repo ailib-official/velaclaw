@@ -212,6 +212,12 @@ pub fn graph_artifact_contract(
         return GraphArtifactVerdict::PartialUnsatisfied;
     }
     for node in nodes {
+        if crate::agent::graph_scheduler::node_sigma(node)
+            == crate::agent::graph_scheduler::NodeSigma::ToolDirect
+            && !artifacts.iter().any(|(id, _)| id == &node.id)
+        {
+            return GraphArtifactVerdict::PartialUnsatisfied;
+        }
         let body = artifacts
             .iter()
             .find(|(id, _)| id == &node.id)
@@ -546,11 +552,18 @@ mod tests {
         let cog = node("cmp", None, None);
         assert_eq!(
             graph_artifact_contract(
-                &[n, cog.clone()],
+                &[n.clone(), cog.clone()],
                 &[
                     ("list".into(), String::new()),
                     ("cmp".into(), "comparison without the planned list".into()),
                 ]
+            ),
+            GraphArtifactVerdict::Ok
+        );
+        assert_eq!(
+            graph_artifact_contract(
+                &[n, cog],
+                &[("cmp".into(), "comparison without the planned list".into())]
             ),
             GraphArtifactVerdict::PartialUnsatisfied
         );

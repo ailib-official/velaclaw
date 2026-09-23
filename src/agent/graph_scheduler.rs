@@ -554,8 +554,9 @@ pub fn tool_direct_artifact_is_invoke(artifact: &str) -> bool {
     shell_line_is_invoke(raw)
 }
 
-/// Planned shell I: one simple argv, `ssh <alias> <simple argv>`, or a pipe of those.
-/// Command lists, `sh -c`, and `xargs` are not one invoke. Injection gates stay separate.
+/// Planned shell I: one simple argv (flags allowed), `ssh [opts] <alias> <simple argv>`,
+/// or a pipe of those segments. Command lists, `sh -c`, and `xargs` are not one invoke.
+/// Injection gates stay separate.
 #[must_use]
 pub fn planned_shell_i_is_one_invoke(cmd: &str) -> bool {
     let cmd = cmd.trim();
@@ -571,24 +572,24 @@ pub fn planned_shell_i_is_one_invoke(cmd: &str) -> bool {
     if segments.is_empty() {
         return false;
     }
-    let mut saw_ssh = false;
-    for segment in &segments {
-        let words: Vec<&str> = segment.split_whitespace().collect();
-        let Some(argv0) = words.first() else {
-            return false;
-        };
-        let base = argv0.rsplit('/').next().unwrap_or(argv0);
-        if base.eq_ignore_ascii_case("xargs") || shell_dash_c(base, &words[1..]) {
-            return false;
-        }
-        if base.eq_ignore_ascii_case("ssh") {
-            saw_ssh = true;
-            if !ssh_remote_is_simple(&words[1..]) {
-                return false;
-            }
-        }
+    segments
+        .iter()
+        .all(|segment| shell_segment_is_one_invoke(segment))
+}
+
+fn shell_segment_is_one_invoke(segment: &str) -> bool {
+    let words: Vec<&str> = segment.split_whitespace().collect();
+    let Some(argv0) = words.first() else {
+        return false;
+    };
+    let base = argv0.rsplit('/').next().unwrap_or(argv0);
+    if base.eq_ignore_ascii_case("xargs") || shell_dash_c(base, &words[1..]) {
+        return false;
     }
-    !(saw_ssh && segments.len() != 1)
+    if base.eq_ignore_ascii_case("ssh") {
+        return ssh_remote_is_simple(&words[1..]);
+    }
+    true
 }
 
 fn split_unquoted_pipes(cmd: &str) -> Vec<&str> {
@@ -615,11 +616,61 @@ fn shell_dash_c(base: &str, args: &[&str]) -> bool {
         && args.iter().any(|arg| *arg == "-c" || *arg == "-lc")
 }
 
-fn ssh_remote_is_simple(args: &[&str]) -> bool {
-    if args.iter().any(|arg| arg.starts_with('-')) {
-        return false;
+fn ssh_client_opt_takes_value(opt: &str) -> bool {
+    matches!(
+        opt,
+        "-b" | "-c"
+            | "-D"
+            | "-E"
+            | "-e"
+            | "-F"
+            | "-I"
+            | "-i"
+            | "-J"
+            | "-L"
+            | "-l"
+            | "-m"
+            | "-O"
+            | "-o"
+            | "-p"
+            | "-Q"
+            | "-R"
+            | "-S"
+            | "-W"
+            | "-w"
+    )
+}
+
+fn ssh_remote_argv<'a>(args: &'a [&'a str]) -> Option<&'a [&'a str]> {
+    let mut i = 0;
+    while i < args.len() {
+        let a = args[i];
+        if a == "--" {
+            i += 1;
+            break;
+        }
+        if a.starts_with('-') {
+            i += 1;
+            if ssh_client_opt_takes_value(a) && !a.contains('=') && i < args.len() {
+                i += 1;
+            }
+            continue;
+        }
+        break;
     }
-    let Some(prog) = args.get(1) else {
+    let remote = args.get(i + 1..)?;
+    if remote.is_empty() {
+        None
+    } else {
+        Some(remote)
+    }
+}
+
+fn ssh_remote_is_simple(args: &[&str]) -> bool {
+    let Some(remote) = ssh_remote_argv(args) else {
+        return false;
+    };
+    let Some(prog) = remote.first() else {
         return false;
     };
     let base = prog.rsplit('/').next().unwrap_or(prog);
@@ -1141,7 +1192,20 @@ mod tests {
         assert!(planned_shell_i_is_one_invoke(
             "ssh alias systemctl status unit"
         ));
+        assert!(planned_shell_i_is_one_invoke("ssh alias ls -la"));
+        assert!(planned_shell_i_is_one_invoke(
+            "ssh alias systemctl --no-pager status unit"
+        ));
+        assert!(planned_shell_i_is_one_invoke(
+            "ssh alias git -C repo remote"
+        ));
+        assert!(planned_shell_i_is_one_invoke("ssh alias ls | head"));
         assert!(planned_shell_i_is_one_invoke("ls"));
+        assert!(!planned_shell_i_is_one_invoke("ssh alias sh -c ls"));
+        assert!(planned_shell_i_is_one_invoke("ls -la"));
+        assert!(planned_shell_i_is_one_invoke(
+            "systemctl --no-pager status unit"
+        ));
         let dag = crate::agent::dag_runner::parse_dag_json(
             r#"{"schema_version":"0.1.0","id":"ls","entry":"ls","max_steps":2,"nodes":[{"id":"ls","task_type":"shell.exec","model_selector":{"capabilities":["shell.exec"]},"artifact":"ls && pwd","next":null}]}"#,
         )

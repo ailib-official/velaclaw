@@ -1036,6 +1036,7 @@ impl Agent {
                     &self.security.snapshot(),
                     self.host_aliases.as_slice(),
                     self.host_phase,
+                    &self.workspace_dir,
                 )
                 .await?,
                 user_message,

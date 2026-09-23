@@ -633,6 +633,7 @@ pub async fn run(
                         &policy,
                         &extra,
                         host_phase,
+                        &config.workspace_dir,
                     )
                     .await?,
                     &msg,
@@ -1608,6 +1609,7 @@ pub async fn run(
                             &policy,
                             &extra,
                             host_phase,
+                            &config.workspace_dir,
                         )
                         .await?,
                         &user_input,

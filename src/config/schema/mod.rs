@@ -375,6 +375,13 @@ pub struct AgentConfig {
     /// Maximum conversation history messages retained per session. Default: `50`.
     #[serde(default = "default_agent_max_history_messages")]
     pub max_history_messages: usize,
+    /// Optional compact trigger as a fraction of the protocol `context_window`.
+    /// `0` (default) leaves compaction on the message-count rule only.
+    /// A positive value such as `0.75` also calls the same summarizer when a
+    /// rough character estimate reaches that fraction. Missing `context_window`
+    /// does not invent a window. This is not the `compact_context` 8192 budget.
+    #[serde(default)]
+    pub compact_context_ratio: f64,
     /// Enable parallel tool execution within a single iteration. Default: `false`.
     #[serde(default)]
     pub parallel_tools: bool,
@@ -473,6 +480,7 @@ impl Default for AgentConfig {
             compact_context: false,
             max_tool_iterations: default_agent_max_tool_iterations(),
             max_history_messages: default_agent_max_history_messages(),
+            compact_context_ratio: 0.0,
             parallel_tools: false,
             tool_dispatcher: default_agent_tool_dispatcher(),
             envelope_assemble: true,

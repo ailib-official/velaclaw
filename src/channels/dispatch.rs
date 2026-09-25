@@ -248,8 +248,9 @@ pub(crate) async fn process_channel_message(
             compact_context: ctx.envelope_pilot.compact_context,
             async_pool: ctx.envelope_pilot.use_async_pool,
             max_history: super::runtime::MAX_CHANNEL_HISTORY,
+            compact_context_ratio: ctx.envelope_pilot.compact_context_ratio,
             extra_chunks: &[],
-            context_window: None,
+            context_window: crate::protocol_registry::lookup_context_window(route.model.as_str()),
             summarizer: Some(&summarizer),
         },
     )

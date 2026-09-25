@@ -20,10 +20,12 @@ const DELEGATE_TIMEOUT_SECS: u64 = 120;
 /// Default timeout for agentic sub-agent runs.
 const DELEGATE_AGENTIC_TIMEOUT_SECS: u64 = 300;
 
-/// Tool that delegates a subtask to a named agent with a different
-/// provider/model configuration. Enables multi-agent workflows where
-/// a primary agent can hand off specialized work (research, coding,
-/// summarization) to purpose-built sub-agents.
+/// Parent-facing `delegate` description. CLI and channel prompts use this same text.
+pub const DELEGATE_TOOL_DESCRIPTION: &str = "Delegate an isolated subtask to a named agent. Use when the work can be finished separately: look up sources, or check several independent items. Return a short result for the parent to merge in the same tool loop. Do not use this for one shared task.";
+
+/// Tool that delegates one isolated subtask to a named agent.
+/// The worker uses that agent's configured provider and model.
+/// The parent turn keeps its own model.
 pub struct DelegateTool {
     agents: Arc<HashMap<String, DelegateAgentConfig>>,
     security: PolicyHandle,
@@ -70,9 +72,8 @@ impl DelegateTool {
         }
     }
 
-    /// Create a DelegateTool for a sub-agent (with incremented depth).
-    /// When sub-agents eventually get their own tool registry, construct
-    /// their DelegateTool via this method with `depth: parent.depth + 1`.
+    /// Build a delegate tool at a fixed chain depth.
+    /// Depth does not change after construction. Nested `delegate` is rejected.
     pub fn with_depth(
         agents: HashMap<String, DelegateAgentConfig>,
         fallback_credential: Option<String>,
@@ -126,9 +127,7 @@ impl Tool for DelegateTool {
     }
 
     fn description(&self) -> &str {
-        "Delegate a subtask to a specialized agent. Use when: a task benefits from a different model \
-         (e.g. fast summarization, deep reasoning, code generation). The sub-agent runs a single \
-         prompt by default; with agentic=true it can iterate with a filtered tool-call loop."
+        DELEGATE_TOOL_DESCRIPTION
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -156,7 +155,7 @@ impl Tool for DelegateTool {
                 },
                 "context": {
                     "type": "string",
-                    "description": "Optional context to prepend (e.g. relevant code, prior findings)"
+                    "description": "Optional notes to prepend, such as sources already found or items already checked."
                 }
             },
             "required": ["agent", "prompt"]
@@ -592,7 +591,7 @@ mod tests {
             },
         );
         agents.insert(
-            "coder".to_string(),
+            "checker".to_string(),
             DelegateAgentConfig {
                 provider: DEFAULT_PROTOCOL_MODEL_ID.to_string(),
                 model: DEFAULT_PROTOCOL_MODEL_ID.to_string(),
@@ -775,6 +774,28 @@ mod tests {
     }
 
     #[test]
+    fn description_is_an_isolated_general_subtask() {
+        let tool = DelegateTool::new(sample_agents(), None, test_security());
+        let description = tool.description();
+        assert!(description.contains("isolated subtask"));
+        assert!(description.contains("short result"));
+        assert!(description.contains("independent"));
+        assert!(!description.to_lowercase().contains("code generation"));
+        let context = tool.parameters_schema()["properties"]["context"]["description"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(context.contains("sources"));
+        assert!(!context.to_lowercase().contains("code"));
+    }
+
+    #[test]
+    fn delegate_timeouts_stay_tool_observations() {
+        assert_eq!(DELEGATE_TIMEOUT_SECS, 120);
+        assert_eq!(DELEGATE_AGENTIC_TIMEOUT_SECS, 300);
+    }
+
+    #[test]
     fn description_not_empty() {
         let tool = DelegateTool::new(sample_agents(), None, test_security());
         assert!(!tool.description().is_empty());
@@ -787,7 +808,7 @@ mod tests {
         let desc = schema["properties"]["agent"]["description"]
             .as_str()
             .unwrap();
-        assert!(desc.contains("researcher") || desc.contains("coder"));
+        assert!(desc.contains("researcher") || desc.contains("checker"));
     }
 
     #[tokio::test]
@@ -841,11 +862,11 @@ mod tests {
 
     #[tokio::test]
     async fn depth_limit_per_agent() {
-        // coder has max_depth=2, so depth=2 should be blocked
+        // checker has max_depth=2, so depth=2 should be blocked
         let tool = DelegateTool::with_depth(sample_agents(), None, test_security(), 2);
         let result = tool
             .execute(
-                json!({"agent": "coder", "prompt": "test"}),
+                json!({"agent": "checker", "prompt": "test"}),
                 &ToolExecutionContext::default(),
             )
             .await

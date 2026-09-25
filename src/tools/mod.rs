@@ -62,7 +62,7 @@ pub use cron_remove::CronRemoveTool;
 pub use cron_run::CronRunTool;
 pub use cron_runs::CronRunsTool;
 pub use cron_update::CronUpdateTool;
-pub use delegate::DelegateTool;
+pub use delegate::{DelegateTool, DELEGATE_TOOL_DESCRIPTION};
 pub use file_read::FileReadTool;
 pub use file_write::FileWriteTool;
 pub use git_operations::GitOperationsTool;

@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Delegate wording (VL-RAO-003):** the `delegate` tool description, channel and CLI copies, and the sub-agent prompt describe isolated general subtasks and a short result. The worker model remains `[agents.<name>].provider` / `model`. Parent model selection, timeouts (120s / 300s), and child-history isolation are unchanged.
+
 - **History compact (VL-RAO-002):** `[agent].compact_context_ratio` defaults to `0` (message-count compact only). A positive fraction summarizes through the existing `prepare_turn_history` path when a rough character estimate reaches that fraction of a known protocol `context_window`. A missing window does not fire the ratio. The summarizer prompt asks for completed subgoals, confirmed facts, and failed attempts. Shell and other tool timeouts stay per-tool `success: false` results.
 
 - **Turn scheduler (VL-RAO-001):** `[agent].bounded_dag_live` still parses and is not rewritten. `true` no longer runs a planner or linear work nodes. CLI, Web, and channel turns use `prepare_turn_history` and `run_tool_call_loop`. A failed tool stays in history for another iteration. `llm_cognition` task cards omit the TOOLS section when a fixture still renders one.

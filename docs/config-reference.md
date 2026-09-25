@@ -291,6 +291,7 @@ Notes:
 - `agentic = true` requires at least one matching entry in `allowed_tools`.
 - Allowlisted names must exist on the parent registry. Unknown names and nested `delegate` fail closed (the child cannot escalate).
 - Agentic runs use the same host tool-loop; dispatch/aggregate lines include a `run_id`.
+- The worker model is this table's `provider` and `model`, created with the existing provider factory. It does not call `resolve_turn_model`. `[agent].intent_capability_route` and `[agent].host_decide` stay default off and apply only to the parent turn. The parent model is not replaced. Child history is not written back; the parent receives a short tool result. Timeouts stay 120 seconds, or 300 seconds when `agentic` is true, and return `success: false`.
 
 ```toml
 [agents.researcher]
@@ -302,9 +303,9 @@ agentic = true
 allowed_tools = ["web_search", "http_request", "file_read"]
 max_iterations = 8
 
-[agents.coder]
+[agents.checker]
 provider = "ollama"
-model = "qwen2.5-coder:32b"
+model = "qwen2.5:32b"
 temperature = 0.2
 ```
 

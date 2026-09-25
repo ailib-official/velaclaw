@@ -132,8 +132,7 @@ pub fn build_task_section(native_tools: bool) -> String {
     let mut section = String::from("## Your Task\n\n");
     section.push_str(
         "You are VelaClaw. Prioritize the user's request over meta-commentary.\n\n\
-         - Implementation: inspect relevant code with tools, make the scoped change, and run \
-         targeted verification when it materially reduces risk. Do not edit unrelated files.\n\
+         - Scope: complete the requested task. Do not expand into unrelated work.\n\
          - Questions: answer from conversation and tool results; do not ask the user to repeat \
          information already present.\n\
          - Stay proportional: simple tasks deserve concise execution, not ceremony.\n\
@@ -269,8 +268,9 @@ pub fn build_compact_summarizer_system() -> String {
 pub fn build_delegate_section() -> String {
     "## Delegated Sub-agent\n\n\
      You are a focused sub-agent executing ONE assigned task for a parent agent.\n\
-     Complete only the scoped objective. Do not expand scope or edit unrelated files.\n\
-     Return a concise result the parent can merge.\n\n"
+     The task is independent: for example, look up sources, or check one item.\n\
+     Complete only that assignment. Do not expand the scope.\n\
+     Return a short result the parent can merge.\n\n"
         .to_string()
 }
 
@@ -475,7 +475,13 @@ mod tests {
     fn delegate_subagent_prompt_lists_allowed_tools() {
         let out = build_delegate_subagent_prompt(&["shell", "file_read"], true);
         assert!(out.contains("Delegated Sub-agent"));
+        assert!(out.contains("independent"));
+        assert!(out.contains("short result"));
         assert!(out.contains("shell, file_read"));
+        let lower = out.to_lowercase();
+        assert!(!lower.contains("code generation"));
+        assert!(!lower.contains("edited files"));
+        assert!(!lower.contains("edit unrelated files"));
     }
 
     #[test]

@@ -27,6 +27,9 @@ pub struct PrepareHistoryOpts<'a> {
     pub compact_context: bool,
     pub async_pool: bool,
     pub max_history: usize,
+    /// `0` keeps the message-count trigger only. A positive fraction also compacts
+    /// when a rough token estimate reaches `ratio * context_window`.
+    pub compact_context_ratio: f64,
     pub summarizer: Option<&'a HistorySummarizer<'a>>,
     /// Host-retrieved Layer chunks (workspace / memory-shaped). Empty = history only.
     #[cfg(feature = "ai-protocol")]
@@ -62,7 +65,19 @@ pub async fn prepare_turn_history(
     }
 
     if let Some(summarizer) = opts.summarizer {
-        if auto_compact_history(history, summarizer, opts.max_history).await? {
+        #[cfg(feature = "ai-protocol")]
+        let context_window = opts.context_window;
+        #[cfg(not(feature = "ai-protocol"))]
+        let context_window = None;
+        if auto_compact_history(
+            history,
+            summarizer,
+            opts.max_history,
+            opts.compact_context_ratio,
+            context_window,
+        )
+        .await?
+        {
             report.compacted = true;
         }
     }
@@ -98,10 +113,50 @@ pub async fn prepare_turn_history(
     Ok(report)
 }
 
+/// Rough tokens for the compact trigger only: four characters ≈ one token.
+/// The assembler keeps its own budget and does not call this.
+fn estimated_history_tokens(history: &[ChatMessage]) -> u64 {
+    let chars: u64 = history
+        .iter()
+        .map(|message| message.content.chars().count() as u64)
+        .sum();
+    chars.div_ceil(4)
+}
+
+fn context_ratio_reached(history: &[ChatMessage], ratio: f64, context_window: Option<u32>) -> bool {
+    let Some(window) = context_window.filter(|window| *window > 0) else {
+        return false;
+    };
+    let Some(limit) = ratio_token_limit(ratio, window) else {
+        return false;
+    };
+    estimated_history_tokens(history) >= limit
+}
+
+/// Token ceiling for the ratio trigger. Non-finite or non-positive ratios stay off.
+fn ratio_token_limit(ratio: f64, window: u32) -> Option<u64> {
+    if !(ratio.is_finite() && ratio > 0.0) {
+        return None;
+    }
+    let product = ratio * f64::from(window);
+    if !(product.is_finite() && product >= 1.0) {
+        return None;
+    }
+    let whole = product.floor();
+    if whole >= u64::MAX as f64 {
+        return Some(u64::MAX);
+    }
+    // `whole` is finite, at least 1, and below `u64::MAX`.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    Some(whole as u64)
+}
+
 async fn auto_compact_history(
     history: &mut Vec<ChatMessage>,
     summarizer: &HistorySummarizer<'_>,
     max_history: usize,
+    context_ratio: f64,
+    context_window: Option<u32>,
 ) -> Result<bool> {
     let has_system = history.first().is_some_and(|m| m.role == "system");
     let non_system_count = if has_system {
@@ -109,8 +164,9 @@ async fn auto_compact_history(
     } else {
         history.len()
     };
-
-    if non_system_count <= max_history {
+    let count_overflow = non_system_count > max_history;
+    let ratio_overflow = context_ratio_reached(history, context_ratio, context_window);
+    if !count_overflow && !ratio_overflow {
         return Ok(false);
     }
 
@@ -201,6 +257,7 @@ mod tests {
                 compact_context: false,
                 async_pool: false,
                 max_history: 4,
+                compact_context_ratio: 0.0,
                 extra_chunks: &[],
                 context_window: None,
                 summarizer: None,
@@ -236,6 +293,7 @@ mod tests {
                 compact_context: false,
                 async_pool: false,
                 max_history: 10,
+                compact_context_ratio: 0.0,
                 extra_chunks: &[],
                 context_window: None,
                 summarizer: Some(&summarizer),
@@ -274,6 +332,7 @@ mod tests {
                 compact_context: false,
                 async_pool: false,
                 max_history: 8,
+                compact_context_ratio: 0.0,
                 extra_chunks: &[],
                 context_window: None,
                 summarizer: Some(&summarizer),
@@ -301,6 +360,7 @@ mod tests {
                 compact_context: false,
                 async_pool: false,
                 max_history: 32,
+                compact_context_ratio: 0.0,
                 extra_chunks: &extra,
                 context_window: None,
                 summarizer: None,
@@ -312,5 +372,106 @@ mod tests {
         assert!(history
             .iter()
             .any(|m| m.content.contains("[retrieve:memory")));
+    }
+
+    fn long_under_cap_history() -> Vec<ChatMessage> {
+        let mut history = vec![ChatMessage::system("sys")];
+        for i in 0..15 {
+            history.push(ChatMessage::user("goal ".repeat(80) + &format!("{i}")));
+            history.push(ChatMessage::assistant("note ".repeat(80) + &format!("{i}")));
+        }
+        history
+    }
+
+    #[tokio::test]
+    async fn ratio_off_does_not_compact_under_message_cap() {
+        let provider = StubProvider {
+            reply: "- completed subgoals: none".into(),
+        };
+        let summarizer = HistorySummarizer {
+            provider: &provider,
+            model: "stub-model",
+        };
+        let mut history = long_under_cap_history();
+        let before = history.len();
+        let report = prepare_turn_history(
+            &mut history,
+            PrepareHistoryOpts {
+                layered: false,
+                compact_context: false,
+                async_pool: false,
+                max_history: 50,
+                compact_context_ratio: 0.0,
+                extra_chunks: &[],
+                context_window: Some(1_000),
+                summarizer: Some(&summarizer),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(!report.compacted);
+        assert_eq!(history.len(), before);
+    }
+
+    #[tokio::test]
+    async fn ratio_compacts_when_window_known() {
+        let provider = StubProvider {
+            reply: "- completed subgoals: gather notes".into(),
+        };
+        let summarizer = HistorySummarizer {
+            provider: &provider,
+            model: "stub-model",
+        };
+        let mut history = long_under_cap_history();
+        let report = prepare_turn_history(
+            &mut history,
+            PrepareHistoryOpts {
+                layered: false,
+                compact_context: false,
+                async_pool: false,
+                max_history: 50,
+                compact_context_ratio: 0.75,
+                extra_chunks: &[],
+                context_window: Some(1_000),
+                summarizer: Some(&summarizer),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(report.compacted);
+        assert!(history
+            .iter()
+            .any(|m| m.content.contains("[Compaction summary]")));
+        assert!(history.iter().any(|m| m.role == "system"));
+    }
+
+    #[tokio::test]
+    async fn ratio_ignored_when_window_missing() {
+        let provider = StubProvider {
+            reply: "- should not be called".into(),
+        };
+        let summarizer = HistorySummarizer {
+            provider: &provider,
+            model: "stub-model",
+        };
+        let mut history = long_under_cap_history();
+        let before = history.len();
+        let report = prepare_turn_history(
+            &mut history,
+            PrepareHistoryOpts {
+                layered: false,
+                compact_context: false,
+                async_pool: false,
+                max_history: 50,
+                compact_context_ratio: 0.75,
+                extra_chunks: &[],
+                context_window: None,
+                summarizer: Some(&summarizer),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(!report.compacted);
+        assert_eq!(history.len(), before);
     }
 }

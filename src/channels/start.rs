@@ -480,6 +480,7 @@ pub async fn start_channels(config: Config) -> Result<()> {
             enabled: config.agent.envelope_assemble,
             use_async_pool: config.agent.envelope_assemble_async,
             compact_context: config.agent.compact_context,
+            compact_context_ratio: config.agent.compact_context_ratio,
         },
         security: security.clone(),
         channel_approval_hub,

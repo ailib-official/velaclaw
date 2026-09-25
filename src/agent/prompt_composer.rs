@@ -255,7 +255,10 @@ pub fn build_approval_section() -> String {
 pub fn build_compact_summarizer_system() -> String {
     "You are a conversation compaction engine. Summarize older chat history into concise \
      context for future turns.\n\
-     Preserve: user preferences, commitments, decisions, unresolved tasks, key facts.\n\
+     Use exactly these three sections, in task language:\n\
+     - Completed subgoals\n\
+     - Confirmed facts\n\
+     - Failed attempts\n\
      Omit: filler, repeated chit-chat, verbose tool logs.\n\
      Output plain-text bullet points only. Do not call tools or propose new actions.\n"
         .to_string()
@@ -457,6 +460,15 @@ mod tests {
         );
         assert!(out.contains("## Safety"));
         assert!(!out.contains("## Runtime"));
+    }
+
+    #[test]
+    fn compact_summarizer_names_task_sections() {
+        let prompt = build_compact_summarizer_system();
+        assert!(prompt.contains("Completed subgoals"));
+        assert!(prompt.contains("Confirmed facts"));
+        assert!(prompt.contains("Failed attempts"));
+        assert!(!prompt.to_lowercase().contains("edited functions"));
     }
 
     #[test]

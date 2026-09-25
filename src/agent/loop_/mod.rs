@@ -587,6 +587,7 @@ pub async fn run(
                     compact_context: config.agent.compact_context,
                     async_pool: config.agent.envelope_assemble_async,
                     max_history: config.agent.max_history_messages,
+                    compact_context_ratio: config.agent.compact_context_ratio,
                     extra_chunks: &extra_chunks,
                     context_window: crate::protocol_registry::lookup_context_window(&model_name),
                     summarizer: Some(&summarizer),
@@ -934,6 +935,7 @@ pub async fn run(
                         compact_context: config.agent.compact_context,
                         async_pool: config.agent.envelope_assemble_async,
                         max_history: config.agent.max_history_messages,
+                        compact_context_ratio: config.agent.compact_context_ratio,
                         extra_chunks: &extra_chunks,
                         context_window: crate::protocol_registry::lookup_context_window(
                             &session_model,
@@ -1126,6 +1128,7 @@ pub async fn run(
                         compact_context: config.agent.compact_context,
                         async_pool: config.agent.envelope_assemble_async,
                         max_history: config.agent.max_history_messages,
+                        compact_context_ratio: config.agent.compact_context_ratio,
                         extra_chunks: &extra_chunks,
                         context_window: crate::protocol_registry::lookup_context_window(
                             &session_model,

@@ -237,6 +237,10 @@ Fields aggregated: `m3c_pass`, `m3d_category`, `m3e_fallback` on
 
 ## Runtime / Gateway
 
+### A tool reports a timeout
+
+Shell (60s), delegate (120s, or 300s when agentic), screenshot (15s), and pushover (15s) return `success: false` into the same tool loop. HTTP and web search use their configured `timeout_secs`. These limits are per-tool observations. They are not a second scheduler timeout.
+
 ### Gateway unreachable
 
 Checks:

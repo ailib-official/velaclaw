@@ -93,6 +93,7 @@ DAG-related keys below: **`template_dag` / candidate emit / shadow** stay librar
 | `compact_context` | `false` | When true: `bootstrap_max_chars=6000`, `rag_chunk_limit=2`, and system-prompt budget capped at ~24k chars (pyramid truncation drops ambient sections first). When false, budget still scales from ai-protocol `context_window` when available (~15% of context, clamped 4k–48k chars). Use for smaller context windows |
 | `max_tool_iterations` | `10` | Maximum tool-call loop turns per user message across CLI, gateway, and channels |
 | `max_history_messages` | `50` | Maximum conversation history messages retained per session |
+| `compact_context_ratio` | `0` | **VL-RAO-002.** Optional second compact trigger inside `prepare_turn_history`. `0` keeps the message-count rule only. A positive fraction (for example `0.75`) also summarizes when a rough estimate (about four characters per token) reaches that fraction of the protocol `context_window`. A missing window does not fire this trigger and does not invent a 24k window. The same summarizer, keep-recent splice, and 2000-character summary cap stay in place. This does not change `assemble_layered` or the `compact_context` 8192 emergency budget. Channel turns pass the routed model's window into the same entry. |
 | `parallel_tools` | `false` | Enable parallel tool execution within a single iteration |
 | `tool_dispatcher` | `auto` | Tool dispatch strategy |
 | `envelope_assemble` | `true` | **VL-CTX-001 (normative):** run ai-lib `assemble_layered` via `prepare_turn_history` before each turn on CLI, Web, and channel dispatch. HardBudgetViolation fails the turn explicitly. Set `false` only as an emergency kill-switch (falls back to message-count trim). Requires `--features ai-protocol`. |
@@ -111,6 +112,8 @@ DAG-related keys below: **`template_dag` / candidate emit / shadow** stay librar
 | `candidate_dag_emit` | `false` | **Library/doctor gate (ORCH-DAG-EMIT-001/002).** Schema-strict / LLM plan→emit helpers. **Not wired** into live chat. Observe: `velaclaw doctor dag-emit` / `velaclaw doctor dag-plan --force`. Requires `--features ai-protocol`. |
 
 `bounded_dag_live = true` does not enable a linear DAG on a turn. Leave the shipped default `false`. Doctor still prints the key.
+
+Tool timeouts are observations that return `success: false` to the same `run_tool_call_loop`. They are not a second timeout policy. Shell is 60 seconds, `delegate` is 120 seconds (300 when agentic), screenshot and pushover are 15 seconds, and HTTP plus web search use their own `timeout_secs`.
 
 | Hint | Capability tags | Family (this proof) | Logical model |
 |---|---|---|---|

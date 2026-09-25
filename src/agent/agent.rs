@@ -616,6 +616,7 @@ impl Agent {
                 compact_context: self.config.compact_context,
                 async_pool: self.config.envelope_assemble_async,
                 max_history: self.config.max_history_messages,
+                compact_context_ratio: self.config.compact_context_ratio,
                 extra_chunks: &extra_chunks,
                 context_window,
                 summarizer: Some(&summarizer),

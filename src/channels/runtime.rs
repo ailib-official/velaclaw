@@ -181,6 +181,8 @@ pub(crate) struct EnvelopePilotConfig {
     /// CR-L3-003: use `AssemblePool` when `enabled` (default false → sync assemble).
     pub(crate) use_async_pool: bool,
     pub(crate) compact_context: bool,
+    /// `[agent].compact_context_ratio`. `0` keeps message-count compaction only.
+    pub(crate) compact_context_ratio: f64,
 }
 
 #[derive(Clone)]

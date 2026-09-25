@@ -39,6 +39,8 @@ pub(crate) struct ToolBatchGateExtras {
     pub approval_hub: Option<Arc<ApprovalHub>>,
     pub human_input_hub: Option<Arc<HumanInputHub>>,
     pub host_phase: HostPhase,
+    /// `[agent].macro_stages`. Empty keeps the tool loop unchanged.
+    pub macro_stages: Vec<crate::config::MacroStageConfig>,
 }
 
 fn abort_hitl(extras: Option<&ToolBatchGateExtras>) {

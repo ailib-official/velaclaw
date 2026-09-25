@@ -493,6 +493,7 @@ pub async fn run(
         approval_hub: None,
         human_input_hub: None,
         host_phase,
+        macro_stages: config.agent.macro_stages.clone(),
     };
 
     // ── Execute ──────────────────────────────────────────────────

@@ -1,19 +1,10 @@
-//! Live bounded DAG: first hop is chat_only or a linear graph with filled I.
+//! Bounded-DAG hop helpers kept for fixtures, doctor, and unit tests.
 //!
-//! When `[agent].bounded_dag_live` is on and `bounded_dag_path` is empty, the
-//! first hop emits in-band `chat_only` or a 1–8 node DAG. Path-only
-//! `single_work` / invalid JSON / unfilled graphs Ask (`EMPTY_I_ASK`); the host
-//! does not synthesize an empty `llm_cognition` node and does not collect a
-//! shell command. A 1-node ToolDirect with invoke I stays Plan. Dist default
-//! remains off.
+//! VL-RAO-001: `Agent::turn` and the CLI loop do not call this scheduler.
+//! `[agent].bounded_dag_live` still parses. A `true` value is logged and ignored.
+//! The key is not rewritten on disk.
 //!
-//! Turn contract (VL-CTX-001 / VL-NA-019 / VL-NA-030): append the user message,
-//! run `prepare_turn_history` on the session (skip only HostPhase::Plan preview),
-//! then first hop **consumes that prepared history**. DAG nodes still slim via
-//! `reset_chat_scope` (intra-graph). Session follow-ups do not replace the
-//! stored graph task.
-//!
-//! 有界 DAG live：首跳 chat_only 或已填 I 线性图；未填则 Ask，不合成空认知节点。
+//! 生产回合不再走这里的线性调度。下面的解析函数留给夹具和单测。
 
 use super::bounded_dag::{format_preview, linear_node_ids, load_bounded_dag, schedule_node_ids};
 use super::bounded_dag_context::contact_for_live_node;
@@ -374,8 +365,20 @@ pub fn one_node_live_dag(user_task: &str) -> PlannedLiveDag {
     }
 }
 
+/// VL-RAO-001: production turns ignore this key for scheduling.
+///
+/// Existing config files keep parsing. This does not write the file back.
+pub fn note_live_scheduler_retired(enabled: bool) {
+    if enabled {
+        tracing::info!(
+            "bounded_dag_live is set; the linear scheduler is retired and this turn uses the tool loop"
+        );
+    }
+}
+
 /// Map TurnMode onto the canonical live hop (R7 + R14 + R22).
 /// Unfilled graphs Ask; they must not become a synthesized empty cognition node.
+/// Fixture and unit-test helper. Production turns do not call this.
 #[must_use]
 pub fn execute_as_live_plan(hop: LiveFirstHop, _user_task: &str) -> LiveFirstHop {
     match collapse_trivial_plan(hop) {

@@ -574,7 +574,7 @@ fn check_config_semantics(config: &Config, items: &mut Vec<DiagItem>) {
         items.push(DiagItem::ok(
             "bounded_dag",
             format!(
-                "bounded_dag_live={} path={} (opt-in; empty path = planner node then linear work; not L4 emit)",
+                "bounded_dag_live={} path={} (key retained; true does not schedule tool steps)",
                 config.agent.bounded_dag_live, dag_path
             ),
         ));
@@ -1333,12 +1333,12 @@ mod tests {
             .find(|i| i.message.contains("autonomy.level=full"))
             .expect("full autonomy line");
         assert!(autonomy.message.contains("does not disable OS sandbox"));
-        let sandbox = items
-            .iter()
-            .find(|i| i.message.contains("sandbox="))
-            .expect("sandbox line");
         #[cfg(target_os = "linux")]
         {
+            let sandbox = items
+                .iter()
+                .find(|i| i.message.contains("sandbox="))
+                .expect("sandbox line");
             assert!(
                 sandbox.message.contains("sandbox=landlock")
                     || sandbox.message.contains("sandbox=fail-closed")

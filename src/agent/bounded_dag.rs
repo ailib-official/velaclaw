@@ -201,17 +201,10 @@ pub fn format_preview(dag: &DagManifest, order: &[String]) -> String {
 pub fn node_task_card(dag_id: &str, node: &DagNode, index: usize, node_count: usize) -> String {
     let next = node.next.as_deref().unwrap_or("END");
     let last = node.next.is_none();
-    let tools = "Run this node's filled I as given. One invoke per tool round: a simple argv, \
-         or ssh <alias> <simple argv>. A pipe between simple programs is allowed. \
-         Do not write $(), backticks, ${, redirects, tee, find -exec, assignment scripts, \
-         or wrap several checks in one ssh. \
-         If INPUTS or USER TASK already name a vantage (host, path, artifact), start there — \
-         do not substitute a local stand-in probe. \
-         Do not re-run a probe whose result is already in INPUTS as this-hop-tool or this-graph-artifact. \
-         Do not rewrite the same check as a new script file. \
-         Do not `find /` or open-ended local scans. \
-         prior-graph-artifact (and other-session memory) is context for gaps only — \
-         not a substitute for this-hop-tool on a live host or service check.";
+    let cognition = node
+        .sigma
+        .as_deref()
+        .is_some_and(|sigma| sigma.eq_ignore_ascii_case("llm_cognition"));
     let success = if last {
         "Stop with the operator-visible conclusion as the last assistant message, \
          in ordinary language. Do not emit an internodal envelope. \
@@ -227,11 +220,27 @@ pub fn node_task_card(dag_id: &str, node: &DagNode, index: usize, node_count: us
          - pointers: identifiers the next node needs (not source dumps)\n\
          - gaps: unknowns; keep exclusivity here until coverage=exhaustive"
     };
-    let mid_hint = "The host counts a shell round only after a command actually ran \
+    let tools_block = if cognition {
+        String::new()
+    } else {
+        let tools = "Run this node's filled I as given. One invoke per tool round: a simple argv, \
+         or ssh <alias> <simple argv>. A pipe between simple programs is allowed. \
+         Do not write $(), backticks, ${, redirects, tee, find -exec, assignment scripts, \
+         or wrap several checks in one ssh. \
+         If INPUTS or USER TASK already name a vantage (host, path, artifact), start there — \
+         do not substitute a local stand-in probe. \
+         Do not re-run a probe whose result is already in INPUTS as this-hop-tool or this-graph-artifact. \
+         Do not rewrite the same check as a new script file. \
+         Do not `find /` or open-ended local scans. \
+         prior-graph-artifact (and other-session memory) is context for gaps only — \
+         not a substitute for this-hop-tool on a live host or service check.";
+        let mid_hint = "The host counts a shell round only after a command actually ran \
          (policy-deny and repeat-skip do not consume the cap). After four such rounds \
          the host injects a cap notice. Do not stop early or claim a cap unless that \
          notice appeared. Then finish this node's internodal envelope from INPUTS, \
          or issue another admit-safe invoke.";
+        format!("\n         TOOLS\n         {tools} {mid_hint}\n")
+    };
     format!(
         "NODE TASK (host-filled slots; do not rewrite this card)\n\
          - dag_id: {dag_id}\n\
@@ -243,9 +252,7 @@ pub fn node_task_card(dag_id: &str, node: &DagNode, index: usize, node_count: us
          OBJECTIVE\n\
          Do only this node's job (task_type) for USER TASK. Do not start {next}. \
          Do not redo a prior node unless INPUTS lack pointers you need.\n\
-         \n\
-         TOOLS\n\
-         {tools} {mid_hint}\n\
+         {tools_block}\
          \n\
          SUCCESS\n\
          {success}",
@@ -397,6 +404,16 @@ mod tests {
         assert!(card.contains("this-hop-tool"));
         assert!(card.contains("SHELL_ROUND_CAP") || card.contains("cap notice"));
         assert!(card.contains("actually ran"));
+    }
+
+    #[test]
+    fn cognition_card_omits_tools_when_rendered() {
+        let json = r#"{"schema_version":"0.1.0","id":"g","entry":"think","max_steps":2,"nodes":[{"id":"think","task_type":"write","sigma":"llm_cognition","model_selector":{"capabilities":["high-reasoning"]},"artifact":"write the note","next":null}]}"#;
+        let dag = parse_dag_json(json).unwrap();
+        let card = node_task_card("g", &dag.nodes[0], 1, 1);
+        assert!(!card.contains("TOOLS"), "{card}");
+        assert!(!card.contains("admit-safe invoke"), "{card}");
+        assert!(card.contains("operator-visible conclusion"), "{card}");
     }
 
     #[test]

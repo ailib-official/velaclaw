@@ -361,6 +361,33 @@ impl Default for HardwareConfig {
     }
 }
 
+/// How an optional macro stage is checked. Empty stages leave the tool loop unchanged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum MacroStageCheckKind {
+    /// The stage name match is enough.
+    #[default]
+    None,
+    /// `artifact` must be an existing path. No command is run.
+    PathExists,
+    /// This stage's tool results must contain `needle`.
+    ToolResultContains,
+}
+
+/// One optional macro stage (`[[agent.macro_stages]]`). Default list is empty.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
+pub struct MacroStageConfig {
+    pub name: String,
+    /// Path or a short user-visible conclusion to archive when the stage passes.
+    #[serde(default)]
+    pub artifact: String,
+    #[serde(default)]
+    pub check: MacroStageCheckKind,
+    /// Substring required when `check` is `tool_result_contains`.
+    #[serde(default)]
+    pub needle: String,
+}
+
 /// Agent orchestration configuration (`[agent]` section).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[allow(clippy::struct_excessive_bools)]
@@ -382,6 +409,10 @@ pub struct AgentConfig {
     /// does not invent a window. This is not the `compact_context` 8192 budget.
     #[serde(default)]
     pub compact_context_ratio: f64,
+    /// Optional macro stages. Empty (default) leaves `run_tool_call_loop` unchanged.
+    /// Not a protocol field and not `host_decide` / `intent_capability_route`.
+    #[serde(default)]
+    pub macro_stages: Vec<MacroStageConfig>,
     /// Enable parallel tool execution within a single iteration. Default: `false`.
     #[serde(default)]
     pub parallel_tools: bool,
@@ -481,6 +512,7 @@ impl Default for AgentConfig {
             max_tool_iterations: default_agent_max_tool_iterations(),
             max_history_messages: default_agent_max_history_messages(),
             compact_context_ratio: 0.0,
+            macro_stages: Vec::new(),
             parallel_tools: false,
             tool_dispatcher: default_agent_tool_dispatcher(),
             envelope_assemble: true,

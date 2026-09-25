@@ -169,6 +169,11 @@ pub(crate) async fn run_tool_call_loop(
     let mut active_model = model.to_string();
     let mut peer_continue_used = false;
     let mut local_probe = Box::new(crate::agent::probe_dedup::HopProbeGovernor::new());
+    let mut stage_cursor = crate::agent::artifact_contract::StageCursor::from_configs(
+        gate_extras
+            .map(|extras| extras.macro_stages.as_slice())
+            .unwrap_or(&[]),
+    );
 
     let block_retrieve = soft_fail.as_ref().is_some_and(|c| c.block_retrieve_tools);
     let tool_specs: Vec<crate::tools::ToolSpec> = if block_retrieve {
@@ -600,6 +605,17 @@ pub(crate) async fn run_tool_call_loop(
                     let _ = tx.send(chunk).await;
                 }
             }
+            if stage_cursor.is_active() {
+                if let Some(observation) = stage_cursor.note_assistant_claim(&final_text) {
+                    history.push(ChatMessage::assistant(response_text.clone()));
+                    history.push(ChatMessage::user(observation));
+                    continue;
+                }
+                if let Some(suffix) = stage_cursor.pointer_suffix() {
+                    final_text.push_str("\n\n");
+                    final_text.push_str(&suffix);
+                }
+            }
             history.push(ChatMessage::assistant(response_text.clone()));
             return Ok(final_text);
         }
@@ -761,11 +777,27 @@ pub(crate) async fn run_tool_call_loop(
                 history.push(ChatMessage::tool_with_call_id(&native_call.id, result));
             }
         }
-        if hop_close != crate::agent::hop_stop::HopClose::None {
-            return Ok(crate::agent::probe_dedup::hop_close_visible_body(
-                &visible_text,
-                hop_close,
-            ));
+        let stage_rejected = if stage_cursor.is_active() {
+            for output in &individual_results {
+                stage_cursor.note_tool_output(output);
+            }
+            if let Some(observation) = stage_cursor.note_assistant_claim(&visible_text) {
+                history.push(ChatMessage::user(observation));
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+        if !stage_rejected && hop_close != crate::agent::hop_stop::HopClose::None {
+            let mut body =
+                crate::agent::probe_dedup::hop_close_visible_body(&visible_text, hop_close);
+            if let Some(suffix) = stage_cursor.pointer_suffix() {
+                body.push_str("\n\n");
+                body.push_str(&suffix);
+            }
+            return Ok(body);
         }
     }
 

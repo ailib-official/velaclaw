@@ -369,6 +369,140 @@ pub fn graph_contract_stop_reason(user_task: &str, verdict: GraphArtifactVerdict
     }
 }
 
+/// Cursor for optional macro stages. An empty list does nothing.
+/// This path does not call [`hop_artifact_contract`] or [`graph_artifact_contract`].
+#[derive(Debug, Clone)]
+pub struct StageCursor {
+    stages: Vec<crate::config::MacroStageConfig>,
+    index: usize,
+    evidence: String,
+    finished: bool,
+}
+
+impl StageCursor {
+    #[must_use]
+    pub fn from_configs(stages: &[crate::config::MacroStageConfig]) -> Self {
+        Self {
+            stages: stages
+                .iter()
+                .filter(|stage| !stage.name.trim().is_empty())
+                .cloned()
+                .collect(),
+            index: 0,
+            evidence: String::new(),
+            finished: false,
+        }
+    }
+
+    #[must_use]
+    pub fn is_active(&self) -> bool {
+        !self.stages.is_empty()
+    }
+
+    pub fn note_tool_output(&mut self, output: &str) {
+        if !self.is_active() || self.finished {
+            return;
+        }
+        if !self.evidence.is_empty() {
+            self.evidence.push('\n');
+        }
+        self.evidence.push_str(output);
+    }
+
+    /// Apply `stage_done: <name>` lines from one assistant message.
+    /// Returns an observation when the claim is rejected. The index stays put.
+    pub fn note_assistant_claim(&mut self, assistant_text: &str) -> Option<String> {
+        if !self.is_active() || self.finished {
+            return None;
+        }
+        for name in claimed_stage_names(assistant_text) {
+            if let Some(observation) = self.apply_claim(&name) {
+                return Some(observation);
+            }
+        }
+        None
+    }
+
+    /// Pointer block once every configured stage has passed. Otherwise `None`.
+    #[must_use]
+    pub fn pointer_suffix(&self) -> Option<String> {
+        if !self.finished {
+            return None;
+        }
+        let mut out = String::from("[Stage artifacts]");
+        for stage in &self.stages {
+            out.push_str("\n- ");
+            out.push_str(stage.name.trim());
+            out.push_str(": ");
+            out.push_str(stage.artifact.trim());
+        }
+        Some(out)
+    }
+
+    fn apply_claim(&mut self, name: &str) -> Option<String> {
+        let stage = self.stages.get(self.index)?;
+        let current = stage.name.trim();
+        if name != current {
+            return Some(format!(
+                "Observation: stage claim '{name}' does not match the current stage '{current}'. Stay on this stage."
+            ));
+        }
+        if let Some(observation) = stage_check_observation(stage, &self.evidence) {
+            return Some(observation);
+        }
+        self.index += 1;
+        self.evidence.clear();
+        if self.index >= self.stages.len() {
+            self.finished = true;
+        }
+        None
+    }
+}
+
+fn claimed_stage_names(assistant_text: &str) -> Vec<String> {
+    assistant_text
+        .lines()
+        .filter_map(|line| {
+            let name = line.trim().strip_prefix("stage_done:")?.trim();
+            if name.is_empty() {
+                None
+            } else {
+                Some(name.to_string())
+            }
+        })
+        .collect()
+}
+
+fn stage_check_observation(
+    stage: &crate::config::MacroStageConfig,
+    evidence: &str,
+) -> Option<String> {
+    let name = stage.name.trim();
+    match stage.check {
+        crate::config::MacroStageCheckKind::None => None,
+        crate::config::MacroStageCheckKind::PathExists => {
+            let path = stage.artifact.trim();
+            if path.is_empty() || !std::path::Path::new(path).exists() {
+                Some(format!(
+                    "Observation: stage '{name}' still needs the artifact path to exist: {path}."
+                ))
+            } else {
+                None
+            }
+        }
+        crate::config::MacroStageCheckKind::ToolResultContains => {
+            let needle = stage.needle.trim();
+            if needle.is_empty() || !evidence.contains(needle) {
+                Some(format!(
+                    "Observation: stage '{name}' still needs the tool result to contain '{needle}'."
+                ))
+            } else {
+                None
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -580,5 +714,118 @@ mod tests {
             GraphArtifactVerdict::InsufficientEvidenceLayer,
         );
         assert!(honest_stop_keeps_session_open(&stop));
+    }
+
+    fn sample_stage(
+        name: &str,
+        artifact: &str,
+        check: crate::config::MacroStageCheckKind,
+        needle: &str,
+    ) -> crate::config::MacroStageConfig {
+        crate::config::MacroStageConfig {
+            name: name.to_string(),
+            artifact: artifact.to_string(),
+            check,
+            needle: needle.to_string(),
+        }
+    }
+
+    #[test]
+    fn empty_macro_stages_do_not_change_the_cursor() {
+        let mut cursor = StageCursor::from_configs(&[]);
+        assert!(!cursor.is_active());
+        assert!(cursor
+            .note_assistant_claim("stage_done: gather materials")
+            .is_none());
+        assert!(cursor.pointer_suffix().is_none());
+        assert!(crate::config::AgentConfig::default()
+            .macro_stages
+            .is_empty());
+    }
+
+    #[test]
+    fn failed_stage_claim_stays_on_the_same_stage() {
+        let stages = vec![
+            sample_stage(
+                "gather materials",
+                "missing-note.txt",
+                crate::config::MacroStageCheckKind::PathExists,
+                "",
+            ),
+            sample_stage(
+                "write the note",
+                "the note",
+                crate::config::MacroStageCheckKind::None,
+                "",
+            ),
+            sample_stage(
+                "check sources",
+                "sources",
+                crate::config::MacroStageCheckKind::ToolResultContains,
+                "source checked",
+            ),
+        ];
+        let mut cursor = StageCursor::from_configs(&stages);
+        let wrong = cursor
+            .note_assistant_claim("stage_done: write the note")
+            .unwrap();
+        assert!(wrong.contains("does not match the current stage"));
+        assert!(wrong.contains("Stay on this stage"));
+        assert!(cursor.pointer_suffix().is_none());
+
+        let missing = cursor
+            .note_assistant_claim("stage_done: gather materials")
+            .unwrap();
+        assert!(missing.contains("artifact path"));
+        assert!(cursor.pointer_suffix().is_none());
+
+        cursor.note_tool_output("listing only");
+        let needle = cursor.note_assistant_claim("stage_done: check sources");
+        assert!(needle.unwrap().contains("does not match"));
+    }
+
+    #[test]
+    fn passed_stages_archive_pointers_without_a_test_command() {
+        let dir = tempfile::tempdir().unwrap();
+        let note = dir.path().join("brief.txt");
+        std::fs::write(&note, "gathered").unwrap();
+        let stages = vec![
+            sample_stage(
+                "gather materials",
+                note.to_str().unwrap(),
+                crate::config::MacroStageCheckKind::PathExists,
+                "",
+            ),
+            sample_stage(
+                "write the note",
+                "brief",
+                crate::config::MacroStageCheckKind::None,
+                "",
+            ),
+            sample_stage(
+                "check sources",
+                "sources",
+                crate::config::MacroStageCheckKind::ToolResultContains,
+                "source checked",
+            ),
+        ];
+        let mut cursor = StageCursor::from_configs(&stages);
+        assert!(cursor
+            .note_assistant_claim(
+                "user said stage_done: gather materials\nstage_done: gather materials"
+            )
+            .is_none());
+        assert!(cursor
+            .note_assistant_claim("stage_done: write the note")
+            .is_none());
+        cursor.note_tool_output("source checked in the notes");
+        assert!(cursor
+            .note_assistant_claim("stage_done: check sources")
+            .is_none());
+        let suffix = cursor.pointer_suffix().unwrap();
+        assert!(suffix.contains("gather materials"));
+        assert!(suffix.contains("write the note"));
+        assert!(suffix.contains("check sources"));
+        assert!(!suffix.to_lowercase().contains("cargo"));
     }
 }

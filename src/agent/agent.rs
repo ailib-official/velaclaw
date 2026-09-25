@@ -853,6 +853,7 @@ impl Agent {
                 .map(|(_, hub)| Arc::clone(hub)),
             human_input_hub: self.human_input_hub.clone(),
             host_phase: self.host_phase,
+            macro_stages: self.config.macro_stages.clone(),
         };
         let approval_mgr = self.gateway_approval.as_ref().map(|(mgr, _)| mgr);
 

@@ -1359,20 +1359,12 @@ async fn run_single_delegates_to_turn() {
     );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// VL-NA-011: bounded linear DAG live (opt-in)
-// ═══════════════════════════════════════════════════════════════════════════
-
-const LIVE_MODE_CHAT: &str = r#"{"path":"chat_only","reply":"Hi — ready."}"#;
-const LIVE_MODE_CHAT_EMPTY: &str =
-    r#"{"path":"chat_only","reply":"I compared agent runtimes from memory."}"#;
-/// Three filled-I nodes so R7 keeps `plan_dag` (the empty L2 template collapses).
-const LIVE_FILLED_CODE_FIX_JSON: &str = r#"{"schema_version":"0.1.0","id":"code-fix-template","entry":"locate","max_steps":6,"nodes":[{"id":"locate","task_type":"code-fix","model_selector":{"capabilities":["coding","tool_calling"]},"artifact":"cargo check","next":"patch"},{"id":"patch","task_type":"code-fix","model_selector":{"capabilities":["coding","tool_calling"]},"artifact":"apply the fix","next":"verify"},{"id":"verify","task_type":"code-fix","model_selector":{"capabilities":["speed"]},"artifact":"recompile and confirm","next":null}]}"#;
+// VL-RAO-001: bounded_dag_live does not enter the linear scheduler.
 
 #[cfg(feature = "ai-protocol")]
 #[tokio::test]
-async fn bounded_dag_plan_runs_planner_then_preview() {
-    let provider = Box::new(ScriptedProvider::new(vec![text_response("not a dag")]));
+async fn live_flag_does_not_enter_linear_scheduler() {
+    let provider = Box::new(ScriptedProvider::new(vec![text_response("plain reply")]));
     let mut agent = build_agent_with_config(
         provider,
         vec![],
@@ -1384,435 +1376,44 @@ async fn bounded_dag_plan_runs_planner_then_preview() {
     );
     agent.set_host_phase(crate::agent::host_phase::HostPhase::Plan);
     let out = agent.turn("fix the compiler error").await.unwrap();
-    assert!(
-        out.contains("empty I") || out.contains("Approve an allowed command"),
-        "invalid planner is unfilled Ask, not a synth cognition preview, got {out}"
-    );
-    assert!(
-        !out.contains("report ready"),
-        "Plan phase must not start a work loop, got {out}"
-    );
+    assert!(out.contains("plain reply"), "{out}");
+    assert!(!out.contains("Approve Build"), "{out}");
+    assert!(!out.contains("empty I"), "{out}");
 }
 
-#[cfg(feature = "ai-protocol")]
 #[tokio::test]
-async fn bounded_dag_plan_accepts_planner_json() {
-    let json = r#"{"schema_version":"0.1.0","id":"paper-slides","entry":"read","max_steps":8,"nodes":[{"id":"read","task_type":"summarize","model_selector":{"capabilities":["document_understanding"]},"artifact":"read the paper","next":"slides"},{"id":"slides","task_type":"write","model_selector":{"capabilities":["speed"]},"artifact":"write intro slides","next":null}]}"#;
-    let mut agent = build_agent_with_config(
-        Box::new(ScriptedProvider::new(vec![text_response(json)])),
-        vec![],
-        AgentConfig {
-            bounded_dag_live: true,
-            envelope_assemble: false,
-            ..AgentConfig::default()
-        },
-    );
-    agent.set_host_phase(crate::agent::host_phase::HostPhase::Plan);
-    let out = agent
-        .turn("read this paper, write intro slides")
-        .await
-        .unwrap();
-    assert!(out.contains("paper-slides"), "{out}");
-    assert!(out.contains("read"), "{out}");
-    assert!(out.contains("slides"), "{out}");
-    assert!(!out.contains("locate"), "{out}");
-}
-
-#[cfg(feature = "ai-protocol")]
-#[tokio::test]
-async fn bounded_dag_plan_path_skips_planner() {
-    let tmp = tempfile::NamedTempFile::new().unwrap();
-    std::fs::write(tmp.path(), LIVE_FILLED_CODE_FIX_JSON).unwrap();
-    let mut agent = build_agent_with_config(
-        Box::new(FailingProvider),
-        vec![],
-        AgentConfig {
-            bounded_dag_live: true,
-            bounded_dag_path: Some(tmp.path().to_string_lossy().into_owned()),
-            envelope_assemble: false,
-            ..AgentConfig::default()
-        },
-    );
-    agent.set_host_phase(crate::agent::host_phase::HostPhase::Plan);
-    let out = agent.turn("fix the compiler error").await.unwrap();
-    assert!(out.contains("locate"), "{out}");
-    assert!(out.contains("Approve Build"), "{out}");
-}
-
-#[cfg(feature = "ai-protocol")]
-#[tokio::test]
-async fn bounded_dag_build_one_loop_per_node() {
+async fn failed_tool_stays_in_history_for_another_iteration() {
     let provider = ScriptedProvider::new(vec![
-        text_response(LIVE_FILLED_CODE_FIX_JSON),
-        text_response("located"),
-        text_response("patched"),
-        text_response("verified"),
+        tool_response(vec![ToolCall {
+            id: "tc1".into(),
+            name: "fail".into(),
+            arguments: "{}".into(),
+        }]),
+        text_response("continued after failure"),
     ]);
-    let calls = provider.call_counter();
+    let requests = provider.recorded_requests();
     let mut agent = build_agent_with_config(
         Box::new(provider),
-        vec![],
+        vec![Box::new(FailingTool)],
         AgentConfig {
             bounded_dag_live: true,
             envelope_assemble: false,
             ..AgentConfig::default()
         },
     );
-    agent.set_host_phase(crate::agent::host_phase::HostPhase::Build);
-    let out = agent.turn("fix the compiler error").await.unwrap();
-    assert_eq!(
-        calls.load(Ordering::SeqCst),
-        4,
-        "MS-APE-R1: 1 first hop + N work hops; observe_llm_on_successful_hops(3)==0"
-    );
-    assert_eq!(
-        crate::agent::graph_scheduler::observe_llm_on_successful_hops(3),
-        0
-    );
-    assert!(out.contains("verified"), "{out}");
-    assert!(
-        !out.contains("Working in 3 step(s)"),
-        "plan gist is live-only, not persist: {out}"
-    );
-    assert!(
-        !out.contains("### locate"),
-        "mid-hop notes are live-only, not persist: {out}"
-    );
-    assert!(!out.contains("HANDOFF"), "{out}");
-    assert!(!out.contains("Bounded task DAG"), "{out}");
-}
-
-#[cfg(feature = "ai-protocol")]
-#[tokio::test]
-async fn bounded_dag_hello_skips_planner() {
-    let provider = ScriptedProvider::new(vec![text_response(LIVE_MODE_CHAT)]);
-    let calls = provider.call_counter();
-    let mut agent = build_agent_with_config(
-        Box::new(provider),
-        vec![],
-        AgentConfig {
-            bounded_dag_live: true,
-            envelope_assemble: false,
-            ..AgentConfig::default()
-        },
-    );
-    agent.set_host_phase(crate::agent::host_phase::HostPhase::Build);
-    let out = agent.turn("hello").await.unwrap();
-    assert_eq!(
-        calls.load(Ordering::SeqCst),
-        crate::agent::graph_scheduler::chat_only_success_llm_calls(),
-        "MS-APE-R1: chat_only provider calls == 1"
-    );
-    assert!(out.contains("Hi"), "{out}");
-}
-
-#[cfg(feature = "ai-protocol")]
-#[tokio::test]
-async fn bounded_dag_follow_up_first_hop_sees_prior_report() {
-    let provider = ScriptedProvider::new(vec![
-        text_response(LIVE_MODE_CHAT),
-        text_response(r#"{"path":"chat_only","reply":"On piubt we already checked gProxy."}"#),
-    ]);
-    let reqs = provider.recorded_requests();
-    let calls = provider.call_counter();
-    let mut agent = build_agent_with_config(
-        Box::new(provider),
-        vec![],
-        AgentConfig {
-            bounded_dag_live: true,
-            envelope_assemble: false,
-            ..AgentConfig::default()
-        },
-    );
-    agent.set_host_phase(crate::agent::host_phase::HostPhase::Build);
-    let first = agent.turn("hello").await.unwrap();
-    assert!(first.contains("Hi"), "{first}");
-    let _ = agent.turn("你忘了所有操作都在piubt上").await.unwrap();
-    assert_eq!(
-        calls.load(Ordering::SeqCst),
-        2,
-        "two chat_only hops; no observe"
-    );
-    let hop2 = reqs.lock().unwrap()[1].clone();
-    assert!(
-        hop2.iter().any(|m| m.content.contains("Hi — ready.")),
-        "first hop of follow-up must see prior in-band reply, got {hop2:?}"
-    );
-}
-
-#[cfg(feature = "ai-protocol")]
-#[tokio::test]
-async fn bounded_dag_single_work_asks_on_empty_invoke_i() {
-    let provider = ScriptedProvider::new(vec![text_response(r#"{"path":"single_work"}"#)]);
-    let calls = provider.call_counter();
-    let mut agent = build_agent_with_config(
-        Box::new(provider),
-        vec![],
-        AgentConfig {
-            bounded_dag_live: true,
-            envelope_assemble: false,
-            ..AgentConfig::default()
-        },
-    );
-    agent.set_host_phase(crate::agent::host_phase::HostPhase::Build);
-    let out = agent
-        .turn("check remote git then sync the workspace")
-        .await
-        .unwrap();
-    assert_eq!(
-        calls.load(Ordering::SeqCst),
-        1,
-        "empty-I single_work must Ask before the work-model loop, calls={}",
-        calls.load(Ordering::SeqCst)
-    );
-    assert!(
-        out.contains("empty I") && out.contains("will not ask for a shell command"),
-        "{out}"
-    );
-    assert!(!out.contains("Approve an allowed command"), "{out}");
-    assert!(!out.contains("report ready"), "{out}");
-}
-
-#[cfg(feature = "ai-protocol")]
-#[tokio::test]
-async fn bounded_dag_empty_i_hub_does_not_collect_a_command() {
-    let provider = ScriptedProvider::new(vec![
-        text_response(r#"{"path":"single_work"}"#),
-        text_response("report ready"),
-    ]);
-    let calls = provider.call_counter();
-    let mut agent = build_agent_with_config(
-        Box::new(provider),
-        vec![],
-        AgentConfig {
-            bounded_dag_live: true,
-            envelope_assemble: false,
-            ..AgentConfig::default()
-        },
-    );
-    agent.set_host_phase(crate::agent::host_phase::HostPhase::Build);
-    let hub = Arc::new(crate::approval::HumanInputHub::new(Arc::new(
-        crate::approval::SecretSlotStore::new(),
-    )));
-    agent.enable_gateway_hitl(Arc::clone(&hub));
-    let mut sub = hub.subscribe();
-    let out = agent
-        .turn("check remote git then sync the workspace")
-        .await
-        .unwrap();
-    assert_eq!(
-        calls.load(Ordering::SeqCst),
-        1,
-        "empty I must not start work"
-    );
-    assert!(
-        out.contains("empty I") && out.contains("will not ask for a shell command"),
-        "{out}"
-    );
-    assert!(!out.contains("report ready"), "{out}");
-    assert!(
-        tokio::time::timeout(std::time::Duration::from_millis(200), sub.recv())
-            .await
-            .is_err(),
-        "empty I must not open a command form"
-    );
-}
-
-#[cfg(feature = "ai-protocol")]
-#[tokio::test]
-async fn bounded_dag_single_work_runs_native_tools_when_i_is_invoke() {
-    let provider = ScriptedProvider::new(vec![
-        text_response(
-            r#"{"schema_version":"0.1.0","id":"sw","entry":"work","max_steps":4,"nodes":[{"id":"work","task_type":"ops","model_selector":{"capabilities":["coding"]},"sigma":"llm_cognition","artifact":"cargo check","next":null}]}"#,
-        ),
-        text_response("report ready"),
-    ]);
-    let calls = provider.call_counter();
-    let mut agent = build_agent_with_config(
-        Box::new(provider),
-        vec![],
-        AgentConfig {
-            bounded_dag_live: true,
-            envelope_assemble: false,
-            ..AgentConfig::default()
-        },
-    );
-    agent.set_host_phase(crate::agent::host_phase::HostPhase::Build);
-    let out = agent
-        .turn("check remote git then sync the workspace")
-        .await
-        .unwrap();
-    assert!(
-        calls.load(Ordering::SeqCst) >= 2,
-        "invoke-I live hop must start the work-model loop, calls={}",
-        calls.load(Ordering::SeqCst)
-    );
-    assert!(
-        !out.contains("empty I") && !out.contains("Approve an allowed command"),
-        "{out}"
-    );
-    assert!(out.contains("report ready"), "{out}");
-}
-
-#[cfg(feature = "ai-protocol")]
-#[tokio::test]
-async fn bounded_dag_chat_only_does_not_observe_upgrade() {
-    let provider = ScriptedProvider::new(vec![text_response(LIVE_MODE_CHAT_EMPTY)]);
-    let calls = provider.call_counter();
-    let mut agent = build_agent_with_config(
-        Box::new(provider),
-        vec![],
-        AgentConfig {
-            bounded_dag_live: true,
-            envelope_assemble: false,
-            ..AgentConfig::default()
-        },
-    );
-    agent.set_host_phase(crate::agent::host_phase::HostPhase::Build);
-    let out = agent
-        .turn("调研主流 agent 编排并对照本机 velaclaw 仓库")
-        .await
-        .unwrap();
-    assert_eq!(
-        calls.load(Ordering::SeqCst),
-        1,
-        "chat_only stays chat_only; no observe upgrade"
-    );
-    assert!(out.contains("compared agent runtimes"), "{out}");
-    assert!(!out.contains("verified"), "{out}");
-}
-
-#[cfg(feature = "ai-protocol")]
-#[tokio::test]
-async fn bounded_dag_writeback_and_node_contact() {
-    let (mem, _tmp) = make_sqlite_memory();
-    let provider = ScriptedProvider::new(vec![
-        text_response(LIVE_FILLED_CODE_FIX_JSON),
-        text_response("LOCATE_UNIQUE_BODY"),
-        text_response("PATCH_UNIQUE_BODY"),
-        text_response("VERIFY_OK"),
-    ]);
-    let reqs = provider.recorded_requests();
-    let models = provider.recorded_models();
-    let mut agent = Agent::builder()
-        .provider(Box::new(provider))
-        .tools(Vec::<Box<dyn Tool>>::new())
-        .memory(mem.clone())
-        .observer(make_observer())
-        .tool_dispatcher(Box::new(NativeToolDispatcher::default()))
-        .workspace_dir(std::env::temp_dir())
-        .security(test_security())
-        .config(AgentConfig {
-            bounded_dag_live: true,
-            envelope_assemble: false,
-            ..AgentConfig::default()
-        })
-        .available_hints(vec!["fast".into(), "code".into()])
-        .build()
-        .unwrap();
-    agent.set_session_id("sess-dag");
-    agent.set_host_phase(crate::agent::host_phase::HostPhase::Build);
-    let out = agent.turn("fix the compiler error").await.unwrap();
-    assert!(out.contains("VERIFY_OK"), "{out}");
-    assert!(!out.contains("contact model="), "{out}");
-
-    let locate = mem
-        .get(&crate::agent::bounded_dag_context::artifact_memory_key(
-            "sess-dag", "locate",
-        ))
-        .await
-        .unwrap()
-        .expect("locate artifact");
-    assert!(
-        locate.content.contains("LOCATE_UNIQUE_BODY"),
-        "{}",
-        locate.content
-    );
-
-    let captured = reqs.lock().unwrap();
-    assert_eq!(captured.len(), 4);
-    let patch_msgs = &captured[2];
-    assert!(
-        !patch_msgs
+    let response = agent.turn("try failing tool").await.unwrap();
+    assert!(response.contains("continued after failure"), "{response}");
+    let saw_failure = agent.history().iter().any(|msg| match msg {
+        ConversationMessage::ToolResults(results) => results
             .iter()
-            .any(|m| m.role == "assistant" && m.content.contains("LOCATE_UNIQUE_BODY")),
-        "patch node must not carry prior assistant dump: {patch_msgs:?}"
-    );
+            .any(|r| r.content.contains("intentional failure") || r.content.contains("fail")),
+        _ => false,
+    });
+    assert!(saw_failure, "failed tool result must stay in history");
+    let recorded = requests.lock().unwrap();
     assert!(
-        patch_msgs
-            .iter()
-            .any(|m| m.content.contains("dag_artifact") && m.content.contains("LOCATE_UNIQUE_BODY")),
-        "patch node should retrieve clipped locate artifact: {patch_msgs:?}"
-    );
-
-    let used = models.lock().unwrap().clone();
-    assert_eq!(
-        used.len(),
-        4,
-        "first hop DAG + 3 work; no mid observe; got {used:?}"
-    );
-    assert_eq!(
-        used[1],
-        "hint:code".to_string(),
-        "locate uses coding capability route; got {used:?}"
-    );
-    assert_eq!(
-        used[2],
-        "hint:code".to_string(),
-        "patch uses coding capability route; got {used:?}"
-    );
-    assert_eq!(
-        used[3],
-        "hint:fast".to_string(),
-        "verify uses speed hint; got {used:?}"
-    );
-}
-
-#[cfg(feature = "ai-protocol")]
-#[tokio::test]
-async fn bounded_dag_session_picker_runs_work_hops() {
-    let provider = ScriptedProvider::new(vec![
-        text_response(LIVE_FILLED_CODE_FIX_JSON),
-        text_response("located"),
-        text_response("patched"),
-        text_response("verified"),
-    ]);
-    let models = provider.recorded_models();
-    let mut agent = Agent::builder()
-        .provider(Box::new(provider))
-        .tools(Vec::<Box<dyn Tool>>::new())
-        .memory(make_memory())
-        .observer(make_observer())
-        .tool_dispatcher(Box::new(NativeToolDispatcher::default()))
-        .workspace_dir(std::env::temp_dir())
-        .security(test_security())
-        .config(AgentConfig {
-            bounded_dag_live: true,
-            envelope_assemble: false,
-            ..AgentConfig::default()
-        })
-        .available_hints(vec!["fast".into(), "code".into()])
-        .build()
-        .unwrap();
-    agent.set_explicit_model(Some("nvidia/nemotron-3-ultra-550b-a55b".into()));
-    agent.set_host_phase(crate::agent::host_phase::HostPhase::Build);
-    let out = agent.turn("fix the compiler error").await.unwrap();
-    assert!(out.contains("verified"), "{out}");
-    assert!(!out.contains("contact model="), "{out}");
-    let used = models.lock().unwrap().clone();
-    assert_eq!(
-        used[0], "nvidia/nemotron-3-ultra-550b-a55b",
-        "live planner uses the session cognition model; got {used:?}"
-    );
-    assert_eq!(
-        used[1],
-        "hint:code".to_string(),
-        "live coding hops use capability route, not explicit_user_pick; got {used:?}"
-    );
-    assert_eq!(used[2], "hint:code".to_string(), "got {used:?}");
-    assert_eq!(
-        used[3],
-        "hint:fast".to_string(),
-        "verify uses speed hint; got {used:?}"
+        recorded.len() >= 2,
+        "the loop must take another model iteration after success: false, got {}",
+        recorded.len()
     );
 }

@@ -398,13 +398,13 @@ pub struct AgentConfig {
     /// expecting chat behavior. Requires `--features ai-protocol`. No AI-generated DAGs.
     #[serde(default)]
     pub template_dag: bool,
-    /// VL-NA-011/015: when true, CLI + Web `Agent::turn` run a planner node (session
-    /// default model, same `run_tool_call_loop`) then linear work nodes. Default: `false`.
-    /// Not L4 `candidate_dag_emit`. Empty `bounded_dag_path` enables the planner.
+    /// Retained so existing files still parse. VL-RAO-001: `true` does not schedule
+    /// a planner or linear work nodes. CLI and Web use `run_tool_call_loop`.
+    /// The process does not rewrite this key. Default: `false`.
     #[serde(default)]
     pub bounded_dag_live: bool,
-    /// Optional filesystem path to L2 DAG JSON. Non-empty skips the planner.
-    /// Empty/none → planner; invalid planner JSON → embedded code-fix template.
+    /// Optional filesystem path kept for fixtures and doctor. Production turns do not
+    /// load it as a scheduler (VL-RAO-001).
     #[serde(default)]
     pub bounded_dag_path: Option<String>,
     /// CR-L4-003: library/doctor gate for [`crate::agent::candidate_dag::maybe_run_candidate_shadow`].

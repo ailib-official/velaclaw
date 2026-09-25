@@ -201,25 +201,21 @@ Skipping `ui-chat` embed leaves `/chat` on the stub page. `trial-redeploy.sh` ch
 
 `trial-redeploy.sh` exits 1 if the release ELF is missing the fingerprint or lives under the sandbox cache.
 
-### Bounded DAG live vs Plan (VL-NA-011/012)
+### `bounded_dag_live` no longer schedules a turn (VL-RAO-001)
 
 Symptoms:
 
-- Chat Plan/Build toggle does not walk `locate` → `patch` → `verify`
-- CLI `--plan` still only blocks mutating tools
+- Setting `bounded_dag_live = true` does not walk `locate` → `patch` → `verify`
 
 Cause:
 
-- `[agent].bounded_dag_live` defaults to **false** (opt-in). Plan without that flag is the older mutating-tool gate, not the DAG planner + preview.
+- VL-RAO-001: the key is retained so existing files still parse. It does not schedule a planner or linear work nodes. CLI `--plan` and the Web Plan phase block mutating tools. They do not print a DAG preview.
 
-Fix:
+What to expect:
 
-1. Set `bounded_dag_live = true` in `[agent]`. Leave `bounded_dag_path` empty to let the planner run; set a JSON path to skip the planner.
-2. CLI: `velaclaw agent --plan -m "…"` for planner + preview; omit `--plan` for Build.
-3. Web: Plan/Build radios send `host_phase` on `/ws` chat (same `Agent::turn` as REST).
-4. `velaclaw doctor` reports `bounded_dag` live/path. Build nodes write `dag_art:<session>:<node>` and print a `contact model=` line. This is **not** L4 `candidate_dag_emit`.
-5. Plan preview shows `code-fix-template` (`locate` → `patch` → `verify`) when the planner JSON fails validation twice. The planner uses a **tool-free** chat turn (not the shell tool loop). Fallback graphs are **not** cached. Plan always replans; Build with a short approval (`ok` / `同意` / `Approve Build`) reuses `dag_plan:<session>`. A new task or correction on Build clears that cache and `dag_art:<session>:*` then replans (generic — not domain-specific).
-6. Work-node Contact follows capability tags (`hint:document` / `hint:reasoning` / `hint:code` / `hint:fast`). The Web session picker is the **planner** default only; it does not flatten every node onto that model. Non-entry nodes receive the previous node's clipped artifact even when the planner omitted `context_requirements`.
+1. A turn uses `run_tool_call_loop` whether the key is true or false.
+2. The process does not rewrite the key in the config file.
+3. `velaclaw doctor` still prints the key and path. That line is not a live scheduler.
 
 ### L4 shadow M3 fields with no Grafana (CR-HOST-002)
 

@@ -16,15 +16,10 @@ use tokio::sync::mpsc::Sender;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-/// Config for one Web/API turn. Live bounded DAG keeps planner/observe on
-/// session `default_model` (avoid a hung aggregator id). Work hops still use
-/// the Web picker via [`explicit_model_from_request`] (VL-NA-043).
+/// Config for one Web/API turn. Model overrides always apply.
+/// `bounded_dag_live` does not change this (VL-RAO-001).
 pub fn effective_chat_config(config: &Config, req: &ChatApiRequest) -> Config {
-    if config.agent.bounded_dag_live {
-        config.clone()
-    } else {
-        apply_chat_overrides(config.clone(), req)
-    }
+    apply_chat_overrides(config.clone(), req)
 }
 
 /// Apply per-request model/temperature overrides onto a config clone.
@@ -652,7 +647,7 @@ mod tests {
     }
 
     #[test]
-    fn live_effective_chat_config_keeps_session_default() {
+    fn live_flag_still_applies_chat_model_override() {
         let mut base = Config::default();
         base.default_model = Some("deepseek/deepseek-v4-flash".into());
         base.default_provider = Some("deepseek".into());
@@ -668,9 +663,9 @@ mod tests {
         let updated = effective_chat_config(&base, &req);
         assert_eq!(
             updated.default_model.as_deref(),
-            Some("deepseek/deepseek-v4-flash")
+            Some("nvidia/nemotron-3-ultra-550b-a55b")
         );
-        assert_eq!(updated.default_provider.as_deref(), Some("deepseek"));
+        assert!(updated.agent.bounded_dag_live);
     }
 
     #[test]

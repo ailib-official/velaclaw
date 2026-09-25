@@ -110,9 +110,9 @@ agentic = true
 allowed_tools = ["web_search", "http_request", "file_read"]
 max_iterations = 8
 
-[agents.coder]
+[agents.checker]
 provider = "ollama"
-model = "qwen2.5-coder:32b"
+model = "qwen2.5:32b"
 temperature = 0.2
 ```
 

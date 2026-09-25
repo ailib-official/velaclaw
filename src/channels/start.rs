@@ -109,10 +109,7 @@ pub async fn start_channels(config: Config) -> Result<()> {
         "Send a Pushover notification to your device. Requires PUSHOVER_TOKEN and PUSHOVER_USER_KEY in .env file.",
     ));
     if !config.agents.is_empty() {
-        tool_descs.push((
-            "delegate",
-            "Delegate a subtask to a specialized agent. Use when: a task benefits from a different model (e.g. fast summarization, deep reasoning, code generation). The sub-agent runs a single prompt and returns its response.",
-        ));
+        tool_descs.push(("delegate", crate::tools::DELEGATE_TOOL_DESCRIPTION));
     }
 
     let bootstrap_max_chars = if config.agent.compact_context {

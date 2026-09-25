@@ -391,10 +391,7 @@ pub async fn run(
         "Manage scheduled tasks (create/list/get/cancel/pause/resume). Supports recurring cron and one-shot delays.",
     ));
     if !config.agents.is_empty() {
-        tool_descs.push((
-            "delegate",
-            "Delegate a sub-task to a specialized agent. Use when: task needs different model/capability, or to parallelize work.",
-        ));
+        tool_descs.push(("delegate", crate::tools::DELEGATE_TOOL_DESCRIPTION));
     }
     if config.peripherals.enabled && !config.peripherals.boards.is_empty() {
         tool_descs.push((

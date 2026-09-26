@@ -1492,7 +1492,7 @@ mod loop_e2e_tests {
         let dir = tempfile::tempdir().expect("temp");
         let path = dir.path().join("brief.txt");
         let provider = Script::new(vec![
-            call("write_note", &format!("{{\"text\":\"citation line\"}}")),
+            call("write_note", r#"{"text":"citation line"}"#),
             call("read_note", "{}"),
             ChatResponse {
                 text: Some(format!("Saved {}", path.display())),

@@ -367,9 +367,13 @@ pub fn ensure_user_visible(user_task: &str, body: &str) -> String {
     }
 }
 
-/// Session/bubble assistant body (I12). Same entry as last-hop delivery.
+/// Persisted chat bubble. An empty loop result stays empty (VL-RAO-006).
+/// Non-empty text still drops an internodal envelope.
 #[must_use]
 pub fn session_assistant_body(user_task: &str, body: &str) -> String {
+    if body.trim().is_empty() {
+        return String::new();
+    }
     ensure_user_visible(user_task, body)
 }
 
@@ -894,6 +898,12 @@ mod tests {
     }
 
     #[test]
+    fn empty_session_body_is_not_the_parlor_stop() {
+        let out = session_assistant_body("检查远端服务状态", "");
+        assert!(out.is_empty(), "{out}");
+        assert!(!out.contains("没有可展示的结论"));
+    }
+
     fn parlor_fallback_empty_does_not_point_at_hidden_steps() {
         let out = parlor_fallback("查看本地项目代码并给出报告", "");
         assert!(!out.contains("步骤记录"));

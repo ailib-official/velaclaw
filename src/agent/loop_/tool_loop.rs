@@ -801,7 +801,15 @@ pub(crate) async fn run_tool_call_loop(
         } else {
             false
         };
-        if !stage_rejected && hop_close != crate::agent::hop_stop::HopClose::None {
+        // VL-RAO-006: directory listings set OffGoal but stay in history. The
+        // model samples again. Policy denial and the four-shell cap still stop.
+        if !stage_rejected
+            && matches!(
+                hop_close,
+                crate::agent::hop_stop::HopClose::Cap
+                    | crate::agent::hop_stop::HopClose::PolicyDeny
+            )
+        {
             let mut body =
                 crate::agent::probe_dedup::hop_close_visible_body(&visible_text, hop_close);
             if let Some(suffix) = stage_cursor.pointer_suffix() {
@@ -1491,6 +1499,97 @@ mod loop_e2e_tests {
             .expect("continues after failure");
         assert!(reply.contains("The source is alpha."));
         assert!(!reply.contains("Stopped after"));
+    }
+
+    struct FixedShell {
+        output: String,
+    }
+
+    #[async_trait]
+    impl Tool for FixedShell {
+        fn name(&self) -> &str {
+            "shell"
+        }
+        fn description(&self) -> &str {
+            "Run a command"
+        }
+        fn parameters_schema(&self) -> serde_json::Value {
+            serde_json::json!({"type": "object", "properties": {}})
+        }
+        async fn execute(
+            &self,
+            _args: serde_json::Value,
+            _ctx: &ToolExecutionContext,
+        ) -> anyhow::Result<ToolResult> {
+            Ok(ToolResult {
+                success: true,
+                output: self.output.clone(),
+                error: None,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn two_listings_then_prose_stays_in_the_tool_loop() {
+        let provider = Script::new(vec![
+            call("shell", r#"{"command":"ls /reports"}"#),
+            call("shell", r#"{"command":"ls /reports/notes"}"#),
+            ChatResponse {
+                text: Some("The service is running.".into()),
+                tool_calls: vec![],
+            },
+        ]);
+        let tools: Vec<Box<dyn Tool>> = vec![Box::new(FixedShell {
+            output: "total 4\n./notes\n".into(),
+        })];
+        let mut history = vec![ChatMessage::user("Check the service and the reports.")];
+        let reply = drive(&provider, &mut history, &tools, 6, None)
+            .await
+            .expect("listings do not end the loop");
+        assert_eq!(reply, "The service is running.");
+        assert!(!reply.contains("Stopped after"));
+    }
+
+    #[tokio::test]
+    async fn policy_deny_still_ends_the_tool_loop() {
+        let provider = Script::new(vec![
+            call("shell", "{}"),
+            ChatResponse {
+                text: Some("The report is ready.".into()),
+                tool_calls: vec![],
+            },
+        ]);
+        let tools: Vec<Box<dyn Tool>> = vec![Box::new(FixedShell {
+            output: "unsafe shell construct".into(),
+        })];
+        let mut history = vec![ChatMessage::user("Check the service.")];
+        let reply = drive(&provider, &mut history, &tools, 6, None)
+            .await
+            .expect("policy deny returns");
+        assert!(!reply.contains("The report is ready."), "{reply}");
+        assert_eq!(provider.replies.lock().expect("replies").len(), 1);
+    }
+
+    #[tokio::test]
+    async fn four_shells_still_hit_the_round_cap() {
+        let mut script = Vec::new();
+        for i in 1..=4 {
+            script.push(call("shell", &format!(r#"{{"command":"echo {i}"}}"#)));
+        }
+        script.push(ChatResponse {
+            text: Some("The report is ready.".into()),
+            tool_calls: vec![],
+        });
+        let provider = Script::new(script);
+        let tools: Vec<Box<dyn Tool>> = vec![Box::new(FixedShell {
+            output: "service active since boot\nMain PID: 1\n".into(),
+        })];
+        let mut history = vec![ChatMessage::user("Check the service.")];
+        let reply = drive(&provider, &mut history, &tools, 8, None)
+            .await
+            .expect("cap returns");
+        assert!(!reply.contains("The report is ready."), "{reply}");
+        assert_eq!(provider.replies.lock().expect("replies").len(), 1);
     }
 
     #[tokio::test]

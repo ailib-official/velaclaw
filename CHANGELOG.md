@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Tool loop close (VL-RAO-006):** two directory listings no longer end `run_tool_call_loop`. The next sample can still write the reply. A policy denial and the four-shell cap still stop the loop. An empty assistant body is stored empty; it is not replaced with the parlor “no conclusion” sentence.
+
 - **Tool loop bound (VL-RAO-005):** reaching `max_tool_iterations` returns the visible assistant text and a short notice. Between samples, the loop calls `prepare_turn_history` with layered assembly off, using the same message cap and `compact_context_ratio` as the turn boundary. Ratio `0` still summarizes only after the message cap. A `delegate` subtask that hits the same bound stays `success: false`.
 
 - **Macro stages (VL-RAO-004):** `[agent].macro_stages` defaults to empty, so the tool loop is unchanged. A non-empty list checks `stage_done: <name>` inside `run_tool_call_loop`. A failed check stays on the current stage. Pointers are appended to the assistant text only after every stage passes. DAG hop gates are not called.

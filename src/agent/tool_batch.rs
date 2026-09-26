@@ -41,6 +41,16 @@ pub(crate) struct ToolBatchGateExtras {
     pub host_phase: HostPhase,
     /// `[agent].macro_stages`. Empty keeps the tool loop unchanged.
     pub macro_stages: Vec<crate::config::MacroStageConfig>,
+    /// When set, `run_tool_call_loop` calls `prepare_turn_history` between samples.
+    pub loop_compact: Option<ToolLoopCompact>,
+}
+
+/// Message-count and ratio inputs already used at the turn boundary.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ToolLoopCompact {
+    pub max_history: usize,
+    pub compact_context_ratio: f64,
+    pub context_window: Option<u32>,
 }
 
 fn abort_hitl(extras: Option<&ToolBatchGateExtras>) {

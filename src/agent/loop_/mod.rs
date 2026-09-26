@@ -494,6 +494,11 @@ pub async fn run(
         human_input_hub: None,
         host_phase,
         macro_stages: config.agent.macro_stages.clone(),
+        loop_compact: Some(crate::agent::tool_batch::ToolLoopCompact {
+            max_history: config.agent.max_history_messages,
+            compact_context_ratio: config.agent.compact_context_ratio,
+            context_window: crate::protocol_registry::lookup_context_window(&model_name),
+        }),
     };
 
     // ── Execute ──────────────────────────────────────────────────
@@ -1318,6 +1323,11 @@ pub async fn process_message(config: Config, message: &str) -> Result<String> {
         true,
         &config.multimodal,
         config.agent.max_tool_iterations,
+        Some(crate::agent::tool_batch::ToolLoopCompact {
+            max_history: config.agent.max_history_messages,
+            compact_context_ratio: config.agent.compact_context_ratio,
+            context_window: crate::protocol_registry::lookup_context_window(&model_name),
+        }),
     )
     .await
 }

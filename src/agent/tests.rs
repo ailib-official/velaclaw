@@ -510,12 +510,13 @@ async fn turn_bails_out_at_max_iterations() {
 
     let mut agent = build_agent_with_config(provider, vec![Box::new(EchoTool)], config);
 
-    let result = agent.turn("infinite loop").await;
-    assert!(result.is_err());
-    let err = result.unwrap_err().to_string();
+    let result = agent
+        .turn("infinite loop")
+        .await
+        .expect("iteration cap returns text");
     assert!(
-        err.contains("maximum tool iterations"),
-        "Expected max iterations error, got: {err}"
+        result.contains("Stopped after 3 tool iterations"),
+        "Expected iteration notice, got: {result}"
     );
 }
 

@@ -854,6 +854,11 @@ impl Agent {
             human_input_hub: self.human_input_hub.clone(),
             host_phase: self.host_phase,
             macro_stages: self.config.macro_stages.clone(),
+            loop_compact: Some(crate::agent::tool_batch::ToolLoopCompact {
+                max_history: self.config.max_history_messages,
+                compact_context_ratio: self.config.compact_context_ratio,
+                context_window: self.hop_envelope_window(None),
+            }),
         };
         let approval_mgr = self.gateway_approval.as_ref().map(|(mgr, _)| mgr);
 

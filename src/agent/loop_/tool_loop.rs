@@ -18,7 +18,14 @@ pub(crate) async fn agent_turn(
     silent: bool,
     multimodal_config: &crate::config::MultimodalConfig,
     max_tool_iterations: usize,
+    loop_compact: Option<crate::agent::tool_batch::ToolLoopCompact>,
 ) -> Result<String> {
+    let gate = loop_compact.map(
+        |loop_compact| crate::agent::tool_batch::ToolBatchGateExtras {
+            loop_compact: Some(loop_compact),
+            ..Default::default()
+        },
+    );
     run_tool_call_loop(
         provider,
         history,
@@ -48,7 +55,7 @@ pub(crate) async fn agent_turn(
         },
         None,
         None,
-        None,
+        gate.as_ref(),
     )
     .await
 }
@@ -62,7 +69,7 @@ pub(crate) async fn agent_turn(
 // full conversation so far (system prompt + user messages + prior tool
 // results). The loop exits when:
 //   • the LLM returns no tool calls (final answer), or
-//   • max_iterations is reached (runaway safety), or
+//   • max_iterations is reached (returns the visible text plus a notice), or
 //   • the cancellation token fires (external abort).
 
 /// Append manifest-backed text tool instructions when the model may emit markup
@@ -174,6 +181,7 @@ pub(crate) async fn run_tool_call_loop(
             .map(|extras| extras.macro_stages.as_slice())
             .unwrap_or(&[]),
     );
+    let mut last_visible = String::new();
 
     let block_retrieve = soft_fail.as_ref().is_some_and(|c| c.block_retrieve_tools);
     let tool_specs: Vec<crate::tools::ToolSpec> = if block_retrieve {
@@ -641,6 +649,9 @@ pub(crate) async fn run_tool_call_loop(
             print!("{prefixed}");
             let _ = std::io::stdout().flush();
         }
+        if !visible_text.trim().is_empty() {
+            last_visible = visible_text.clone();
+        }
 
         // Execute tool calls and build results. `individual_results` tracks per-call output so
         // native-mode history can emit one role=tool message per tool call with the correct ID.
@@ -799,9 +810,49 @@ pub(crate) async fn run_tool_call_loop(
             }
             return Ok(body);
         }
+        compact_between_samples(history, provider, active_model.as_str(), gate_extras).await?;
     }
 
-    anyhow::bail!("Agent exceeded maximum tool iterations ({max_iterations})")
+    Ok(tool_iteration_cap_reply(&last_visible, max_iterations))
+}
+
+fn tool_iteration_cap_reply(last_visible: &str, max_iterations: usize) -> String {
+    let notice =
+        format!("Stopped after {max_iterations} tool iterations. This reply is incomplete.");
+    if last_visible.trim().is_empty() {
+        notice
+    } else {
+        format!("{last_visible}\n\n{notice}")
+    }
+}
+
+async fn compact_between_samples(
+    history: &mut Vec<ChatMessage>,
+    provider: &dyn Provider,
+    model: &str,
+    gate_extras: Option<&crate::agent::tool_batch::ToolBatchGateExtras>,
+) -> Result<()> {
+    let Some(compact) = gate_extras.and_then(|extras| extras.loop_compact) else {
+        return Ok(());
+    };
+    let summarizer = crate::agent::context_orch::HistorySummarizer { provider, model };
+    crate::agent::context_orch::prepare_turn_history(
+        history,
+        crate::agent::context_orch::PrepareHistoryOpts {
+            layered: false,
+            compact_context: false,
+            async_pool: false,
+            max_history: compact.max_history,
+            compact_context_ratio: compact.compact_context_ratio,
+            summarizer: Some(&summarizer),
+            #[cfg(feature = "ai-protocol")]
+            extra_chunks: &[],
+            #[cfg(feature = "ai-protocol")]
+            context_window: compact.context_window,
+        },
+    )
+    .await?;
+    Ok(())
 }
 
 /// Catalog logical ids from `[[model_routes]]` including same-hint `fallbacks`.
@@ -1149,5 +1200,376 @@ mod hitl_prompt_tests {
         assert!(prompt.contains("request_human_input"));
         assert!(prompt.contains("Do **not** ask the human to run terminal commands"));
         assert!(prompt.contains("shell") && prompt.contains("approval"));
+    }
+}
+
+#[cfg(test)]
+mod loop_e2e_tests {
+    use super::run_tool_call_loop;
+    use crate::agent::tool_batch::{ToolBatchGateExtras, ToolLoopCompact};
+    use crate::observability::NoopObserver;
+    use crate::providers::{ChatMessage, ChatRequest, ChatResponse, Provider, ToolCall};
+    use crate::tools::{Tool, ToolExecutionContext, ToolResult};
+    use async_trait::async_trait;
+    use std::sync::{Arc, Mutex};
+
+    struct Script {
+        replies: Mutex<Vec<ChatResponse>>,
+        seen: Mutex<Vec<Vec<ChatMessage>>>,
+        summaries: Mutex<usize>,
+    }
+
+    impl Script {
+        fn new(replies: Vec<ChatResponse>) -> Self {
+            Self {
+                replies: Mutex::new(replies),
+                seen: Mutex::new(Vec::new()),
+                summaries: Mutex::new(0),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl Provider for Script {
+        async fn chat_with_system(
+            &self,
+            _system_prompt: Option<&str>,
+            _message: &str,
+            _model: &str,
+            _temperature: f64,
+        ) -> anyhow::Result<String> {
+            *self.summaries.lock().expect("summary count") += 1;
+            Ok("kept the citation".into())
+        }
+
+        async fn chat(
+            &self,
+            request: ChatRequest<'_>,
+            _model: &str,
+            _temperature: f64,
+        ) -> anyhow::Result<ChatResponse> {
+            self.seen
+                .lock()
+                .expect("seen")
+                .push(request.messages.to_vec());
+            let mut replies = self.replies.lock().expect("replies");
+            if replies.is_empty() {
+                return Ok(ChatResponse {
+                    text: Some("done".into()),
+                    tool_calls: vec![],
+                });
+            }
+            Ok(replies.remove(0))
+        }
+    }
+
+    struct OnceFail {
+        left: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl Tool for OnceFail {
+        fn name(&self) -> &str {
+            "probe"
+        }
+        fn description(&self) -> &str {
+            "Look up a source"
+        }
+        fn parameters_schema(&self) -> serde_json::Value {
+            serde_json::json!({"type": "object", "properties": {}})
+        }
+        async fn execute(
+            &self,
+            _args: serde_json::Value,
+            _ctx: &ToolExecutionContext,
+        ) -> anyhow::Result<ToolResult> {
+            if self.left.fetch_sub(1, std::sync::atomic::Ordering::SeqCst) == 1 {
+                return Ok(ToolResult {
+                    success: false,
+                    output: "source missing".into(),
+                    error: Some("source missing".into()),
+                });
+            }
+            Ok(ToolResult {
+                success: true,
+                output: "source alpha".into(),
+                error: None,
+            })
+        }
+    }
+
+    struct NotePad {
+        path: std::path::PathBuf,
+    }
+
+    #[async_trait]
+    impl Tool for NotePad {
+        fn name(&self) -> &str {
+            "write_note"
+        }
+        fn description(&self) -> &str {
+            "Write the note"
+        }
+        fn parameters_schema(&self) -> serde_json::Value {
+            serde_json::json!({
+                "type": "object",
+                "properties": {"text": {"type": "string"}},
+                "required": ["text"]
+            })
+        }
+        async fn execute(
+            &self,
+            args: serde_json::Value,
+            _ctx: &ToolExecutionContext,
+        ) -> anyhow::Result<ToolResult> {
+            let text = args
+                .get("text")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            std::fs::write(&self.path, &text)?;
+            Ok(ToolResult {
+                success: true,
+                output: self.path.display().to_string(),
+                error: None,
+            })
+        }
+    }
+
+    struct NoteRead {
+        path: std::path::PathBuf,
+    }
+
+    #[async_trait]
+    impl Tool for NoteRead {
+        fn name(&self) -> &str {
+            "read_note"
+        }
+        fn description(&self) -> &str {
+            "Read the note"
+        }
+        fn parameters_schema(&self) -> serde_json::Value {
+            serde_json::json!({"type": "object", "properties": {}})
+        }
+        async fn execute(
+            &self,
+            _args: serde_json::Value,
+            _ctx: &ToolExecutionContext,
+        ) -> anyhow::Result<ToolResult> {
+            let text = std::fs::read_to_string(&self.path).unwrap_or_default();
+            Ok(ToolResult {
+                success: true,
+                output: format!("{}: {text}", self.path.display()),
+                error: None,
+            })
+        }
+    }
+
+    fn call(name: &str, arguments: &str) -> ChatResponse {
+        ChatResponse {
+            text: Some(String::new()),
+            tool_calls: vec![ToolCall {
+                id: format!("call-{name}"),
+                name: name.into(),
+                arguments: arguments.into(),
+            }],
+        }
+    }
+
+    fn call_with_text(name: &str, arguments: &str, text: &str) -> ChatResponse {
+        let mut response = call(name, arguments);
+        response.text = Some(text.into());
+        response
+    }
+
+    fn render() -> crate::cli_render::RenderOpts {
+        crate::cli_render::RenderOpts {
+            style: crate::cli_render::RenderStyle {
+                ansi: false,
+                markdown: false,
+            },
+            fold_lines: 4,
+            fold_enabled: false,
+        }
+    }
+
+    async fn drive(
+        provider: &Script,
+        history: &mut Vec<ChatMessage>,
+        tools: &[Box<dyn Tool>],
+        max_iterations: usize,
+        compact: Option<ToolLoopCompact>,
+    ) -> anyhow::Result<String> {
+        let gate = ToolBatchGateExtras {
+            loop_compact: compact,
+            ..ToolBatchGateExtras::default()
+        };
+        let observer = NoopObserver;
+        run_tool_call_loop(
+            provider,
+            history,
+            tools,
+            &observer,
+            "mock",
+            "mock-model",
+            0.0,
+            true,
+            None,
+            "cli",
+            &crate::config::MultimodalConfig::default(),
+            max_iterations,
+            None,
+            None,
+            None,
+            None,
+            None,
+            false,
+            render(),
+            None,
+            None,
+            Some(&gate),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn direct_answer_does_not_mention_the_iteration_cap() {
+        let provider = Script::new(vec![ChatResponse {
+            text: Some("The citation is alpha.".into()),
+            tool_calls: vec![],
+        }]);
+        let mut history = vec![ChatMessage::user("What is the citation?")];
+        let reply = drive(&provider, &mut history, &[], 4, None)
+            .await
+            .expect("answer");
+        assert_eq!(reply, "The citation is alpha.");
+        assert_eq!(*provider.summaries.lock().expect("summaries"), 0);
+    }
+
+    #[tokio::test]
+    async fn iteration_cap_keeps_the_visible_reply() {
+        let provider = Script::new(vec![call_with_text(
+            "probe",
+            "{}",
+            "Gathered the citation.",
+        )]);
+        let tools: Vec<Box<dyn Tool>> = vec![Box::new(OnceFail {
+            left: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        })];
+        let mut history = vec![ChatMessage::user("Check the source.")];
+        let reply = drive(&provider, &mut history, &tools, 1, None)
+            .await
+            .expect("cap returns text");
+        assert!(reply.contains("Gathered the citation."));
+        assert!(reply.contains("Stopped after 1 tool iterations"));
+    }
+
+    #[tokio::test]
+    async fn failed_probe_then_second_probe_reaches_the_answer() {
+        static LEFT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1);
+        LEFT.store(1, std::sync::atomic::Ordering::SeqCst);
+        let provider = Script::new(vec![
+            call("probe", "{}"),
+            call("probe", "{}"),
+            ChatResponse {
+                text: Some("The source is alpha.".into()),
+                tool_calls: vec![],
+            },
+        ]);
+        let tools: Vec<Box<dyn Tool>> = vec![Box::new(OnceFail {
+            left: Arc::new(std::sync::atomic::AtomicUsize::new(1)),
+        })];
+        let mut history = vec![ChatMessage::user("Find the source.")];
+        let reply = drive(&provider, &mut history, &tools, 4, None)
+            .await
+            .expect("continues after failure");
+        assert!(reply.contains("The source is alpha."));
+        assert!(!reply.contains("Stopped after"));
+    }
+
+    #[tokio::test]
+    async fn write_note_then_read_it_back() {
+        let dir = tempfile::tempdir().expect("temp");
+        let path = dir.path().join("brief.txt");
+        let provider = Script::new(vec![
+            call("write_note", &format!("{{\"text\":\"citation line\"}}")),
+            call("read_note", "{}"),
+            ChatResponse {
+                text: Some(format!("Saved {}", path.display())),
+                tool_calls: vec![],
+            },
+        ]);
+        let tools: Vec<Box<dyn Tool>> = vec![
+            Box::new(NotePad { path: path.clone() }),
+            Box::new(NoteRead { path: path.clone() }),
+        ];
+        let mut history = vec![ChatMessage::user("Write the note.")];
+        let reply = drive(&provider, &mut history, &tools, 4, None)
+            .await
+            .expect("note");
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("file"),
+            "citation line"
+        );
+        assert!(reply.contains(&path.display().to_string()));
+    }
+
+    #[tokio::test]
+    async fn short_history_with_ratio_zero_does_not_summarize() {
+        let provider = Script::new(vec![
+            call("probe", "{}"),
+            ChatResponse {
+                text: Some("done".into()),
+                tool_calls: vec![],
+            },
+        ]);
+        let tools: Vec<Box<dyn Tool>> = vec![Box::new(OnceFail {
+            left: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        })];
+        let mut history = vec![ChatMessage::system("system"), ChatMessage::user("Check.")];
+        let compact = ToolLoopCompact {
+            max_history: 50,
+            compact_context_ratio: 0.0,
+            context_window: Some(8000),
+        };
+        let reply = drive(&provider, &mut history, &tools, 3, Some(compact))
+            .await
+            .expect("short");
+        assert_eq!(reply, "done");
+        assert_eq!(*provider.summaries.lock().expect("summaries"), 0);
+        let seen = provider.seen.lock().expect("seen");
+        assert!(seen.len() >= 2);
+        assert!(!seen[1]
+            .iter()
+            .any(|m| m.content.contains("[Compaction summary]")));
+    }
+
+    #[tokio::test]
+    async fn long_tool_history_compacts_before_the_next_sample() {
+        let provider = Script::new(vec![
+            call("probe", "{}"),
+            ChatResponse {
+                text: Some("done".into()),
+                tool_calls: vec![],
+            },
+        ]);
+        let tools: Vec<Box<dyn Tool>> = vec![Box::new(OnceFail {
+            left: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        })];
+        let mut history = vec![ChatMessage::system("system"), ChatMessage::user("Check.")];
+        let compact = ToolLoopCompact {
+            max_history: 2,
+            compact_context_ratio: 0.0,
+            context_window: None,
+        };
+        let reply = drive(&provider, &mut history, &tools, 3, Some(compact))
+            .await
+            .expect("compact");
+        assert_eq!(reply, "done");
+        assert_eq!(*provider.summaries.lock().expect("summaries"), 1);
+        let seen = provider.seen.lock().expect("seen");
+        assert!(seen[1]
+            .iter()
+            .any(|m| m.content.contains("[Compaction summary]")));
     }
 }

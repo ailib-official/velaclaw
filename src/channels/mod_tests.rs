@@ -1483,7 +1483,7 @@ async fn process_channel_message_reports_configured_max_tool_iterations_limit() 
     let sent_messages = channel_impl.sent_messages.lock().await;
     assert_eq!(sent_messages.len(), 1);
     assert!(sent_messages[0].starts_with("chat-iter-fail:"));
-    assert!(sent_messages[0].contains("⚠️ Error: Agent exceeded maximum tool iterations (3)"));
+    assert!(sent_messages[0].contains("Stopped after 3 tool iterations"));
 }
 
 struct NoopMemory;

@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Tool loop bound (VL-RAO-005):** reaching `max_tool_iterations` returns the visible assistant text and a short notice. Between samples, the loop calls `prepare_turn_history` with layered assembly off, using the same message cap and `compact_context_ratio` as the turn boundary. Ratio `0` still summarizes only after the message cap.
+
 - **Macro stages (VL-RAO-004):** `[agent].macro_stages` defaults to empty, so the tool loop is unchanged. A non-empty list checks `stage_done: <name>` inside `run_tool_call_loop`. A failed check stays on the current stage. Pointers are appended to the assistant text only after every stage passes. DAG hop gates are not called.
 
 - **Delegate wording (VL-RAO-003):** the `delegate` tool description, channel and CLI copies, and the sub-agent prompt describe isolated general subtasks and a short result. The worker model remains `[agents.<name>].provider` / `model`. Parent model selection, timeouts (120s / 300s), and child-history isolation are unchanged.

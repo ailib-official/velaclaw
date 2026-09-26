@@ -414,6 +414,14 @@ pub(crate) async fn process_channel_message(
     let max_tool_iterations = runtime_defaults.max_tool_iterations;
     let timeout_budget_secs =
         channel_message_timeout_budget_secs(ctx.message_timeout_secs, max_tool_iterations);
+    let channel_gate = crate::agent::tool_batch::ToolBatchGateExtras {
+        loop_compact: Some(crate::agent::tool_batch::ToolLoopCompact {
+            max_history: super::runtime::MAX_CHANNEL_HISTORY,
+            compact_context_ratio: ctx.envelope_pilot.compact_context_ratio,
+            context_window: crate::protocol_registry::lookup_context_window(route.model.as_str()),
+        }),
+        ..Default::default()
+    };
     let llm_result = tokio::select! {
         () = cancellation_token.cancelled() => LlmExecutionResult::Cancelled,
         result = tokio::time::timeout(
@@ -468,7 +476,7 @@ pub(crate) async fn process_channel_message(
                     hop_tool_accum: None,
                     block_retrieve_tools: false,
                 }),
-            None,
+            Some(&channel_gate),
             ),
         ) => LlmExecutionResult::Completed(result),
     };

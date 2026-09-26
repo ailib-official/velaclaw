@@ -713,3 +713,27 @@ async fn e2e_live_openai_codex_multi_turn() {
         "Model should recall 'zephyr' from history, got: {r2}",
     );
 }
+
+/// Live reply through `Agent::turn` (the tool loop), not `chat_with_history`.
+///
+/// Run manually: `cargo test e2e_live_tool_loop_reply -- --ignored`
+#[tokio::test]
+#[ignore]
+async fn e2e_live_tool_loop_reply() {
+    use velaclaw::providers::openai_codex::OpenAiCodexProvider;
+
+    let provider = OpenAiCodexProvider::new(&ProviderRuntimeOptions::default());
+    let mut agent = build_agent(Box::new(provider), vec![]);
+    let response = agent
+        .turn("Reply with the single word pong.")
+        .await
+        .expect("live tool loop");
+    assert!(
+        !response.is_empty(),
+        "tool loop should return the model reply"
+    );
+    assert!(
+        !response.contains("Stopped after"),
+        "a one-step reply should stay under the iteration cap, got: {response}"
+    );
+}

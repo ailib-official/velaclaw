@@ -461,6 +461,16 @@ impl DelegateTool {
         .await;
 
         let aggregate = match result {
+            Ok(Ok(response))
+                if crate::agent::loop_::tool_loop::reply_hit_tool_iteration_cap(&response) =>
+            {
+                SubAgentAggregate {
+                    run_id: dispatch.run_id.clone(),
+                    success: false,
+                    output: String::new(),
+                    error: Some(format!("Agent '{agent_name}' failed: {response}")),
+                }
+            }
             Ok(Ok(response)) => {
                 let rendered = if response.trim().is_empty() {
                     "[Empty response]".to_string()
@@ -1219,7 +1229,7 @@ mod tests {
             .error
             .as_deref()
             .unwrap_or("")
-            .contains("maximum tool iterations (2)"));
+            .contains("Stopped after 2 tool iterations"));
     }
 
     #[tokio::test]

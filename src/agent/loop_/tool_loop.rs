@@ -816,9 +816,15 @@ pub(crate) async fn run_tool_call_loop(
     Ok(tool_iteration_cap_reply(&last_visible, max_iterations))
 }
 
+const TOOL_ITERATION_CAP_MARK: &str = "tool iterations. This reply is incomplete.";
+
+/// True when `text` is the incomplete reply from the tool-iteration bound.
+pub(crate) fn reply_hit_tool_iteration_cap(text: &str) -> bool {
+    text.contains(TOOL_ITERATION_CAP_MARK)
+}
+
 fn tool_iteration_cap_reply(last_visible: &str, max_iterations: usize) -> String {
-    let notice =
-        format!("Stopped after {max_iterations} tool iterations. This reply is incomplete.");
+    let notice = format!("Stopped after {max_iterations} {TOOL_ITERATION_CAP_MARK}");
     if last_visible.trim().is_empty() {
         notice
     } else {

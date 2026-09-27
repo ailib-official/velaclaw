@@ -367,14 +367,22 @@ pub fn ensure_user_visible(user_task: &str, body: &str) -> String {
     }
 }
 
-/// Persisted chat bubble. An empty loop result stays empty (VL-RAO-006).
-/// Non-empty text still drops an internodal envelope.
+/// Persisted chat bubble. Same text the tool loop returned (VL-RAO-008).
+///
+/// A prose prefix is kept and an internodal suffix after it is dropped.
+/// An envelope with no prose, or an empty loop result, is stored empty.
+/// The hop parlor sentence is not substituted.
 #[must_use]
-pub fn session_assistant_body(user_task: &str, body: &str) -> String {
+pub fn session_assistant_body(_user_task: &str, body: &str) -> String {
     if body.trim().is_empty() {
         return String::new();
     }
-    ensure_user_visible(user_task, body)
+    let visible = operator_visible_source(body);
+    let visible = visible.trim();
+    if visible.is_empty() || looks_like_internodal_envelope(visible) {
+        return String::new();
+    }
+    visible.to_string()
 }
 
 /// Last hop ends the graph: parlor, never `replan_remaining` (VL-NA-035).
@@ -820,27 +828,33 @@ mod tests {
     }
 
     #[test]
-    fn policy_deny_persisted_body_is_not_internodal() {
+    fn envelope_only_session_body_is_empty() {
         let raw = "HANDOFF\nverdict: policy_deny\nfindings:\n- unsafe_construct\npointers:\n- {\"path\":\"/tmp/x\"}\ngaps:\n- none";
         let out = session_assistant_body("list files", raw);
-        assert!(!looks_like_internodal_envelope(&out), "{out}");
-        assert!(!out.trim_start().to_ascii_lowercase().starts_with("handoff"));
+        assert!(out.is_empty(), "{out}");
+        assert!(!out.contains("没有可展示的结论"));
+        let tube = session_assistant_body("upgrade SmartTube", SMART_TUBE);
+        assert!(tube.is_empty(), "{tube}");
+        assert!(!tube.contains("5917"));
     }
 
     #[test]
-    fn cap_persisted_body_is_not_internodal() {
+    fn prose_prefix_survives_handoff_suffix() {
         let raw = "Host note.\nHANDOFF\nverdict: hop_cap\npointers:\n- {\"node\":\"n1\"}\ngaps:\n- remaining";
         let out = session_assistant_body("inspect workspace", raw);
-        assert!(!looks_like_internodal_envelope(&out), "{out}");
-        assert!(!out.trim_start().to_ascii_lowercase().starts_with("handoff"));
+        assert_eq!(out, "Host note.");
+        assert!(!out.contains("没有可展示的结论"));
+        let mixed = "已完成全部检查。\n\n## Google\n| gProxy | 204 |\n---\n**HANDOFF**\n- verdict: ok\n- findings: x\n- pointers: y\n- gaps: z";
+        let kept = session_assistant_body("检查 xray", mixed);
+        assert!(kept.contains("已完成全部检查"), "{kept}");
+        assert!(kept.contains("gProxy"), "{kept}");
+        assert!(!kept.to_ascii_lowercase().contains("handoff"), "{kept}");
     }
 
     #[test]
-    fn parlor_strips_handoff_pointers() {
-        let out = session_assistant_body("upgrade SmartTube", SMART_TUBE);
-        assert!(!looks_like_internodal_envelope(&out), "{out}");
-        assert!(!out.trim_start().eq_ignore_ascii_case("handoff"));
-        assert!(!out.trim().is_empty());
+    fn prose_session_body_is_the_loop_reply() {
+        let reply = "The service is running.";
+        assert_eq!(session_assistant_body("check the service", reply), reply);
     }
 
     #[test]

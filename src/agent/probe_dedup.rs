@@ -7,17 +7,13 @@ use std::collections::{HashMap, HashSet};
 
 pub const REPEAT_PROBE_NOTICE: &str = "Host skipped a repeat probe (same fingerprint as an earlier call this hop). Use INPUTS; issue a different admit-safe invoke or finish this node's internodal envelope.";
 
-pub const SHELL_ROUND_CAP_NOTICE: &str = "Host capped this hop at four executed shell rounds. Finish this node's internodal envelope from current INPUTS; do not start a new script file.";
-
-pub const MAX_SHELL_ROUNDS_PER_HOP: u32 = 4;
 pub const MAX_OFF_GOAL_LISTING_ROUNDS: u32 = 2;
 pub const OFF_GOAL_NOTICE: &str = "Host stopped this hop: shell output stayed on workspace listing and did not advance the declared evidence layer.";
 
-/// Probe skip/cap state for one DAG node (survives peer_continue and same-node re-entry).
+/// Probe skip state for one DAG node (survives peer_continue and same-node re-entry).
 #[derive(Debug, Default, Clone)]
 pub struct HopProbeGovernor {
     seen: HashSet<String>,
-    shell_rounds: u32,
     policy_denies: HashMap<&'static str, u32>,
     hop_close: HopClose,
     last_policy_class: Option<&'static str>,
@@ -29,7 +25,6 @@ pub struct HopProbeGovernor {
 pub enum ProbeShellDecision {
     Run,
     SkipRepeat,
-    Cap,
 }
 
 impl HopProbeGovernor {
@@ -38,31 +33,13 @@ impl HopProbeGovernor {
         Self::default()
     }
 
-    /// Count one assistant batch that actually ran a shell (not deny / skip / cap).
-    pub fn record_executed_round(&mut self) {
-        self.shell_rounds = self.shell_rounds.saturating_add(1);
-        if self.shell_rounds >= MAX_SHELL_ROUNDS_PER_HOP {
-            self.hop_close = HopClose::Cap;
-        }
-    }
-
     /// Drop a fingerprint that was reserved for Run but never executed (policy-deny / approval).
     pub fn retract_unexecuted(&mut self, fingerprint: &str) {
         self.seen.remove(fingerprint);
     }
 
     #[must_use]
-    pub fn shell_rounds(&self) -> u32 {
-        self.shell_rounds
-    }
-
-    #[must_use]
     pub fn decide_shell(&mut self, fingerprint: &str) -> ProbeShellDecision {
-        if self.shell_rounds >= MAX_SHELL_ROUNDS_PER_HOP {
-            self.notices.push(SHELL_ROUND_CAP_NOTICE.to_string());
-            self.hop_close = HopClose::Cap;
-            return ProbeShellDecision::Cap;
-        }
         if self.seen.contains(fingerprint) {
             self.notices.push(REPEAT_PROBE_NOTICE.to_string());
             return ProbeShellDecision::SkipRepeat;
@@ -77,10 +54,6 @@ impl HopProbeGovernor {
 
     /// Classify a shell tool result: policy-deny tally, off-goal listing, and hop close.
     pub fn note_shell_output(&mut self, output: &str) {
-        if output.contains(SHELL_ROUND_CAP_NOTICE) {
-            self.hop_close = HopClose::Cap;
-            return;
-        }
         if let Some(class) = policy_deny_class(output) {
             self.last_policy_class = Some(class);
             let n = self.policy_denies.entry(class).or_insert(0);
@@ -114,13 +87,11 @@ impl HopProbeGovernor {
     }
 }
 
-/// Cap / skip chrome is internodal (tool results), not the operator bubble.
+/// Skip chrome is internodal (tool results), not the operator bubble.
 #[must_use]
 pub fn is_governor_chrome(text: &str) -> bool {
     let t = text.trim();
-    t.contains(SHELL_ROUND_CAP_NOTICE)
-        || t.contains(REPEAT_PROBE_NOTICE)
-        || t.contains(OFF_GOAL_NOTICE)
+    t.contains(REPEAT_PROBE_NOTICE) || t.contains(OFF_GOAL_NOTICE)
 }
 
 /// Notices that may be appended to the operator-visible prefix (VL-NA-045).
@@ -141,14 +112,16 @@ pub fn hop_close_visible_body(visible_text: &str, close: HopClose) -> String {
     visible_text.trim().to_string()
 }
 
-/// True when this tool result consumed a host shell-round (VL-NA-041).
+/// True when this shell result should keep its probe fingerprint.
+///
+/// Denies, approval holds, and skip chrome return false so the same call can run again.
 #[must_use]
-pub fn shell_output_counts_as_round(output: &str) -> bool {
+pub fn shell_output_keeps_fingerprint(output: &str) -> bool {
     let t = output.trim();
     if t.is_empty() {
         return false;
     }
-    if t.contains(REPEAT_PROBE_NOTICE) || t.contains(SHELL_ROUND_CAP_NOTICE) {
+    if t.contains(REPEAT_PROBE_NOTICE) {
         return false;
     }
     if t.contains("[policy_deny]") || t.contains("[sandbox_deny]") || t.contains("[needs_approval]")
@@ -291,34 +264,13 @@ mod tests {
     }
 
     #[test]
-    fn governor_survives_reentry_and_caps_fifth_round() {
+    fn governor_fifth_distinct_shell_still_runs() {
         let mut g = HopProbeGovernor::new();
-        for round in 1..=4 {
+        for round in 1..=5 {
             let fp = tool_probe_fingerprint("shell", &json!({"command": format!("echo {round}")}));
             assert_eq!(g.decide_shell(&fp), ProbeShellDecision::Run);
-            g.record_executed_round();
         }
-        let fp = tool_probe_fingerprint("shell", &json!({"command": "echo 5"}));
-        assert_eq!(g.decide_shell(&fp), ProbeShellDecision::Cap);
-        let fp2 = tool_probe_fingerprint("shell", &json!({"command": "echo 6"}));
-        assert_eq!(g.decide_shell(&fp2), ProbeShellDecision::Cap);
-        assert_eq!(g.shell_rounds(), 4);
-        assert_eq!(g.hop_close(), HopClose::Cap);
-    }
-
-    #[test]
-    fn four_executed_rounds_close_hop_without_fifth_shell() {
-        let mut g = HopProbeGovernor::new();
-        for round in 1..=4 {
-            let fp = tool_probe_fingerprint("shell", &json!({"command": format!("echo {round}")}));
-            assert_eq!(g.decide_shell(&fp), ProbeShellDecision::Run);
-            g.record_executed_round();
-        }
-        assert_eq!(g.hop_close(), HopClose::Cap);
-        assert_eq!(
-            crate::agent::hop_stop::after_hop_close(g.hop_close()),
-            crate::agent::hop_stop::AfterHopClose::NextRemainingSkipObserve
-        );
+        assert_eq!(g.hop_close(), HopClose::None);
     }
 
     #[test]
@@ -326,29 +278,17 @@ mod tests {
         let mut g = HopProbeGovernor::new();
         let fp = tool_probe_fingerprint("shell", &json!({"command": "pwd"}));
         assert_eq!(g.decide_shell(&fp), ProbeShellDecision::Run);
-        g.record_executed_round();
         assert_eq!(g.decide_shell(&fp), ProbeShellDecision::SkipRepeat);
-        assert_eq!(g.shell_rounds(), 1);
+        assert_eq!(g.hop_close(), HopClose::None);
     }
 
     #[test]
-    fn policy_deny_does_not_consume_shell_round() {
-        assert!(!shell_output_counts_as_round(
+    fn deny_output_does_not_keep_the_fingerprint() {
+        assert!(!shell_output_keeps_fingerprint(
             "[policy_deny] command not in allowlist"
         ));
-        assert!(!shell_output_counts_as_round(REPEAT_PROBE_NOTICE));
-        assert!(!shell_output_counts_as_round(SHELL_ROUND_CAP_NOTICE));
-        assert!(shell_output_counts_as_round("xray.service active"));
-        let mut g = HopProbeGovernor::new();
-        for i in 0..4 {
-            let fp = tool_probe_fingerprint("shell", &json!({"command": format!("denied {i}")}));
-            assert_eq!(g.decide_shell(&fp), ProbeShellDecision::Run);
-            // deny / skip: do not record
-        }
-        let fp = tool_probe_fingerprint("shell", &json!({"command": "ssh host.example echo ok"}));
-        assert_eq!(g.decide_shell(&fp), ProbeShellDecision::Run);
-        g.record_executed_round();
-        assert_eq!(g.shell_rounds(), 1);
+        assert!(!shell_output_keeps_fingerprint(REPEAT_PROBE_NOTICE));
+        assert!(shell_output_keeps_fingerprint("xray.service active"));
     }
 
     #[test]
@@ -358,14 +298,7 @@ mod tests {
         assert_eq!(g.decide_shell(&fp), ProbeShellDecision::Run);
         g.retract_unexecuted(&fp);
         assert_eq!(g.decide_shell(&fp), ProbeShellDecision::Run);
-        g.record_executed_round();
-        assert_eq!(g.shell_rounds(), 1);
         assert_eq!(g.decide_shell(&fp), ProbeShellDecision::SkipRepeat);
-    }
-
-    #[test]
-    fn cap_notice_does_not_teach_handoff() {
-        assert!(!SHELL_ROUND_CAP_NOTICE.contains("HANDOFF"));
     }
 
     #[test]
@@ -448,9 +381,8 @@ mod tests {
     }
 
     #[test]
-    fn operator_visible_notices_drop_cap_and_skip_chrome() {
+    fn operator_visible_notices_drop_skip_chrome() {
         let kept = operator_visible_notices(vec![
-            SHELL_ROUND_CAP_NOTICE.to_string(),
             REPEAT_PROBE_NOTICE.to_string(),
             "### repo-origin\nFour shells ran.".to_string(),
         ]);

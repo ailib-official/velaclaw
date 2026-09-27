@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Policy deny writeup (VL-RAO-009):** a policy denial stays in history and does not run another tool. The next sample is sent without tool specs, and its prose is the turn reply. Shell progress captions skip loop keywords and `$` placeholders, so the label is the command inside the loop.
+
 - **Session bubble (VL-RAO-008):** Web persist stores the tool-loop reply. A prose prefix is kept and an internodal suffix after it is dropped. An envelope with no prose is stored empty. The hop parlor sentence is not substituted.
 
 - **Shell round cap (VL-RAO-007):** the production tool loop no longer stops after four executed shells. Repeat fingerprints are still skipped. A policy denial still stops the turn. Turn length stays on `max_tool_iterations`.

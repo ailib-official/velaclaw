@@ -210,25 +210,71 @@ fn verb_arg(verb: &str, args: &Value, keys: &[&str]) -> String {
     }
 }
 
+fn shell_control_prefix(bin: &str) -> bool {
+    matches!(
+        bin,
+        "do" | "then" | "{" | "[" | "[[" | "!" | "time" | "coproc"
+    )
+}
+
+fn shell_control_clause(bin: &str) -> bool {
+    matches!(
+        bin,
+        "cd" | "export"
+            | "true"
+            | ":"
+            | "shift"
+            | "for"
+            | "while"
+            | "until"
+            | "if"
+            | "elif"
+            | "else"
+            | "fi"
+            | "done"
+            | "case"
+            | "esac"
+            | "select"
+            | "}"
+            | "]"
+            | "]]"
+    )
+}
+
 fn first_substantive_shell_segment(cmd: &str) -> &str {
     for part in cmd.split("&&") {
         for seg in part.split(';') {
-            let t = seg.trim();
-            if t.is_empty() {
-                continue;
+            let mut t = seg.trim();
+            loop {
+                if t.is_empty() {
+                    break;
+                }
+                let bin = t
+                    .split_whitespace()
+                    .next()
+                    .map(basename_or_path)
+                    .unwrap_or("");
+                if shell_control_prefix(bin) {
+                    t = t
+                        .split_once(|c: char| c.is_whitespace())
+                        .map(|(_, rest)| rest.trim())
+                        .unwrap_or("");
+                    continue;
+                }
+                if shell_control_clause(bin) {
+                    t = "";
+                    break;
+                }
+                return t;
             }
-            let bin = t
-                .split_whitespace()
-                .next()
-                .map(basename_or_path)
-                .unwrap_or("");
-            if matches!(bin, "cd" | "export" | "true" | ":" | "shift") {
-                continue;
-            }
-            return t;
         }
     }
     cmd.trim()
+}
+
+fn shell_caption_placeholder(token: &str) -> bool {
+    let bare = token.trim_matches(|c| c == '"' || c == '\'' || c == '`');
+    bare.is_empty() || bare.starts_with('$')
 }
 
 fn shell_caption(args: &Value) -> String {
@@ -242,7 +288,7 @@ fn shell_caption(args: &Value) -> String {
         return "shell".into();
     };
     let bin = basename_or_path(bin_raw);
-    let obj = tokens.find(|t| !t.starts_with('-'));
+    let obj = tokens.find(|t| !t.starts_with('-') && !shell_caption_placeholder(t));
     match obj {
         Some(o) => format!("{bin} {o}"),
         None => bin.to_string(),
@@ -581,6 +627,16 @@ mod tests {
         assert_eq!(cargo, "cargo test");
         let cd = progress_caption("shell", &json!({"command": "cd /tmp && git status -sb"}));
         assert_eq!(cd, "git status");
+    }
+
+    #[test]
+    fn shell_caption_skips_loop_keywords() {
+        let cap = progress_caption(
+            "shell",
+            &json!({"command": "for dir in /tmp/*; do git -C \"$dir\" remote -v; done"}),
+        );
+        assert_eq!(cap, "git remote");
+        assert!(!cap.starts_with("for"));
     }
 
     #[test]

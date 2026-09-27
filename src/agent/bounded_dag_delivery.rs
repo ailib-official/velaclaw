@@ -829,11 +829,8 @@ mod tests {
 
     #[test]
     fn cap_persisted_body_is_not_internodal() {
-        let raw = format!(
-            "{}\nHANDOFF\nverdict: hop_cap\npointers:\n- {{\"node\":\"n1\"}}\ngaps:\n- remaining",
-            crate::agent::probe_dedup::SHELL_ROUND_CAP_NOTICE
-        );
-        let out = session_assistant_body("inspect workspace", &raw);
+        let raw = "Host note.\nHANDOFF\nverdict: hop_cap\npointers:\n- {\"node\":\"n1\"}\ngaps:\n- remaining";
+        let out = session_assistant_body("inspect workspace", raw);
         assert!(!looks_like_internodal_envelope(&out), "{out}");
         assert!(!out.trim_start().to_ascii_lowercase().starts_with("handoff"));
     }

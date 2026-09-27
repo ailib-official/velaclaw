@@ -678,11 +678,6 @@ pub(crate) async fn run_tool_call_loop(
                     g.decide_shell(&fp)
                 });
                 match decision {
-                    crate::agent::probe_dedup::ProbeShellDecision::Cap => {
-                        skip_outputs[i] =
-                            Some(crate::agent::probe_dedup::SHELL_ROUND_CAP_NOTICE.into());
-                        continue;
-                    }
                     crate::agent::probe_dedup::ProbeShellDecision::SkipRepeat => {
                         skip_outputs[i] =
                             Some(crate::agent::probe_dedup::REPEAT_PROBE_NOTICE.into());
@@ -726,24 +721,16 @@ pub(crate) async fn run_tool_call_loop(
                 batch_outputs[i] = msg;
             }
         }
-        let mut counted_round = false;
         for (call, out) in tool_calls.iter().zip(batch_outputs.iter()) {
             if !call.name.eq_ignore_ascii_case("shell") {
                 continue;
             }
-            if crate::agent::probe_dedup::shell_output_counts_as_round(out) {
-                counted_round = true;
-            } else {
-                let fp =
-                    crate::agent::probe_dedup::tool_probe_fingerprint(&call.name, &call.arguments);
-                with_probe(soft_fail.as_ref(), &mut local_probe, |g| {
-                    g.retract_unexecuted(&fp);
-                });
+            if crate::agent::probe_dedup::shell_output_keeps_fingerprint(out) {
+                continue;
             }
-        }
-        if counted_round {
+            let fp = crate::agent::probe_dedup::tool_probe_fingerprint(&call.name, &call.arguments);
             with_probe(soft_fail.as_ref(), &mut local_probe, |g| {
-                g.record_executed_round();
+                g.retract_unexecuted(&fp);
             });
         }
         for out in &batch_outputs {
@@ -801,15 +788,9 @@ pub(crate) async fn run_tool_call_loop(
         } else {
             false
         };
-        // VL-RAO-006: directory listings set OffGoal but stay in history. The
-        // model samples again. Policy denial and the four-shell cap still stop.
-        if !stage_rejected
-            && matches!(
-                hop_close,
-                crate::agent::hop_stop::HopClose::Cap
-                    | crate::agent::hop_stop::HopClose::PolicyDeny
-            )
-        {
+        // VL-RAO-006/007: listings stay in history. The model samples again.
+        // A policy denial still stops the turn. There is no shell-round cap.
+        if !stage_rejected && hop_close == crate::agent::hop_stop::HopClose::PolicyDeny {
             let mut body =
                 crate::agent::probe_dedup::hop_close_visible_body(&visible_text, hop_close);
             if let Some(suffix) = stage_cursor.pointer_suffix() {
@@ -1571,9 +1552,9 @@ mod loop_e2e_tests {
     }
 
     #[tokio::test]
-    async fn four_shells_still_hit_the_round_cap() {
+    async fn five_distinct_shells_then_prose_continues() {
         let mut script = Vec::new();
-        for i in 1..=4 {
+        for i in 1..=5 {
             script.push(call("shell", &format!(r#"{{"command":"echo {i}"}}"#)));
         }
         script.push(ChatResponse {
@@ -1587,9 +1568,9 @@ mod loop_e2e_tests {
         let mut history = vec![ChatMessage::user("Check the service.")];
         let reply = drive(&provider, &mut history, &tools, 8, None)
             .await
-            .expect("cap returns");
-        assert!(!reply.contains("The report is ready."), "{reply}");
-        assert_eq!(provider.replies.lock().expect("replies").len(), 1);
+            .expect("shell count does not end the loop");
+        assert_eq!(reply, "The report is ready.");
+        assert!(!reply.contains("Stopped after"));
     }
 
     #[tokio::test]

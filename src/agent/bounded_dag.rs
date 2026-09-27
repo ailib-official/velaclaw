@@ -233,13 +233,9 @@ pub fn node_task_card(dag_id: &str, node: &DagNode, index: usize, node_count: us
          Do not rewrite the same check as a new script file. \
          Do not `find /` or open-ended local scans. \
          prior-graph-artifact (and other-session memory) is context for gaps only — \
-         not a substitute for this-hop-tool on a live host or service check.";
-        let mid_hint = "The host counts a shell round only after a command actually ran \
-         (policy-deny and repeat-skip do not consume the cap). After four such rounds \
-         the host injects a cap notice. Do not stop early or claim a cap unless that \
-         notice appeared. Then finish this node's internodal envelope from INPUTS, \
-         or issue another admit-safe invoke.";
-        format!("\n         TOOLS\n         {tools} {mid_hint}\n")
+         not a substitute for this-hop-tool on a live host or service check. \
+         If INPUTS are not enough to finish, issue another admit-safe invoke.";
+        format!("\n         TOOLS\n         {tools}\n")
     };
     format!(
         "NODE TASK (host-filled slots; do not rewrite this card)\n\
@@ -401,9 +397,11 @@ mod tests {
             !card.contains("Aim for at most four shell rounds"),
             "must not teach early HANDOFF on a soft four-round slogan: {card}"
         );
+        assert!(
+            !card.contains("cap notice"),
+            "must not teach a four-shell cap: {card}"
+        );
         assert!(card.contains("this-hop-tool"));
-        assert!(card.contains("SHELL_ROUND_CAP") || card.contains("cap notice"));
-        assert!(card.contains("actually ran"));
     }
 
     #[test]

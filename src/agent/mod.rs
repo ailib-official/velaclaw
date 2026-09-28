@@ -52,6 +52,7 @@ pub mod dispatcher;
 pub mod double_esc;
 #[cfg(feature = "ai-protocol")]
 pub mod envelope_pilot;
+pub mod evidence_window;
 #[cfg(feature = "ai-protocol")]
 pub mod graph_scheduler;
 pub mod hop_stop;

@@ -182,6 +182,8 @@ pub(crate) async fn run_tool_call_loop(
             .unwrap_or(&[]),
     );
     let mut last_visible = String::new();
+    // VL-RAO-009: one sample after PolicyDeny, with tools withheld.
+    let mut deny_writeup = false;
 
     let block_retrieve = soft_fail.as_ref().is_some_and(|c| c.block_retrieve_tools);
     let tool_specs: Vec<crate::tools::ToolSpec> = if block_retrieve {
@@ -193,7 +195,12 @@ pub(crate) async fn run_tool_call_loop(
         .map(|d| d.should_send_tool_specs() && !tool_specs.is_empty())
         .unwrap_or_else(|| provider.supports_native_tools() && !tool_specs.is_empty());
 
-    for _iteration in 0..max_iterations {
+    // The extra slot runs only after PolicyDeny, so the writeup sample still
+    // happens when the denial used the last counted tool iteration.
+    for iteration in 0..max_iterations.saturating_add(1) {
+        if iteration == max_iterations && !deny_writeup {
+            break;
+        }
         if cancellation_token
             .as_ref()
             .is_some_and(CancellationToken::is_cancelled)
@@ -226,10 +233,10 @@ pub(crate) async fn run_tool_call_loop(
 
         // Unified path via Provider::chat so provider-specific native tool logic
         // (OpenAI/Anthropic/OpenRouter/compatible adapters) is honored.
-        let request_tools = if use_native_tools {
-            Some(tool_specs.as_slice())
-        } else {
+        let request_tools = if deny_writeup || !use_native_tools {
             None
+        } else {
+            Some(tool_specs.as_slice())
         };
 
         let chat_future = provider.chat(
@@ -653,6 +660,11 @@ pub(crate) async fn run_tool_call_loop(
             last_visible = visible_text.clone();
         }
 
+        // VL-RAO-009: the writeup sample may not run tools. A tool call here is dropped.
+        if deny_writeup {
+            return Ok(visible_text.trim().to_string());
+        }
+
         // Execute tool calls and build results. `individual_results` tracks per-call output so
         // native-mode history can emit one role=tool message per tool call with the correct ID.
         //
@@ -788,16 +800,11 @@ pub(crate) async fn run_tool_call_loop(
         } else {
             false
         };
-        // VL-RAO-006/007: listings stay in history. The model samples again.
-        // A policy denial still stops the turn. There is no shell-round cap.
+        // VL-RAO-006/007/009: listings stay in history. There is no shell-round cap.
+        // PolicyDeny withholds tools for one following sample so the model can
+        // answer from observations already in history. That sample does not run tools.
         if !stage_rejected && hop_close == crate::agent::hop_stop::HopClose::PolicyDeny {
-            let mut body =
-                crate::agent::probe_dedup::hop_close_visible_body(&visible_text, hop_close);
-            if let Some(suffix) = stage_cursor.pointer_suffix() {
-                body.push_str("\n\n");
-                body.push_str(&suffix);
-            }
-            return Ok(body);
+            deny_writeup = true;
         }
         compact_between_samples(history, provider, active_model.as_str(), gate_extras).await?;
     }
@@ -1486,6 +1493,36 @@ mod loop_e2e_tests {
         output: String,
     }
 
+    struct CountingShell {
+        output: String,
+        runs: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl Tool for CountingShell {
+        fn name(&self) -> &str {
+            "shell"
+        }
+        fn description(&self) -> &str {
+            "Run a command"
+        }
+        fn parameters_schema(&self) -> serde_json::Value {
+            serde_json::json!({"type": "object", "properties": {}})
+        }
+        async fn execute(
+            &self,
+            _args: serde_json::Value,
+            _ctx: &ToolExecutionContext,
+        ) -> anyhow::Result<ToolResult> {
+            self.runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(ToolResult {
+                success: true,
+                output: self.output.clone(),
+                error: None,
+            })
+        }
+    }
+
     #[async_trait]
     impl Tool for FixedShell {
         fn name(&self) -> &str {
@@ -1532,7 +1569,7 @@ mod loop_e2e_tests {
     }
 
     #[tokio::test]
-    async fn policy_deny_still_ends_the_tool_loop() {
+    async fn policy_deny_writeup_uses_the_next_prose() {
         let provider = Script::new(vec![
             call("shell", "{}"),
             ChatResponse {
@@ -1546,9 +1583,29 @@ mod loop_e2e_tests {
         let mut history = vec![ChatMessage::user("Check the service.")];
         let reply = drive(&provider, &mut history, &tools, 6, None)
             .await
-            .expect("policy deny returns");
-        assert!(!reply.contains("The report is ready."), "{reply}");
-        assert_eq!(provider.replies.lock().expect("replies").len(), 1);
+            .expect("policy deny writeup");
+        assert_eq!(reply, "The report is ready.");
+        assert!(!reply.contains("没有可展示的结论"));
+        assert!(provider.replies.lock().expect("replies").is_empty());
+    }
+
+    #[tokio::test]
+    async fn policy_deny_writeup_does_not_run_another_shell() {
+        let runs = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let provider = Script::new(vec![
+            call("shell", r#"{"command":"echo unsafe"}"#),
+            call("shell", r#"{"command":"echo again"}"#),
+        ]);
+        let tools: Vec<Box<dyn Tool>> = vec![Box::new(CountingShell {
+            output: "unsafe shell construct".into(),
+            runs: Arc::clone(&runs),
+        })];
+        let mut history = vec![ChatMessage::user("Check the service.")];
+        let reply = drive(&provider, &mut history, &tools, 6, None)
+            .await
+            .expect("writeup drops the shell");
+        assert!(reply.is_empty(), "{reply}");
+        assert_eq!(runs.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
     #[tokio::test]

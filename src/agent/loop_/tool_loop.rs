@@ -184,6 +184,10 @@ pub(crate) async fn run_tool_call_loop(
     let mut last_visible = String::new();
     // VL-RAO-009: one sample after PolicyDeny, with tools withheld.
     let mut deny_writeup = false;
+    // VL-RAO-010: cards are loop-owned. A failed citation gets one card-only sample.
+    let mut evidence_cards: Vec<crate::agent::evidence_window::EvidenceCard> = Vec::new();
+    let mut evidence_writeup = false;
+    let mut evidence_note: Option<String> = None;
 
     let block_retrieve = soft_fail.as_ref().is_some_and(|c| c.block_retrieve_tools);
     let tool_specs: Vec<crate::tools::ToolSpec> = if block_retrieve {
@@ -195,10 +199,9 @@ pub(crate) async fn run_tool_call_loop(
         .map(|d| d.should_send_tool_specs() && !tool_specs.is_empty())
         .unwrap_or_else(|| provider.supports_native_tools() && !tool_specs.is_empty());
 
-    // The extra slot runs only after PolicyDeny, so the writeup sample still
-    // happens when the denial used the last counted tool iteration.
-    for iteration in 0..max_iterations.saturating_add(1) {
-        if iteration == max_iterations && !deny_writeup {
+    // Extra slots: PolicyDeny writeup, or one citation retry that sees cards.
+    for iteration in 0..max_iterations.saturating_add(2) {
+        if iteration >= max_iterations && !deny_writeup && !evidence_writeup {
             break;
         }
         if cancellation_token
@@ -220,8 +223,29 @@ pub(crate) async fn run_tool_call_loop(
             .into());
         }
 
+        let user_task = crate::agent::evidence_window::user_task_text(history);
+        let writeup_view = if evidence_writeup {
+            let answered_at = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+            let pack = crate::agent::evidence_window::writeup_pack(
+                &user_task,
+                &evidence_cards,
+                &answered_at,
+                evidence_note.as_deref(),
+            );
+            let mut view: Vec<ChatMessage> = history
+                .iter()
+                .filter(|message| message.role == "system")
+                .cloned()
+                .collect();
+            view.push(ChatMessage::user(user_task));
+            view.push(ChatMessage::user(pack));
+            Some(view)
+        } else {
+            None
+        };
+        let sample_history = writeup_view.as_ref().unwrap_or(history);
         let prepared_messages =
-            multimodal::prepare_messages_for_provider(history, multimodal_config).await?;
+            multimodal::prepare_messages_for_provider(sample_history, multimodal_config).await?;
 
         observer.record_event(&ObserverEvent::LlmRequest {
             provider: provider_name.to_string(),
@@ -233,7 +257,7 @@ pub(crate) async fn run_tool_call_loop(
 
         // Unified path via Provider::chat so provider-specific native tool logic
         // (OpenAI/Anthropic/OpenRouter/compatible adapters) is honored.
-        let request_tools = if deny_writeup || !use_native_tools {
+        let request_tools = if deny_writeup || evidence_writeup || !use_native_tools {
             None
         } else {
             Some(tool_specs.as_slice())
@@ -631,6 +655,17 @@ pub(crate) async fn run_tool_call_loop(
                     final_text.push_str(&suffix);
                 }
             }
+            if !deny_writeup && !evidence_writeup && !evidence_cards.is_empty() {
+                if let Some(issue) = crate::agent::evidence_window::citation_issue(
+                    &final_text,
+                    &crate::agent::evidence_window::user_task_text(history),
+                    &evidence_cards,
+                ) {
+                    evidence_writeup = true;
+                    evidence_note = Some(issue);
+                    continue;
+                }
+            }
             history.push(ChatMessage::assistant(response_text.clone()));
             return Ok(final_text);
         }
@@ -660,8 +695,8 @@ pub(crate) async fn run_tool_call_loop(
             last_visible = visible_text.clone();
         }
 
-        // VL-RAO-009: the writeup sample may not run tools. A tool call here is dropped.
-        if deny_writeup {
+        // VL-RAO-009/010: a writeup sample may not run tools. A tool call here is dropped.
+        if deny_writeup || evidence_writeup {
             return Ok(visible_text.trim().to_string());
         }
 
@@ -683,6 +718,13 @@ pub(crate) async fn run_tool_call_loop(
                 continue;
             }
             let is_shell = call.name.eq_ignore_ascii_case("shell");
+            if let Some(card_id) = crate::agent::evidence_window::covered_by(
+                &evidence_cards,
+                &call.arguments.to_string(),
+            ) {
+                skip_outputs[i] = Some(format!("already covered by {card_id}"));
+                continue;
+            }
             if is_shell {
                 let fp =
                     crate::agent::probe_dedup::tool_probe_fingerprint(&call.name, &call.arguments);
@@ -725,7 +767,19 @@ pub(crate) async fn run_tool_call_loop(
             )
             .await?;
             for (call_i, result) in runnable_idx.into_iter().zip(batch_results) {
-                batch_outputs[call_i] = result.output;
+                let call = &tool_calls[call_i];
+                let card = crate::agent::evidence_window::card_from_call(
+                    evidence_cards.len(),
+                    &call.name,
+                    &call.arguments.to_string(),
+                    &result.output,
+                    result.success,
+                );
+                evidence_cards.push(card);
+                let coverage = crate::agent::evidence_window::coverage_line(
+                    evidence_cards.last().expect("card"),
+                );
+                batch_outputs[call_i] = format!("{}\n{coverage}", result.output);
             }
         }
         for (i, skip) in skip_outputs.into_iter().enumerate() {
@@ -1714,5 +1768,133 @@ mod loop_e2e_tests {
         assert!(seen[1]
             .iter()
             .any(|m| m.content.contains("[Compaction summary]")));
+    }
+
+    struct SeqShell {
+        runs: Arc<std::sync::atomic::AtomicUsize>,
+        outputs: Mutex<Vec<(bool, String)>>,
+    }
+
+    #[async_trait]
+    impl Tool for SeqShell {
+        fn name(&self) -> &str {
+            "shell"
+        }
+        fn description(&self) -> &str {
+            "Run a command"
+        }
+        fn parameters_schema(&self) -> serde_json::Value {
+            serde_json::json!({"type": "object", "properties": {}})
+        }
+        async fn execute(
+            &self,
+            _args: serde_json::Value,
+            _ctx: &ToolExecutionContext,
+        ) -> anyhow::Result<ToolResult> {
+            self.runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let next = self.outputs.lock().expect("outputs").remove(0);
+            Ok(ToolResult {
+                success: next.0,
+                output: next.1,
+                error: None,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn writeup_rejection_does_not_run_tools() {
+        let runs = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let provider = Script::new(vec![
+            call("shell", r#"{"command":"head -5 /tmp/note.txt"}"#),
+            ChatResponse {
+                text: Some("全部完成 [c1]".into()),
+                tool_calls: vec![],
+            },
+            call_with_text("shell", r#"{"command":"cat /tmp/note.txt"}"#, "not run"),
+        ]);
+        let tools: Vec<Box<dyn Tool>> = vec![Box::new(SeqShell {
+            runs: Arc::clone(&runs),
+            outputs: Mutex::new(vec![(true, "one line".into())]),
+        })];
+        let mut history = vec![ChatMessage::user("Read the note.")];
+        let reply = drive(&provider, &mut history, &tools, 6, None)
+            .await
+            .expect("writeup");
+        assert_eq!(reply, "not run");
+        assert_eq!(runs.load(std::sync::atomic::Ordering::SeqCst), 1);
+        let seen = provider.seen.lock().expect("seen");
+        let last = seen.last().expect("writeup sample");
+        assert!(last.iter().any(|m| m.content.contains("[evidence-cards]")));
+        assert!(last.iter().any(|m| m.content.contains("window: undated")));
+    }
+
+    #[tokio::test]
+    async fn covered_target_skips_repeat_call() {
+        let runs = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let provider = Script::new(vec![
+            call("shell", r#"{"command":"cat /tmp/note.txt"}"#),
+            call("shell", r#"{"command":"cat /tmp/note.txt"}"#),
+            ChatResponse {
+                text: Some("the note says hello [c1]".into()),
+                tool_calls: vec![],
+            },
+        ]);
+        let tools: Vec<Box<dyn Tool>> = vec![Box::new(SeqShell {
+            runs: Arc::clone(&runs),
+            outputs: Mutex::new(vec![(true, "hello".into())]),
+        })];
+        let mut history = vec![ChatMessage::user("Read the note.")];
+        let reply = drive(&provider, &mut history, &tools, 6, None)
+            .await
+            .expect("skip");
+        assert_eq!(reply, "the note says hello [c1]");
+        assert_eq!(runs.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn truncated_card_allows_wider_call() {
+        let runs = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let provider = Script::new(vec![
+            call("shell", r#"{"command":"head -5 /tmp/note.txt"}"#),
+            call("shell", r#"{"command":"cat /tmp/note.txt"}"#),
+            ChatResponse {
+                text: Some("样本显示全文 [c1]".into()),
+                tool_calls: vec![],
+            },
+        ]);
+        let tools: Vec<Box<dyn Tool>> = vec![Box::new(SeqShell {
+            runs: Arc::clone(&runs),
+            outputs: Mutex::new(vec![(true, "one".into()), (true, "all".into())]),
+        })];
+        let mut history = vec![ChatMessage::user("Read the note.")];
+        let reply = drive(&provider, &mut history, &tools, 6, None)
+            .await
+            .expect("wider");
+        assert!(reply.contains("样本显示全文"));
+        assert_eq!(runs.load(std::sync::atomic::Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn empty_citation_rewrite_stays_empty() {
+        let provider = Script::new(vec![
+            call("shell", r#"{"command":"head -5 /tmp/note.txt"}"#),
+            ChatResponse {
+                text: Some("全部完成 [c1]".into()),
+                tool_calls: vec![],
+            },
+            ChatResponse {
+                text: Some("  ".into()),
+                tool_calls: vec![],
+            },
+        ]);
+        let tools: Vec<Box<dyn Tool>> = vec![Box::new(FixedShell {
+            output: "one line".into(),
+        })];
+        let mut history = vec![ChatMessage::user("Read the note.")];
+        let reply = drive(&provider, &mut history, &tools, 6, None)
+            .await
+            .expect("empty rewrite");
+        assert!(reply.trim().is_empty(), "{reply}");
+        assert!(!reply.contains("没有可展示的结论"));
     }
 }

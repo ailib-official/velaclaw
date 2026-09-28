@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Evidence cards (VL-RAO-010):** each tool result becomes a loop-owned card. The next sample sees a coverage line. A call whose target is already covered by a non-truncated card is not executed. When a reply cites the wrong card for a time window, a truncated sample, or only one of two conflicting results, one following sample sees the cards and no tools.
+
 - **Policy deny writeup (VL-RAO-009):** a policy denial stays in history and does not run another tool. The next sample is sent without tool specs, and its prose is the turn reply. Shell progress captions skip loop keywords and `$` placeholders, so the label is the command inside the loop.
 
 - **Session bubble (VL-RAO-008):** Web persist stores the tool-loop reply. A prose prefix is kept and an internodal suffix after it is dropped. An envelope with no prose is stored empty. The hop parlor sentence is not substituted.

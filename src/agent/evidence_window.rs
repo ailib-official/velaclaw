@@ -352,17 +352,12 @@ pub(crate) fn citation_issue(
 }
 
 fn needs_citation(reply: &str) -> bool {
-    let lower = reply.to_ascii_lowercase();
     reply.contains("最新")
         || reply.contains("全部")
         || reply.contains("完全")
         || reply.contains("成功")
         || reply.contains("失败")
         || reply.contains('%')
-        || lower.contains("all ")
-        || lower.contains("completely")
-        || lower.contains("success")
-        || lower.contains("fail")
         || !timestamps_in(reply).is_empty()
 }
 
@@ -405,11 +400,7 @@ fn reply_dates_miss_cards(reply: &str, cited: &[String], cards: &[EvidenceCard])
 }
 
 fn universal_on_truncated(reply: &str, cited: &[String], cards: &[EvidenceCard]) -> bool {
-    let universal = reply.contains("全部")
-        || reply.contains("完全")
-        || reply.contains('%')
-        || reply.to_ascii_lowercase().contains("all ")
-        || reply.to_ascii_lowercase().contains("completely");
+    let universal = reply.contains("全部") || reply.contains("完全") || reply.contains('%');
     if !universal {
         return false;
     }
@@ -422,11 +413,7 @@ fn universal_on_truncated(reply: &str, cited: &[String], cards: &[EvidenceCard])
 }
 
 fn misses_conflicting_card(reply: &str, cited: &[String], cards: &[EvidenceCard]) -> bool {
-    let lower = reply.to_ascii_lowercase();
-    let asserts = lower.contains("success")
-        || lower.contains("fail")
-        || reply.contains("成功")
-        || reply.contains("失败");
+    let asserts = reply.contains("成功") || reply.contains("失败");
     if !asserts {
         return false;
     }

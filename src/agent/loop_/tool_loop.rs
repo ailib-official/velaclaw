@@ -753,7 +753,6 @@ pub(crate) async fn run_tool_call_loop(
             }
         }
         let mut batch_outputs: Vec<String> = vec![String::new(); tool_calls.len()];
-        let coverage_mark = evidence_cards.len();
         if !runnable.is_empty() {
             let batch_results = tool_batch::execute_tool_batch(
                 &runnable,
@@ -777,7 +776,10 @@ pub(crate) async fn run_tool_call_loop(
                     result.success,
                 );
                 evidence_cards.push(card);
-                batch_outputs[call_i] = result.output;
+                let coverage = crate::agent::evidence_window::coverage_line(
+                    evidence_cards.last().expect("card"),
+                );
+                batch_outputs[call_i] = format!("{}\n{coverage}", result.output);
             }
         }
         for (i, skip) in skip_outputs.into_iter().enumerate() {
@@ -838,11 +840,6 @@ pub(crate) async fn run_tool_call_loop(
             for (native_call, result) in native_tool_calls.iter().zip(individual_results.iter()) {
                 history.push(ChatMessage::tool_with_call_id(&native_call.id, result));
             }
-        }
-        for card in evidence_cards.iter().skip(coverage_mark) {
-            history.push(ChatMessage::user(
-                crate::agent::evidence_window::coverage_line(card),
-            ));
         }
         let stage_rejected = if stage_cursor.is_active() {
             for output in &individual_results {

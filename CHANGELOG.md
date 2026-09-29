@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Read roots and retrieval (VL-RAO-011):** a path the user names, or a directory listed because its name matches that token, can be read by `file_read`, `pdf_read`, `image_info`, and `glob_search`. Writes stay in the workspace. A listing does not answer a content question. An update or alignment question stays open until a successful external observation exists. One further sample still has tools; if the obligation is still open, the reply is a gap line. An empty reply with no obligation stays empty. A failed card does not cover a later read. A duplicate target in the same batch is not executed.
+
 - **Evidence cards (VL-RAO-010):** each tool result becomes a loop-owned card. The next sample sees a coverage line. A call whose target is already covered by a non-truncated card is not executed. When a reply cites the wrong card for a time window, a truncated sample, or only one of two conflicting results, one following sample sees the cards and no tools.
 
 - **Policy deny writeup (VL-RAO-009):** a policy denial stays in history and does not run another tool. The next sample is sent without tool specs, and its prose is the turn reply. Shell progress captions skip loop keywords and `$` placeholders, so the label is the command inside the loop.

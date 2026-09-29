@@ -77,7 +77,7 @@ impl Tool for FileReadTool {
         }
 
         // Security check: validate path is within workspace
-        if !self.security.is_path_allowed(path) {
+        if !self.security.turn_read_allowed(path, &ctx.read_roots) {
             return Ok(ToolResult {
                 success: false,
                 output: String::new(),
@@ -112,7 +112,7 @@ impl Tool for FileReadTool {
 
         if !self
             .security
-            .allows_workspace_symlink_read(&full_path, &resolved_path)
+            .resolved_read_allowed(&full_path, &resolved_path, &ctx.read_roots)
         {
             return Ok(ToolResult {
                 success: false,
@@ -246,6 +246,50 @@ mod tests {
     fn file_read_name() {
         let tool = FileReadTool::new(test_security(std::env::temp_dir()));
         assert_eq!(tool.name(), "file_read");
+    }
+
+    #[tokio::test]
+    async fn named_read_root_allows_that_tree_only() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let fixture =
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/vl-rao-011-fixture");
+        let root = fixture.join("proj-alpha");
+        let sibling = fixture.join("other");
+        std::fs::create_dir_all(&root).expect("root");
+        std::fs::create_dir_all(&sibling).expect("sibling");
+        let note = root.join("notes.txt");
+        let other = sibling.join("secret.txt");
+        std::fs::write(&note, "read-root-marker").expect("note");
+        std::fs::write(&other, "nope").expect("other");
+        let security = PolicyHandle::new(SecurityPolicy {
+            workspace_dir: workspace.path().to_path_buf(),
+            workspace_only: true,
+            forbidden_paths: vec!["/blocked".into()],
+            ..SecurityPolicy::default()
+        });
+        let tool = FileReadTool::new(security);
+        let ctx = ToolExecutionContext::default()
+            .with_read_roots(vec![root.to_string_lossy().to_string()]);
+        let allowed = tool
+            .execute(json!({"path": note.to_string_lossy()}), &ctx)
+            .await
+            .expect("read");
+        assert!(allowed.success, "{:?}", allowed.error);
+        assert!(allowed.output.contains("read-root-marker"));
+        let denied = tool
+            .execute(json!({"path": other.to_string_lossy()}), &ctx)
+            .await
+            .expect("deny");
+        assert!(!denied.success, "{}", denied.output);
+        let traversal = tool
+            .execute(
+                json!({"path": format!("{}/../other/secret.txt", root.to_string_lossy())}),
+                &ctx,
+            )
+            .await
+            .expect("traversal");
+        assert!(!traversal.success);
+        let _ = std::fs::remove_dir_all(&fixture);
     }
 
     #[tokio::test]

@@ -207,6 +207,34 @@ mod tests {
         assert_eq!(tool.name(), "file_write");
     }
 
+    #[tokio::test]
+    async fn file_write_does_not_accept_a_read_root() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target/vl-rao-011-write-fixture");
+        std::fs::create_dir_all(&fixture).expect("fixture");
+        let note = fixture.join("notes.txt");
+        let security = PolicyHandle::new(SecurityPolicy {
+            workspace_dir: workspace.path().to_path_buf(),
+            workspace_only: true,
+            forbidden_paths: vec!["/blocked".into()],
+            ..SecurityPolicy::default()
+        });
+        let tool = FileWriteTool::new(security);
+        let ctx = ToolExecutionContext::default()
+            .with_read_roots(vec![fixture.to_string_lossy().to_string()]);
+        let result = tool
+            .execute(
+                json!({"path": note.to_string_lossy(), "content": "nope"}),
+                &ctx,
+            )
+            .await
+            .expect("write");
+        assert!(!result.success, "{}", result.output);
+        assert!(!note.exists());
+        let _ = std::fs::remove_dir_all(&fixture);
+    }
+
     #[test]
     fn file_write_schema_has_path_and_content() {
         let tool = FileWriteTool::new(test_security(std::env::temp_dir()));

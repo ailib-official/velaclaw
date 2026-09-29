@@ -61,7 +61,7 @@ impl Tool for PdfReadTool {
     async fn execute(
         &self,
         args: serde_json::Value,
-        _ctx: &ToolExecutionContext,
+        ctx: &ToolExecutionContext,
     ) -> anyhow::Result<ToolResult> {
         let path = args
             .get("path")
@@ -86,7 +86,7 @@ impl Tool for PdfReadTool {
             });
         }
 
-        if !self.security.is_path_allowed(path) {
+        if !self.security.turn_read_allowed(path, &ctx.read_roots) {
             return Ok(ToolResult {
                 success: false,
                 output: String::new(),
@@ -118,7 +118,7 @@ impl Tool for PdfReadTool {
 
         if !self
             .security
-            .allows_workspace_symlink_read(&full_path, &resolved_path)
+            .resolved_read_allowed(&full_path, &resolved_path, &ctx.read_roots)
         {
             return Ok(ToolResult {
                 success: false,

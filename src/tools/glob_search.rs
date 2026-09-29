@@ -44,7 +44,7 @@ impl Tool for GlobSearchTool {
     async fn execute(
         &self,
         args: serde_json::Value,
-        _ctx: &ToolExecutionContext,
+        ctx: &ToolExecutionContext,
     ) -> anyhow::Result<ToolResult> {
         let pattern = args
             .get("pattern")
@@ -60,13 +60,25 @@ impl Tool for GlobSearchTool {
             });
         }
 
-        // Security: reject absolute paths
+        // Absolute globs run only under a turn read root. Relative globs stay on the workspace.
         if pattern.starts_with('/') || pattern.starts_with('\\') {
-            return Ok(ToolResult {
-                success: false,
-                output: String::new(),
-                error: Some("Absolute paths are not allowed. Use a relative glob pattern.".into()),
-            });
+            let prefix = glob_static_prefix(pattern);
+            let prefix_path = std::path::Path::new(prefix);
+            if prefix.is_empty()
+                || !prefix_path.is_absolute()
+                || pattern.contains("../")
+                || pattern.contains("..\\")
+                || pattern == ".."
+                || !self.security.turn_read_allowed(prefix, &ctx.read_roots)
+            {
+                return Ok(ToolResult {
+                    success: false,
+                    output: String::new(),
+                    error: Some(
+                        "Absolute paths are not allowed. Use a relative glob pattern.".into(),
+                    ),
+                });
+            }
         }
 
         // Security: reject path traversal
@@ -87,20 +99,22 @@ impl Tool for GlobSearchTool {
             });
         }
 
-        // Build full pattern anchored to workspace
+        // Build full pattern anchored to workspace, plus each turn read root.
         let workspace = self.security.workspace_dir();
-        let full_pattern = workspace.join(pattern).to_string_lossy().to_string();
-
-        let entries = match glob::glob(&full_pattern) {
-            Ok(paths) => paths,
-            Err(e) => {
-                return Ok(ToolResult {
-                    success: false,
-                    output: String::new(),
-                    error: Some(format!("Invalid glob pattern: {e}")),
-                });
+        let mut full_patterns = Vec::new();
+        if pattern.starts_with('/') || pattern.starts_with('\\') {
+            full_patterns.push(pattern.to_string());
+        } else {
+            full_patterns.push(workspace.join(pattern).to_string_lossy().to_string());
+            for root in &ctx.read_roots {
+                full_patterns.push(
+                    std::path::Path::new(root)
+                        .join(pattern)
+                        .to_string_lossy()
+                        .to_string(),
+                );
             }
-        };
+        }
 
         let workspace_canon = match std::fs::canonicalize(&workspace) {
             Ok(p) => p,
@@ -116,53 +130,62 @@ impl Tool for GlobSearchTool {
         let mut results = Vec::new();
         let mut truncated = false;
 
-        for entry in entries {
-            let path = match entry {
-                Ok(p) => p,
-                Err(_) => continue, // skip unreadable entries
+        for full_pattern in &full_patterns {
+            if truncated {
+                break;
+            }
+            let entries = match glob::glob(full_pattern) {
+                Ok(paths) => paths,
+                Err(e) => {
+                    return Ok(ToolResult {
+                        success: false,
+                        output: String::new(),
+                        error: Some(format!("Invalid glob pattern: {e}")),
+                    });
+                }
             };
-
-            // Workspace-anchored globs may traverse symlinks (e.g. tools → ~/ext-tools).
-            // List logical workspace-relative paths; file_read still canonicalizes before read.
-            let under_workspace =
-                path.starts_with(&workspace) || path.starts_with(&workspace_canon);
-            if under_workspace {
-                let base = if path.starts_with(&workspace_canon) {
-                    workspace_canon.as_path()
-                } else {
-                    workspace.as_path()
+            for entry in entries {
+                let path = match entry {
+                    Ok(p) => p,
+                    Err(_) => continue,
                 };
                 if path.is_dir() {
                     continue;
                 }
-                if let Ok(rel) = path.strip_prefix(base) {
-                    let rel_str = rel
-                        .to_string_lossy()
-                        .trim_start_matches(std::path::MAIN_SEPARATOR)
-                        .to_string();
-                    if !rel_str.is_empty() {
-                        results.push(rel_str);
+
+                let under_workspace =
+                    path.starts_with(&workspace) || path.starts_with(&workspace_canon);
+                if under_workspace {
+                    let base = if path.starts_with(&workspace_canon) {
+                        workspace_canon.as_path()
+                    } else {
+                        workspace.as_path()
+                    };
+                    if let Ok(rel) = path.strip_prefix(base) {
+                        let rel_str = rel
+                            .to_string_lossy()
+                            .trim_start_matches(std::path::MAIN_SEPARATOR)
+                            .to_string();
+                        if !rel_str.is_empty() && !results.contains(&rel_str) {
+                            results.push(rel_str);
+                        }
+                    }
+                } else if let Ok(resolved) = std::fs::canonicalize(&path) {
+                    if self
+                        .security
+                        .resolved_read_allowed(&path, &resolved, &ctx.read_roots)
+                        && !results
+                            .iter()
+                            .any(|seen| seen == &resolved.to_string_lossy())
+                    {
+                        results.push(resolved.to_string_lossy().to_string());
                     }
                 }
-            } else {
-                // Defensive: non-workspace hits still require resolved-path policy.
-                let resolved = match std::fs::canonicalize(&path) {
-                    Ok(p) => p,
-                    Err(_) => continue,
-                };
 
-                if !self.security.is_resolved_path_allowed(&resolved) || resolved.is_dir() {
-                    continue;
+                if results.len() >= MAX_RESULTS {
+                    truncated = true;
+                    break;
                 }
-
-                if let Ok(rel) = resolved.strip_prefix(&workspace_canon) {
-                    results.push(rel.to_string_lossy().to_string());
-                }
-            }
-
-            if results.len() >= MAX_RESULTS {
-                truncated = true;
-                break;
             }
         }
 
@@ -189,6 +212,12 @@ impl Tool for GlobSearchTool {
             error: None,
         })
     }
+}
+
+fn glob_static_prefix(pattern: &str) -> &str {
+    let end = pattern.find(['*', '?', '[']).unwrap_or(pattern.len());
+    let prefix = &pattern[..end];
+    prefix.trim_end_matches('/')
 }
 
 #[cfg(test)]

@@ -76,7 +76,7 @@ pub(crate) fn command_is_truncated(command: &str) -> bool {
     })
 }
 
-fn targets_in(command: &str) -> Vec<String> {
+pub(crate) fn targets_in(command: &str) -> Vec<String> {
     let mut out = Vec::new();
     for token in command.split_whitespace() {
         let bare = token.trim_matches(|c| c == '"' || c == '\'' || c == '`');
@@ -302,7 +302,7 @@ pub(crate) fn covered_by<'a>(cards: &'a [EvidenceCard], arguments: &str) -> Opti
     }
     let (asked_start, _) = timestamp_span(&command);
     cards.iter().rev().find_map(|card| {
-        if card.truncated || !same_target(card, &targets) {
+        if card.truncated || !card.success || !same_target(card, &targets) {
             return None;
         }
         if let Some(asked) = &asked_start {
@@ -347,6 +347,12 @@ pub(crate) fn citation_issue(
     }
     if let Some(issue) = window_issue(reply, &cited, cards, &window) {
         return Some(issue);
+    }
+    if currency_claim(reply)
+        && external_required(user_text)
+        && !cites_content_and_external(&cited, cards)
+    {
+        return Some("cite a content card and an external card".into());
     }
     None
 }
@@ -482,9 +488,460 @@ pub(crate) fn user_task_text(history: &[crate::providers::ChatMessage]) -> Strin
                 && !message.content.starts_with("[Tool results]")
                 && !message.content.starts_with("[coverage]")
                 && !message.content.starts_with("[evidence-cards]")
+                && !message.content.starts_with("Obligation open:")
         })
         .map(|message| message.content.clone())
         .unwrap_or_default()
+}
+
+const NAME_STOP: &[&str] = &[
+    "list",
+    "files",
+    "file",
+    "read",
+    "update",
+    "status",
+    "current",
+    "align",
+    "alignment",
+    "git",
+    "curl",
+    "wget",
+    "http",
+    "https",
+    "www",
+    "src",
+    "test",
+    "log",
+    "logs",
+    "config",
+    "data",
+    "repo",
+    "code",
+    "true",
+    "false",
+    "none",
+    "null",
+    "with",
+    "from",
+    "this",
+    "that",
+    "what",
+    "when",
+    "your",
+    "the",
+    "and",
+    "for",
+    "all",
+    "each",
+    "item",
+    "items",
+    "path",
+    "name",
+    "names",
+    "tmp",
+    "var",
+    "usr",
+    "home",
+    "etc",
+    "bin",
+    "opt",
+    "dev",
+    "proc",
+    "sys",
+    "private",
+    "users",
+];
+
+/// Path-like names in the user text. Ordinary words are not filesystem targets.
+pub(crate) fn name_tokens(user_text: &str) -> Vec<String> {
+    let stripped = strip_absolute_paths(user_text);
+    let mut out = Vec::new();
+    let bytes = stripped.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if is_name_start(bytes[i]) {
+            let start = i;
+            i += 1;
+            while i < bytes.len() && is_name_cont(bytes[i]) {
+                if bytes[i] == b'.'
+                    && (i + 1 >= bytes.len() || !bytes[i + 1].is_ascii_alphanumeric())
+                {
+                    break;
+                }
+                i += 1;
+            }
+            let tok = &stripped[start..i];
+            if tok.len() >= 3
+                && (tok.contains('.') || tok.contains('-') || tok.contains('_'))
+                && !NAME_STOP.contains(&tok.to_ascii_lowercase().as_str())
+                && !out.iter().any(|seen| seen == tok)
+            {
+                out.push(tok.to_string());
+            }
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
+fn is_name_start(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric()
+}
+
+fn is_name_cont(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_')
+}
+
+/// Absolute paths written in `text`. Components containing `..` are dropped.
+pub(crate) fn absolute_paths_in(text: &str) -> Vec<String> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        let boundary = i == 0
+            || bytes[i - 1].is_ascii_whitespace()
+            || matches!(bytes[i - 1], b'"' | b'\'' | b'=' | b'(' | b'[');
+        if bytes[i] == b'/' && boundary {
+            let start = i;
+            i += 1;
+            while i < bytes.len()
+                && !bytes[i].is_ascii_whitespace()
+                && !matches!(bytes[i], b'"' | b'\'' | b',' | b';' | b')' | b']')
+            {
+                i += 1;
+            }
+            let mut path = text[start..i].to_string();
+            while path.ends_with(['.', ':', ',']) {
+                path.pop();
+            }
+            if path.len() > 1 && !path.split('/').any(|part| part == "..") && !out.contains(&path) {
+                out.push(path);
+            }
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
+fn strip_absolute_paths(text: &str) -> String {
+    let mut out = text.to_string();
+    for path in absolute_paths_in(text) {
+        out = out.replace(&path, " ");
+    }
+    out
+}
+
+pub(crate) fn initial_read_roots(user_text: &str) -> Vec<String> {
+    absolute_paths_in(user_text)
+}
+
+/// Directories admitted because a successful observation named the user's token.
+pub(crate) fn roots_from_observation(
+    user_text: &str,
+    command: &str,
+    output: &str,
+    workspace: &std::path::Path,
+) -> Vec<String> {
+    let tokens = name_tokens(user_text);
+    if tokens.is_empty() {
+        return Vec::new();
+    }
+    let mut roots = Vec::new();
+    for path in absolute_paths_in(command)
+        .into_iter()
+        .chain(absolute_paths_in(output))
+    {
+        if let Some(root) = prefix_through_token(&path, &tokens) {
+            push_unique(&mut roots, root);
+        }
+    }
+    let listed_dirs = absolute_paths_in(command);
+    for token in &tokens {
+        if output_has_bare_name(output, token) {
+            for dir in &listed_dirs {
+                push_unique(
+                    &mut roots,
+                    format!("{}/{}", dir.trim_end_matches('/'), token),
+                );
+            }
+        }
+        for rel in relative_paths_in(output) {
+            if rel.split('/').any(|part| part == token) {
+                if let Some(root) =
+                    prefix_through_token(&workspace.join(&rel).to_string_lossy(), &tokens)
+                {
+                    push_unique(&mut roots, root);
+                }
+            }
+        }
+    }
+    roots
+}
+
+fn push_unique(roots: &mut Vec<String>, root: String) {
+    if !root.is_empty() && !roots.iter().any(|seen| seen == &root) {
+        roots.push(root);
+    }
+}
+
+fn prefix_through_token(path: &str, tokens: &[String]) -> Option<String> {
+    let mut acc = String::new();
+    for (index, comp) in path.split('/').filter(|part| !part.is_empty()).enumerate() {
+        if path.starts_with('/') && index == 0 {
+            acc = format!("/{comp}");
+        } else if acc.is_empty() {
+            acc = comp.to_string();
+        } else {
+            acc = format!("{acc}/{comp}");
+        }
+        if tokens.iter().any(|token| token == comp) {
+            return Some(acc);
+        }
+    }
+    None
+}
+
+fn output_has_bare_name(output: &str, token: &str) -> bool {
+    output.split_whitespace().any(|word| {
+        let bare = word.trim_matches(|c| matches!(c, '"' | '\'' | '`' | ',' | ':'));
+        bare == token
+    })
+}
+
+fn relative_paths_in(output: &str) -> Vec<String> {
+    output
+        .split_whitespace()
+        .filter_map(|word| {
+            let bare = word.trim_matches(|c| matches!(c, '"' | '\'' | '`' | ','));
+            if bare.contains('/') && !bare.starts_with('/') && !bare.contains("..") {
+                Some(bare.to_string())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn list_only(user_text: &str) -> bool {
+    let lower = user_text.to_lowercase();
+    let listing = user_text.contains("列出")
+        || user_text.contains("列表")
+        || user_text.contains("有哪些")
+        || lower.contains("list files")
+        || lower.contains("what files");
+    listing && !external_predicate(user_text) && !content_verb(user_text)
+}
+
+fn content_verb(user_text: &str) -> bool {
+    user_text.contains("读取")
+        || user_text.contains("检查")
+        || user_text.contains("查看")
+        || has_word(user_text, "read")
+        || has_word(user_text, "check")
+        || has_word(user_text, "inspect")
+}
+
+fn external_predicate(user_text: &str) -> bool {
+    user_text.contains("更新")
+        || user_text.contains("对齐")
+        || user_text.contains("上游")
+        || user_text.contains("官方")
+        || user_text.contains("现状")
+        || has_word(user_text, "update")
+        || has_word(user_text, "align")
+        || has_word(user_text, "alignment")
+        || has_word(user_text, "upstream")
+        || has_word(user_text, "official")
+}
+
+fn has_word(text: &str, word: &str) -> bool {
+    text.split(|c: char| !c.is_ascii_alphanumeric())
+        .any(|part| part.eq_ignore_ascii_case(word))
+}
+
+fn has_named_target(user_text: &str) -> bool {
+    !name_tokens(user_text).is_empty() || !absolute_paths_in(user_text).is_empty()
+}
+
+pub(crate) fn content_required(user_text: &str) -> bool {
+    !list_only(user_text) && has_named_target(user_text)
+}
+
+pub(crate) fn external_required(user_text: &str) -> bool {
+    if list_only(user_text)
+        || absolute_paths_in(user_text).len() >= 2
+        || !has_named_target(user_text)
+    {
+        return false;
+    }
+    external_predicate(user_text)
+}
+
+fn each_requested(user_text: &str) -> bool {
+    user_text.contains('各')
+        || user_text.contains("每一个")
+        || user_text.contains("每个")
+        || has_word(user_text, "every")
+        || has_word(user_text, "each")
+}
+
+fn is_content_tool(tool: &str) -> bool {
+    matches!(tool, "file_read" | "pdf_read" | "image_info")
+}
+
+pub(crate) fn command_is_external(tool: &str, command: &str) -> bool {
+    match tool {
+        "http_request" | "web_search" | "browser" | "browser_open" => true,
+        "shell" => shell_contacts_remote(command),
+        _ => false,
+    }
+}
+
+fn shell_contacts_remote(command: &str) -> bool {
+    let mut tokens = command.split_whitespace().map(|tok| {
+        tok.trim_matches(|c| matches!(c, '"' | '\'' | '`'))
+            .to_string()
+    });
+    while let Some(tok) = tokens.next() {
+        if is_env_assignment(&tok) {
+            continue;
+        }
+        if tok == "curl" || tok == "wget" || tok == "gh" {
+            return true;
+        }
+        if tok == "git" {
+            return tokens.any(|sub| matches!(sub.as_str(), "fetch" | "ls-remote" | "pull"));
+        }
+        return false;
+    }
+    false
+}
+
+fn is_env_assignment(token: &str) -> bool {
+    let Some((name, _)) = token.split_once('=') else {
+        return false;
+    };
+    !name.is_empty()
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        && name
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+}
+
+fn file_like(path: &str) -> bool {
+    std::path::Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.contains('.'))
+}
+
+fn under_root(path: &str, roots: &[String]) -> bool {
+    let path = std::path::Path::new(path);
+    roots
+        .iter()
+        .any(|root| path.starts_with(std::path::Path::new(root)))
+}
+
+fn content_card_matches(card: &EvidenceCard, roots: &[String], tokens: &[String]) -> bool {
+    if !card.success || card.truncated || !is_content_tool(&card.tool) {
+        return false;
+    }
+    card.targets.iter().any(|target| {
+        under_root(target, roots)
+            || tokens
+                .iter()
+                .any(|token| target.split(['/', '\\']).any(|part| part == token))
+    })
+}
+
+fn listed_files(cards: &[EvidenceCard], roots: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    for card in cards {
+        if !card.success || !matches!(card.tool.as_str(), "shell" | "glob_search") {
+            continue;
+        }
+        for path in absolute_paths_in(&card.body) {
+            if file_like(&path) && under_root(&path, roots) && !out.contains(&path) {
+                out.push(path);
+            }
+        }
+    }
+    out
+}
+
+pub(crate) fn obligation_gap(
+    user_text: &str,
+    cards: &[EvidenceCard],
+    roots: &[String],
+) -> Option<String> {
+    let tokens = name_tokens(user_text);
+    let mut parts = Vec::new();
+    if content_required(user_text) {
+        if each_requested(user_text) {
+            let missing = listed_files(cards, roots)
+                .into_iter()
+                .filter(|path| {
+                    !cards
+                        .iter()
+                        .any(|card| content_card_matches(card, std::slice::from_ref(path), &tokens))
+                })
+                .count();
+            if missing > 0 {
+                parts.push(format!("{missing} listed file(s) were not read"));
+            } else if !cards
+                .iter()
+                .any(|card| content_card_matches(card, roots, &tokens))
+            {
+                parts.push("the named target has no successful read".into());
+            }
+        } else if !cards
+            .iter()
+            .any(|card| content_card_matches(card, roots, &tokens))
+        {
+            parts.push("the named target has no successful read".into());
+        }
+    }
+    if external_required(user_text)
+        && !cards.iter().any(|card| {
+            card.success && !card.truncated && command_is_external(&card.tool, &card.command)
+        })
+    {
+        parts.push("no external observation".into());
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(format!("Missing evidence: {}.", parts.join("; ")))
+    }
+}
+
+fn currency_claim(reply: &str) -> bool {
+    reply.contains("已更新")
+        || reply.contains("无更新")
+        || reply.contains("没有更新")
+        || reply.contains("已对齐")
+        || reply.contains("未对齐")
+        || reply.contains("不一致")
+        || has_word(reply, "updated")
+        || has_word(reply, "aligned")
+}
+
+fn cites_content_and_external(cited: &[String], cards: &[EvidenceCard]) -> bool {
+    let chosen: Vec<&EvidenceCard> = cards
+        .iter()
+        .filter(|card| cited.iter().any(|id| id == &card.id))
+        .collect();
+    let content = chosen
+        .iter()
+        .any(|card| is_content_tool(&card.tool) && card.success);
+    let external = chosen
+        .iter()
+        .any(|card| card.success && command_is_external(&card.tool, &card.command));
+    content && external
 }
 
 #[cfg(test)]
@@ -642,5 +1099,122 @@ mod tests {
         prior.command = "head -5 /tmp/note.txt".into();
         let wider = r#"{"command":"cat /tmp/note.txt"}"#;
         assert_eq!(covered_by(&[prior], wider), None);
+    }
+
+    #[test]
+    fn failed_card_does_not_cover() {
+        let cards = vec![card(
+            "c1",
+            "/data/proj-alpha/a.txt",
+            false,
+            false,
+            None,
+            "denied",
+        )];
+        let again = r#"{"path":"/data/proj-alpha/a.txt"}"#;
+        assert_eq!(covered_by(&cards, again), None);
+    }
+
+    #[test]
+    fn user_absolute_path_is_a_read_root() {
+        let roots = initial_read_roots("Read /data/proj-alpha/notes.txt please");
+        assert_eq!(roots, vec!["/data/proj-alpha/notes.txt".to_string()]);
+    }
+
+    #[test]
+    fn listed_name_token_admits_that_directory_only() {
+        let roots = roots_from_observation(
+            "Inspect proj-alpha",
+            "ls /data",
+            "other\nproj-alpha\n",
+            std::path::Path::new("/work"),
+        );
+        assert_eq!(roots, vec!["/data/proj-alpha".to_string()]);
+    }
+
+    #[test]
+    fn unrelated_absolute_path_stays_denied() {
+        let roots = initial_read_roots("Inspect proj-alpha");
+        assert!(roots.is_empty());
+        assert!(name_tokens("Inspect proj-alpha") == vec!["proj-alpha".to_string()]);
+        assert!(name_tokens("What is the citation?").is_empty());
+    }
+
+    #[test]
+    fn listing_does_not_satisfy_content() {
+        let mut listed = card("c1", "/data/proj-alpha", true, false, None, "notes.txt");
+        listed.tool = "shell".into();
+        listed.command = "ls /data/proj-alpha".into();
+        let user = "Inspect proj-alpha";
+        let roots = vec!["/data/proj-alpha".to_string()];
+        assert!(content_required(user));
+        assert!(obligation_gap(user, &[listed], &roots).is_some());
+    }
+
+    #[test]
+    fn list_only_request_has_no_content_obligation() {
+        let user = "list files in proj-alpha";
+        assert!(!content_required(user));
+        assert!(!external_required(user));
+        assert!(obligation_gap(user, &[], &[]).is_none());
+    }
+
+    #[test]
+    fn update_with_one_name_requires_external() {
+        let user = "Has proj-alpha had an update?";
+        assert!(content_required(user));
+        assert!(external_required(user));
+        let gap = obligation_gap(user, &[], &[]).expect("open");
+        assert!(gap.contains("no external observation"));
+        assert!(gap.contains("no successful read"));
+    }
+
+    #[test]
+    fn two_local_paths_skip_external() {
+        let user = "Compare /data/proj-alpha/a.txt and /data/proj-beta/b.txt";
+        assert!(!external_required(user));
+        assert!(content_required(user));
+    }
+
+    #[test]
+    fn latest_alone_does_not_require_external() {
+        let user = "proj-alpha 的最新状况";
+        assert!(!external_required(user));
+        assert!(content_required(user));
+    }
+
+    #[test]
+    fn git_status_is_not_external_git_fetch_is() {
+        assert!(!command_is_external("shell", "git status"));
+        assert!(command_is_external("shell", "git fetch origin"));
+        assert!(command_is_external(
+            "shell",
+            "curl https://example.test/models"
+        ));
+        assert!(command_is_external(
+            "http_request",
+            "https://example.test/models"
+        ));
+        assert!(!command_is_external("shell", "ls /data/proj-alpha"));
+    }
+
+    #[test]
+    fn currency_sentence_cites_content_and_external() {
+        let mut local = card("c1", "/data/proj-alpha/a.txt", true, false, None, "local");
+        local.tool = "file_read".into();
+        let mut remote = card(
+            "c2",
+            "https://example.test/models",
+            true,
+            false,
+            None,
+            "remote",
+        );
+        remote.tool = "http_request".into();
+        remote.command = "https://example.test/models".into();
+        let cards = vec![local, remote];
+        let user = "Has proj-alpha had an update?";
+        assert!(citation_issue("proj-alpha 无更新 [c1]", user, &cards).is_some());
+        assert!(citation_issue("proj-alpha 无更新 [c1][c2]", user, &cards).is_none());
     }
 }

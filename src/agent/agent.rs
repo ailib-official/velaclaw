@@ -859,6 +859,7 @@ impl Agent {
                 compact_context_ratio: self.config.compact_context_ratio,
                 context_window: self.hop_envelope_window(None),
             }),
+            read_roots: Vec::new(),
         };
         let approval_mgr = self.gateway_approval.as_ref().map(|(mgr, _)| mgr);
 

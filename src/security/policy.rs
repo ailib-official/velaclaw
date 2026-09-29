@@ -228,6 +228,33 @@ impl Default for SecurityPolicy {
 /// Workspace-relative scratch for host temp roots (`/tmp`, `/var/tmp`).
 pub const SCRATCH_REL: &str = ".velaclaw/tmp";
 
+fn path_has_parent_dir(path: &str) -> bool {
+    Path::new(path)
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+}
+
+fn path_has_encoded_traversal(path: &str) -> bool {
+    let lower = path.to_lowercase();
+    lower.contains("..%2f") || lower.contains("%2f..")
+}
+
+fn expand_user_path(path: &str) -> String {
+    if let Some(stripped) = path.strip_prefix("~/") {
+        if let Some(home) = std::env::var("HOME").ok().map(PathBuf::from) {
+            return home.join(stripped).to_string_lossy().to_string();
+        }
+    }
+    path.to_string()
+}
+
+fn path_under_read_root(path: &str, read_roots: &[String]) -> bool {
+    let path = Path::new(path);
+    read_roots
+        .iter()
+        .any(|root| path.starts_with(Path::new(root)))
+}
+
 /// Map `/tmp/foo` → `.velaclaw/tmp/foo` so file tools stay workspace-only.
 #[must_use]
 pub fn rewrite_temp_tool_path(path: &str) -> String {
@@ -1341,6 +1368,54 @@ self_adjust, use the `policy_patch` tool; otherwise edit config.toml (no silent 
         }
 
         true
+    }
+
+    /// Read allow for this turn: workspace rules, or an absolute path under a loop-admitted root.
+    ///
+    /// `..`, encoded traversal, and forbidden prefixes stay denied. Write tools do not call this.
+    #[must_use]
+    pub fn turn_read_allowed(&self, path: &str, read_roots: &[String]) -> bool {
+        if self.is_path_allowed(path) {
+            return true;
+        }
+        if path.contains('\0') || path_has_parent_dir(path) || path_has_encoded_traversal(path) {
+            return false;
+        }
+        let expanded = expand_user_path(&self.rewrite_temp_tool_path(path));
+        if self.path_is_forbidden(&expanded) {
+            return false;
+        }
+        Path::new(&expanded).is_absolute() && path_under_read_root(&expanded, read_roots)
+    }
+
+    /// Canonical path may sit under the workspace or under a turn read root.
+    #[must_use]
+    pub fn resolved_read_allowed(
+        &self,
+        logical_full: &Path,
+        resolved: &Path,
+        read_roots: &[String],
+    ) -> bool {
+        if self.allows_workspace_symlink_read(logical_full, resolved) {
+            return true;
+        }
+        read_roots.iter().any(|root| {
+            let root_path = Path::new(root);
+            let canon =
+                std::fs::canonicalize(root_path).unwrap_or_else(|_| root_path.to_path_buf());
+            resolved.starts_with(&canon) || resolved.starts_with(root_path)
+        })
+    }
+
+    fn path_is_forbidden(&self, expanded: &str) -> bool {
+        let expanded_path = Path::new(expanded);
+        for forbidden in &self.forbidden_paths {
+            let forbidden_expanded = expand_user_path(forbidden);
+            if expanded_path.starts_with(Path::new(&forbidden_expanded)) {
+                return true;
+            }
+        }
+        false
     }
 
     /// Map `/tmp` / `/var/tmp` onto workspace `.velaclaw/tmp` (VL-SEC-012).

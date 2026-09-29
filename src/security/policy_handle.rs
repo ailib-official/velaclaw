@@ -59,6 +59,20 @@ impl PolicyHandle {
         self.read().is_path_allowed(path)
     }
 
+    pub fn turn_read_allowed(&self, path: &str, read_roots: &[String]) -> bool {
+        self.read().turn_read_allowed(path, read_roots)
+    }
+
+    pub fn resolved_read_allowed(
+        &self,
+        logical_full: &Path,
+        resolved: &Path,
+        read_roots: &[String],
+    ) -> bool {
+        self.read()
+            .resolved_read_allowed(logical_full, resolved, read_roots)
+    }
+
     pub fn rewrite_temp_tool_path(&self, path: &str) -> String {
         self.read().rewrite_temp_tool_path(path)
     }

@@ -188,6 +188,11 @@ pub(crate) async fn run_tool_call_loop(
     let mut evidence_cards: Vec<crate::agent::evidence_window::EvidenceCard> = Vec::new();
     let mut evidence_writeup = false;
     let mut evidence_note: Option<String> = None;
+    let mut read_roots = crate::agent::evidence_window::initial_read_roots(
+        &crate::agent::evidence_window::user_task_text(history),
+    );
+    let mut obligation_retried = false;
+    let mut obligation_extra = false;
 
     let block_retrieve = soft_fail.as_ref().is_some_and(|c| c.block_retrieve_tools);
     let tool_specs: Vec<crate::tools::ToolSpec> = if block_retrieve {
@@ -199,11 +204,12 @@ pub(crate) async fn run_tool_call_loop(
         .map(|d| d.should_send_tool_specs() && !tool_specs.is_empty())
         .unwrap_or_else(|| provider.supports_native_tools() && !tool_specs.is_empty());
 
-    // Extra slots: PolicyDeny writeup, or one citation retry that sees cards.
-    for iteration in 0..max_iterations.saturating_add(2) {
-        if iteration >= max_iterations && !deny_writeup && !evidence_writeup {
+    // Extra slots: PolicyDeny writeup, one citation retry, or one obligation retry.
+    for iteration in 0..max_iterations.saturating_add(3) {
+        if iteration >= max_iterations && !deny_writeup && !evidence_writeup && !obligation_extra {
             break;
         }
+        obligation_extra = false;
         if cancellation_token
             .as_ref()
             .is_some_and(CancellationToken::is_cancelled)
@@ -655,6 +661,31 @@ pub(crate) async fn run_tool_call_loop(
                     final_text.push_str(&suffix);
                 }
             }
+            if !deny_writeup && !evidence_writeup {
+                let user_task = crate::agent::evidence_window::user_task_text(history);
+                if let Some(gap) = crate::agent::evidence_window::obligation_gap(
+                    &user_task,
+                    &evidence_cards,
+                    &read_roots,
+                ) {
+                    if !obligation_retried {
+                        obligation_retried = true;
+                        obligation_extra = true;
+                        history.push(ChatMessage::assistant(response_text.clone()));
+                        history.push(ChatMessage::user(format!(
+                            "Obligation open: {gap} Call the missing tool."
+                        )));
+                        continue;
+                    }
+                    let reply = if final_text.trim().is_empty() {
+                        gap
+                    } else {
+                        format!("{final_text}\n\n{gap}")
+                    };
+                    history.push(ChatMessage::assistant(reply.clone()));
+                    return Ok(reply);
+                }
+            }
             if !deny_writeup && !evidence_writeup && !evidence_cards.is_empty() {
                 if let Some(issue) = crate::agent::evidence_window::citation_issue(
                     &final_text,
@@ -709,6 +740,7 @@ pub(crate) async fn run_tool_call_loop(
         let mut skip_outputs: Vec<Option<String>> = vec![None; tool_calls.len()];
         let mut runnable: Vec<ParsedToolCall> = Vec::new();
         let mut runnable_idx: Vec<usize> = Vec::new();
+        let mut admitted_targets: Vec<Vec<String>> = Vec::new();
         for (i, call) in tool_calls.iter().enumerate() {
             if block_retrieve
                 && crate::agent::graph_scheduler::is_retrieve_substitute_tool(&call.name)
@@ -718,10 +750,23 @@ pub(crate) async fn run_tool_call_loop(
                 continue;
             }
             let is_shell = call.name.eq_ignore_ascii_case("shell");
-            if let Some(card_id) = crate::agent::evidence_window::covered_by(
-                &evidence_cards,
-                &call.arguments.to_string(),
-            ) {
+            let args_text = call.arguments.to_string();
+            let command = crate::agent::evidence_window::command_text(&args_text);
+            let targets = crate::agent::evidence_window::targets_in(&command);
+            if !crate::agent::evidence_window::command_is_truncated(&command)
+                && !targets.is_empty()
+                && admitted_targets.iter().any(|seen| {
+                    targets
+                        .iter()
+                        .any(|target| seen.iter().any(|have| have == target))
+                })
+            {
+                skip_outputs[i] = Some("already covered by an earlier call in this batch".into());
+                continue;
+            }
+            if let Some(card_id) =
+                crate::agent::evidence_window::covered_by(&evidence_cards, &args_text)
+            {
                 skip_outputs[i] = Some(format!("already covered by {card_id}"));
                 continue;
             }
@@ -742,6 +787,10 @@ pub(crate) async fn run_tool_call_loop(
             }
             runnable.push(call.clone());
             runnable_idx.push(i);
+            if !targets.is_empty() && !crate::agent::evidence_window::command_is_truncated(&command)
+            {
+                admitted_targets.push(targets);
+            }
             if crate::agent::graph_scheduler::is_retrieve_substitute_tool(&call.name) {
                 if let Some(ctx) = soft_fail.as_ref() {
                     if let Some(acc) = &ctx.hop_tool_accum {
@@ -754,6 +803,8 @@ pub(crate) async fn run_tool_call_loop(
         }
         let mut batch_outputs: Vec<String> = vec![String::new(); tool_calls.len()];
         if !runnable.is_empty() {
+            let mut batch_extras = gate_extras.cloned().unwrap_or_default();
+            batch_extras.read_roots.clone_from(&read_roots);
             let batch_results = tool_batch::execute_tool_batch(
                 &runnable,
                 tools_registry,
@@ -763,7 +814,7 @@ pub(crate) async fn run_tool_call_loop(
                 channel_name,
                 channel_approval.clone(),
                 cancellation_token.as_ref(),
-                gate_extras,
+                Some(&batch_extras),
             )
             .await?;
             for (call_i, result) in runnable_idx.into_iter().zip(batch_results) {
@@ -776,6 +827,24 @@ pub(crate) async fn run_tool_call_loop(
                     result.success,
                 );
                 evidence_cards.push(card);
+                if result.success {
+                    let workspace = security
+                        .map(|policy| policy.workspace_dir())
+                        .unwrap_or_else(|| std::path::PathBuf::from("."));
+                    let user_task = crate::agent::evidence_window::user_task_text(history);
+                    let command =
+                        crate::agent::evidence_window::command_text(&call.arguments.to_string());
+                    for root in crate::agent::evidence_window::roots_from_observation(
+                        &user_task,
+                        &command,
+                        &result.output,
+                        &workspace,
+                    ) {
+                        if !read_roots.iter().any(|have| have == &root) {
+                            read_roots.push(root);
+                        }
+                    }
+                }
                 let coverage = crate::agent::evidence_window::coverage_line(
                     evidence_cards.last().expect("card"),
                 );
@@ -863,7 +932,14 @@ pub(crate) async fn run_tool_call_loop(
         compact_between_samples(history, provider, active_model.as_str(), gate_extras).await?;
     }
 
-    Ok(tool_iteration_cap_reply(&last_visible, max_iterations))
+    let cap = tool_iteration_cap_reply(&last_visible, max_iterations);
+    let user_task = crate::agent::evidence_window::user_task_text(history);
+    if let Some(gap) =
+        crate::agent::evidence_window::obligation_gap(&user_task, &evidence_cards, &read_roots)
+    {
+        return Ok(format!("{cap}\n\n{gap}"));
+    }
+    Ok(cap)
 }
 
 const TOOL_ITERATION_CAP_MARK: &str = "tool iterations. This reply is incomplete.";
@@ -1273,6 +1349,7 @@ mod loop_e2e_tests {
         replies: Mutex<Vec<ChatResponse>>,
         seen: Mutex<Vec<Vec<ChatMessage>>>,
         summaries: Mutex<usize>,
+        tools_present: Mutex<Vec<bool>>,
     }
 
     impl Script {
@@ -1281,6 +1358,7 @@ mod loop_e2e_tests {
                 replies: Mutex::new(replies),
                 seen: Mutex::new(Vec::new()),
                 summaries: Mutex::new(0),
+                tools_present: Mutex::new(Vec::new()),
             }
         }
     }
@@ -1304,6 +1382,10 @@ mod loop_e2e_tests {
             _model: &str,
             _temperature: f64,
         ) -> anyhow::Result<ChatResponse> {
+            self.tools_present
+                .lock()
+                .expect("tools")
+                .push(request.tools.is_some());
             self.seen
                 .lock()
                 .expect("seen")
@@ -1896,5 +1978,109 @@ mod loop_e2e_tests {
             .expect("empty rewrite");
         assert!(reply.trim().is_empty(), "{reply}");
         assert!(!reply.contains("没有可展示的结论"));
+    }
+
+    #[tokio::test]
+    async fn empty_reply_without_obligation_stays_empty() {
+        let provider = Script::new(vec![ChatResponse {
+            text: Some(String::new()),
+            tool_calls: vec![],
+        }]);
+        let mut history = vec![ChatMessage::user("Hello.")];
+        let reply = drive(&provider, &mut history, &[], 4, None)
+            .await
+            .expect("empty");
+        assert!(reply.trim().is_empty(), "{reply}");
+    }
+
+    #[tokio::test]
+    async fn open_obligation_retries_with_tools_then_gap_line() {
+        let hits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let provider = Script::new(vec![
+            ChatResponse {
+                text: Some("proj-alpha 无更新".into()),
+                tool_calls: vec![],
+            },
+            ChatResponse {
+                text: Some(String::new()),
+                tool_calls: vec![],
+            },
+        ]);
+        let tools: Vec<Box<dyn Tool>> = vec![Box::new(CountTool {
+            hits: Arc::clone(&hits),
+        })];
+        let mut history = vec![ChatMessage::user("Has proj-alpha had an update?")];
+        let reply = drive(&provider, &mut history, &tools, 4, None)
+            .await
+            .expect("gap");
+        assert!(reply.contains("Missing evidence"), "{reply}");
+        assert!(reply.contains("no external observation"), "{reply}");
+        let seen = provider.seen.lock().expect("seen");
+        assert!(seen.len() >= 2, "samples {}", seen.len());
+        assert!(
+            seen[1]
+                .iter()
+                .any(|message| message.content.contains("Obligation open:")),
+            "retry sample keeps the turn open"
+        );
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn same_batch_duplicate_is_not_executed() {
+        let hits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let provider = Script::new(vec![ChatResponse {
+            text: Some(String::new()),
+            tool_calls: vec![
+                ToolCall {
+                    id: "a".into(),
+                    name: "file_read".into(),
+                    arguments: r#"{"path":"/data/proj-alpha/a.txt"}"#.into(),
+                },
+                ToolCall {
+                    id: "b".into(),
+                    name: "file_read".into(),
+                    arguments: r#"{"path":"/data/proj-alpha/a.txt"}"#.into(),
+                },
+            ],
+        }]);
+        let tools: Vec<Box<dyn Tool>> = vec![Box::new(CountTool {
+            hits: Arc::clone(&hits),
+        })];
+        let mut history = vec![ChatMessage::user("Hello.")];
+        let reply = drive(&provider, &mut history, &tools, 4, None)
+            .await
+            .expect("batch");
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(reply, "done");
+    }
+
+    struct CountTool {
+        hits: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl Tool for CountTool {
+        fn name(&self) -> &str {
+            "file_read"
+        }
+        fn description(&self) -> &str {
+            "Read a file"
+        }
+        fn parameters_schema(&self) -> serde_json::Value {
+            serde_json::json!({"type":"object","properties":{"path":{"type":"string"}}})
+        }
+        async fn execute(
+            &self,
+            _args: serde_json::Value,
+            _ctx: &ToolExecutionContext,
+        ) -> anyhow::Result<ToolResult> {
+            self.hits.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(ToolResult {
+                success: true,
+                output: "body".into(),
+                error: None,
+            })
+        }
     }
 }

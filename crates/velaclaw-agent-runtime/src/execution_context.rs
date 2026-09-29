@@ -16,6 +16,10 @@ pub struct ToolExecutionContext {
     /// Never sourced from model JSON; agent resolves opaque `secret_slot` ids.
     #[serde(skip)]
     pub stdin_secret: Option<String>,
+    /// Turn-scoped directories the loop admitted for read tools.
+    /// Never sourced from model JSON.
+    #[serde(default)]
+    pub read_roots: Vec<String>,
 }
 
 impl ToolExecutionContext {
@@ -24,6 +28,7 @@ impl ToolExecutionContext {
             human_shell_approved: approved,
             sandbox_elevated: false,
             stdin_secret: None,
+            read_roots: Vec::new(),
         }
     }
 
@@ -34,6 +39,11 @@ impl ToolExecutionContext {
 
     pub fn with_stdin_secret(mut self, secret: Option<String>) -> Self {
         self.stdin_secret = secret;
+        self
+    }
+
+    pub fn with_read_roots(mut self, roots: Vec<String>) -> Self {
+        self.read_roots = roots;
         self
     }
 }

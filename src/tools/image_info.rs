@@ -146,7 +146,7 @@ impl Tool for ImageInfoTool {
     async fn execute(
         &self,
         args: serde_json::Value,
-        _ctx: &ToolExecutionContext,
+        ctx: &ToolExecutionContext,
     ) -> anyhow::Result<ToolResult> {
         let path_str = args
             .get("path")
@@ -161,7 +161,7 @@ impl Tool for ImageInfoTool {
         let path = self.security.tool_fs_path(path_str);
 
         // Restrict reads to workspace directory to prevent arbitrary file exfiltration
-        if !self.security.is_path_allowed(path_str) {
+        if !self.security.turn_read_allowed(path_str, &ctx.read_roots) {
             return Ok(ToolResult {
                 success: false,
                 output: String::new(),
@@ -177,6 +177,32 @@ impl Tool for ImageInfoTool {
                 output: String::new(),
                 error: Some(format!("File not found: {path_str}")),
             });
+        }
+
+        if std::path::Path::new(path_str).is_absolute() {
+            let resolved = match tokio::fs::canonicalize(&path).await {
+                Ok(resolved) => resolved,
+                Err(e) => {
+                    return Ok(ToolResult {
+                        success: false,
+                        output: String::new(),
+                        error: Some(format!("Failed to resolve file path: {e}")),
+                    });
+                }
+            };
+            if !self
+                .security
+                .resolved_read_allowed(&path, &resolved, &ctx.read_roots)
+            {
+                return Ok(ToolResult {
+                    success: false,
+                    output: String::new(),
+                    error: Some(format!(
+                        "Resolved path escapes workspace: {}",
+                        resolved.display()
+                    )),
+                });
+            }
         }
 
         let metadata = tokio::fs::metadata(&path)

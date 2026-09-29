@@ -43,6 +43,8 @@ pub(crate) struct ToolBatchGateExtras {
     pub macro_stages: Vec<crate::config::MacroStageConfig>,
     /// When set, `run_tool_call_loop` calls `prepare_turn_history` between samples.
     pub loop_compact: Option<ToolLoopCompact>,
+    /// Directories this turn may read outside the workspace. Loop-owned.
+    pub read_roots: Vec<String>,
 }
 
 /// Message-count and ratio inputs already used at the turn boundary.
@@ -83,6 +85,7 @@ fn build_tool_execution_context(
     args: &mut serde_json::Value,
     shell_human_approved: bool,
     human_input_hub: Option<&HumanInputHub>,
+    read_roots: &[String],
 ) -> Result<ToolExecutionContext, ToolBatchResult> {
     let mut stdin_secret = None;
     if call_name == "shell" {
@@ -111,10 +114,25 @@ fn build_tool_execution_context(
             }
         }
     }
-    Ok(
+    Ok(apply_read_roots(
         ToolExecutionContext::with_shell_human_approved(shell_human_approved)
             .with_stdin_secret(stdin_secret),
-    )
+        read_roots,
+    ))
+}
+
+fn apply_read_roots(ctx: ToolExecutionContext, read_roots: &[String]) -> ToolExecutionContext {
+    if read_roots.is_empty() {
+        ctx
+    } else {
+        ctx.with_read_roots(read_roots.to_vec())
+    }
+}
+
+fn batch_read_roots(extras: Option<&ToolBatchGateExtras>) -> &[String] {
+    extras
+        .map(|extras| extras.read_roots.as_slice())
+        .unwrap_or(&[])
 }
 
 fn plan_blocked(phase: HostPhase, tool_name: &str) -> Option<ToolBatchResult> {
@@ -252,7 +270,8 @@ async fn execute_tools_parallel(
     let futures: Vec<_> = runnable
         .into_iter()
         .map(|(i, call)| async move {
-            let ctx = ToolExecutionContext::default();
+            let ctx =
+                ToolExecutionContext::default().with_read_roots(batch_read_roots(extras).to_vec());
             (
                 i,
                 execute_one_tool(
@@ -317,8 +336,13 @@ async fn execute_tools_sequential_no_gate(
             continue;
         }
         let mut args = normalize_tool_arguments(&call.name, call.arguments.clone());
-        let ctx = match build_tool_execution_context(&call.name, &mut args, false, human_input_hub)
-        {
+        let ctx = match build_tool_execution_context(
+            &call.name,
+            &mut args,
+            false,
+            human_input_hub,
+            batch_read_roots(extras),
+        ) {
             Ok(ctx) => ctx,
             Err(err) => {
                 results.push(err);
@@ -413,6 +437,7 @@ async fn execute_tools_sequential_with_gate(
             &mut args,
             shell_human_approved,
             human_input_hub,
+            batch_read_roots(extras),
         ) {
             Ok(ctx) => ctx,
             Err(err) => {
@@ -464,6 +489,7 @@ async fn execute_tools_sequential_with_gate(
                             &mut retry_args,
                             shell_human_approved,
                             human_input_hub,
+                            batch_read_roots(extras),
                         ) {
                             Ok(ctx) => ctx.with_sandbox_elevated(true),
                             Err(err) => {

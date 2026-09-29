@@ -499,6 +499,7 @@ pub async fn run(
             compact_context_ratio: config.agent.compact_context_ratio,
             context_window: crate::protocol_registry::lookup_context_window(&model_name),
         }),
+        read_roots: Vec::new(),
     };
 
     // ── Execute ──────────────────────────────────────────────────

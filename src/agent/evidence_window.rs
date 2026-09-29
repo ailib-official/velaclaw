@@ -1136,7 +1136,10 @@ mod tests {
     fn unrelated_absolute_path_stays_denied() {
         let roots = initial_read_roots("Inspect proj-alpha");
         assert!(roots.is_empty());
-        assert!(name_tokens("Inspect proj-alpha") == vec!["proj-alpha".to_string()]);
+        assert_eq!(
+            name_tokens("Inspect proj-alpha"),
+            vec!["proj-alpha".to_string()]
+        );
         assert!(name_tokens("What is the citation?").is_empty());
     }
 

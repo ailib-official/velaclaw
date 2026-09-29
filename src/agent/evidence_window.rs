@@ -554,7 +554,9 @@ const NAME_STOP: &[&str] = &[
 ];
 
 /// Path-like names in the user text. Ordinary words are not filesystem targets.
+/// A leading `[Memory context]` block is not part of the request.
 pub(crate) fn name_tokens(user_text: &str) -> Vec<String> {
+    let user_text = obligation_text(user_text);
     let stripped = strip_absolute_paths(user_text);
     let mut out = Vec::new();
     let bytes = stripped.as_bytes();
@@ -635,7 +637,16 @@ fn strip_absolute_paths(text: &str) -> String {
 }
 
 pub(crate) fn initial_read_roots(user_text: &str) -> Vec<String> {
-    absolute_paths_in(user_text)
+    absolute_paths_in(obligation_text(user_text))
+}
+
+fn obligation_text(user_text: &str) -> &str {
+    let Some(rest) = user_text.strip_prefix("[Memory context]\n") else {
+        return user_text;
+    };
+    rest.find("\n\n")
+        .map(|index| &rest[index + 2..])
+        .unwrap_or(user_text)
 }
 
 /// Directories admitted because a successful observation named the user's token.
@@ -726,6 +737,7 @@ fn relative_paths_in(output: &str) -> Vec<String> {
 }
 
 fn list_only(user_text: &str) -> bool {
+    let user_text = obligation_text(user_text);
     let lower = user_text.to_lowercase();
     let listing = user_text.contains("列出")
         || user_text.contains("列表")
@@ -745,6 +757,7 @@ fn content_verb(user_text: &str) -> bool {
 }
 
 fn external_predicate(user_text: &str) -> bool {
+    let user_text = obligation_text(user_text);
     user_text.contains("更新")
         || user_text.contains("对齐")
         || user_text.contains("上游")
@@ -763,7 +776,7 @@ fn has_word(text: &str, word: &str) -> bool {
 }
 
 fn has_named_target(user_text: &str) -> bool {
-    !name_tokens(user_text).is_empty() || !absolute_paths_in(user_text).is_empty()
+    !name_tokens(user_text).is_empty() || !absolute_paths_in(obligation_text(user_text)).is_empty()
 }
 
 pub(crate) fn content_required(user_text: &str) -> bool {
@@ -781,6 +794,7 @@ pub(crate) fn external_required(user_text: &str) -> bool {
 }
 
 fn each_requested(user_text: &str) -> bool {
+    let user_text = obligation_text(user_text);
     user_text.contains('各')
         || user_text.contains("每一个")
         || user_text.contains("每个")
@@ -1113,6 +1127,13 @@ mod tests {
         )];
         let again = r#"{"path":"/data/proj-alpha/a.txt"}"#;
         assert_eq!(covered_by(&cards, again), None);
+    }
+
+    #[test]
+    fn memory_preamble_does_not_open_a_content_obligation() {
+        let user = "[Memory context]\n- age_fact: Age is 45\n\nhello";
+        assert!(!content_required(user));
+        assert!(obligation_gap(user, &[], &[]).is_none());
     }
 
     #[test]

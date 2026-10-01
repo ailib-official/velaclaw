@@ -23,6 +23,38 @@ const SAFE_ENV_VARS: &[&str] = &[
 /// Injected only when the first allowlist segment is `gh` / `gh.exe` (same split as policy).
 const OPERATOR_PASSTHROUGH_ENV_VARS: &[&str] = &["GH_TOKEN", "GITHUB_TOKEN"];
 
+fn shell_write_policy_deny(command: &str, ctx: &ToolExecutionContext) -> Option<String> {
+    if !ctx.no_product_edit && !ctx.no_scratch_write {
+        return None;
+    }
+    let targets = crate::agent::evidence_window::shell_rewrite_targets(command);
+    if targets.is_empty() {
+        return None;
+    }
+    if ctx.no_scratch_write {
+        return Some(format!(
+            "Turn is read-only: shell rewrite blocked ({})",
+            targets.join(", ")
+        ));
+    }
+    let scratch = ctx.turn_scratch_rel.as_deref().unwrap_or("");
+    for target in &targets {
+        if scratch.is_empty()
+            || !crate::agent::evidence_window::path_under_turn_scratch(target, scratch)
+        {
+            let hint = if scratch.is_empty() {
+                "turn scratch".to_string()
+            } else {
+                scratch.to_string()
+            };
+            return Some(format!(
+                "no_product_edit: shell rewrite only under {hint} (got {target})"
+            ));
+        }
+    }
+    None
+}
+
 /// Shell command execution tool with sandboxing
 pub struct ShellTool {
     security: PolicyHandle,
@@ -185,6 +217,14 @@ impl Tool for ShellTool {
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("Missing 'command' parameter"))?;
         let human_approved = ctx.human_shell_approved;
+
+        if let Some(deny) = shell_write_policy_deny(command, ctx) {
+            return Ok(ToolResult {
+                success: false,
+                output: String::new(),
+                error: Some(deny),
+            });
+        }
 
         if self.security.is_rate_limited() {
             return Ok(ToolResult {

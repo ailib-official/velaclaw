@@ -14,6 +14,28 @@ impl FileWriteTool {
     }
 }
 
+fn write_policy_deny(path: &str, ctx: &ToolExecutionContext) -> Option<String> {
+    if ctx.no_scratch_write {
+        return Some("Turn is read-only: file writes are blocked".into());
+    }
+    if ctx.no_product_edit {
+        let scratch = ctx.turn_scratch_rel.as_deref().unwrap_or("");
+        if scratch.is_empty()
+            || !crate::agent::evidence_window::path_under_turn_scratch(path, scratch)
+        {
+            let hint = if scratch.is_empty() {
+                "turn scratch".to_string()
+            } else {
+                scratch.to_string()
+            };
+            return Some(format!(
+                "no_product_edit: write only under {hint} (got {path})"
+            ));
+        }
+    }
+    None
+}
+
 #[async_trait]
 impl Tool for FileWriteTool {
     fn name(&self) -> &str {
@@ -89,6 +111,14 @@ impl Tool for FileWriteTool {
                 success: false,
                 output: String::new(),
                 error: Some(format!("Path not allowed by security policy: {path}")),
+            });
+        }
+
+        if let Some(deny) = write_policy_deny(path, ctx) {
+            return Ok(ToolResult {
+                success: false,
+                output: String::new(),
+                error: Some(deny),
             });
         }
 
@@ -546,5 +576,58 @@ mod tests {
         assert!(!result.success, "paths with null bytes must be blocked");
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn no_product_edit_blocks_product_write_allows_scratch() {
+        let dir = tempfile::tempdir().unwrap();
+        let security = PolicyHandle::new(SecurityPolicy {
+            autonomy: AutonomyLevel::Full,
+            workspace_dir: dir.path().to_path_buf(),
+            ..SecurityPolicy::default()
+        });
+        let tool = FileWriteTool::new(security);
+        let scratch = ".velaclaw/tmp/turn-test/probe.txt";
+        let deny_ctx = ToolExecutionContext::default().with_write_policy(
+            true,
+            false,
+            Some(".velaclaw/tmp/turn-test".into()),
+        );
+        let blocked = tool
+            .execute(json!({"path": "src/main.rs", "content": "nope"}), &deny_ctx)
+            .await
+            .unwrap();
+        assert!(!blocked.success);
+        assert!(blocked.error.as_ref().unwrap().contains("no_product_edit"));
+
+        let allowed = tool
+            .execute(json!({"path": scratch, "content": "ok"}), &deny_ctx)
+            .await
+            .unwrap();
+        assert!(allowed.success, "{:?}", allowed.error);
+        assert!(dir.path().join(scratch).exists());
+    }
+
+    #[tokio::test]
+    async fn read_only_blocks_scratch_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let security = PolicyHandle::new(SecurityPolicy {
+            autonomy: AutonomyLevel::Full,
+            workspace_dir: dir.path().to_path_buf(),
+            ..SecurityPolicy::default()
+        });
+        let tool = FileWriteTool::new(security);
+        let scratch = ".velaclaw/tmp/turn-ro/probe.txt";
+        let ctx = ToolExecutionContext::default().with_write_policy(
+            false,
+            true,
+            Some(".velaclaw/tmp/turn-ro".into()),
+        );
+        let result = tool
+            .execute(json!({"path": scratch, "content": "nope"}), &ctx)
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(result.error.as_ref().unwrap().contains("read-only"));
     }
 }

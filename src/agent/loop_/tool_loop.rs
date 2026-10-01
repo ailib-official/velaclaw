@@ -191,6 +191,12 @@ pub(crate) async fn run_tool_call_loop(
     let mut read_roots = crate::agent::evidence_window::initial_read_roots(
         &crate::agent::evidence_window::user_task_text(history),
     );
+    let turn_id = uuid::Uuid::new_v4().simple().to_string();
+    let turn_id = &turn_id[..8];
+    let write_policy = crate::agent::evidence_window::parse_write_policy(
+        &crate::agent::evidence_window::user_task_text(history),
+        turn_id,
+    );
     let mut obligation_retried = false;
     let mut obligation_extra = false;
 
@@ -805,6 +811,9 @@ pub(crate) async fn run_tool_call_loop(
         if !runnable.is_empty() {
             let mut batch_extras = gate_extras.cloned().unwrap_or_default();
             batch_extras.read_roots.clone_from(&read_roots);
+            batch_extras.no_product_edit = write_policy.no_product_edit;
+            batch_extras.no_scratch_write = write_policy.no_scratch_write;
+            batch_extras.turn_scratch_rel = Some(write_policy.scratch_rel.clone());
             let batch_results = tool_batch::execute_tool_batch(
                 &runnable,
                 tools_registry,

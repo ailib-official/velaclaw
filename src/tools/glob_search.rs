@@ -99,20 +99,30 @@ impl Tool for GlobSearchTool {
             });
         }
 
-        // Build full pattern anchored to workspace, plus each turn read root.
+        // Build search plans: workspace (+ read roots) for relative patterns,
+        // or the absolute static prefix for absolute patterns.
         let workspace = self.security.workspace_dir();
-        let mut full_patterns = Vec::new();
+        let mut plans = Vec::new();
         if pattern.starts_with('/') || pattern.starts_with('\\') {
-            full_patterns.push(pattern.to_string());
+            let prefix = glob_static_prefix(pattern);
+            let rel = pattern[prefix.len()..]
+                .trim_start_matches(['/', '\\'])
+                .to_string();
+            let rel = if rel.is_empty() { "*".to_string() } else { rel };
+            plans.push(GlobWalkPlan {
+                root: std::path::PathBuf::from(prefix),
+                rel_pattern: rel,
+            });
         } else {
-            full_patterns.push(workspace.join(pattern).to_string_lossy().to_string());
+            plans.push(GlobWalkPlan {
+                root: workspace.clone(),
+                rel_pattern: pattern.to_string(),
+            });
             for root in &ctx.read_roots {
-                full_patterns.push(
-                    std::path::Path::new(root)
-                        .join(pattern)
-                        .to_string_lossy()
-                        .to_string(),
-                );
+                plans.push(GlobWalkPlan {
+                    root: std::path::PathBuf::from(root),
+                    rel_pattern: pattern.to_string(),
+                });
             }
         }
 
@@ -130,12 +140,12 @@ impl Tool for GlobSearchTool {
         let mut results = Vec::new();
         let mut truncated = false;
 
-        for full_pattern in &full_patterns {
+        for plan in &plans {
             if truncated {
                 break;
             }
-            let entries = match glob::glob(full_pattern) {
-                Ok(paths) => paths,
+            let compiled = match glob::Pattern::new(&plan.rel_pattern) {
+                Ok(p) => p,
                 Err(e) => {
                     return Ok(ToolResult {
                         success: false,
@@ -144,48 +154,21 @@ impl Tool for GlobSearchTool {
                     });
                 }
             };
-            for entry in entries {
-                let path = match entry {
-                    Ok(p) => p,
-                    Err(_) => continue,
-                };
-                if path.is_dir() {
-                    continue;
-                }
-
-                let under_workspace =
-                    path.starts_with(&workspace) || path.starts_with(&workspace_canon);
-                if under_workspace {
-                    let base = if path.starts_with(&workspace_canon) {
-                        workspace_canon.as_path()
-                    } else {
-                        workspace.as_path()
-                    };
-                    if let Ok(rel) = path.strip_prefix(base) {
-                        let rel_str = rel
-                            .to_string_lossy()
-                            .trim_start_matches(std::path::MAIN_SEPARATOR)
-                            .to_string();
-                        if !rel_str.is_empty() && !results.contains(&rel_str) {
-                            results.push(rel_str);
-                        }
-                    }
-                } else if let Ok(resolved) = std::fs::canonicalize(&path) {
-                    if self
-                        .security
-                        .resolved_read_allowed(&path, &resolved, &ctx.read_roots)
-                        && !results
-                            .iter()
-                            .any(|seen| seen == &resolved.to_string_lossy())
-                    {
-                        results.push(resolved.to_string_lossy().to_string());
-                    }
-                }
-
-                if results.len() >= MAX_RESULTS {
-                    truncated = true;
-                    break;
-                }
+            if let Err(e) = collect_glob_hits(
+                &plan.root,
+                &compiled,
+                &workspace,
+                &workspace_canon,
+                &ctx.read_roots,
+                &self.security,
+                &mut results,
+                &mut truncated,
+            ) {
+                return Ok(ToolResult {
+                    success: false,
+                    output: String::new(),
+                    error: Some(e),
+                });
             }
         }
 
@@ -212,6 +195,151 @@ impl Tool for GlobSearchTool {
             error: None,
         })
     }
+}
+
+const MAX_GLOB_DEPTH: usize = 16;
+
+const SKIP_DIR_NAMES: &[&str] = &[".cache", "node_modules", ".git", "target", ".nvm"];
+
+struct GlobWalkPlan {
+    root: std::path::PathBuf,
+    rel_pattern: String,
+}
+
+fn collect_glob_hits(
+    search_root: &std::path::Path,
+    pattern: &glob::Pattern,
+    workspace: &std::path::Path,
+    workspace_canon: &std::path::Path,
+    read_roots: &[String],
+    security: &crate::security::PolicyHandle,
+    results: &mut Vec<String>,
+    truncated: &mut bool,
+) -> Result<(), String> {
+    use std::collections::HashSet;
+
+    if !search_root.exists() {
+        return Ok(());
+    }
+
+    let mut stack: Vec<(std::path::PathBuf, usize)> = vec![(search_root.to_path_buf(), 0)];
+    let mut seen_dirs: HashSet<(u64, u64)> = HashSet::new();
+
+    while let Some((dir, depth)) = stack.pop() {
+        if *truncated || results.len() >= MAX_RESULTS {
+            *truncated = true;
+            break;
+        }
+        if depth > MAX_GLOB_DEPTH {
+            continue;
+        }
+
+        let meta = match std::fs::metadata(&dir) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if !meta.is_dir() {
+            continue;
+        }
+        if let Some(key) = dir_inode_key(&meta) {
+            if !seen_dirs.insert(key) {
+                continue;
+            }
+        }
+
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            if results.len() >= MAX_RESULTS {
+                *truncated = true;
+                break;
+            }
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            let path = entry.path();
+            let file_type = match entry.file_type() {
+                Ok(ft) => ft,
+                Err(_) => continue,
+            };
+
+            let is_dir = if file_type.is_dir() {
+                true
+            } else if file_type.is_symlink() {
+                std::fs::metadata(&path)
+                    .map(|m| m.is_dir())
+                    .unwrap_or(false)
+            } else {
+                false
+            };
+
+            if is_dir {
+                if SKIP_DIR_NAMES.iter().any(|skip| *skip == name_str.as_ref()) {
+                    continue;
+                }
+                stack.push((path, depth + 1));
+                continue;
+            }
+
+            if !file_type.is_file() && !file_type.is_symlink() {
+                continue;
+            }
+            if file_type.is_symlink()
+                && std::fs::metadata(&path)
+                    .map(|m| m.is_dir())
+                    .unwrap_or(false)
+            {
+                continue;
+            }
+
+            let rel_to_root = match path.strip_prefix(search_root) {
+                Ok(rel) => rel,
+                Err(_) => continue,
+            };
+            if !pattern.matches_path(rel_to_root) {
+                continue;
+            }
+
+            let under_workspace = path.starts_with(workspace) || path.starts_with(workspace_canon);
+            if under_workspace {
+                let base = if path.starts_with(workspace_canon) {
+                    workspace_canon
+                } else {
+                    workspace
+                };
+                if let Ok(rel) = path.strip_prefix(base) {
+                    let rel_str = rel
+                        .to_string_lossy()
+                        .trim_start_matches(std::path::MAIN_SEPARATOR)
+                        .to_string();
+                    if !rel_str.is_empty() && !results.contains(&rel_str) {
+                        results.push(rel_str);
+                    }
+                }
+            } else if let Ok(resolved) = std::fs::canonicalize(&path) {
+                if security.resolved_read_allowed(&path, &resolved, read_roots)
+                    && !results
+                        .iter()
+                        .any(|seen| seen == &resolved.to_string_lossy())
+                {
+                    results.push(resolved.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn dir_inode_key(meta: &std::fs::Metadata) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    Some((meta.dev(), meta.ino()))
+}
+
+#[cfg(not(unix))]
+fn dir_inode_key(_meta: &std::fs::Metadata) -> Option<(u64, u64)> {
+    None
 }
 
 fn glob_static_prefix(pattern: &str) -> &str {
@@ -536,6 +664,33 @@ mod tests {
         assert!(result.success);
         assert!(result.output.contains("file.txt"));
         assert!(!result.output.contains("subdir"));
+    }
+
+    #[tokio::test]
+    async fn glob_skips_seen_inode_and_cache_dir() {
+        let dir = TempDir::new().unwrap();
+        let cache = dir.path().join(".cache");
+        std::fs::create_dir_all(&cache).unwrap();
+        std::fs::write(cache.join("secret.txt"), "nope").unwrap();
+        std::fs::write(dir.path().join("keep.txt"), "yes").unwrap();
+        let cycle = dir.path().join("cycle");
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(dir.path(), &cycle).unwrap();
+        }
+
+        let tool = GlobSearchTool::new(test_security(dir.path().to_path_buf()));
+        let result = tool
+            .execute(
+                json!({"pattern": "**/*.txt"}),
+                &ToolExecutionContext::default(),
+            )
+            .await
+            .unwrap();
+
+        assert!(result.success);
+        assert!(result.output.contains("keep.txt"));
+        assert!(!result.output.contains("secret.txt"));
     }
 
     #[tokio::test]

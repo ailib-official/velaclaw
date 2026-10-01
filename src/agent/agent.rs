@@ -860,6 +860,9 @@ impl Agent {
                 context_window: self.hop_envelope_window(None),
             }),
             read_roots: Vec::new(),
+            no_product_edit: false,
+            no_scratch_write: false,
+            turn_scratch_rel: None,
         };
         let approval_mgr = self.gateway_approval.as_ref().map(|(mgr, _)| mgr);
 

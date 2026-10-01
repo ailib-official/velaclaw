@@ -45,6 +45,12 @@ pub(crate) struct ToolBatchGateExtras {
     pub loop_compact: Option<ToolLoopCompact>,
     /// Directories this turn may read outside the workspace. Loop-owned.
     pub read_roots: Vec<String>,
+    /// Block product-root writes; allow turn scratch (VL-RAO-012).
+    pub no_product_edit: bool,
+    /// Block all writes including scratch (VL-RAO-012).
+    pub no_scratch_write: bool,
+    /// Workspace-relative scratch for this turn.
+    pub turn_scratch_rel: Option<String>,
 }
 
 /// Message-count and ratio inputs already used at the turn boundary.
@@ -86,6 +92,7 @@ fn build_tool_execution_context(
     shell_human_approved: bool,
     human_input_hub: Option<&HumanInputHub>,
     read_roots: &[String],
+    extras: Option<&ToolBatchGateExtras>,
 ) -> Result<ToolExecutionContext, ToolBatchResult> {
     let mut stdin_secret = None;
     if call_name == "shell" {
@@ -114,10 +121,13 @@ fn build_tool_execution_context(
             }
         }
     }
-    Ok(apply_read_roots(
-        ToolExecutionContext::with_shell_human_approved(shell_human_approved)
-            .with_stdin_secret(stdin_secret),
-        read_roots,
+    Ok(apply_write_policy(
+        apply_read_roots(
+            ToolExecutionContext::with_shell_human_approved(shell_human_approved)
+                .with_stdin_secret(stdin_secret),
+            read_roots,
+        ),
+        extras,
     ))
 }
 
@@ -127,6 +137,23 @@ fn apply_read_roots(ctx: ToolExecutionContext, read_roots: &[String]) -> ToolExe
     } else {
         ctx.with_read_roots(read_roots.to_vec())
     }
+}
+
+fn apply_write_policy(
+    ctx: ToolExecutionContext,
+    extras: Option<&ToolBatchGateExtras>,
+) -> ToolExecutionContext {
+    let Some(extras) = extras else {
+        return ctx;
+    };
+    if !extras.no_product_edit && !extras.no_scratch_write && extras.turn_scratch_rel.is_none() {
+        return ctx;
+    }
+    ctx.with_write_policy(
+        extras.no_product_edit,
+        extras.no_scratch_write,
+        extras.turn_scratch_rel.clone(),
+    )
 }
 
 fn batch_read_roots(extras: Option<&ToolBatchGateExtras>) -> &[String] {
@@ -270,8 +297,10 @@ async fn execute_tools_parallel(
     let futures: Vec<_> = runnable
         .into_iter()
         .map(|(i, call)| async move {
-            let ctx =
-                ToolExecutionContext::default().with_read_roots(batch_read_roots(extras).to_vec());
+            let ctx = apply_write_policy(
+                ToolExecutionContext::default().with_read_roots(batch_read_roots(extras).to_vec()),
+                extras,
+            );
             (
                 i,
                 execute_one_tool(
@@ -342,6 +371,7 @@ async fn execute_tools_sequential_no_gate(
             false,
             human_input_hub,
             batch_read_roots(extras),
+            extras,
         ) {
             Ok(ctx) => ctx,
             Err(err) => {
@@ -438,6 +468,7 @@ async fn execute_tools_sequential_with_gate(
             shell_human_approved,
             human_input_hub,
             batch_read_roots(extras),
+            extras,
         ) {
             Ok(ctx) => ctx,
             Err(err) => {
@@ -490,6 +521,7 @@ async fn execute_tools_sequential_with_gate(
                             shell_human_approved,
                             human_input_hub,
                             batch_read_roots(extras),
+                            extras,
                         ) {
                             Ok(ctx) => ctx.with_sandbox_elevated(true),
                             Err(err) => {

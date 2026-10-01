@@ -20,6 +20,15 @@ pub struct ToolExecutionContext {
     /// Never sourced from model JSON.
     #[serde(default)]
     pub read_roots: Vec<String>,
+    /// Block writes under product roots; allow turn scratch only (VL-RAO-012).
+    #[serde(default)]
+    pub no_product_edit: bool,
+    /// Block all file writes including turn scratch (VL-RAO-012).
+    #[serde(default)]
+    pub no_scratch_write: bool,
+    /// Relative scratch directory for this turn (under workspace), when set.
+    #[serde(default)]
+    pub turn_scratch_rel: Option<String>,
 }
 
 impl ToolExecutionContext {
@@ -29,6 +38,9 @@ impl ToolExecutionContext {
             sandbox_elevated: false,
             stdin_secret: None,
             read_roots: Vec::new(),
+            no_product_edit: false,
+            no_scratch_write: false,
+            turn_scratch_rel: None,
         }
     }
 
@@ -44,6 +56,18 @@ impl ToolExecutionContext {
 
     pub fn with_read_roots(mut self, roots: Vec<String>) -> Self {
         self.read_roots = roots;
+        self
+    }
+
+    pub fn with_write_policy(
+        mut self,
+        no_product_edit: bool,
+        no_scratch_write: bool,
+        turn_scratch_rel: Option<String>,
+    ) -> Self {
+        self.no_product_edit = no_product_edit;
+        self.no_scratch_write = no_scratch_write;
+        self.turn_scratch_rel = turn_scratch_rel;
         self
     }
 }

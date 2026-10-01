@@ -500,6 +500,9 @@ pub async fn run(
             context_window: crate::protocol_registry::lookup_context_window(&model_name),
         }),
         read_roots: Vec::new(),
+        no_product_edit: false,
+        no_scratch_write: false,
+        turn_scratch_rel: None,
     };
 
     // ── Execute ──────────────────────────────────────────────────

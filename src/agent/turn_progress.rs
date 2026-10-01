@@ -113,7 +113,7 @@ pub fn model_status_detail(provider: &str, model: &str) -> String {
 pub fn progress_caption(tool: &str, args: &Value) -> String {
     let raw = match tool {
         "shell" => shell_caption(args),
-        "file_read" | "pdf_read" => verb_path("read", args),
+        "file_read" | "pdf_read" | "image_info" => verb_path("read", args),
         "file_write" => verb_path("write", args),
         "glob_search" => verb_arg("glob", args, &["pattern", "glob"]),
         "web_search_tool" => verb_arg("search", args, &["query", "q"]),
@@ -196,9 +196,24 @@ fn basename_or_path(path: &str) -> &str {
         .unwrap_or(path)
 }
 
+/// Prefer `parent/name` when the path has a directory; otherwise the bare name.
+fn caption_path(path: &str) -> &str {
+    let trimmed = path.trim_end_matches(['/', '\\']);
+    let mut parts = trimmed.rsplit(['/', '\\']).filter(|s| !s.is_empty());
+    let Some(name) = parts.next() else {
+        return path;
+    };
+    let Some(parent) = parts.next() else {
+        return name;
+    };
+    let name_start = trimmed.len().saturating_sub(name.len());
+    let parent_start = name_start.saturating_sub(parent.len() + 1);
+    &trimmed[parent_start..]
+}
+
 fn verb_path(verb: &str, args: &Value) -> String {
     match first_str(args, &["path", "file", "filename"]) {
-        Some(p) => format!("{verb} {}", basename_or_path(p)),
+        Some(p) => format!("{verb} {}", caption_path(p)),
         None => verb.to_string(),
     }
 }
@@ -640,9 +655,11 @@ mod tests {
     }
 
     #[test]
-    fn file_read_caption_uses_basename() {
+    fn file_read_caption_keeps_parent_and_name() {
         let cap = progress_caption("file_read", &json!({"path": "src/agent/turn_progress.rs"}));
-        assert_eq!(cap, "read turn_progress.rs");
+        assert_eq!(cap, "read agent/turn_progress.rs");
+        let shallow = progress_caption("file_read", &json!({"path": "README.md"}));
+        assert_eq!(shallow, "read README.md");
     }
 
     #[test]

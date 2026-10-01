@@ -1,9 +1,11 @@
-//! 证据卡片与成文引用检查（VL-RAO-010）。
+//! 证据卡片与成文引用检查（VL-RAO-010/011/012）。
 //!
 //! Cards are filled by the tool loop from the call itself. The writeup sample
 //! cites those cards. A time range comes from the user text; when the user
 //! names none, the newest dated card is the latest status. Covered targets are
-//! not executed again.
+//! not executed again. External obligations require a non-HTML observation;
+//! local-config phrases admit the config directory as a read root; write
+//! phrases gate product vs scratch paths.
 
 use serde_json::Value;
 
@@ -348,11 +350,20 @@ pub(crate) fn citation_issue(
     if let Some(issue) = window_issue(reply, &cited, cards, &window) {
         return Some(issue);
     }
-    if currency_claim(reply)
-        && external_required(user_text)
-        && !cites_content_and_external(&cited, cards)
-    {
-        return Some("cite a content card and an external card".into());
+    if currency_claim(reply) && external_required(user_text) {
+        let has_external = cites_qualifying_external(&cited, cards);
+        if content_required(user_text) {
+            let has_content = cited.iter().any(|id| {
+                cards
+                    .iter()
+                    .any(|card| card.id == *id && is_content_tool(&card.tool) && card.success)
+            });
+            if !(has_content && has_external) {
+                return Some("cite a content card and a qualifying external card".into());
+            }
+        } else if !has_external {
+            return Some("cite a qualifying external card".into());
+        }
     }
     None
 }
@@ -363,7 +374,19 @@ fn needs_citation(reply: &str) -> bool {
         || reply.contains("完全")
         || reply.contains("成功")
         || reply.contains("失败")
+        || reply.contains("当前")
+        || reply.contains("现在")
+        || reply.contains("有效")
+        || reply.contains("过时")
         || reply.contains('%')
+        || has_word(reply, "current")
+        || has_word(reply, "live")
+        || has_word(reply, "presently")
+        || has_word(reply, "valid")
+        || has_word(reply, "outdated")
+        || has_word(reply, "update")
+        || has_word(reply, "updated")
+        || has_word(reply, "aligned")
         || !timestamps_in(reply).is_empty()
 }
 
@@ -637,7 +660,139 @@ fn strip_absolute_paths(text: &str) -> String {
 }
 
 pub(crate) fn initial_read_roots(user_text: &str) -> Vec<String> {
-    absolute_paths_in(obligation_text(user_text))
+    initial_read_roots_with_config(user_text, config_dir_read_root().as_deref())
+}
+
+/// Same as [`initial_read_roots`], with an injectable config directory for tests.
+pub(crate) fn initial_read_roots_with_config(
+    user_text: &str,
+    config_dir: Option<&str>,
+) -> Vec<String> {
+    let mut roots = absolute_paths_in(obligation_text(user_text));
+    if wants_config_read_root(user_text) {
+        if let Some(dir) = config_dir.filter(|d| !d.is_empty()) {
+            push_unique(&mut roots, dir.to_string());
+        }
+    }
+    roots
+}
+
+fn wants_config_read_root(user_text: &str) -> bool {
+    let text = obligation_text(user_text);
+    let lower = text.to_lowercase();
+    text.contains("本机")
+        || text.contains("当前配置")
+        || text.contains("正在用")
+        || text.contains("正在使用")
+        || text.contains("运行配置")
+        || lower.contains("this machine")
+        || lower.contains("currently using")
+        || lower.contains("running config")
+        || lower.contains("my config")
+        || lower.contains("local config")
+}
+
+fn config_dir_read_root() -> Option<String> {
+    if let Ok(custom) = std::env::var("VELACLAW_CONFIG_DIR") {
+        let trimmed = custom.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+    directories::UserDirs::new().map(|u| {
+        u.home_dir()
+            .join(".velaclaw")
+            .to_string_lossy()
+            .into_owned()
+    })
+}
+
+/// Turn write gates from user phrasing (VL-RAO-012). Enforcement is in tools.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TurnWritePolicy {
+    pub no_product_edit: bool,
+    pub no_scratch_write: bool,
+    pub scratch_rel: String,
+}
+
+pub(crate) fn parse_write_policy(user_text: &str, turn_id: &str) -> TurnWritePolicy {
+    let text = obligation_text(user_text);
+    let lower = text.to_lowercase();
+    let no_scratch_write = text.contains("只读")
+        || text.contains("不要写文件")
+        || lower.contains("read-only")
+        || lower.contains("read only")
+        || lower.contains("don't write")
+        || lower.contains("do not write");
+    let no_product_edit = text.contains("不要动代码")
+        || text.contains("先不要动代码")
+        || lower.contains("don't change code")
+        || lower.contains("do not change code")
+        || lower.contains("no code changes");
+    TurnWritePolicy {
+        no_product_edit,
+        no_scratch_write,
+        scratch_rel: format!("{}/turn-{}", crate::security::policy::SCRATCH_REL, turn_id),
+    }
+}
+
+/// True when `path` (workspace-relative or absolute under workspace) is inside scratch.
+pub(crate) fn path_under_turn_scratch(path: &str, scratch_rel: &str) -> bool {
+    let path = path.trim().trim_start_matches("./");
+    let scratch = scratch_rel.trim().trim_start_matches("./");
+    if scratch.is_empty() || path.is_empty() {
+        return false;
+    }
+    path == scratch
+        || path.starts_with(&format!("{scratch}/"))
+        || path.starts_with(&format!("{scratch}\\"))
+}
+
+/// Paths that a shell rewrite (`>`, `>>`, `tee`) would touch.
+pub(crate) fn shell_rewrite_targets(command: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let tokens: Vec<&str> = command.split_whitespace().collect();
+    let mut i = 0;
+    while i < tokens.len() {
+        let tok = tokens[i].trim_matches(|c| matches!(c, '"' | '\'' | '`'));
+        if tok == ">" || tok == ">>" || tok.starts_with(">>") || tok.starts_with('>') {
+            let target = if tok == ">" || tok == ">>" {
+                i += 1;
+                tokens.get(i).copied()
+            } else {
+                let rest = tok.trim_start_matches('>').trim_start_matches('>');
+                if rest.is_empty() {
+                    i += 1;
+                    tokens.get(i).copied()
+                } else {
+                    Some(rest)
+                }
+            };
+            if let Some(path) = target {
+                let bare = path.trim_matches(|c| matches!(c, '"' | '\'' | '`'));
+                if !bare.is_empty() && bare != "&" && !bare.starts_with('&') {
+                    out.push(bare.to_string());
+                }
+            }
+        } else if tok == "tee" || tok.ends_with("/tee") {
+            i += 1;
+            while i < tokens.len() {
+                let arg = tokens[i].trim_matches(|c| matches!(c, '"' | '\'' | '`'));
+                if arg.starts_with('-') {
+                    i += 1;
+                    continue;
+                }
+                if matches!(arg, "|" | "||" | "&&" | ";" | ">" | ">>") {
+                    break;
+                }
+                out.push(arg.to_string());
+                i += 1;
+            }
+            continue;
+        }
+        i += 1;
+    }
+    out
 }
 
 fn obligation_text(user_text: &str) -> &str {
@@ -919,11 +1074,7 @@ pub(crate) fn obligation_gap(
             parts.push("the named target has no successful read".into());
         }
     }
-    if external_required(user_text)
-        && !cards.iter().any(|card| {
-            card.success && !card.truncated && command_is_external(&card.tool, &card.command)
-        })
-    {
+    if external_required(user_text) && !cards.iter().any(external_observation_ok) {
         parts.push("no external observation".into());
     }
     if parts.is_empty() {
@@ -933,6 +1084,21 @@ pub(crate) fn obligation_gap(
     }
 }
 
+/// External card that can close an update obligation (VL-RAO-012).
+pub(crate) fn external_observation_ok(card: &EvidenceCard) -> bool {
+    card.success
+        && !card.truncated
+        && command_is_external(&card.tool, &card.command)
+        && !body_is_html_document(&card.body)
+}
+
+fn body_is_html_document(body: &str) -> bool {
+    let trimmed = body.trim_start();
+    let head: String = trimmed.chars().take(16).collect();
+    let lower = head.to_ascii_lowercase();
+    lower.starts_with("<!doctype") || lower.starts_with("<html")
+}
+
 fn currency_claim(reply: &str) -> bool {
     reply.contains("已更新")
         || reply.contains("无更新")
@@ -940,22 +1106,31 @@ fn currency_claim(reply: &str) -> bool {
         || reply.contains("已对齐")
         || reply.contains("未对齐")
         || reply.contains("不一致")
+        || reply.contains("当前")
+        || reply.contains("现在")
+        || reply.contains("有效")
+        || reply.contains("过时")
         || has_word(reply, "updated")
         || has_word(reply, "aligned")
+        || has_word(reply, "current")
+        || has_word(reply, "live")
+        || has_word(reply, "presently")
+        || has_word(reply, "valid")
+        || has_word(reply, "outdated")
+        || has_word(reply, "update")
+        || lower_has_phrase(reply, "no change")
 }
 
-fn cites_content_and_external(cited: &[String], cards: &[EvidenceCard]) -> bool {
-    let chosen: Vec<&EvidenceCard> = cards
-        .iter()
-        .filter(|card| cited.iter().any(|id| id == &card.id))
-        .collect();
-    let content = chosen
-        .iter()
-        .any(|card| is_content_tool(&card.tool) && card.success);
-    let external = chosen
-        .iter()
-        .any(|card| card.success && command_is_external(&card.tool, &card.command));
-    content && external
+fn lower_has_phrase(text: &str, phrase: &str) -> bool {
+    text.to_ascii_lowercase().contains(phrase)
+}
+
+fn cites_qualifying_external(cited: &[String], cards: &[EvidenceCard]) -> bool {
+    cited.iter().any(|id| {
+        cards
+            .iter()
+            .any(|card| card.id == *id && external_observation_ok(card))
+    })
 }
 
 #[cfg(test)]
@@ -1240,5 +1415,108 @@ mod tests {
         let user = "Has proj-alpha had an update?";
         assert!(citation_issue("proj-alpha 无更新 [c1]", user, &cards).is_some());
         assert!(citation_issue("proj-alpha 无更新 [c1][c2]", user, &cards).is_none());
+    }
+
+    #[test]
+    fn html_external_does_not_satisfy_update_obligation() {
+        let mut html = card(
+            "c1",
+            "https://example.test/",
+            true,
+            false,
+            None,
+            "<!DOCTYPE html><html><body>marketing</body></html>",
+        );
+        html.tool = "http_request".into();
+        html.command = "https://example.test/".into();
+        let user = "Has proj-alpha had an update?";
+        let gap = obligation_gap(user, &[html.clone()], &[]).expect("open");
+        assert!(gap.contains("no external observation"));
+        assert!(!external_observation_ok(&html));
+    }
+
+    #[test]
+    fn json_external_satisfies_update_obligation() {
+        let mut local = card("c1", "/data/proj-alpha/a.txt", true, false, None, "local");
+        local.tool = "file_read".into();
+        let mut remote = card(
+            "c2",
+            "https://example.test/models",
+            true,
+            false,
+            None,
+            r#"{"models":["a","b"]}"#,
+        );
+        remote.tool = "http_request".into();
+        remote.command = "https://example.test/models".into();
+        let user = "Has proj-alpha had an update?";
+        let roots = vec!["/data/proj-alpha".to_string()];
+        assert!(external_observation_ok(&remote));
+        assert!(obligation_gap(user, &[local, remote], &roots).is_none());
+    }
+
+    #[test]
+    fn current_claim_requires_qualifying_external_card() {
+        let mut local = card("c1", "/data/proj-alpha/a.txt", true, false, None, "local");
+        local.tool = "file_read".into();
+        let mut html = card(
+            "c2",
+            "https://example.test/",
+            true,
+            false,
+            None,
+            "<html><body>ok</body></html>",
+        );
+        html.tool = "http_request".into();
+        html.command = "https://example.test/".into();
+        let mut json = card(
+            "c3",
+            "https://example.test/api",
+            true,
+            false,
+            None,
+            r#"{"ok":true}"#,
+        );
+        json.tool = "http_request".into();
+        json.command = "https://example.test/api".into();
+        let user = "Has proj-alpha had an update?";
+        assert!(citation_issue(
+            "current status is fine [c1][c2]",
+            user,
+            &[local.clone(), html]
+        )
+        .is_some());
+        assert!(citation_issue("current status is fine [c1][c3]", user, &[local, json]).is_none());
+    }
+
+    #[test]
+    fn local_config_phrase_admits_config_dir_root() {
+        let roots = initial_read_roots_with_config(
+            "What is my local config on this machine?",
+            Some("/tmp/velaclaw-test-config"),
+        );
+        assert!(roots.iter().any(|r| r == "/tmp/velaclaw-test-config"));
+        let bare =
+            initial_read_roots_with_config("Inspect proj-alpha", Some("/tmp/velaclaw-test-config"));
+        assert!(!bare.iter().any(|r| r == "/tmp/velaclaw-test-config"));
+    }
+
+    #[test]
+    fn no_product_edit_from_dont_change_code() {
+        let policy = parse_write_policy("don't change code; probe only", "abc123");
+        assert!(policy.no_product_edit);
+        assert!(!policy.no_scratch_write);
+        assert!(path_under_turn_scratch(
+            &format!("{}/probe.sh", policy.scratch_rel),
+            &policy.scratch_rel
+        ));
+        assert!(!path_under_turn_scratch("src/main.rs", &policy.scratch_rel));
+    }
+
+    #[test]
+    fn read_only_opens_no_scratch_write() {
+        let policy = parse_write_policy("read-only please", "xyz");
+        assert!(policy.no_scratch_write);
+        assert!(!policy.no_product_edit);
     }
 }

@@ -10,6 +10,7 @@
 #![warn(clippy::all, clippy::pedantic)]
 #![allow(
     clippy::assigning_clones,
+    clippy::assert_is_empty,
     clippy::bool_to_int_with_if,
     clippy::case_sensitive_file_extension_comparisons,
     clippy::cast_possible_wrap,

@@ -134,7 +134,25 @@ impl RouterProvider {
                 "Unknown route hint, falling back to default provider"
             );
         }
+        if let Some(idx) = self.index_for_logical_family(model) {
+            return (idx, model.to_string());
+        }
         (self.default_index, model.to_string())
+    }
+
+    /// `groq/llama-…` must hit the groq client, not the default NVIDIA client.
+    fn index_for_logical_family(&self, model: &str) -> Option<usize> {
+        let model = model.trim();
+        if !model.contains('/') {
+            return None;
+        }
+        let family = super::hint_peer::provider_family(model);
+        if family.eq_ignore_ascii_case(model) {
+            return None;
+        }
+        self.providers.iter().position(|(name, _)| {
+            super::hint_peer::provider_family(name).eq_ignore_ascii_case(family)
+        })
     }
 
     fn pinned_for(&self, hint: &str) -> Option<String> {
@@ -612,6 +630,29 @@ mod tests {
         assert_eq!(result, "primary-response");
         assert_eq!(mocks[0].call_count(), 1);
         assert_eq!(mocks[0].last_model(), "anthropic/claude-sonnet-4-20250514");
+    }
+
+    #[tokio::test]
+    async fn logical_model_uses_matching_provider_family() {
+        let (router, mocks) = make_router(
+            vec![
+                (
+                    "nvidia/nvidia/nemotron-3-super-120b-a12b",
+                    "nvidia-response",
+                ),
+                ("groq/openai/gpt-oss-20b", "groq-response"),
+            ],
+            vec![],
+        );
+
+        let result = router
+            .simple_chat("hello", "groq/llama-3.3-70b-versatile", 0.5)
+            .await
+            .unwrap();
+        assert_eq!(result, "groq-response");
+        assert_eq!(mocks[1].call_count(), 1);
+        assert_eq!(mocks[0].call_count(), 0);
+        assert_eq!(mocks[1].last_model(), "groq/llama-3.3-70b-versatile");
     }
 
     #[test]

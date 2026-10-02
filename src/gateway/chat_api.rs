@@ -79,8 +79,20 @@ pub async fn handle_post_chat(
         }
         Err(e) => {
             tracing::warn!("POST /api/chat failed: {e:#}");
+            let message = user_facing_turn_error(&e, req.model_id.as_deref());
+            if let Err(pe) = persist_chat_turn(
+                &config,
+                req.session_id.as_deref(),
+                &req,
+                &message,
+                Some(state.session_title_hub.clone()),
+            )
+            .await
+            {
+                tracing::warn!("session persist failed-turn: {pe:#}");
+            }
             let err = serde_json::json!({
-                "error": user_facing_turn_error(&e, req.model_id.as_deref()),
+                "error": message,
             });
             (StatusCode::INTERNAL_SERVER_ERROR, Json(err)).into_response()
         }

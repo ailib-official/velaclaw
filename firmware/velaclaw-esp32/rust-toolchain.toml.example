@@ -1,0 +1,4 @@
+# Copy to rust-toolchain.toml when building ESP32 firmware (optional; not used by default).
+[toolchain]
+channel = "nightly-x86_64-pc-windows-gnu"
+components = ["rust-src"]

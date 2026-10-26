@@ -1,2 +1,5 @@
+# Stable per host (Linux/macOS/Windows). Add rust-analyzer for IDE parity with rustup.
+# Windows GNU devs: see docs/troubleshooting.md (rust-analyzer / default-host).
 [toolchain]
 channel = "stable"
+components = ["rust-analyzer"]

@@ -1,0 +1,6 @@
+{
+  "rust-analyzer.cargo.exclude": [
+    "firmware/velaclaw-esp32",
+    "firmware/velaclaw-esp32-ui"
+  ]
+}

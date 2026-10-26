@@ -102,7 +102,7 @@ rm -rf /var/folders/*/T/cargo-install*
 
 This project uses **nightly Rust with build-std**, not espup. Ensure:
 
-- `rust-toolchain.toml` exists (pins nightly + rust-src)
+- Copy `rust-toolchain.toml.example` → `rust-toolchain.toml` (pins GNU nightly + rust-src)
 - You are **not** sourcing `~/export-esp.sh` (that's for Xtensa targets)
 - Run `cargo build` from `firmware/velaclaw-esp32`
 

@@ -43,6 +43,30 @@ Fix:
 
 Or install from <https://rustup.rs/>.
 
+### Windows: `Open rust-toolchain file` / GNU vs MSVC
+
+Symptoms:
+
+- Cursor or VS Code shows a modal about **Open rust-toolchain file** or an outdated toolchain
+- `rustup show` in the repo reports `stable-x86_64-pc-windows-msvc` while you only use **GNU**
+
+Cause:
+
+- `rust-toolchain.toml` pins `channel = "stable"`, which follows rustup **default host** (often MSVC on Windows)
+- The Rust extension may prefer a `rust-analyzer` component on the pinned toolchain (declared in this repo)
+
+Fix (GNU as default; keep MSVC installed only for ad-hoc use):
+
+```powershell
+rustup set default-host x86_64-pc-windows-gnu
+rustup default stable-x86_64-pc-windows-gnu
+rustup component add rust-analyzer --toolchain stable-x86_64-pc-windows-gnu
+```
+
+For a one-off MSVC build, use `rustup run stable-x86_64-pc-windows-msvc cargo build` — do not commit MSVC overrides unless a target requires it.
+
+ESP32 firmware (optional): copy `firmware/velaclaw-esp32/rust-toolchain.toml.example` to `rust-toolchain.toml` in that directory when building firmware; remove it when not working on ESP32 so the IDE does not pull nightly.
+
 ### Missing system build dependencies
 
 Symptom:

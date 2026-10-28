@@ -186,6 +186,12 @@ pub fn decode_unwrapped_ir(
                         cursor = end;
                         continue;
                     }
+                    if let Some(extracted) = parsed_shell_cmd_heuristic(&value, allow_lower_to_name)
+                    {
+                        calls.extend(extracted);
+                        cursor = end;
+                        continue;
+                    }
                     if is_canonical_ir_shape(&value) {
                         unknown_isolated = unknown_isolated.saturating_add(1);
                         cursor = end;
@@ -316,6 +322,40 @@ fn parsed_call_from_object(
     })
 }
 
+/// Groq gpt-oss and similar models emit `{"cmd":["bash","-lc","…"]}` without `name`/`arguments`.
+fn parsed_shell_cmd_heuristic(
+    value: &Value,
+    allow_lower_to_name: &HashMap<String, String>,
+) -> Option<Vec<ParsedToolCall>> {
+    let canonical = allow_lower_to_name.get("shell")?;
+    let object = value.as_object()?;
+    if object.contains_key("name") {
+        return None;
+    }
+    let cmd_val = object.get("cmd").or_else(|| object.get("command"))?;
+    let command = match cmd_val {
+        Value::Array(arr) => arr
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect::<Vec<_>>()
+            .join(" "),
+        Value::String(s) => s.clone(),
+        _ => return None,
+    };
+    if command.trim().is_empty() {
+        return None;
+    }
+    let arguments = crate::tool_util::normalize_tool_arguments(
+        "shell",
+        serde_json::json!({ "command": command }),
+    );
+    Some(vec![ParsedToolCall {
+        name: canonical.clone(),
+        arguments,
+        tool_call_id: None,
+    }])
+}
+
 fn normalize_stripped(cleaned: &str) -> String {
     let mut result = cleaned.replace("\r\n", "\n");
     while result.contains("\n\n\n") {
@@ -347,6 +387,22 @@ mod tests {
         let mut m = HashMap::new();
         m.insert("shell".into(), "shell".into());
         m
+    }
+
+    #[test]
+    fn decode_unwrapped_ir_shell_cmd_array_heuristic() {
+        let raw = r#"Plan.
+{"cmd":["bash","-lc","uname -n"]}"#;
+        let out = decode_unwrapped_ir(raw, &allow_shell());
+        assert_eq!(out.calls.len(), 1);
+        assert_eq!(out.calls[0].name, "shell");
+        assert_eq!(
+            out.calls[0]
+                .arguments
+                .get("command")
+                .and_then(|v| v.as_str()),
+            Some("bash -lc uname -n")
+        );
     }
 
     #[test]

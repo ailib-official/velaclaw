@@ -578,6 +578,17 @@ fn check_config_semantics(config: &Config, items: &mut Vec<DiagItem>) {
                 config.agent.bounded_dag_live, dag_path
             ),
         ));
+        if config.agent.macro_task_graph_enabled {
+            items.push(DiagItem::warn(
+                "macro_task_graph",
+                "macro_task_graph_enabled=true (G1 opt-in; scheduler wiring pending VL-MACRO-001)",
+            ));
+        } else {
+            items.push(DiagItem::ok(
+                "macro_task_graph",
+                "macro_task_graph_enabled=false (dist default; RAO tool loop only)",
+            ));
+        }
     }
 
     // Runtime kind honesty: native host vs docker wrapper (avoid model/container confusion).

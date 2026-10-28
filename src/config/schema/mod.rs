@@ -445,6 +445,10 @@ pub struct AgentConfig {
     /// load it as a scheduler (VL-RAO-001).
     #[serde(default)]
     pub bounded_dag_path: Option<String>,
+    /// VL-MACRO-001 (G1): opt-in bounded **task** graph scheduler wrapping the canonical tool loop.
+    /// Default: `false`. Dist and production turns stay RAO-only until explicitly enabled.
+    #[serde(default)]
+    pub macro_task_graph_enabled: bool,
     /// CR-L4-003: library/doctor gate for [`crate::agent::candidate_dag::maybe_run_candidate_shadow`].
     /// Default: `false`. **Not wired** into live CLI/Web/channel chat. Doctor `candidate-dag`
     /// observes without enabling this flag. Does **not** default-on AI-DAG in the live loop.
@@ -520,6 +524,7 @@ impl Default for AgentConfig {
             template_dag: false,
             bounded_dag_live: false,
             bounded_dag_path: None,
+            macro_task_graph_enabled: false,
             candidate_dag_shadow: false,
             candidate_dag_stagnation_limit: 0,
             intent_capability_route: false,

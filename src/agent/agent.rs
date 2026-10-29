@@ -820,11 +820,16 @@ impl Agent {
 
         crate::agent::bounded_dag_live::note_live_scheduler_retired(self.config.bounded_dag_live);
 
+        #[cfg(feature = "ai-protocol")]
+        if self.config.macro_task_graph_enabled {
+            return crate::agent::macro_task_graph::run_task_graph_turn(self, user_message).await;
+        }
+
         self.invoke_tool_loop_once(user_message).await
     }
 
     /// One `run_tool_call_loop` over current history (GOV-007 canonical body).
-    async fn invoke_tool_loop_once(&mut self, user_message: &str) -> Result<String> {
+    pub(super) async fn invoke_tool_loop_once(&mut self, user_message: &str) -> Result<String> {
         let effective_model = self.classify_model_tracked(user_message)?;
         self.invoke_tool_loop_resolved_with(effective_model, true)
             .await

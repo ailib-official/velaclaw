@@ -60,6 +60,8 @@ pub mod host_phase;
 #[cfg(feature = "ai-protocol")]
 pub mod intent_route;
 pub mod loop_;
+#[cfg(feature = "ai-protocol")]
+pub mod macro_task_graph;
 pub mod memory_loader;
 pub mod probe_dedup;
 pub mod prompt;

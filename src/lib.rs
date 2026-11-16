@@ -41,6 +41,9 @@
     clippy::unused_self,
     clippy::cast_precision_loss,
     clippy::unnecessary_wraps,
+    // CI stable (1.100+) reports hundreds of `assert_is_empty` in tests; local stable may not define the lint yet.
+    unknown_lints,
+    clippy::assert_is_empty,
     dead_code
 )]
 

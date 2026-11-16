@@ -216,10 +216,7 @@ fn path_matches(path: &str, pattern: &str) -> bool {
     if let Some(prefix) = pattern.strip_suffix(".*") {
         return path == prefix || path.starts_with(&format!("{prefix}."));
     }
-    if pattern == "*" {
-        return true;
-    }
-    false
+    pattern == "*"
 }
 
 #[cfg(test)]

@@ -42,7 +42,20 @@ pub(crate) fn card_from_call(
     success: bool,
 ) -> EvidenceCard {
     let command = command_text(arguments);
-    let targets = targets_in(&command);
+    let mut targets = targets_in(&command);
+    if targets.is_empty() {
+        if let Ok(value) = serde_json::from_str::<Value>(arguments) {
+            for key in ["path", "file", "filepath", "file_path"] {
+                if let Some(path) = value.get(key).and_then(|v| v.as_str()) {
+                    let path = path.trim();
+                    if !path.is_empty() {
+                        targets.push(path.to_string());
+                        break;
+                    }
+                }
+            }
+        }
+    }
     let (start, end) = timestamp_span(output);
     EvidenceCard {
         id: format!("c{}", index + 1),
@@ -61,7 +74,7 @@ pub(crate) fn command_text(arguments: &str) -> String {
     let Ok(value) = serde_json::from_str::<Value>(arguments) else {
         return arguments.to_string();
     };
-    for key in ["command", "cmd", "path", "file"] {
+    for key in ["command", "cmd", "path", "file", "filepath", "file_path"] {
         if let Some(text) = value.get(key).and_then(|v| v.as_str()) {
             return text.to_string();
         }
@@ -816,6 +829,21 @@ pub(crate) fn roots_from_observation(
         return Vec::new();
     }
     let mut roots = Vec::new();
+    let cmd = command.trim();
+    if !cmd.is_empty() && !cmd.contains(char::is_whitespace) {
+        for token in &tokens {
+            if cmd == token.as_str() {
+                if cmd.starts_with('/') {
+                    push_unique(&mut roots, cmd.to_string());
+                } else {
+                    push_unique(
+                        &mut roots,
+                        workspace.join(cmd).to_string_lossy().into_owned(),
+                    );
+                }
+            }
+        }
+    }
     for path in absolute_paths_in(command)
         .into_iter()
         .chain(absolute_paths_in(output))
@@ -1356,6 +1384,43 @@ mod tests {
         assert!(!content_required(user));
         assert!(!external_required(user));
         assert!(obligation_gap(user, &[], &[]).is_none());
+    }
+
+    #[test]
+    fn file_read_card_closes_obligation_for_named_probe() {
+        let mut read = card("c1", "e2e_probe.txt", true, false, None, "ok");
+        read.tool = "file_read".into();
+        read.command = "e2e_probe.txt".into();
+        read.targets = vec!["e2e_probe.txt".into()];
+        let user = "用 file_write 写入 e2e_probe.txt，再用 file_read 读取 e2e_probe.txt";
+        assert!(content_required(user));
+        assert!(obligation_gap(user, &[read], &[]).is_none());
+    }
+
+    #[test]
+    fn card_from_call_accepts_filepath_alias() {
+        let card = card_from_call(
+            0,
+            "file_write",
+            r#"{"filepath":"e2e_probe.txt","content":"ok"}"#,
+            "written",
+            true,
+        );
+        assert_eq!(card.targets, vec!["e2e_probe.txt"]);
+    }
+
+    #[test]
+    fn roots_from_observation_admits_relative_file_command() {
+        let roots = roots_from_observation(
+            "read e2e_probe.txt",
+            "e2e_probe.txt",
+            "1: ok",
+            std::path::Path::new("/work"),
+        );
+        assert!(
+            roots.iter().any(|r| r.ends_with("e2e_probe.txt")),
+            "{roots:?}"
+        );
     }
 
     #[test]

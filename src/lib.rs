@@ -10,7 +10,6 @@
 #![warn(clippy::all, clippy::pedantic)]
 #![allow(
     clippy::assigning_clones,
-    clippy::assert_is_empty,
     clippy::bool_to_int_with_if,
     clippy::case_sensitive_file_extension_comparisons,
     clippy::cast_possible_wrap,
@@ -42,6 +41,9 @@
     clippy::unused_self,
     clippy::cast_precision_loss,
     clippy::unnecessary_wraps,
+    // CI stable (1.100+) reports hundreds of `assert_is_empty` in tests; local stable may not define the lint yet.
+    unknown_lints,
+    clippy::assert_is_empty,
     dead_code
 )]
 

@@ -578,10 +578,7 @@ fn cache_is_fresh(cached: &CapabilityIndex, protocol_root: &Path) -> bool {
         return false;
     }
     let tip = protocol_tip(protocol_root);
-    if tip != "unknown" && cached.meta.protocol_tip != tip {
-        return false;
-    }
-    true
+    !(tip != "unknown" && cached.meta.protocol_tip != tip)
 }
 
 /// Load cache if fresh for `protocol_root`; otherwise rebuild and save.

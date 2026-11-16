@@ -130,12 +130,8 @@ pub fn shell_output_keeps_fingerprint(output: &str) -> bool {
     }
     let head = t.lines().next().unwrap_or(t);
     let l = head.to_ascii_lowercase();
-    if l.contains("denied")
-        && (l.contains("approval") || l.contains("policy") || l.contains("security"))
-    {
-        return false;
-    }
-    true
+    !(l.contains("denied")
+        && (l.contains("approval") || l.contains("policy") || l.contains("security")))
 }
 
 /// Fingerprint a tool call so equivalent probes collapse (whitespace + script version).

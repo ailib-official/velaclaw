@@ -14,14 +14,25 @@ use std::time::Duration;
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::timeout::TimeoutLayer;
 
+fn clamp_api_chat_timeout_secs(configured: u64) -> u64 {
+    configured.clamp(REQUEST_TIMEOUT_SECS, 600)
+}
+
 /// Build the axum router for the gateway HTTP surface.
-pub fn build_gateway_router(state: AppState) -> Router {
-    Router::new()
+pub fn build_gateway_router(state: AppState, api_chat_timeout_secs: u64) -> Router {
+    let chat_timeout_secs = clamp_api_chat_timeout_secs(api_chat_timeout_secs);
+    let chat_routes = Router::new()
+        .route("/api/chat", post(chat_api::handle_post_chat))
+        .layer(TimeoutLayer::with_status_code(
+            axum::http::StatusCode::REQUEST_TIMEOUT,
+            Duration::from_secs(chat_timeout_secs),
+        ));
+
+    let standard_routes = Router::new()
         .route("/health", get(handle_health))
         .route("/metrics", get(handle_metrics))
         .route("/dashboard", get(handle_dashboard))
         .route("/api/dashboard", get(handle_dashboard_api))
-        .route("/api/chat", post(chat_api::handle_post_chat))
         .route("/api/providers", get(providers_api::handle_get_providers))
         .route("/api/sessions", get(sessions_api::handle_list_sessions))
         .route("/api/sessions", post(sessions_api::handle_create_session))
@@ -66,12 +77,15 @@ pub fn build_gateway_router(state: AppState) -> Router {
         .route("/whatsapp", post(handle_whatsapp_message))
         .route("/linq", post(handle_linq_webhook))
         .route("/nextcloud-talk", post(handle_nextcloud_talk_webhook))
-        .with_state(state)
-        .layer(RequestBodyLimitLayer::new(MAX_BODY_SIZE))
         .layer(TimeoutLayer::with_status_code(
             axum::http::StatusCode::REQUEST_TIMEOUT,
             Duration::from_secs(REQUEST_TIMEOUT_SECS),
-        ))
+        ));
+
+    chat_routes
+        .merge(standard_routes)
+        .with_state(state)
+        .layer(RequestBodyLimitLayer::new(MAX_BODY_SIZE))
 }
 
 /// Options controlling which webhook endpoints appear in the listen banner.
@@ -122,4 +136,17 @@ pub fn print_gateway_banner(
         println!("  ⚠️  Pairing: DISABLED (all requests accepted)");
     }
     println!("  Press Ctrl+C to stop.\n");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn api_chat_timeout_clamps_to_bounds() {
+        assert_eq!(clamp_api_chat_timeout_secs(0), REQUEST_TIMEOUT_SECS);
+        assert_eq!(clamp_api_chat_timeout_secs(29), REQUEST_TIMEOUT_SECS);
+        assert_eq!(clamp_api_chat_timeout_secs(240), 240);
+        assert_eq!(clamp_api_chat_timeout_secs(900), 600);
+    }
 }

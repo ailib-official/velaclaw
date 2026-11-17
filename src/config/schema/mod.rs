@@ -891,6 +891,11 @@ pub struct GatewayConfig {
     /// Maximum distinct idempotency keys retained in memory.
     #[serde(default = "default_gateway_idempotency_max_keys")]
     pub idempotency_max_keys: usize,
+
+    /// HTTP timeout in seconds for `POST /api/chat` (tool-heavy agent turns).
+    /// Other gateway routes keep the global 30s limit. Default: 300 (aligned with channel `message_timeout_secs`).
+    #[serde(default = "default_gateway_api_chat_timeout_secs")]
+    pub api_chat_timeout_secs: u64,
 }
 
 fn default_gateway_port() -> u16 {
@@ -921,6 +926,10 @@ fn default_gateway_idempotency_max_keys() -> usize {
     10_000
 }
 
+fn default_gateway_api_chat_timeout_secs() -> u64 {
+    300
+}
+
 fn default_true() -> bool {
     true
 }
@@ -939,6 +948,7 @@ impl Default for GatewayConfig {
             rate_limit_max_keys: default_gateway_rate_limit_max_keys(),
             idempotency_ttl_secs: default_idempotency_ttl_secs(),
             idempotency_max_keys: default_gateway_idempotency_max_keys(),
+            api_chat_timeout_secs: default_gateway_api_chat_timeout_secs(),
         }
     }
 }

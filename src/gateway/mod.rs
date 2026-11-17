@@ -460,7 +460,7 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
         session_title_hub,
     };
 
-    let app = http_router::build_gateway_router(state);
+    let app = http_router::build_gateway_router(state, config.gateway.api_chat_timeout_secs);
 
     // Run the server
     axum::serve(

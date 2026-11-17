@@ -476,6 +476,7 @@ Notes:
 | `port` | `3000` | gateway listen port |
 | `require_pairing` | `true` | require pairing before bearer auth |
 | `allow_public_bind` | `false` | block accidental public exposure |
+| `api_chat_timeout_secs` | `300` | HTTP timeout for `POST /api/chat` only; other routes stay at 30s |
 
 ## `[autonomy]`
 
